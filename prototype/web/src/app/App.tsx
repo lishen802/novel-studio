@@ -21,7 +21,7 @@ export function App() {
 
   return <div className="studio-app">
     <aside className="global-rail">
-      <div className="brand-mark">织</div>
+      <div className="brand-mark"><img src="/brand/app-icon-64.png" alt="织境" /></div>
       <nav aria-label="全局导航">
         <button className={page === 'library' ? 'active' : ''} aria-label="作品库" onClick={() => setPage('library')}><Library /></button>
         <button aria-label="模型中心" onClick={() => { setPage('agents'); showToast('已进入模型与智能体配置') }}><Boxes /></button>
