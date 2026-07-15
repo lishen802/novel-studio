@@ -2,7 +2,8 @@ import type { PageId } from '../../app/navigation'
 import type { Project } from '../../domain/types'
 import { AgentsPage, ReviewPage, RunsPage, VersionsPage, WorkflowPage } from './AgentPages'
 import { CanonPage, CharactersPage, ManuscriptPage, OutlinePage, SettingsPage, WorldPage } from './AuthoringPages'
-import { GraphPage, MapPage, TimelinePage } from './VisualizationPages'
+import { GraphPage, TimelinePage } from './VisualizationPages'
+import { WorldMapPage } from '../map/WorldMapPage'
 
 export function StudioPageRouter({ page, project, onChange, toast, createSnapshot, restoreSnapshot }: { page: PageId; project: Project; onChange: (project: Project) => void; toast: (message: string) => void; createSnapshot: (name: string) => string; restoreSnapshot: (id: string) => void }) {
   switch (page) {
@@ -13,7 +14,7 @@ export function StudioPageRouter({ page, project, onChange, toast, createSnapsho
     case 'canon': return <CanonPage project={project} onChange={onChange} toast={toast} />
     case 'timeline': return <TimelinePage project={project} onChange={onChange} toast={toast} />
     case 'graph': return <GraphPage project={project} onChange={onChange} toast={toast} />
-    case 'map': return <MapPage project={project} onChange={onChange} toast={toast} />
+    case 'map': return <WorldMapPage project={project} onChange={onChange} toast={toast} />
     case 'agents': return <AgentsPage project={project} onChange={onChange} toast={toast} />
     case 'workflow': return <WorkflowPage project={project} onChange={onChange} toast={toast} />
     case 'review': return <ReviewPage project={project} onChange={onChange} toast={toast} />
