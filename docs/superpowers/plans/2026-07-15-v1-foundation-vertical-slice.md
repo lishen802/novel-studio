@@ -361,7 +361,7 @@ git commit -m "feat: add production desktop shell"
 - Create: `internal/domain/project/chapter.go`
 - Create: `internal/domain/project/chapter_test.go`
 
-- [ ] **Step 1: 写领域不变量失败测试**
+- [x] **Step 1: 写领域不变量失败测试**
 
 测试必须覆盖：
 
@@ -370,7 +370,7 @@ func TestNewProjectRejectsBlankTitle(t *testing.T)
 func TestNewProjectNormalizesTextAndKeepsStableIdentity(t *testing.T)
 func TestNewChapterStartsAtRevisionOne(t *testing.T)
 func TestChapterCommitRequiresExpectedRevision(t *testing.T)
-func TestChapterCommitRejectsBlankTitle(t *testing.T)
+func TestNewChapterRejectsBlankTitle(t *testing.T)
 ```
 
 关键并发测试：
@@ -401,7 +401,7 @@ Run: `go test ./internal/domain/project -run Test -v`
 
 Expected: FAIL because constructors and errors do not exist.
 
-- [ ] **Step 2: 实现纯领域对象**
+- [x] **Step 2: 实现纯领域对象**
 
 需要导出的最小 API：
 
@@ -438,7 +438,7 @@ func (c Chapter) Commit(body string, expectedRevision int64, now time.Time) (Cha
 
 规则：对标题、类型和摘要执行 `strings.TrimSpace`；ID 不能为空；position 从 1 开始；新章节 revision 为 1；`Commit` 只改变正文、更新时间和 revision，不执行 I/O。
 
-- [ ] **Step 3: 回归和提交**
+- [x] **Step 3: 回归和提交**
 
 ```bash
 go test ./internal/domain/project -race
