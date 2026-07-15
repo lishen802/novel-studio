@@ -17,3 +17,9 @@ playwright-report/
 *.db-shm
 *.db-wal
 src-tauri/target/
+apps/desktop/build/bin/
+apps/desktop/frontend/dist/
+apps/desktop/frontend/node_modules/
+apps/desktop/frontend/wailsjs/
+apps/desktop/frontend/src/bindings/
+*.zjproject/

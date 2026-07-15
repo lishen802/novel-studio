@@ -6,7 +6,7 @@
 
 **Architecture:** 使用根 Go module 与 `apps/desktop` 内的标准 Wails v2 项目。领域、应用、端口、SQLite 和平台实现位于 `internal/`；桌面入口只组装依赖，Wails API 只转发应用用例；React 通过一个可替换的 `StudioClient` 调用生成绑定。每个项目是独立目录包和 SQLite 数据库，保存采用乐观并发，短周期草稿与正式章节提交分离。V1 的授权实现为默认放行，但创建和编辑仍经过能力门禁。
 
-**Tech Stack:** Go 1.23+、Wails v2.13.0、React 19、TypeScript 5.7、Vite、SQLite（`modernc.org/sqlite`）、Go `testing`、Vitest、Testing Library、GitHub Actions。
+**Tech Stack:** Go 1.25+、Wails v2.13.0、React 19、TypeScript 5.7、Vite、SQLite（`modernc.org/sqlite`）、Go `testing`、Vitest、Testing Library、GitHub Actions。
 
 ---
 
@@ -39,10 +39,10 @@ Run:
 go version
 node --version
 npm --version
-wails version
+"$(go env GOPATH)/bin/wails" version
 ```
 
-Expected: Go ≥ 1.23、Node ≥ 20；首次执行时 `wails` 可以不存在，这正是安装步骤的前置证据。
+Expected: Go 自动选择的有效工具链 ≥ 1.25、Node ≥ 20；首次执行时 `wails` 可以不存在，这正是安装步骤的前置证据。
 
 - [ ] **Step 2: 安装固定的 Wails v2 CLI 并运行环境诊断**
 
@@ -50,7 +50,7 @@ Run:
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-wails doctor
+"$(go env GOPATH)/bin/wails" doctor
 ```
 
 Expected: CLI 报告 v2.13.0；macOS 本机诊断通过。Windows 构建环境由 CI 在 Task 10 验证。
@@ -343,7 +343,7 @@ go mod tidy
 go test ./...
 go vet ./...
 cd apps/desktop
-wails build -clean
+"$(go env GOPATH)/bin/wails" build -clean
 ```
 
 Expected: 全部 PASS，生成本地应用包；产物不进入 Git。
@@ -829,7 +829,7 @@ Run:
 ```bash
 go test ./apps/desktop ./internal/... -race
 cd apps/desktop
-wails build -clean
+"$(go env GOPATH)/bin/wails" build -clean
 ```
 
 Expected: `wails build` 自动生成 TypeScript bindings 并完成桌面构建；若生成位置与 `StudioClient` adapter 不一致，只调整 adapter，不让 feature 组件导入生成代码。
@@ -905,7 +905,7 @@ npm test
 npm run typecheck
 npm run build
 cd ..
-wails build -clean
+"$(go env GOPATH)/bin/wails" build -clean
 git add frontend
 git commit -m "feat: create projects and edit chapters"
 ```
@@ -1006,7 +1006,7 @@ npm test
 npm run typecheck
 npm run build
 cd ..
-wails build -clean
+"$(go env GOPATH)/bin/wails" build -clean
 git status --short
 ```
 
