@@ -1,4 +1,5 @@
-# Rust Crates
+# 可选 Rust 扩展（历史预留目录）
 
-正式 Rust 模块将按 `domain`、`application`、`persistence`、`agent-runtime` 和 `model-providers` 边界组织。各模块的公开接口由后续架构规格确定。
+该目录来自最初的 Rust-first 规划，不再承载正式领域、应用、持久化或智能体代码。当前主语言是 Go。
 
+只有符合 ADR-0002 准入条件并经过独立架构决策的 Rust Sidecar 才能加入项目。正式初始化代码仓库时，可将获批 Sidecar 统一放入 `rust/sidecars` 并移除这些空占位目录。

@@ -7,14 +7,16 @@
 开始新任务时按顺序阅读：
 
 1. `docs/product/product-baseline.md`
-2. `docs/architecture/0001-desktop-stack.md`
-3. `docs/specifications/2026-07-15-product-repository-design.md`
-4. `prototype/web/README.md`
+2. `docs/architecture/0002-go-first-wails-stack.md`
+3. `docs/specifications/2026-07-15-go-first-desktop-stack-design.md`
+4. `docs/specifications/2026-07-15-product-repository-design.md`
+5. `prototype/web/README.md`
 
 ## 已确定事项
 
-- 正式技术栈：Rust + Tauri 2 + React + TypeScript + Vite。
-- 数据层：SQLite + SQLx，本地优先。
+- 正式技术栈：Go + Wails v2 + React + TypeScript + Vite。
+- 数据层：SQLite，通过 Go 数据访问接口隔离具体驱动，本地优先。
+- Rust 是按需扩展，不是首版必需依赖；优先以独立 Sidecar 接入。
 - 智能体必须支持不同角色使用不同供应商和模型。
 - 现有原型是 UX 和功能基线，正式代码需要重新划分领域、应用、基础设施和 UI 边界。
 - 产品目标平台是 Windows 与 macOS，并按未来商业发布标准设计。
@@ -31,5 +33,4 @@
 6. 桌面生命周期、自动升级、许可证和崩溃恢复。
 7. Windows/macOS CI、签名、公证与发布流程。
 
-完成规格审查后，再创建详细实施计划和首个 Tauri/Rust 骨架。
-
+完成规格审查后，再创建详细实施计划和首个 Wails/Go 骨架。Wails v3 稳定后再通过独立 ADR 评估升级。
