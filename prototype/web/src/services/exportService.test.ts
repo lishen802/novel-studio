@@ -14,3 +14,8 @@ test('round-trips a project through validated JSON', () => {
   expect(parsed.success).toBe(true)
   if (parsed.success) expect(parsed.data.chapters).toHaveLength(original.chapters.length)
 })
+
+test('includes hierarchical world regions in project JSON', () => {
+  const payload = JSON.parse(buildProjectJson(createDemoProject())) as { project: { worldRegions: Array<{ name: string }> } }
+  expect(payload.project.worldRegions.some((item) => item.name === '镜海世界')).toBe(true)
+})
