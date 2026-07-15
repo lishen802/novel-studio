@@ -1,4 +1,4 @@
-import type { AgentProfile, Project, StudioData, WorkflowStep } from './types'
+import type { AgentProfile, Project, StudioData, WorkflowStep, WorldRegion } from './types'
 
 const now = '2026-07-15T00:00:00.000Z'
 
@@ -29,6 +29,31 @@ export function createDemoAgents(): AgentProfile[] {
   ].map(([id, name, role, provider, family, model, temperature]) => ({
     id: String(id), name: String(name), role: role as AgentProfile['role'], provider: String(provider), family: family as AgentProfile['family'], model: String(model), temperature: Number(temperature), enabled: true, instructions: `${name}只根据证据输出结构化结论。`,
   }))
+}
+
+function createDemoWorldRegions(): WorldRegion[] {
+  const make = (region: Partial<WorldRegion> & Pick<WorldRegion, 'id' | 'parentId' | 'name' | 'type'>): WorldRegion => ({
+    direction: 'center', order: 1, summary: '', terrain: '', climate: '', rules: '', canonStatus: 'author-confirmed',
+    adjacentRegionIds: [], travelNotes: '', locationIds: [], factionIds: [], characterIds: [], eventIds: [], chapterIds: [], factIds: [],
+    layout: { x: 100, y: 100, width: 280, height: 190 },
+    ...region,
+  })
+
+  return [
+    make({ id: 'region-world', parentId: null, name: '镜海世界', type: 'world', summary: '被广阔雾海分隔的双大陆世界，潮汐会干扰人的记忆。', terrain: '大陆、群岛与终年雾海', climate: '沿海湿冷，南陆温热', rules: '大潮期间，未经保护的记忆可能被改写。', factIds: ['fact-tide'], layout: { x: 0, y: 0, width: 1000, height: 700 } }),
+    make({ id: 'region-north-land', parentId: 'region-world', name: '北陆', type: 'continent', direction: 'north-west', order: 1, summary: '故事主要发生的北方大陆，港口城市密集。', terrain: '西部海岸与北方冻原', climate: '湿冷多雾', adjacentRegionIds: ['region-central-sea'], travelNotes: '跨越中央雾海可前往南陆，普通航程约十二日。', characterIds: ['char-shen', 'char-xu', 'char-lu'], factionIds: ['faction-lighthouse', 'faction-port'], layout: { x: 70, y: 70, width: 390, height: 270 } }),
+    make({ id: 'region-south-land', parentId: 'region-world', name: '南陆', type: 'continent', direction: 'south-east', order: 2, summary: '贸易繁盛的南方大陆，与北陆隔海相望。', terrain: '高原、赤色海岸与河谷', climate: '温暖多风', adjacentRegionIds: ['region-central-sea'], travelNotes: '与北陆依靠定期商船往来。', canonStatus: 'ai-inferred', layout: { x: 550, y: 360, width: 380, height: 250 } }),
+    make({ id: 'region-central-sea', parentId: 'region-world', name: '中央雾海', type: 'sea', direction: 'center', order: 3, summary: '隔开南北大陆的危险海域。', terrain: '深海、暗礁与移动雾墙', climate: '常年大雾', rules: '雾墙会使航线与记忆同时偏移。', adjacentRegionIds: ['region-north-land', 'region-south-land'], travelNotes: '仅旧航线能较稳定地穿过雾墙。', factIds: ['fact-tide'], layout: { x: 370, y: 235, width: 300, height: 210 } }),
+    make({ id: 'region-fog-state', parentId: 'region-north-land', name: '雾港州', type: 'state', direction: 'south-east', order: 1, summary: '北陆东南岸的重要海港州，也是潮汐实验的核心区域。', terrain: '海湾、堤岸与低地城区', climate: '潮湿多雾', rules: '城市记忆会随异常潮汐产生偏差。', adjacentRegionIds: ['region-frost-state'], travelNotes: '沿北岸铁路五小时可抵达霜湾州。', locationIds: ['loc-oldport', 'loc-lighthouse', 'loc-warehouse'], factionIds: ['faction-lighthouse', 'faction-port'], characterIds: ['char-shen', 'char-xu', 'char-lu'], eventIds: ['event-letter', 'event-archive', 'event-infiltrate'], chapterIds: ['demo-chapter-36', 'demo-chapter-37', 'demo-chapter-38'], factIds: ['fact-letter', 'fact-tide', 'fact-xu', 'fact-conflict'], layout: { x: 500, y: 330, width: 360, height: 230 } }),
+    make({ id: 'region-frost-state', parentId: 'region-north-land', name: '霜湾州', type: 'state', direction: 'north', order: 2, summary: '北陆寒冷海湾，保留着未被改写的旧航海档案。', terrain: '冻湾与针叶林', climate: '寒冷干燥', adjacentRegionIds: ['region-fog-state'], canonStatus: 'ai-inferred', layout: { x: 260, y: 70, width: 340, height: 210 } }),
+    make({ id: 'region-red-isle-state', parentId: 'region-south-land', name: '赤屿州', type: 'state', direction: 'west', order: 1, summary: '以红色火山岩海岸得名的南陆州域。', terrain: '火山岛链与海岸平原', climate: '温热', adjacentRegionIds: ['region-longwind-state'], canonStatus: 'ai-inferred', layout: { x: 80, y: 250, width: 360, height: 260 } }),
+    make({ id: 'region-longwind-state', parentId: 'region-south-land', name: '长风州', type: 'state', direction: 'east', order: 2, summary: '盛产帆布与远洋船只的贸易州。', terrain: '河谷与丘陵', climate: '季风明显', adjacentRegionIds: ['region-red-isle-state'], canonStatus: 'ai-inferred', layout: { x: 540, y: 130, width: 350, height: 250 } }),
+    make({ id: 'region-grey-islands', parentId: 'region-central-sea', name: '灰鲸群岛', type: 'island', direction: 'north-east', order: 1, summary: '旧航线上的补给群岛，灯塔会在此设有秘密中继站。', terrain: '礁石群岛', climate: '多风多雨', factionIds: ['faction-lighthouse'], canonStatus: 'author-confirmed', layout: { x: 560, y: 120, width: 300, height: 200 } }),
+    make({ id: 'region-return-zone', parentId: 'region-central-sea', name: '归潮禁区', type: 'secret-realm', direction: 'south-west', order: 2, summary: '潮汐实验最早发生的封锁海域。', terrain: '深海漩涡与永久雾墙', climate: '无法稳定观测', rules: '进入者可能失去部分时间感。', factionIds: ['faction-port'], factIds: ['fact-tide'], canonStatus: 'conflicted', layout: { x: 120, y: 360, width: 330, height: 220 } }),
+    make({ id: 'region-fog-city', parentId: 'region-fog-state', name: '雾港城', type: 'city', direction: 'center', order: 1, summary: '围绕天然深水港发展的州府城市。', terrain: '港湾城市', climate: '终年潮湿', locationIds: ['loc-oldport', 'loc-lighthouse'], factionIds: ['faction-lighthouse', 'faction-port'], characterIds: ['char-shen', 'char-xu', 'char-lu'], eventIds: ['event-letter', 'event-archive'], chapterIds: ['demo-chapter-36', 'demo-chapter-37'], layout: { x: 310, y: 230, width: 340, height: 230 } }),
+    make({ id: 'region-north-warehouse', parentId: 'region-fog-state', name: '北堤仓储区', type: 'stronghold', direction: 'north', order: 2, summary: '港务集团控制的封闭工业区。', terrain: '堤岸、仓库与旧铁路线', climate: '海风强烈', locationIds: ['loc-warehouse'], factionIds: ['faction-port'], characterIds: ['char-shen', 'char-xu', 'char-lu'], eventIds: ['event-infiltrate'], chapterIds: ['demo-chapter-38'], layout: { x: 570, y: 70, width: 300, height: 190 } }),
+    make({ id: 'region-tide-observatory', parentId: 'region-fog-state', name: '潮汐观测站', type: 'terrain', direction: 'south-west', order: 3, summary: '用于记录异常潮汐的废弃设施。', terrain: '孤立礁台', climate: '风浪频繁', rules: '部分观测日志存在互相矛盾的日期。', canonStatus: 'ai-inferred', layout: { x: 80, y: 430, width: 290, height: 170 } }),
+  ]
 }
 
 export function createDemoProject(overrides: Partial<Project> = {}): Project {
@@ -85,8 +110,8 @@ export function createDemoProject(overrides: Partial<Project> = {}): Project {
     ],
     graphPositions: { 'char-shen': { x: 240, y: 220 }, 'char-xu': { x: 520, y: 180 }, 'char-lu': { x: 760, y: 330 }, 'faction-lighthouse': { x: 430, y: 420 }, 'faction-port': { x: 760, y: 500 } },
     mapBackground: null,
-    worldRegions: [],
-    worldMapState: { mode: 'map', focusRegionId: null },
+    worldRegions: createDemoWorldRegions(),
+    worldMapState: { mode: 'map', focusRegionId: 'region-world' },
     agents: createDemoAgents(),
     reviews: [
       { id: 'review-1', chapterId: 'demo-chapter-38', reviewerRole: 'continuity-auditor', reviewerModel: 'gpt-5.2', severity: 'warning', category: '时间连续性', description: '第37章到第38章之间缺少从钟楼前往北堤的时间交代。', evidence: [{ source: '第37章', quote: '档案室里只有一盏绿灯' }, { source: '第38章', quote: '退潮前还有四十分钟' }], suggestion: '增加一句离开钟楼时的时间锚点。', disposition: 'open' },
