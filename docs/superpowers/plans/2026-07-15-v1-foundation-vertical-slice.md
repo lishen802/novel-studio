@@ -6,7 +6,7 @@
 
 **Architecture:** 使用根 Go module 与 `apps/desktop` 内的标准 Wails v2 项目。领域、应用、端口、SQLite 和平台实现位于 `internal/`；桌面入口只组装依赖，Wails API 只转发应用用例；React 通过一个可替换的 `StudioClient` 调用生成绑定。每个项目是独立目录包和 SQLite 数据库，保存采用乐观并发，短周期草稿与正式章节提交分离。V1 的授权实现为默认放行，但创建和编辑仍经过能力门禁。
 
-**Tech Stack:** Go 1.23+、Wails v2.12.x、React 19、TypeScript 5.7、Vite、SQLite（`modernc.org/sqlite`）、Go `testing`、Vitest、Testing Library、GitHub Actions。
+**Tech Stack:** Go 1.23+、Wails v2.13.0、React 19、TypeScript 5.7、Vite、SQLite（`modernc.org/sqlite`）、Go `testing`、Vitest、Testing Library、GitHub Actions。
 
 ---
 
@@ -49,11 +49,11 @@ Expected: Go ≥ 1.23、Node ≥ 20；首次执行时 `wails` 可以不存在，
 Run:
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 wails doctor
 ```
 
-Expected: CLI 报告 v2.12.0；macOS 本机诊断通过。Windows 构建环境由 CI 在 Task 10 验证。
+Expected: CLI 报告 v2.13.0；macOS 本机诊断通过。Windows 构建环境由 CI 在 Task 10 验证。
 
 - [ ] **Step 3: 写 ADR，固定 Wails 工程位于 `apps/desktop`**
 
@@ -70,10 +70,7 @@ Run:
 
 ```bash
 go mod init github.com/lishen802/novel-studio
-go get github.com/wailsapp/wails/v2@v2.12.0
-go get modernc.org/sqlite
-go get github.com/pressly/goose/v3
-go get github.com/google/uuid
+go get github.com/wailsapp/wails/v2@v2.13.0
 ```
 
 Expected: 根目录生成 `go.mod`/`go.sum`，不存在第二个嵌套 Go module。此处暂不执行 `go mod tidy`，因为正式前端构建产物尚未生成，而 `main.go` 的 `go:embed` 会在 Task 2 前故意保持不可编译状态。
@@ -562,6 +559,17 @@ git commit -m "feat: add project package and capability boundaries"
 - Create: `internal/persistence/sqlite/project_store.go`
 - Create: `internal/persistence/sqlite/project_store_test.go`
 
+- [ ] **Step 0: 添加本任务实际使用的持久化依赖**
+
+Run:
+
+```bash
+go get modernc.org/sqlite
+go get github.com/pressly/goose/v3
+```
+
+Expected: `go.mod`/`go.sum` 固定当前选定版本；后续测试直接编译到实际 SQLite 和 migration 库。
+
 - [ ] **Step 1: 写空库迁移失败测试**
 
 测试在 `t.TempDir()` 创建数据库，执行两次 `OpenDatabase`，断言：
@@ -760,6 +768,16 @@ git commit -m "feat: add workspace application use cases"
 - Modify: `apps/desktop/app.go`
 - Modify: `apps/desktop/main.go`
 
+- [ ] **Step 0: 添加 UUID 实现依赖**
+
+Run:
+
+```bash
+go get github.com/google/uuid
+```
+
+Expected: UUID 依赖直到平台 ID adapter 实际实现时才进入根 Go module。
+
 - [ ] **Step 1: 写 API 转发失败测试**
 
 使用 mock workspace，验证 API：
@@ -953,8 +971,8 @@ git commit -m "feat: recover manuscript drafts after interruption"
 CI 至少包含：
 
 - Ubuntu：`go test ./... -race`、`go vet ./...`、前端 test/typecheck/build。
-- macOS：安装 Wails v2.12.0，执行 `wails doctor` 与 production build。
-- Windows：安装 Wails v2.12.0，执行 production build 和 Go tests。
+- macOS：安装 Wails v2.13.0，执行 `wails doctor` 与 production build。
+- Windows：安装 Wails v2.13.0，执行 production build 和 Go tests。
 - npm 使用 `npm ci`，Go/NPM cache key 包含 lockfile hash。
 - CI 不访问真实模型 API，不注入任何用户密钥。
 
