@@ -126,6 +126,18 @@ export function WorldMapPage({ project, onChange, toast }: Props) {
     onChange({ ...project, worldRegions: project.worldRegions.filter((region) => region.id !== selected.id) })
     toast('区域已删除')
   }
+  const createWorldRoot = () => {
+    const id = crypto.randomUUID()
+    const world: WorldRegion = {
+      id, parentId: null, name: '新世界', type: 'world', direction: 'center', order: 1,
+      summary: '从这里开始构建大陆、海域与故事地点。', terrain: '', climate: '', rules: '', canonStatus: 'author-confirmed', adjacentRegionIds: [], travelNotes: '',
+      locationIds: [], factionIds: [], characterIds: [], eventIds: [], chapterIds: [], factIds: [],
+      layout: { x: 0, y: 0, width: 1000, height: 700 },
+    }
+    setSelectedId(id)
+    onChange({ ...project, worldRegions: [world], worldMapState: { mode: 'map', focusRegionId: id } })
+    toast('世界根节点已创建')
+  }
 
   return <div className="page visualization-page">
     <header className="page-header"><div><span className="eyebrow">WORLD STRUCTURE</span><h2>层级方位世界地图</h2><p>用层级、方位和故事关联描述世界，不依赖真实地图或图片底图。</p></div><div className="toolbar"><button type="button" className={project.worldMapState.mode === 'map' ? 'primary' : 'secondary'} onClick={() => setMode('map')}><MapIcon size={16} />方位地图</button><button type="button" className={project.worldMapState.mode === 'tree' ? 'primary' : 'secondary'} onClick={() => setMode('tree')}><ListTree size={16} />层级结构</button><button type="button" className="secondary" onClick={addRegion}><Plus size={16} />新增区域</button></div></header>
@@ -135,11 +147,11 @@ export function WorldMapPage({ project, onChange, toast }: Props) {
         {project.worldMapState.mode === 'map' ? <section className="panel world-map-surface" aria-label={`${focus?.name ?? '世界'}方位地图`}>
           <div className="world-map-compass"><Compass size={17} /><span>北</span></div>
           <div className="world-map-caption"><strong>{focus?.name}</strong><span>{visibleRegions.length} 个下级区域 · 示意方位，非真实比例</span></div>
-          {visibleRegions.map((region) => <button type="button" aria-label={region.name} key={region.id} className={`world-region-block ${region.type} ${selected?.id === region.id ? 'selected' : ''}`} style={{ left: `${region.layout.x / 10}%`, top: `${region.layout.y / 7}%`, width: `${region.layout.width / 10}%`, height: `${region.layout.height / 7}%` }} onClick={() => setSelectedId(region.id)} onDoubleClick={() => enter(region)}><span className="region-kind">{typeLabels[region.type]}</span><strong>{region.name}</strong><small>{region.direction}</small></button>)}
+          {visibleRegions.map((region) => <button type="button" aria-label={region.name} key={region.id} className={`world-region-block ${region.type} ${selected?.id === region.id ? 'selected' : ''}`} style={{ left: `${region.layout.x / 10}%`, top: `${region.layout.y / 7}%`, width: `${region.layout.width / 10}%`, height: `${region.layout.height / 7}%` }} onClick={() => setSelectedId(region.id)} onDoubleClick={() => enter(region)}><span className="region-kind">{typeLabels[region.type]}</span><strong>{region.name}</strong><small>{directionLabels[region.direction]}</small></button>)}
           {!visibleRegions.length && <div className="mini-empty map-empty">当前区域没有下级划分</div>}
         </section> : <section className="panel world-tree" role="tree" aria-label="世界层级结构"><RegionTree regions={project.worldRegions} parentId={null} selectedId={selected?.id ?? ''} onSelect={setSelectedId} /></section>}
         <RegionInspector project={project} selected={selected} onEnter={enter} onUpdate={updateSelected} onDelete={deleteSelected} toast={toast} />
       </div>
-    </> : <div className="empty-state"><Compass size={42} /><h3>还没有世界结构</h3><p>创建世界根节点后，可以继续划分大陆、海域、州域与地点。</p><button type="button" className="primary">创建世界根节点</button></div>}
+    </> : <div className="empty-state"><Compass size={42} /><h3>还没有世界结构</h3><p>创建世界根节点后，可以继续划分大陆、海域、州域与地点。</p><button type="button" className="primary" onClick={createWorldRoot}>创建世界根节点</button></div>}
   </div>
 }

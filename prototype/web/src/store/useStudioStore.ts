@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { createDemoProject, createDemoStudioData } from '../domain/demoData'
 import type { Project, ProjectSnapshot, StudioData } from '../domain/types'
-import { createSafeStorage, STORAGE_KEY } from './persistence'
+import { createSafeStorage, migrateStudioState, STORAGE_KEY } from './persistence'
 
 interface NewProjectInput { title: string; genre: string; summary: string }
 interface StudioState extends StudioData {
@@ -74,7 +74,8 @@ export const useStudioStore = create<StudioState>()(persist((set, get) => ({
   resetDemo() { set(createDemoStudioData()) },
 }), {
   name: STORAGE_KEY,
-  version: 1,
+  version: 2,
+  migrate: (persistedState) => migrateStudioState(persistedState) as StudioState,
   storage: createJSONStorage(() => createSafeStorage(localStorage)),
   partialize: (state) => ({ schemaVersion: state.schemaVersion, selectedProjectId: state.selectedProjectId, projects: state.projects }),
 }))

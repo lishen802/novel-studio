@@ -73,3 +73,13 @@ test('creates a child region under the current map focus', async () => {
 
   expect(useStudioStore.getState().projects[0].worldRegions.some((item) => item.name === '东陆' && item.parentId === 'region-world')).toBe(true)
 })
+
+test('creates a world root for a project without map data', async () => {
+  useStudioStore.getState().updateProject({ worldRegions: [], worldMapState: { mode: 'map', focusRegionId: null } })
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: '世界地图' }))
+  await user.click(screen.getByRole('button', { name: '创建世界根节点' }))
+
+  expect(useStudioStore.getState().projects[0].worldRegions[0]).toMatchObject({ name: '新世界', type: 'world', parentId: null })
+})
