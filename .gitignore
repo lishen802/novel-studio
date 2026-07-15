@@ -22,4 +22,5 @@ apps/desktop/frontend/dist/
 apps/desktop/frontend/node_modules/
 apps/desktop/frontend/wailsjs/
 apps/desktop/frontend/src/bindings/
+apps/desktop/frontend/package.json.md5
 *.zjproject/

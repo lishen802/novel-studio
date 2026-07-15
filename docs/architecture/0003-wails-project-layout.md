@@ -31,6 +31,7 @@ Wails v2.13.0 还把最低 Go 版本提升到 1.25。当前开发机的系统 Go
 - 早期设计里的 `cmd/novel-studio` 不再创建；该目录只是建议而非已经实现的公共契约。
 - `apps/desktop` 是唯一允许导入 Wails application/runtime API 的组装层之一；其他使用必须位于明确的平台适配包。
 - 在没有 `frontend/dist` 时，包含 `go:embed` 的桌面入口不能单独编译，因此全量 Go 验证必须先执行前端构建。
+- 根 module 同时覆盖正式前端和浏览器原型；安装 npm 依赖后，Go 的递归 `./...` pattern 会进入 `node_modules`。因此测试和 vet 必须显式使用 `./apps/desktop` 与 `./internal/...`，Wails 构建使用 `-m` 跳过其内部 `go mod tidy`。依赖更新由明确的 `go get` 完成，必要的 tidy 在没有 `node_modules` 的干净检出中执行。
 - 如果未来恢复 `cmd/` 入口，必须通过新 ADR 解决资源嵌入、CLI 工作目录和双平台构建，不能依赖符号链接。
 
 ## 参考

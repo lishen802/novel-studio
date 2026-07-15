@@ -31,7 +31,7 @@
 - Modify: `.gitignore`
 - Modify: `apps/desktop/README.md`
 
-- [ ] **Step 1: 记录当前工具链并验证前置条件**
+- [x] **Step 1: 记录当前工具链并验证前置条件**
 
 Run:
 
@@ -44,7 +44,7 @@ npm --version
 
 Expected: Go 自动选择的有效工具链 ≥ 1.25、Node ≥ 20；首次执行时 `wails` 可以不存在，这正是安装步骤的前置证据。
 
-- [ ] **Step 2: 安装固定的 Wails v2 CLI 并运行环境诊断**
+- [x] **Step 2: 安装固定的 Wails v2 CLI 并运行环境诊断**
 
 Run:
 
@@ -55,7 +55,7 @@ go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 
 Expected: CLI 报告 v2.13.0；macOS 本机诊断通过。Windows 构建环境由 CI 在 Task 10 验证。
 
-- [ ] **Step 3: 写 ADR，固定 Wails 工程位于 `apps/desktop`**
+- [x] **Step 3: 写 ADR，固定 Wails 工程位于 `apps/desktop`**
 
 `docs/architecture/0003-wails-project-layout.md` 必须写明：
 
@@ -64,7 +64,7 @@ Expected: CLI 报告 v2.13.0；macOS 本机诊断通过。Windows 构建环境�
 3. 业务代码仍全部位于 `internal/`，该调整不改变模块化单体边界。
 4. 若未来恢复 `cmd/`，必须通过新 ADR 解决嵌入资源和跨平台构建，不使用符号链接。
 
-- [ ] **Step 4: 初始化根 Go module 并固定依赖**
+- [x] **Step 4: 初始化根 Go module 并固定依赖**
 
 Run:
 
@@ -75,7 +75,7 @@ go get github.com/wailsapp/wails/v2@v2.13.0
 
 Expected: 根目录生成 `go.mod`/`go.sum`，不存在第二个嵌套 Go module。此处暂不执行 `go mod tidy`，因为正式前端构建产物尚未生成，而 `main.go` 的 `go:embed` 会在 Task 2 前故意保持不可编译状态。
 
-- [ ] **Step 5: 建立最小 Wails 入口和配置**
+- [x] **Step 5: 建立最小 Wails 入口和配置**
 
 `apps/desktop/main.go`：
 
@@ -150,7 +150,7 @@ func (a *App) startup(ctx context.Context) {
 }
 ```
 
-- [ ] **Step 6: 忽略本地产物并完成冒烟检查**
+- [x] **Step 6: 忽略本地产物并完成冒烟检查**
 
 `.gitignore` 至少新增：
 
@@ -174,7 +174,7 @@ git status --short
 
 Expected: module checksum 验证通过；本任务不声称桌面入口已经可编译，第一次完整编译必须在 Task 2 生成真实 `frontend/dist` 后完成。
 
-- [ ] **Step 7: 提交本任务**
+- [x] **Step 7: 提交本任务**
 
 ```bash
 git add .gitignore go.mod go.sum apps/desktop docs/architecture/0003-wails-project-layout.md
@@ -196,7 +196,7 @@ git commit -m "build: establish Wails v2 desktop foundation"
 - Create: `apps/desktop/frontend/src/test/setup.ts`
 - Create: `apps/desktop/frontend/src/lib/studio-client.ts`
 
-- [ ] **Step 1: 创建前端包并安装固定依赖**
+- [x] **Step 1: 创建前端包并安装固定依赖**
 
 `package.json` 使用已在原型验证的 React/测试依赖版本，脚本至少包含：
 
@@ -239,7 +239,7 @@ Run: `cd apps/desktop/frontend && npm install`
 
 Expected: 生成 `package-lock.json`，安装成功。
 
-- [ ] **Step 2: 先写应用壳失败测试**
+- [x] **Step 2: 先写应用壳失败测试**
 
 `src/app/App.test.tsx`：
 
@@ -262,7 +262,7 @@ Run: `npm test -- App.test.tsx`
 
 Expected: FAIL because `App` does not exist.
 
-- [ ] **Step 3: 实现最小正式壳**
+- [x] **Step 3: 实现最小正式壳**
 
 `src/app/App.tsx`：
 
@@ -286,7 +286,7 @@ export function App() {
 
 建立 `main.tsx`、测试 setup、Vite/TS 配置和从原型提炼的基础设计 token；不要复制原型状态管理或假数据。
 
-- [ ] **Step 4: 定义 UI 唯一后端边界**
+- [x] **Step 4: 定义 UI 唯一后端边界**
 
 `src/lib/studio-client.ts`：
 
@@ -329,7 +329,7 @@ export interface StudioClient {
 
 React feature code只能依赖该接口，不能直接导入生成的 Wails bindings。
 
-- [ ] **Step 5: 验证和提交**
+- [x] **Step 5: 验证和提交**
 
 Run:
 
@@ -339,11 +339,10 @@ npm test
 npm run typecheck
 npm run build
 cd ../../..
-go mod tidy
-go test ./...
-go vet ./...
+go test ./apps/desktop
+go vet ./apps/desktop
 cd apps/desktop
-"$(go env GOPATH)/bin/wails" build -clean
+"$(go env GOPATH)/bin/wails" build -clean -m
 ```
 
 Expected: 全部 PASS，生成本地应用包；产物不进入 Git。
@@ -443,7 +442,7 @@ func (c Chapter) Commit(body string, expectedRevision int64, now time.Time) (Cha
 
 ```bash
 go test ./internal/domain/project -race
-go test ./...
+go test ./apps/desktop ./internal/...
 git add internal/domain/project
 git commit -m "feat: define project and chapter domain"
 ```
@@ -544,7 +543,7 @@ func OpenLayout(packagePath string) (Layout, error)
 
 ```bash
 go test ./internal/application/license ./internal/platform/projectfs -race
-go test ./...
+go test ./apps/desktop ./internal/...
 git add internal/application/ports internal/application/license internal/platform/projectfs
 git commit -m "feat: add project package and capability boundaries"
 ```
@@ -674,7 +673,7 @@ WHERE id = ? AND revision = ?;
 
 ```bash
 go test ./internal/persistence/sqlite -race -count=1
-go test ./... -race
+go test ./apps/desktop ./internal/... -race
 git add internal/persistence/sqlite go.mod go.sum
 git commit -m "feat: persist projects chapters and recovery drafts"
 ```
@@ -752,7 +751,7 @@ func (s *Service) Close() error
 
 ```bash
 go test ./internal/application/workspace -race
-go test ./... -race
+go test ./apps/desktop ./internal/... -race
 git add internal/application/workspace
 git commit -m "feat: add workspace application use cases"
 ```
@@ -829,7 +828,7 @@ Run:
 ```bash
 go test ./apps/desktop ./internal/... -race
 cd apps/desktop
-"$(go env GOPATH)/bin/wails" build -clean
+"$(go env GOPATH)/bin/wails" build -clean -m
 ```
 
 Expected: `wails build` 自动生成 TypeScript bindings 并完成桌面构建；若生成位置与 `StudioClient` adapter 不一致，只调整 adapter，不让 feature 组件导入生成代码。
@@ -905,7 +904,7 @@ npm test
 npm run typecheck
 npm run build
 cd ..
-"$(go env GOPATH)/bin/wails" build -clean
+"$(go env GOPATH)/bin/wails" build -clean -m
 git add frontend
 git commit -m "feat: create projects and edit chapters"
 ```
@@ -970,7 +969,7 @@ git commit -m "feat: recover manuscript drafts after interruption"
 
 CI 至少包含：
 
-- Ubuntu：`go test ./... -race`、`go vet ./...`、前端 test/typecheck/build。
+- Ubuntu：`go test ./apps/desktop ./internal/... -race`、`go vet ./apps/desktop ./internal/...`、前端 test/typecheck/build。
 - macOS：安装 Wails v2.13.0，执行 `wails doctor` 与 production build。
 - Windows：安装 Wails v2.13.0，执行 production build 和 Go tests。
 - npm 使用 `npm ci`，Go/NPM cache key 包含 lockfile hash。
@@ -998,15 +997,15 @@ README 必须给出可复制的开发命令、目录边界、数据位置、隐�
 Run:
 
 ```bash
-go test ./... -race -count=1
-go vet ./...
+go test ./apps/desktop ./internal/... -race -count=1
+go vet ./apps/desktop ./internal/...
 cd apps/desktop/frontend
 npm ci
 npm test
 npm run typecheck
 npm run build
 cd ..
-"$(go env GOPATH)/bin/wails" build -clean
+"$(go env GOPATH)/bin/wails" build -clean -m
 git status --short
 ```
 

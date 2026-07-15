@@ -1,0 +1,204 @@
+:root {
+  color: #202431;
+  background: #171c2c;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+.app-shell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  overflow: hidden;
+  padding: 48px 24px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    radial-gradient(circle at 50% -20%, #343c58 0%, #1d2336 42%, #151a29 100%);
+  background-size: 32px 32px, 32px 32px, auto;
+}
+
+.app-shell__glow {
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  filter: blur(110px);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.app-shell__glow--left {
+  left: -180px;
+  top: -140px;
+  background: #d9a56f;
+}
+
+.app-shell__glow--right {
+  right: -180px;
+  bottom: -180px;
+  background: #6f7fb2;
+}
+
+.welcome-card {
+  position: relative;
+  width: min(100%, 640px);
+  padding: clamp(36px, 6vw, 64px);
+  border: 1px solid rgba(255, 248, 232, 0.13);
+  border-radius: 30px;
+  color: #f7f1e6;
+  text-align: center;
+  background: linear-gradient(145deg, rgba(42, 48, 70, 0.92), rgba(28, 33, 51, 0.88));
+  box-shadow:
+    0 32px 80px rgba(4, 7, 16, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(22px);
+}
+
+.product-mark {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 24px;
+  place-items: center;
+  border: 1px solid rgba(231, 184, 127, 0.28);
+  border-radius: 20px;
+  color: #f0c792;
+  background: linear-gradient(145deg, rgba(226, 169, 102, 0.18), rgba(255, 255, 255, 0.04));
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: #d8b17f;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.welcome-card h1 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", "STSong", serif;
+  font-size: clamp(2.25rem, 7vw, 4.35rem);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1.04;
+}
+
+.welcome-card__description {
+  max-width: 500px;
+  margin: 24px auto 0;
+  color: #b9bdc9;
+  font-size: 1rem;
+  line-height: 1.85;
+}
+
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.welcome-actions button {
+  display: inline-flex;
+  min-width: 150px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 13px 20px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 650;
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.welcome-actions button:hover {
+  transform: translateY(-1px);
+}
+
+.welcome-actions button:focus-visible {
+  outline: 3px solid rgba(240, 199, 146, 0.42);
+  outline-offset: 3px;
+}
+
+.primary-action {
+  color: #28231f;
+  background: #e8bd86;
+  box-shadow: 0 12px 30px rgba(215, 158, 91, 0.2);
+}
+
+.primary-action:hover {
+  background: #f0ca9a;
+}
+
+.secondary-action {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f1eadf;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.secondary-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.local-first-note {
+  margin: 28px 0 0;
+  color: #858b9a;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 520px) {
+  .app-shell {
+    padding: 20px;
+  }
+
+  .welcome-card {
+    padding: 36px 24px;
+    border-radius: 22px;
+  }
+
+  .welcome-actions {
+    flex-direction: column;
+  }
+
+  .welcome-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-actions button {
+    transition: none;
+  }
+}
