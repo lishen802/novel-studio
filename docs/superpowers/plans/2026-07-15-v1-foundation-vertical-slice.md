@@ -768,7 +768,7 @@ git commit -m "feat: add workspace application use cases"
 - Modify: `apps/desktop/app.go`
 - Modify: `apps/desktop/main.go`
 
-- [ ] **Step 0: 添加 UUID 实现依赖**
+- [x] **Step 0: 添加 UUID 实现依赖**
 
 Run:
 
@@ -778,7 +778,7 @@ go get github.com/google/uuid
 
 Expected: UUID 依赖直到平台 ID adapter 实际实现时才进入根 Go module。
 
-- [ ] **Step 1: 写 API 转发失败测试**
+- [x] **Step 1: 写 API 转发失败测试**
 
 使用 mock workspace，验证 API：
 
@@ -787,7 +787,7 @@ Expected: UUID 依赖直到平台 ID adapter 实际实现时才进入根 Go modu
 - 应用服务错误原样进入统一的安全错误映射。
 - shutdown 总是调用 workspace `Close`。
 
-- [ ] **Step 2: 定义薄 API 方法**
+- [x] **Step 2: 定义薄 API 方法**
 
 ```go
 type DesktopAPI struct {
@@ -808,7 +808,7 @@ func (a *DesktopAPI) CommitChapter(id, body string, baseRevision int64) (workspa
 
 目录对话框只允许选择目录；打开项目后由应用服务验证 `.zjproject`、数据库完整性和项目记录。
 
-- [ ] **Step 3: 在 `newApp` 组装生产依赖**
+- [x] **Step 3: 在 `newApp` 组装生产依赖**
 
 依赖方向固定为：
 
@@ -822,7 +822,7 @@ Wails lifecycle
 
 `main.go` 的 `Bind` 只绑定 `DesktopAPI`，不绑定仓储或领域对象。`OnShutdown` 调用关闭服务。
 
-- [ ] **Step 4: 生成绑定并验证**
+- [x] **Step 4: 生成绑定并验证**
 
 Run:
 

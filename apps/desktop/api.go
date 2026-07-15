@@ -1,0 +1,105 @@
+package main
+
+import (
+	"context"
+
+	"github.com/lishen802/novel-studio/internal/application/workspace"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+type WorkspaceUseCases interface {
+	CreateProject(context.Context, string, string, string, string) (workspace.ProjectView, error)
+	OpenProject(context.Context, string) (workspace.ProjectView, error)
+	ListChapters(context.Context) ([]workspace.ChapterView, error)
+	CreateChapter(context.Context, string) (workspace.ChapterView, error)
+	OpenChapter(context.Context, string) (workspace.ChapterView, error)
+	SaveDraft(context.Context, string, string, int64) error
+	CommitChapter(context.Context, string, string, int64) (workspace.ChapterView, error)
+	Close() error
+}
+
+type DirectoryPicker interface {
+	ChooseProjectParent(context.Context) (string, error)
+	ChooseProjectToOpen(context.Context) (string, error)
+}
+
+type CreateProjectInput struct {
+	ParentDirectory string `json:"parentDirectory"`
+	Title           string `json:"title"`
+	Genre           string `json:"genre"`
+	Summary         string `json:"summary"`
+}
+
+type DesktopAPI struct {
+	ctx       context.Context
+	workspace WorkspaceUseCases
+	picker    DirectoryPicker
+}
+
+func newDesktopAPI(workspaceService WorkspaceUseCases, picker DirectoryPicker) *DesktopAPI {
+	return &DesktopAPI{
+		ctx:       context.Background(),
+		workspace: workspaceService,
+		picker:    picker,
+	}
+}
+
+func (a *DesktopAPI) startup(ctx context.Context) {
+	a.ctx = ctx
+}
+
+func (a *DesktopAPI) ChooseProjectParent() (string, error) {
+	return a.picker.ChooseProjectParent(a.ctx)
+}
+
+func (a *DesktopAPI) ChooseProjectToOpen() (string, error) {
+	return a.picker.ChooseProjectToOpen(a.ctx)
+}
+
+func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectView, error) {
+	return a.workspace.CreateProject(
+		a.ctx,
+		input.ParentDirectory,
+		input.Title,
+		input.Genre,
+		input.Summary,
+	)
+}
+
+func (a *DesktopAPI) OpenProject(path string) (workspace.ProjectView, error) {
+	return a.workspace.OpenProject(a.ctx, path)
+}
+
+func (a *DesktopAPI) ListChapters() ([]workspace.ChapterView, error) {
+	return a.workspace.ListChapters(a.ctx)
+}
+
+func (a *DesktopAPI) CreateChapter(title string) (workspace.ChapterView, error) {
+	return a.workspace.CreateChapter(a.ctx, title)
+}
+
+func (a *DesktopAPI) OpenChapter(id string) (workspace.ChapterView, error) {
+	return a.workspace.OpenChapter(a.ctx, id)
+}
+
+func (a *DesktopAPI) SaveDraft(id, body string, revision int64) error {
+	return a.workspace.SaveDraft(a.ctx, id, body, revision)
+}
+
+func (a *DesktopAPI) CommitChapter(id, body string, revision int64) (workspace.ChapterView, error) {
+	return a.workspace.CommitChapter(a.ctx, id, body, revision)
+}
+
+type wailsDirectoryPicker struct{}
+
+func (wailsDirectoryPicker) ChooseProjectParent(ctx context.Context) (string, error) {
+	return runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{
+		Title: "选择小说项目保存位置",
+	})
+}
+
+func (wailsDirectoryPicker) ChooseProjectToOpen(ctx context.Context) (string, error) {
+	return runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{
+		Title: "打开小说项目",
+	})
+}
