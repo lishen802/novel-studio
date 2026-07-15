@@ -688,7 +688,7 @@ git commit -m "feat: persist projects chapters and recovery drafts"
 - Create: `internal/application/workspace/view.go`
 - Create: `internal/application/workspace/errors.go`
 
-- [ ] **Step 1: 用 fake ports 写失败测试**
+- [x] **Step 1: 用 fake ports 写失败测试**
 
 测试以下用户用例：
 
@@ -704,7 +704,7 @@ func TestOpenChapterReturnsRecoverableDraft(t *testing.T)
 
 每个测试使用固定 clock 和顺序 ID generator，断言能力门禁先于文件/数据库写入发生。
 
-- [ ] **Step 2: 定义面向 UI 的稳定 DTO**
+- [x] **Step 2: 定义面向 UI 的稳定 DTO**
 
 `view.go`：
 
@@ -731,7 +731,7 @@ type ChapterView struct {
 
 DTO 不暴露 `sql.Null*`、数据库路径细节或供应商类型。
 
-- [ ] **Step 3: 实现服务和并发保护**
+- [x] **Step 3: 实现服务和并发保护**
 
 `Service` 持有 factory、license、clock、IDs、`sync.RWMutex` 和当前 active store/path。公开方法：
 
@@ -748,7 +748,7 @@ func (s *Service) Close() error
 
 创建和编辑分别调用 `license.CreateProject`、`license.EditManuscript`。切换项目时先成功打开新 store，再原子替换并关闭旧 store；失败时旧项目保持可用。
 
-- [ ] **Step 4: 验证和提交**
+- [x] **Step 4: 验证和提交**
 
 ```bash
 go test ./internal/application/workspace -race
