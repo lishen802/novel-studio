@@ -50,6 +50,32 @@ export async function renderIcon(size) {
   return sharp(source).resize(size, size).png().toBuffer()
 }
 
+export async function composePreview(rendered, background, foreground) {
+  const sizes = [1024, 512, 256, 128, 64, 32, 24, 16]
+  const composites = []
+  for (const [index, size] of sizes.entries()) {
+    const column = index % 4
+    const row = Math.floor(index / 4)
+    const displaySize = Math.min(size, 220)
+    const centerX = 200 + column * 400
+    const centerY = 190 + row * 420
+    const icon = await sharp(rendered.get(size)).resize(displaySize, displaySize).png().toBuffer()
+    composites.push({ input: icon, left: Math.round(centerX - displaySize / 2), top: Math.round(centerY - displaySize / 2) })
+    const label = Buffer.from(`<svg width="400" height="48"><text x="200" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="${foreground}">${size}px</text></svg>`)
+    composites.push({ input: label, left: column * 400, top: centerY + 128 })
+  }
+  return sharp({ create: { width: 1600, height: 900, channels: 4, background } })
+    .composite(composites)
+    .png()
+    .toBuffer()
+}
+
+async function writePreview(rendered, background, foreground, fileName) {
+  const previewDir = path.join(generatedDir, 'previews')
+  await mkdir(previewDir, { recursive: true })
+  await writeFile(path.join(previewDir, fileName), await composePreview(rendered, background, foreground))
+}
+
 export async function buildIcons() {
   const sizes = [16, 24, 32, 48, 64, 128, 180, 256, 512, 1024]
   const pngDir = path.join(generatedDir, 'png')
@@ -84,6 +110,8 @@ export async function buildIcons() {
     const icnsImages = [16, 32, 64, 128, 256, 512, 1024].map((size) => ({ size, png: rendered.get(size) }))
     await writeFile(path.join(macosDir, 'app.icns'), encodeIcns(icnsImages))
   }
+  await writePreview(rendered, '#FFFAF0', '#111827', 'icon-sizes-light.png')
+  await writePreview(rendered, '#111827', '#FFFAF0', 'icon-sizes-dark.png')
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await buildIcons()

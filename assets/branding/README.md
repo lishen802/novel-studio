@@ -26,3 +26,31 @@ Avoid: starscape, moon, mountains, many particles, braided DNA shape, robot, bra
 ## 概念稿
 
 - `concepts/folded-pages-world-v1.png`：视觉母稿，不直接用于产品发布。
+
+## 构建
+
+在仓库根目录执行：
+
+```bash
+cd prototype/web
+npm run build:icons
+```
+
+构建器会从 SVG 主源重新生成 PNG、macOS ICNS、Windows ICO、网页图标和尺寸验收图。输出是确定性的，不依赖概念稿，也不需要手工导出。
+
+## 唯一几何主源
+
+- `source/app-icon.svg`：128px 及以上的完整图标，保留金环与灵感星。
+- `source/app-icon-small.svg`：64px 及以下的简化图标，移除小尺寸易糊细节并加粗主线。
+
+修改品牌图标时只编辑这两份 SVG，然后重新运行构建命令；不要直接修改 `generated/` 或网页目录中的 PNG。
+
+## 平台交付物
+
+- macOS：`generated/macos/app.icns` 与 `generated/macos/app.iconset/`
+- Windows：`generated/windows/app.ico`
+- 通用 PNG：`generated/png/`
+- 浅色/深色验收图：`generated/previews/`
+- 网页原型：`prototype/web/public/brand/`
+
+ICNS 与 ICO 都由 Node 构建器直接打包，便于在 macOS、Windows 和 CI 环境中复现。

@@ -1,7 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs><clipPath id="world-boundary"><circle cx="512" cy="492" r="350"/></clipPath></defs>
   <rect width="1024" height="1024" rx="224" fill="#FFFAF0"/>
   <circle cx="512" cy="492" r="350" fill="#111827"/>
-  <path d="M220 600C360 390 494 500 522 516C654 582 704 468 804 316" fill="none" stroke="#FFFAF0" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M220 600C374 514 470 612 522 680C644 828 724 730 804 704" fill="none" stroke="#FFFAF0" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M522 516C500 612 502 704 528 808" fill="none" stroke="#C9983B" stroke-width="36" stroke-linecap="round"/>
+  <g clip-path="url(#world-boundary)">
+    <path d="M220 600C360 390 494 500 522 516C654 582 704 468 804 316" fill="none" stroke="#FFFAF0" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M220 600C374 514 470 612 522 680C644 828 724 730 804 704" fill="none" stroke="#FFFAF0" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M522 516C500 612 502 704 528 808" fill="none" stroke="#C9983B" stroke-width="36" stroke-linecap="round"/>
+  </g>
 </svg>

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import sharp from 'sharp'
 import { describe, expect, test } from 'vitest'
 
 const root = path.resolve(process.cwd(), '../..')
@@ -15,7 +16,16 @@ describe('brand icon sources', () => {
     expect(svg).toContain('#111827')
     expect(svg).toContain('#C9983B')
     expect(svg).toContain('#FFFAF0')
+    expect(svg).toContain('<clipPath id="world-boundary">')
+    expect(svg).toContain('clip-path="url(#world-boundary)"')
     expect(svg).not.toMatch(/<text|filter=|data:image/i)
+  })
+
+  test('the full-size icon uses a compact four-point inspiration star', async () => {
+    const svg = await readFile(path.join(root, 'assets/branding/source/app-icon.svg'), 'utf8')
+
+    expect(svg).toContain('data-part="inspiration-star"')
+    expect(svg).not.toContain('M714 244v96M666 292h96')
   })
 })
 
@@ -54,4 +64,18 @@ test('encodes PNG images in a modern macOS ICNS container', async () => {
   expect(icns.readUInt32BE(4)).toBe(icns.length)
   expect(icns.subarray(8, 12).toString('ascii')).toBe('icp4')
   expect(icns.subarray(19, 23).toString('ascii')).toBe('ic09')
+})
+
+test('composes a 1600 by 900 icon size preview', async () => {
+  const module = await loadBuilder()
+  const sample = await sharp({ create: { width: 16, height: 16, channels: 4, background: '#111827' } }).png().toBuffer()
+  const rendered = new Map([16, 24, 32, 64, 128, 256, 512, 1024].map((size) => [size, sample]))
+  const preview = 'composePreview' in module
+    ? await module.composePreview(rendered, '#FFFAF0', '#111827')
+    : Buffer.alloc(0)
+  expect(preview.length).toBeGreaterThan(0)
+  if (!preview.length) return
+  const metadata = await sharp(preview).metadata()
+  expect(metadata.width).toBe(1600)
+  expect(metadata.height).toBe(900)
 })

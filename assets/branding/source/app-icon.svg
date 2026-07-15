@@ -1,10 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs><clipPath id="world-boundary"><circle cx="512" cy="492" r="338"/></clipPath></defs>
   <rect width="1024" height="1024" rx="224" fill="#FFFAF0"/>
   <circle cx="512" cy="492" r="338" fill="#111827"/>
   <circle cx="512" cy="492" r="296" fill="none" stroke="#C9983B" stroke-width="18"/>
-  <path d="M232 594C364 396 496 500 522 512C650 574 700 472 790 330" fill="none" stroke="#FFFAF0" stroke-width="94" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M232 594C374 518 470 610 522 674C640 816 716 724 790 702" fill="none" stroke="#FFFAF0" stroke-width="94" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M522 512C500 604 502 696 526 798" fill="none" stroke="#C9983B" stroke-width="24" stroke-linecap="round"/>
-  <path d="M714 244v96M666 292h96" stroke="#FFFAF0" stroke-width="13" stroke-linecap="round"/>
-  <circle cx="714" cy="292" r="15" fill="#C9983B"/>
+  <g clip-path="url(#world-boundary)">
+    <path d="M232 594C364 396 496 500 522 512C650 574 700 472 790 330" fill="none" stroke="#FFFAF0" stroke-width="94" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M232 594C374 518 470 610 522 674C640 816 716 724 790 702" fill="none" stroke="#FFFAF0" stroke-width="94" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M522 512C500 604 502 696 526 798" fill="none" stroke="#C9983B" stroke-width="24" stroke-linecap="round"/>
+    <g data-part="inspiration-star">
+      <path d="M714 244C720 278 728 286 762 292C728 298 720 306 714 340C708 306 700 298 666 292C700 286 708 278 714 244Z" fill="#FFFAF0"/>
+      <circle cx="714" cy="292" r="10" fill="#C9983B"/>
+    </g>
+  </g>
 </svg>

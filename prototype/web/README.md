@@ -14,11 +14,14 @@ npm run dev
 浏览器打开 `http://127.0.0.1:5173`。构建与测试：
 
 ```bash
+npm run build:icons
 npm run typecheck
 npm test -- --run
 npm run build
 npx playwright test
 ```
+
+`npm run build:icons` 会从 `../../assets/branding/source/` 的 SVG 主源重建网页和桌面平台图标。普通原型开发不需要每次运行；修改图标源文件后必须运行。
 
 ## 原型能力
 
