@@ -6,7 +6,7 @@
 
 **Architecture:** 采用本地优先的模块化单体。Go 承载领域、应用、SQLite、智能体运行时、模型适配和平台能力，Wails v2 暴露薄桌面绑定，React/TypeScript 只处理界面与交互；Rust 仅在有量化证据且 ADR 批准后，以版本化 sidecar 引入。所有 AI 写作结果先形成可审阅变更集，正文、结构化故事模型、任务和版本历史均落在项目包内。
 
-**Tech Stack:** Go 1.25+、Wails v2.13.0、React、TypeScript、Vite、SQLite、Vitest、Testing Library、Go `testing`、GitHub Actions；可选 Rust sidecar。
+**Tech Stack:** Go 1.25.7+、Wails v2.13.0、React、TypeScript、Vite、SQLite、Vitest、Testing Library、Go `testing`、GitHub Actions；可选 Rust sidecar。
 
 ---
 

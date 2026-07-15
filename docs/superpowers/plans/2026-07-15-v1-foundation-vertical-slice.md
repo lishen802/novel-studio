@@ -6,7 +6,7 @@
 
 **Architecture:** 使用根 Go module 与 `apps/desktop` 内的标准 Wails v2 项目。领域、应用、端口、SQLite 和平台实现位于 `internal/`；桌面入口只组装依赖，Wails API 只转发应用用例；React 通过一个可替换的 `StudioClient` 调用生成绑定。每个项目是独立目录包和 SQLite 数据库，保存采用乐观并发，短周期草稿与正式章节提交分离。V1 的授权实现为默认放行，但创建和编辑仍经过能力门禁。
 
-**Tech Stack:** Go 1.25+、Wails v2.13.0、React 19、TypeScript 5.7、Vite、SQLite（`modernc.org/sqlite`）、Go `testing`、Vitest、Testing Library、GitHub Actions。
+**Tech Stack:** Go 1.25.7+、Wails v2.13.0、React 19、TypeScript 5.7、Vite、SQLite（`modernc.org/sqlite`）、Go `testing`、Vitest、Testing Library、GitHub Actions。
 
 ---
 
@@ -42,7 +42,7 @@ npm --version
 "$(go env GOPATH)/bin/wails" version
 ```
 
-Expected: Go 自动选择的有效工具链 ≥ 1.25、Node ≥ 20；首次执行时 `wails` 可以不存在，这正是安装步骤的前置证据。
+Expected: Go 自动选择的有效工具链 ≥ 1.25.7、Node ≥ 20；首次执行时 `wails` 可以不存在，这正是安装步骤的前置证据。
 
 - [x] **Step 2: 安装固定的 Wails v2 CLI 并运行环境诊断**
 
@@ -559,7 +559,7 @@ git commit -m "feat: add project package and capability boundaries"
 - Create: `internal/persistence/sqlite/project_store.go`
 - Create: `internal/persistence/sqlite/project_store_test.go`
 
-- [ ] **Step 0: 添加本任务实际使用的持久化依赖**
+- [x] **Step 0: 添加本任务实际使用的持久化依赖**
 
 Run:
 
@@ -570,7 +570,7 @@ go get github.com/pressly/goose/v3
 
 Expected: `go.mod`/`go.sum` 固定当前选定版本；后续测试直接编译到实际 SQLite 和 migration 库。
 
-- [ ] **Step 1: 写空库迁移失败测试**
+- [x] **Step 1: 写空库迁移失败测试**
 
 测试在 `t.TempDir()` 创建数据库，执行两次 `OpenDatabase`，断言：
 
@@ -580,7 +580,7 @@ Expected: `go.mod`/`go.sum` 固定当前选定版本；后续测试直接编译�
 - 必需表和唯一索引存在。
 - 损坏数据库返回分类错误，不重新创建并覆盖原文件。
 
-- [ ] **Step 2: 写第一版完整 migration**
+- [x] **Step 2: 写第一版完整 migration**
 
 `00001_foundation.sql`：
 
@@ -634,9 +634,9 @@ DROP TABLE chapters;
 DROP TABLE projects;
 ```
 
-- [ ] **Step 3: 实现数据库打开策略**
+- [x] **Step 3: 实现数据库打开策略**
 
-`OpenDatabase(path string)` 必须：
+`OpenDatabase(ctx context.Context, path string)` 必须：
 
 1. 使用 modernc SQLite driver。
 2. 设置 `foreign_keys=ON`、`journal_mode=WAL`、`busy_timeout=5000`。
@@ -644,7 +644,7 @@ DROP TABLE projects;
 4. 使用 `go:embed migrations/*.sql` 与 goose 迁移。
 5. 迁移失败时关闭连接并原样返回错误。
 
-- [ ] **Step 4: 先写仓储失败测试**
+- [x] **Step 4: 先写仓储失败测试**
 
 至少包含：
 
@@ -666,11 +666,11 @@ WHERE id = ? AND revision = ?;
 
 受影响行数不是 1 时回滚并返回 `project.ErrRevisionConflict`。
 
-- [ ] **Step 5: 实现 `ports.ProjectStore` 和 factory**
+- [x] **Step 5: 实现 `ports.ProjectStore` 和 factory**
 
 所有时间按 UTC RFC3339Nano 存储；查询后恢复为 `time.Time`。SQL 只存在于 persistence 包。错误使用 `%w` 保留分类，不把 SQL 文本或正文写入日志。
 
-- [ ] **Step 6: 验证和提交**
+- [x] **Step 6: 验证和提交**
 
 ```bash
 go test ./internal/persistence/sqlite -race -count=1

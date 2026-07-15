@@ -12,7 +12,7 @@
 
 ## 本地命令
 
-Wails v2.13.0 要求 Go 1.25 或更高版本。本项目通过 `go.mod` 的 toolchain 指令固定 Go 1.25.12。
+Wails v2.13.0 要求 Go 1.25 或更高版本；当前持久化依赖把 module 下限提升到 Go 1.25.7。本项目通过 `go.mod` 的 toolchain 指令固定 Go 1.25.12。
 
 ```bash
 cd apps/desktop/frontend

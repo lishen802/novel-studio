@@ -16,7 +16,7 @@ Wails v2.13.0 还把最低 Go 版本提升到 1.25。当前开发机的系统 Go
 - Go 入口使用 `apps/desktop/main.go`，Wails 配置使用 `apps/desktop/wails.json`。
 - 正式 UI 位于 `apps/desktop/frontend`，平台构建资源位于 `apps/desktop/build`。
 - 仓库只保留一个根 Go module；领域、应用、持久化、智能体运行时和平台适配仍位于根目录 `internal/`。
-- 根 module 最低版本为 Go 1.25.0，并使用 `toolchain go1.25.12` 提供可复现的本地与 CI 工具链。
+- 根 module 最低版本为 Go 1.25.7，并使用 `toolchain go1.25.12` 提供可复现的本地与 CI 工具链。Wails 本身要求 Go 1.25.0，当前 goose 迁移依赖把实际 module 下限提升到 1.25.7。
 - Wails 固定为 v2.13.0；升级 Wails 或 Go 主/次版本时必须先运行双平台构建验证。
 
 ## 理由
