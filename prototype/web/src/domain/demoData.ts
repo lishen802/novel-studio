@@ -85,6 +85,8 @@ export function createDemoProject(overrides: Partial<Project> = {}): Project {
     ],
     graphPositions: { 'char-shen': { x: 240, y: 220 }, 'char-xu': { x: 520, y: 180 }, 'char-lu': { x: 760, y: 330 }, 'faction-lighthouse': { x: 430, y: 420 }, 'faction-port': { x: 760, y: 500 } },
     mapBackground: null,
+    worldRegions: [],
+    worldMapState: { mode: 'map', focusRegionId: null },
     agents: createDemoAgents(),
     reviews: [
       { id: 'review-1', chapterId: 'demo-chapter-38', reviewerRole: 'continuity-auditor', reviewerModel: 'gpt-5.2', severity: 'warning', category: '时间连续性', description: '第37章到第38章之间缺少从钟楼前往北堤的时间交代。', evidence: [{ source: '第37章', quote: '档案室里只有一盏绿灯' }, { source: '第38章', quote: '退潮前还有四十分钟' }], suggestion: '增加一句离开钟楼时的时间锚点。', disposition: 'open' },

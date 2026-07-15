@@ -1,5 +1,5 @@
-import { createDemoStudioData } from './demoData'
-import { StudioDataSchema } from './schema'
+import { createDemoProject, createDemoStudioData } from './demoData'
+import { parseProject, StudioDataSchema } from './schema'
 
 describe('StudioDataSchema', () => {
   test('accepts the complete demo workspace', () => {
@@ -14,5 +14,16 @@ describe('StudioDataSchema', () => {
       projects: [{ ...data.projects[0], title: '' }],
     })
     expect(result.success).toBe(false)
+  })
+
+  test('adds empty world map fields to legacy projects', () => {
+    const project = structuredClone(createDemoProject()) as unknown as Record<string, unknown>
+    delete project.worldRegions
+    delete project.worldMapState
+
+    const parsed = parseProject(project)
+
+    expect(parsed.worldRegions).toEqual([])
+    expect(parsed.worldMapState).toEqual({ mode: 'map', focusRegionId: null })
   })
 })

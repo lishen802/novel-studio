@@ -4,6 +4,8 @@ export type CanonStatus = 'author-confirmed' | 'text-evidenced' | 'ai-inferred' 
 export type EntityKind = 'character' | 'faction' | 'location'
 export type AgentFamily = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'local' | 'custom'
 export type AgentRole = 'planner' | 'context-curator' | 'writer' | 'continuity-auditor' | 'character-auditor' | 'causality-auditor' | 'pacing-auditor' | 'arbiter' | 'reviser' | 'fact-extractor' | 'final-auditor'
+export type WorldRegionType = 'world' | 'continent' | 'sea' | 'state' | 'island' | 'city' | 'stronghold' | 'terrain' | 'secret-realm' | 'resource'
+export type RelativeDirection = 'north' | 'north-east' | 'east' | 'south-east' | 'south' | 'south-west' | 'west' | 'north-west' | 'center' | 'surrounding'
 
 export interface Scene {
   id: string
@@ -77,6 +79,29 @@ export interface Location {
   y: number
   visitChapterIds: string[]
   eventIds: string[]
+}
+
+export interface WorldRegion {
+  id: string
+  parentId: string | null
+  name: string
+  type: WorldRegionType
+  direction: RelativeDirection
+  order: number
+  summary: string
+  terrain: string
+  climate: string
+  rules: string
+  canonStatus: Extract<CanonStatus, 'author-confirmed' | 'text-evidenced' | 'ai-inferred' | 'conflicted'>
+  adjacentRegionIds: string[]
+  travelNotes: string
+  locationIds: string[]
+  factionIds: string[]
+  characterIds: string[]
+  eventIds: string[]
+  chapterIds: string[]
+  factIds: string[]
+  layout: { x: number; y: number; width: number; height: number }
 }
 
 export interface StoryItem {
@@ -224,6 +249,8 @@ export interface Project {
   events: StoryEvent[]
   graphPositions: Record<string, { x: number; y: number }>
   mapBackground: string | null
+  worldRegions: WorldRegion[]
+  worldMapState: { mode: 'map' | 'tree'; focusRegionId: string | null }
   agents: AgentProfile[]
   reviews: ReviewIssue[]
   runs: WorkflowRun[]
