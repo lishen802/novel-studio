@@ -454,13 +454,14 @@ git commit -m "feat: define project and chapter domain"
 - Create: `internal/application/ports/clock.go`
 - Create: `internal/application/ports/id_generator.go`
 - Create: `internal/application/ports/project_store.go`
+- Create: `internal/application/ports/project_package.go`
 - Create: `internal/application/license/service.go`
 - Create: `internal/application/license/noop.go`
 - Create: `internal/application/license/noop_test.go`
 - Create: `internal/platform/projectfs/layout.go`
 - Create: `internal/platform/projectfs/layout_test.go`
 
-- [ ] **Step 1: 写项目包和门禁失败测试**
+- [x] **Step 1: 写项目包和门禁失败测试**
 
 项目包测试使用 `t.TempDir()`，验证：
 
@@ -487,7 +488,7 @@ func TestNoopServiceAllowsEveryV1Capability(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 定义端口，避免应用层依赖 SQLite/Wails**
+- [x] **Step 2: 定义端口，避免应用层依赖 SQLite/Wails**
 
 `project_store.go`：
 
@@ -512,14 +513,14 @@ type ProjectStore interface {
 }
 
 type ProjectStoreFactory interface {
-	Create(ctx context.Context, packagePath string, project projectdomain.Project) (ProjectStore, error)
-	Open(ctx context.Context, packagePath string) (ProjectStore, error)
+	Create(ctx context.Context, databasePath string, project projectdomain.Project) (ProjectStore, error)
+	Open(ctx context.Context, databasePath string) (ProjectStore, error)
 }
 ```
 
-同时定义可注入的 `Clock`、`IDGenerator`，测试中禁止依赖真实时间和随机 ID。
+同时定义可注入的 `Clock`、`IDGenerator` 和 `ProjectPackageManager`。应用层通过 package manager 创建/打开项目目录，再把明确的数据库路径交给 store factory；测试中禁止依赖真实时间、随机 ID 或具体文件系统实现。
 
-- [ ] **Step 3: 实现 `projectfs.Layout`**
+- [x] **Step 3: 实现 `projectfs.Layout`**
 
 公开 API：
 
@@ -539,7 +540,7 @@ func OpenLayout(packagePath string) (Layout, error)
 
 使用 `filepath.Join` 和 `os.Mkdir`/`os.MkdirAll`；`Create` 对根目录使用不覆盖语义。不要在项目包里保存许可证或模型密钥。
 
-- [ ] **Step 4: 验证和提交**
+- [x] **Step 4: 验证和提交**
 
 ```bash
 go test ./internal/application/license ./internal/platform/projectfs -race
