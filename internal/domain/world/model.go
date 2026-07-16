@@ -10,6 +10,7 @@ var (
 	ErrBlankValue       = errors.New("world value must not be blank")
 	ErrInvalidRole      = errors.New("invalid character role")
 	ErrInvalidStatus    = errors.New("invalid world status")
+	ErrInvalidHierarchy = errors.New("invalid world hierarchy")
 	ErrInvalidReference = errors.New("invalid world reference")
 	ErrInvalidStrength  = errors.New("relationship strength must be between -100 and 100")
 	ErrInvalidRelation  = errors.New("invalid relationship kind")
