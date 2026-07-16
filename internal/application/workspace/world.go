@@ -527,7 +527,7 @@ func consistencyIssues(characters []worlddomain.Character) []ConsistencyIssueVie
 }
 
 func characterView(character worlddomain.Character) CharacterView {
-	aliases := append([]string(nil), character.Aliases...)
+	aliases := append(make([]string, 0, len(character.Aliases)), character.Aliases...)
 	return CharacterView{ID: character.ID, Name: character.Name, Aliases: aliases, Role: string(character.Role), Summary: character.Summary, Motivation: character.Motivation, Fear: character.Fear, Secret: character.Secret, Arc: character.Arc, Status: string(character.Status)}
 }
 

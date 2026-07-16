@@ -1,7 +1,9 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -37,6 +39,26 @@ func TestCreateAndUpdateCharacterUsesStoryCapability(t *testing.T) {
 	}
 	if updated.ID != created.ID || updated.Name != "林默之" || updated.Status != "inactive" || store.characters[created.ID].Summary != "前调查员" {
 		t.Fatalf("updated = %#v", updated)
+	}
+}
+
+func TestCreateCharacterWithoutAliasesSerializesEmptyArray(t *testing.T) {
+	project := mustProject(t, "project", "凡人修仙")
+	store := newFakeStore(project)
+	service := openTestService(t, store, &sequenceIDs{ids: []string{"character"}})
+
+	created, err := service.CreateCharacter(context.Background(), CharacterInput{
+		Name: "韩立", Role: "protagonist",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"aliases":[]`)) {
+		t.Fatalf("character payload = %s", payload)
 	}
 }
 
