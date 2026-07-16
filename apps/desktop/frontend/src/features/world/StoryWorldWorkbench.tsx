@@ -31,6 +31,11 @@ import type {
 
 type Props = { client: StudioClient; chapters: ChapterView[] };
 type DialogKind = "character" | "faction" | "relationship" | null;
+type ArchiveTarget = {
+  kind: "character" | "faction" | "relationship";
+  id: string;
+  name: string;
+};
 
 const emptyWorld: StoryWorldView = {
   characters: [],
@@ -116,6 +121,7 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
   const [dialog, setDialog] = useState<DialogKind>(null);
+  const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget | null>(null);
   const [editingId, setEditingId] = useState("");
   const [character, setCharacter] = useState(emptyCharacter);
   const [aliases, setAliases] = useState("");
@@ -269,18 +275,25 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
     if (saved) closeDialog();
   };
 
-  const archiveCharacter = async (item: CharacterView) => {
-    if (!window.confirm(`归档角色“${item.name}”？仍被其他资料引用时不会归档。`))
-      return;
-    await mutate(() => client.archiveCharacter(item.id), "无法归档角色");
-  };
-  const archiveFaction = async (item: FactionView) => {
-    if (!window.confirm(`归档势力“${item.name}”？仍有成员时不会归档。`)) return;
-    await mutate(() => client.archiveFaction(item.id), "无法归档势力");
-  };
-  const archiveRelationship = async (id: string) => {
-    if (!window.confirm("归档这条人物关系？")) return;
-    await mutate(() => client.archiveRelationship(id), "无法归档人物关系");
+  const confirmArchive = async () => {
+    if (!archiveTarget) return;
+    if (archiveTarget.kind === "character") {
+      await mutate(
+        () => client.archiveCharacter(archiveTarget.id),
+        "无法归档角色",
+      );
+    } else if (archiveTarget.kind === "faction") {
+      await mutate(
+        () => client.archiveFaction(archiveTarget.id),
+        "无法归档势力",
+      );
+    } else {
+      await mutate(
+        () => client.archiveRelationship(archiveTarget.id),
+        "无法归档人物关系",
+      );
+    }
+    setArchiveTarget(null);
   };
 
   const saveMembership = async () => {
@@ -431,7 +444,13 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                       <button
                         type="button"
                         aria-label={`归档角色：${selectedCharacter.name}`}
-                        onClick={() => void archiveCharacter(selectedCharacter)}
+                        onClick={() =>
+                          setArchiveTarget({
+                            kind: "character",
+                            id: selectedCharacter.id,
+                            name: selectedCharacter.name,
+                          })
+                        }
                       >
                         <Archive size={15} />
                       </button>
@@ -744,7 +763,13 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                       <button
                         type="button"
                         aria-label={`归档关系：${source} → ${target}`}
-                        onClick={() => void archiveRelationship(item.id)}
+                        onClick={() =>
+                          setArchiveTarget({
+                            kind: "relationship",
+                            id: item.id,
+                            name: `${source} → ${target}`,
+                          })
+                        }
                       >
                         <Archive size={14} />
                       </button>
@@ -778,7 +803,13 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                       <button
                         type="button"
                         aria-label={`归档势力：${item.name}`}
-                        onClick={() => void archiveFaction(item)}
+                        onClick={() =>
+                          setArchiveTarget({
+                            kind: "faction",
+                            id: item.id,
+                            name: item.name,
+                          })
+                        }
                       >
                         <Archive size={14} />
                       </button>
@@ -1133,6 +1164,48 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {archiveTarget && (
+        <div className="dialog-backdrop">
+          <section
+            className="project-dialog"
+            role="dialog"
+            aria-label={
+              archiveTarget.kind === "character"
+                ? "归档角色"
+                : archiveTarget.kind === "faction"
+                  ? "归档势力"
+                  : "归档人物关系"
+            }
+          >
+            <p className="eyebrow">Archive Confirmation</p>
+            <h2>确认归档“{archiveTarget.name}”？</h2>
+            <p>
+              {archiveTarget.kind === "character"
+                ? "归档后不会在当前角色列表中显示。仍被势力、人物关系、章节或场景引用的角色无法归档。"
+                : archiveTarget.kind === "faction"
+                  ? "归档后不会在当前势力列表中显示。仍有角色归属的势力无法归档。"
+                  : "归档后不会在当前关系网络中显示。"}
+            </p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => setArchiveTarget(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="danger-action"
+                onClick={() => void confirmArchive()}
+              >
+                确认归档
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </section>

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 )
@@ -14,14 +15,15 @@ import (
 type desktopErrorCode string
 
 const (
-	errorProjectNotFound  desktopErrorCode = "PROJECT_NOT_FOUND"
-	errorPermissionDenied desktopErrorCode = "PERMISSION_DENIED"
-	errorProjectCorrupt   desktopErrorCode = "PROJECT_CORRUPT"
-	errorProjectTooNew    desktopErrorCode = "PROJECT_TOO_NEW"
-	errorRevisionConflict desktopErrorCode = "REVISION_CONFLICT"
-	errorWriteFailed      desktopErrorCode = "WRITE_FAILED"
-	errorDatabaseBusy     desktopErrorCode = "DATABASE_BUSY"
-	errorOperationFailed  desktopErrorCode = "OPERATION_FAILED"
+	errorProjectNotFound   desktopErrorCode = "PROJECT_NOT_FOUND"
+	errorPermissionDenied  desktopErrorCode = "PERMISSION_DENIED"
+	errorProjectCorrupt    desktopErrorCode = "PROJECT_CORRUPT"
+	errorProjectTooNew     desktopErrorCode = "PROJECT_TOO_NEW"
+	errorRevisionConflict  desktopErrorCode = "REVISION_CONFLICT"
+	errorWriteFailed       desktopErrorCode = "WRITE_FAILED"
+	errorDatabaseBusy      desktopErrorCode = "DATABASE_BUSY"
+	errorReferenceConflict desktopErrorCode = "REFERENCE_CONFLICT"
+	errorOperationFailed   desktopErrorCode = "OPERATION_FAILED"
 )
 
 type desktopError struct {
@@ -52,6 +54,8 @@ func safeDesktopError(err error) error {
 		code, message = errorProjectTooNew, "该项目由更新版本创建，请升级应用后再打开。"
 	case errors.Is(err, projectdomain.ErrRevisionConflict):
 		code, message = errorRevisionConflict, "章节已在其他位置更新，本地文本已保留。"
+	case errors.Is(err, worlddomain.ErrReferenced):
+		code, message = errorReferenceConflict, "该内容仍被其他故事资料引用，请先解除关联后再归档。"
 	case errors.Is(err, sqlite.ErrDatabaseWrite), strings.Contains(lowerMessage, "no space left"), strings.Contains(lowerMessage, "disk full"):
 		code, message = errorWriteFailed, "无法写入项目，请检查磁盘空间和目录权限。"
 	case strings.Contains(lowerMessage, "database is locked"), strings.Contains(lowerMessage, "database table is locked"):

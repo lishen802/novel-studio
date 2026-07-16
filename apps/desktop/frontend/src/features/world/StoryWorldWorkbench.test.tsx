@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 import { StoryWorldWorkbench } from "./StoryWorldWorkbench";
 
@@ -250,7 +250,6 @@ describe("StoryWorldWorkbench", () => {
       consistencyIssues: [],
     };
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<StoryWorldWorkbench client={client} chapters={[]} />);
 
     await user.click(await screen.findByRole("button", { name: "新建关系" }));
@@ -278,6 +277,19 @@ describe("StoryWorldWorkbench", () => {
     await user.click(
       await screen.findByRole("button", { name: "归档关系：林默 → 顾青" }),
     );
+    const archiveDialog = screen.getByRole("dialog", { name: "归档人物关系" });
+    expect(client.archiveRelationshipCalls).toEqual([]);
+    await user.click(within(archiveDialog).getByRole("button", { name: "取消" }));
+    expect(client.archiveRelationshipCalls).toEqual([]);
+    await user.click(
+      screen.getByRole("button", { name: "归档关系：林默 → 顾青" }),
+    );
+    await user.click(
+      within(screen.getByRole("dialog", { name: "归档人物关系" })).getByRole(
+        "button",
+        { name: "确认归档" },
+      ),
+    );
     expect(client.archiveRelationshipCalls).toEqual(["relationship-1"]);
   });
 
@@ -293,15 +305,26 @@ describe("StoryWorldWorkbench", () => {
       consistencyIssues: [],
     };
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<StoryWorldWorkbench client={client} chapters={[]} />);
 
     await user.click(
       await screen.findByRole("button", { name: "归档角色：林默" }),
     );
+    const characterDialog = screen.getByRole("dialog", { name: "归档角色" });
+    expect(within(characterDialog).getByText(/林默/)).toBeInTheDocument();
+    expect(client.archiveCharacterCalls).toEqual([]);
+    await user.click(
+      within(characterDialog).getByRole("button", { name: "确认归档" }),
+    );
     expect(client.archiveCharacterCalls).toEqual([linMo.id]);
     await user.click(
       await screen.findByRole("button", { name: "归档势力：守夜人" }),
+    );
+    const factionDialog = screen.getByRole("dialog", { name: "归档势力" });
+    expect(within(factionDialog).getByText(/守夜人/)).toBeInTheDocument();
+    expect(client.archiveFactionCalls).toEqual([]);
+    await user.click(
+      within(factionDialog).getByRole("button", { name: "确认归档" }),
     );
     expect(client.archiveFactionCalls).toEqual([faction.id]);
   });
