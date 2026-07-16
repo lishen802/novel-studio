@@ -2,6 +2,7 @@ import {
   BookOpenText,
   FilePlus2,
   Feather,
+  Globe2,
   LibraryBig,
   Network,
   UsersRound,
@@ -9,6 +10,7 @@ import {
 import { useState, type FormEvent } from "react";
 import type { ChapterView, StudioClient } from "../../lib/studio-client";
 import { ChapterEditor } from "../editor/ChapterEditor";
+import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import type { WorkspaceStatus } from "./workspace-store";
@@ -40,7 +42,7 @@ export function Workspace({
   const [chapterTitle, setChapterTitle] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
   const [activeView, setActiveView] = useState<
-    "manuscript" | "story" | "world"
+    "manuscript" | "story" | "world" | "assets"
   >("manuscript");
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
@@ -108,6 +110,14 @@ export function Workspace({
             <UsersRound size={17} />
             人物与势力
           </button>
+          <button
+            type="button"
+            className={activeView === "assets" ? "is-active" : ""}
+            onClick={() => setActiveView("assets")}
+          >
+            <Globe2 size={17} />
+            世界设定
+          </button>
         </nav>
 
         {activeView === "manuscript" && (
@@ -174,6 +184,8 @@ export function Workspace({
           />
         ) : activeView === "world" ? (
           <StoryWorldWorkbench client={client} chapters={workspace.chapters} />
+        ) : activeView === "assets" ? (
+          <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
         ) : activeChapter ? (
           <ChapterEditor
             key={activeChapter.id}

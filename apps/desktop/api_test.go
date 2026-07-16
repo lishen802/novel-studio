@@ -305,6 +305,24 @@ func TestSafeDesktopErrorExplainsBlankWorldValue(t *testing.T) {
 	}
 }
 
+func TestSafeDesktopErrorExplainsInvalidWorldAssets(t *testing.T) {
+	tests := []error{
+		worlddomain.ErrInvalidHierarchy,
+		worlddomain.ErrInvalidReference,
+		worlddomain.ErrInvalidStatus,
+	}
+	for _, internal := range tests {
+		var safe *desktopError
+		err := safeDesktopError(internal)
+		if !errors.As(err, &safe) {
+			t.Fatalf("error = %#v, want desktop error", err)
+		}
+		if safe.Code != errorValidationFailed || safe.Message != "故事资料包含无效状态、层级或关联，请检查后重试。" {
+			t.Fatalf("safe error = %#v", safe)
+		}
+	}
+}
+
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if strings.Contains(value, candidate) {
