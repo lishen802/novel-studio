@@ -966,7 +966,7 @@ git commit -m "feat: recover manuscript drafts after interruption"
 - Modify: `README.md`
 - Modify: `docs/handoff/START-HERE.md`
 
-- [ ] **Step 1: 建立 Go/前端测试矩阵**
+- [x] **Step 1: 建立 Go/前端测试矩阵**
 
 CI 至少包含：
 
@@ -976,7 +976,7 @@ CI 至少包含：
 - npm 使用 `npm ci`，Go/NPM cache key 包含 lockfile hash。
 - CI 不访问真实模型 API，不注入任何用户密钥。
 
-- [ ] **Step 2: 编写手工验收清单**
+- [x] **Step 2: 编写手工验收清单**
 
 `foundation-acceptance.md` 按 Windows/macOS 分栏记录：
 
@@ -989,11 +989,11 @@ CI 至少包含：
 7. 只读目录、磁盘空间不足和项目路径丢失。
 8. 项目包在两个系统间往返打开。
 
-- [ ] **Step 3: 更新入口文档**
+- [x] **Step 3: 更新入口文档**
 
 README 必须给出可复制的开发命令、目录边界、数据位置、隐私规则和已知限制。`START-HERE` 指向批准规格、总体路线图、本计划和 ADR-0003。
 
-- [ ] **Step 4: 运行最终验证**
+- [x] **Step 4: 运行最终验证**
 
 Run:
 
@@ -1012,7 +1012,7 @@ git status --short
 
 Expected: 所有命令退出码为 0；Git 状态只包含当前任务有意修改；构建产物、数据库和 bindings 未被跟踪。
 
-- [ ] **Step 5: 独立审查并提交**
+- [x] **Step 5: 独立审查并提交**
 
 在提交前使用 `superpowers:requesting-code-review` 检查架构边界、数据安全、Windows/macOS 差异和计划验收标准。处理反馈后重新运行 Step 4。
 
@@ -1026,11 +1026,11 @@ git commit -m "ci: verify foundation on Windows and macOS"
 只有同时满足以下条件，本纵向切片才算完成：
 
 - [ ] macOS 与 Windows CI 生产构建通过。
-- [ ] 创建/打开项目、新建章节、自动保存、冲突处理和草稿恢复全部有自动测试。
-- [ ] 项目数据库可从空库迁移，异常打开不会覆盖原数据或当前工作区。
-- [ ] React 只依赖 `StudioClient`，Wails API 只调用应用服务，领域层无 Wails/SQLite 依赖。
-- [ ] 创建和编辑已经过 `LicenseService`，但 V1 `NoopService` 不限制用户。
-- [ ] 原型仍能独立启动，未被正式代码改写。
-- [ ] README、ADR、恢复文档和验收记录与实现一致。
+- [x] 创建/打开项目、新建章节、自动保存、冲突处理和草稿恢复全部有自动测试。
+- [x] 项目数据库可从空库迁移，异常打开不会覆盖原数据或当前工作区。
+- [x] React 只依赖 `StudioClient`，Wails API 只调用应用服务，领域层无 Wails/SQLite 依赖。
+- [x] 创建和编辑已经过 `LicenseService`，但 V1 `NoopService` 不限制用户。
+- [x] 原型仍能独立启动，未被正式代码改写。
+- [x] README、ADR、恢复文档和验收记录与实现一致。
 
 完成后进入总体路线图 P1“故事工程与结构化模型”，并在编码前另写文件级实施计划。

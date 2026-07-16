@@ -1,36 +1,44 @@
 # 新任务接手说明
 
-## 从这里开始
+## 当前阶段
 
-这是织境 Story Studio 的正式产品仓库。上一阶段已经完成并验收网页交互原型，本阶段将把产品规划转化为可商业发布的 Windows/macOS 桌面软件。
+织境 Story Studio 已从网页原型阶段进入正式 Windows/macOS 产品研发。P0 桌面基础纵向切片已经实现本地项目、章节编辑、revision、恢复草稿、SQLite 完整性保护和 Wails v2.13.0 桌面壳；托管 Windows/macOS CI 与双平台人工验收仍以对应工作流结果和验收记录为准。
 
-开始新任务时按顺序阅读：
+下一阶段是总体路线图 P1“故事工程与结构化模型”。编码前必须先写 P1 的文件级实施计划，不能直接把原型状态或组件搬入正式架构。
 
-1. `docs/product/product-baseline.md`
-2. `docs/architecture/0002-go-first-wails-stack.md`
-3. `docs/specifications/2026-07-15-go-first-desktop-stack-design.md`
-4. `docs/specifications/2026-07-15-product-repository-design.md`
-5. `prototype/web/README.md`
+## 必读顺序
 
-## 已确定事项
+开始任何产品或架构任务前，依次完整阅读：
 
-- 正式技术栈：Go + Wails v2 + React + TypeScript + Vite。
-- 数据层：SQLite，通过 Go 数据访问接口隔离具体驱动，本地优先。
-- Rust 是按需扩展，不是首版必需依赖；优先以独立 Sidecar 接入。
-- 智能体必须支持不同角色使用不同供应商和模型。
-- 现有原型是 UX 和功能基线，正式代码需要重新划分领域、应用、基础设施和 UI 边界。
-- 产品目标平台是 Windows 与 macOS，并按未来商业发布标准设计。
+1. [`AGENTS.md`](../../AGENTS.md) 与仓库根目录 [`README.md`](../../README.md)
+2. [产品基线](../product/product-baseline.md)
+3. [批准的商业产品设计](../superpowers/specs/2026-07-15-commercial-product-design.md)
+4. [Go-first 桌面技术规格](../specifications/2026-07-15-go-first-desktop-stack-design.md)
+5. [产品仓库设计](../specifications/2026-07-15-product-repository-design.md)
+6. [ADR-0002：Go-first Wails 技术栈](../architecture/0002-go-first-wails-stack.md)
+7. [ADR-0003：Wails 工程布局](../architecture/0003-wails-project-layout.md)
+8. [V1 总体实施路线图](../superpowers/plans/2026-07-15-v1-implementation-roadmap.md)
+9. [P0 文件级实施计划](../superpowers/plans/2026-07-15-v1-foundation-vertical-slice.md)
+10. [`prototype/web/README.md`](../../prototype/web/README.md) 与当前原型，只作为 UX 参考
 
-## 下一任务建议
+涉及项目损坏、恢复或跨平台验收时，还要阅读[恢复说明](../operations/project-recovery.md)和[P0 基础验收清单](../testing/foundation-acceptance.md)。
 
-先完成“商业桌面产品总体设计规格”，建议依次确定：
+## 已批准且不得无决策改写的基线
 
-1. V1、V1.5、V2 的版本范围与验收标准。
-2. 小说项目文件格式、SQLite Schema、资产与备份策略。
-3. 领域模型和跨模块接口。
-4. 多智能体任务图、上下文组装、证据与仲裁协议。
-5. 模型供应商能力矩阵、凭据、安全、预算和限流策略。
-6. 桌面生命周期、自动升级、许可证和崩溃恢复。
-7. Windows/macOS CI、签名、公证与发布流程。
+- 正式技术栈：Go + Wails v2.13.0 + React + TypeScript + Vite + SQLite。
+- 架构：模块化单体；Go 领域、应用、持久化、智能体运行时、Provider、平台适配和 UI 边界明确。
+- 正式 Wails 工程位于 `apps/desktop`；根目录保持单一 Go module。
+- Rust 只为经过测量的性能瓶颈、可靠 Go 库缺口或更安全的原生能力按需引入，优先隔离 Sidecar；CGO/FFI 需要新 ADR。
+- Wails v3 Alpha 不是生产基线；稳定发布后也必须通过新 ADR 重新评估。
+- React 不直接访问 SQLite 或模型 Provider；Wails binding 保持薄层。
+- 多智能体复核必须支持不同角色选择不同供应商和模型。
+- V1 授权能力门禁默认放行，但接口必须允许未来加入 30 天试用、激活、月度续期和离线宽限。
+- 原型保持可运行，正式实现不反向依赖原型。
 
-完成规格审查后，再创建详细实施计划和首个 Wails/Go 骨架。Wails v3 稳定后再通过独立 ADR 评估升级。
+## P1 开始前的门禁
+
+1. 当前分支的 Ubuntu 自动测试与 macOS/Windows production build 工作流通过。
+2. [P0 基础验收清单](../testing/foundation-acceptance.md)在两个系统均有记录，失败项已关联缺陷。
+3. 工作区无作者稿件、数据库、密钥、签名材料或构建产物被跟踪。
+4. 为“故事工程与结构化模型”编写新的文件级实施计划，包含领域 Schema、迁移、用例、UI 适配和双平台测试。
+5. 新计划经过产品、架构和数据安全审查后，再开始生产编码。

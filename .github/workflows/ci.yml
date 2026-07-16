@@ -1,0 +1,145 @@
+name: Foundation CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WAILS_VERSION: v2.13.0
+  NODE_VERSION: "22"
+
+jobs:
+  test:
+    name: Ubuntu tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/frontend/package-lock.json
+            prototype/web/package-lock.json
+
+      - name: Install desktop frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop/frontend
+
+      - name: Test desktop frontend
+        run: npm test -- --run
+        working-directory: apps/desktop/frontend
+
+      - name: Type-check desktop frontend
+        run: npm run typecheck
+        working-directory: apps/desktop/frontend
+
+      - name: Build desktop frontend for Go embed
+        run: npm run build
+        working-directory: apps/desktop/frontend
+
+      - name: Run Go race tests
+        run: go test -count=1 -race ./apps/desktop ./internal/...
+
+      - name: Vet Go packages
+        run: go vet ./apps/desktop ./internal/...
+
+      - name: Install prototype dependencies
+        run: npm ci
+        working-directory: prototype/web
+
+      - name: Verify accepted prototype
+        run: |
+          npm test -- --run
+          npm run typecheck
+          npm run build
+        working-directory: prototype/web
+
+  macos-build:
+    name: macOS production build
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop/frontend
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Diagnose Wails toolchain
+        run: wails doctor
+
+      - name: Build macOS application
+        run: wails build -clean -m
+        working-directory: apps/desktop
+
+  windows-build:
+    name: Windows production build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop/frontend
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build Windows application
+        run: wails build -clean -m
+        working-directory: apps/desktop
+
+      - name: Run Go tests on Windows
+        run: go test -count=1 ./apps/desktop ./internal/...
+
