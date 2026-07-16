@@ -30,6 +30,11 @@ button {
   border: 0;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .app-shell {
   position: relative;
   display: grid;
@@ -178,6 +183,371 @@ button {
   font-size: 0.78rem;
 }
 
+.entry-error {
+  margin: 18px 0 0;
+  color: #f3b3a6;
+  font-size: 0.9rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  inset: 0;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 11, 20, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.project-dialog {
+  width: min(100%, 520px);
+  padding: 32px;
+  border: 1px solid rgba(255, 248, 232, 0.14);
+  border-radius: 22px;
+  color: #f7f1e6;
+  background: #282e42;
+  box-shadow: 0 28px 80px rgba(2, 4, 12, 0.56);
+}
+
+.project-dialog h2 {
+  margin: 0 0 10px;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1.8rem;
+  font-weight: 500;
+}
+
+.dialog-path,
+.project-dialog > p:not(.eyebrow, .entry-error) {
+  color: #aeb4c4;
+  line-height: 1.6;
+}
+
+.project-dialog label {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  color: #d4d7df;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.project-dialog input,
+.project-dialog textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: none;
+  color: #f8f2e8;
+  background: rgba(10, 13, 23, 0.35);
+}
+
+.project-dialog input {
+  padding: 11px 12px;
+}
+
+.project-dialog textarea {
+  min-height: 94px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.project-dialog input:focus,
+.project-dialog textarea:focus {
+  border-color: rgba(232, 189, 134, 0.65);
+  box-shadow: 0 0 0 3px rgba(232, 189, 134, 0.11);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.dialog-actions button,
+.editor-alert button {
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.workspace-shell {
+  display: grid;
+  min-width: 900px;
+  min-height: 100vh;
+  grid-template-columns: 290px minmax(0, 1fr);
+  color: #282a32;
+  background: #f0eadf;
+}
+
+.chapter-sidebar {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  border-right: 1px solid rgba(61, 51, 41, 0.1);
+  color: #ebe6dc;
+  background: #252b3d;
+}
+
+.workspace-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.workspace-brand__mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  color: #e9bd86;
+  background: rgba(233, 189, 134, 0.12);
+}
+
+.workspace-brand p,
+.workspace-brand span {
+  margin: 0;
+}
+
+.workspace-brand p {
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 0.98rem;
+}
+
+.workspace-brand span {
+  color: #858da3;
+  font-size: 0.7rem;
+}
+
+.project-summary {
+  padding: 26px 22px 20px;
+}
+
+.project-summary h1 {
+  margin: 6px 0 8px;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.project-summary > p:last-child {
+  margin: 0;
+  color: #9198aa;
+  font-size: 0.8rem;
+}
+
+.chapter-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px 8px 22px;
+  color: #858da3;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.chapter-list__header button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: #d8b17f;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chapter-list__header button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chapter-list {
+  display: grid;
+  gap: 5px;
+  padding: 4px 12px;
+}
+
+.chapter-list > button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  color: #b8bdc9;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chapter-list > button span {
+  color: #737c91;
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+}
+
+.chapter-list > button.is-active {
+  color: #f5ecdf;
+  background: rgba(232, 189, 134, 0.11);
+}
+
+.chapter-empty {
+  display: grid;
+  place-items: center;
+  padding: 38px 15px;
+  color: #747d92;
+  text-align: center;
+}
+
+.chapter-empty p {
+  margin: 12px 0;
+}
+
+.chapter-empty button {
+  color: #dcb482;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-main {
+  min-width: 0;
+  background:
+    linear-gradient(rgba(79, 65, 47, 0.025) 1px, transparent 1px),
+    #f3eee5;
+  background-size: 100% 31px;
+}
+
+.editor-empty {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  justify-items: center;
+  color: #9c9388;
+  text-align: center;
+}
+
+.editor-empty h2 {
+  margin: 18px 0 8px;
+  color: #4d4944;
+  font-family: Georgia, "Songti SC", serif;
+  font-weight: 500;
+}
+
+.editor-empty p {
+  max-width: 430px;
+  line-height: 1.7;
+}
+
+.chapter-editor {
+  display: flex;
+  width: min(100%, 960px);
+  min-height: 100vh;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: 54px clamp(44px, 7vw, 96px);
+}
+
+.chapter-editor__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid rgba(70, 55, 39, 0.12);
+}
+
+.chapter-editor__header h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: 500;
+}
+
+.save-status {
+  margin: 0;
+  color: #81786e;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.save-status--conflict,
+.save-status--error {
+  color: #a2463d;
+}
+
+.chapter-editor__textarea {
+  width: 100%;
+  min-height: 65vh;
+  flex: 1;
+  padding: 34px 0;
+  border: 0;
+  outline: none;
+  color: #36322e;
+  font-family: Georgia, "Songti SC", "STSong", serif;
+  font-size: 1.12rem;
+  line-height: 2;
+  resize: none;
+  background: transparent;
+}
+
+.chapter-editor__textarea::placeholder {
+  color: #b4aba0;
+}
+
+.editor-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 20px;
+  padding: 13px 15px;
+  border: 1px solid rgba(162, 70, 61, 0.2);
+  border-radius: 10px;
+  color: #873c35;
+  font-size: 0.85rem;
+  background: rgba(179, 79, 67, 0.07);
+}
+
+.workspace-alert {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  top: 20px;
+  right: 24px;
+  left: 314px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 15px;
+  border: 1px solid rgba(162, 70, 61, 0.2);
+  border-radius: 10px;
+  color: #873c35;
+  background: rgba(255, 245, 238, 0.96);
+  box-shadow: 0 10px 30px rgba(66, 42, 31, 0.12);
+}
+
+.workspace-alert button {
+  color: #873c35;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.editor-alert button {
+  color: #fff8f0;
+  background: #94463e;
+}
+
+.recovery-dialog {
+  width: min(100%, 560px);
+}
+
 @media (max-width: 520px) {
   .app-shell {
     padding: 20px;
@@ -194,6 +564,17 @@ button {
 
   .welcome-actions button {
     width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace-shell {
+    min-width: 720px;
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  .chapter-editor {
+    padding: 42px 38px;
   }
 }
 

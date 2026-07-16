@@ -852,7 +852,7 @@ git commit -m "feat: expose workspace through thin desktop API"
 - Create: `apps/desktop/frontend/src/features/editor/ChapterEditor.test.tsx`
 - Modify: `apps/desktop/frontend/src/app/App.tsx`
 
-- [ ] **Step 1: 写项目入口失败测试**
+- [x] **Step 1: 写项目入口失败测试**
 
 测试用户事件：
 
@@ -862,7 +862,7 @@ git commit -m "feat: expose workspace through thin desktop API"
 4. `createProject` 只调用一次。
 5. 成功后进入空章节工作区；取消选择时仍停留欢迎页。
 
-- [ ] **Step 2: 写编辑器失败测试**
+- [x] **Step 2: 写编辑器失败测试**
 
 测试必须覆盖：
 
@@ -875,11 +875,11 @@ git commit -m "feat: expose workspace through thin desktop API"
 
 使用 Vitest fake timers 验证 200ms 草稿保存和 750ms 正式提交，不使用真实等待。
 
-- [ ] **Step 3: 实现客户端 adapter**
+- [x] **Step 3: 实现客户端 adapter**
 
 `wails-studio-client.ts` 是唯一可导入 Wails 生成绑定的文件。它把生成 DTO 转换为 `studio-client.ts` 的显式类型，并用 Zod 在开发环境校验返回值。测试和 Storybook/浏览器预览使用 `FakeStudioClient`。
 
-- [ ] **Step 4: 实现工作区状态机**
+- [x] **Step 4: 实现工作区状态机**
 
 状态至少包含：
 
@@ -893,11 +893,11 @@ type WorkspaceStatus =
 
 把异步调用放在 store actions；组件只渲染状态并发送用户意图。不要在 store 中保存 native 路径以外的敏感信息。
 
-- [ ] **Step 5: 实现编辑器保存控制器**
+- [x] **Step 5: 实现编辑器保存控制器**
 
 每次输入：标记 dirty；200ms 后调用 `saveDraft`；用户停止输入 750ms 后调用 `commitChapter`。同一章节同时最多一个提交请求；请求期间的新输入排入下一次提交。切换章节/关闭窗口前 flush 当前 draft；不得通过阻塞 UI 等待网络，因为本阶段全为本地调用。
 
-- [ ] **Step 6: 验证和提交**
+- [x] **Step 6: 验证和提交**
 
 ```bash
 cd apps/desktop/frontend

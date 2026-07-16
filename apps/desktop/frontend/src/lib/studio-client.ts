@@ -13,6 +13,8 @@ export type ChapterView = {
   position: number;
   body: string;
   revision: number;
+  recoveryBody?: string;
+  hasRecoveryDraft: boolean;
 };
 
 export type CreateProjectInput = {
@@ -29,6 +31,7 @@ export interface StudioClient {
   openProject(path: string): Promise<ProjectView>;
   listChapters(): Promise<ChapterView[]>;
   createChapter(title: string): Promise<ChapterView>;
+  openChapter(chapterId: string): Promise<ChapterView>;
   saveDraft(
     chapterId: string,
     body: string,
@@ -39,4 +42,11 @@ export interface StudioClient {
     body: string,
     baseRevision: number,
   ): Promise<ChapterView>;
+}
+
+export class RevisionConflictError extends Error {
+  constructor() {
+    super("章节版本冲突");
+    this.name = "RevisionConflictError";
+  }
 }
