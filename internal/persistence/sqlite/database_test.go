@@ -57,6 +57,8 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	for _, name := range []string{
 		"projects", "chapters", "chapter_revisions", "drafts",
 		"outline_nodes", "story_lines", "story_line_links", "scene_cards",
+		"characters", "factions", "faction_memberships", "character_relationships",
+		"chapter_characters", "scene_card_characters",
 	} {
 		assertSchemaObjectExists(t, db, "table", name)
 	}
@@ -64,6 +66,9 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "index", "idx_outline_nodes_parent_position")
 	assertSchemaObjectExists(t, db, "index", "idx_story_line_links_position")
 	assertSchemaObjectExists(t, db, "index", "idx_scene_cards_chapter_position")
+	assertSchemaObjectExists(t, db, "index", "idx_characters_name")
+	assertSchemaObjectExists(t, db, "index", "idx_relationships_source")
+	assertSchemaObjectExists(t, db, "index", "idx_chapter_characters_character")
 }
 
 func TestOpenDatabaseClassifiesCorruptFileWithoutOverwritingIt(t *testing.T) {

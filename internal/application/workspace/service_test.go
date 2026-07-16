@@ -11,6 +11,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
 
@@ -360,15 +361,27 @@ type fakeStore struct {
 	storyLines          map[string]storydomain.StoryLine
 	storyLinks          []storydomain.StoryLineLink
 	sceneCards          map[string]storydomain.SceneCard
+	characters          map[string]worlddomain.Character
+	factions            map[string]worlddomain.Faction
+	memberships         map[string]worlddomain.Membership
+	relationships       map[string]worlddomain.Relationship
+	chapterAppearances  map[string]worlddomain.ChapterAppearance
+	sceneAppearances    map[string]worlddomain.SceneAppearance
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
 	return &fakeStore{
-		project:      project,
-		chapters:     make(map[string]projectdomain.Chapter),
-		outlineNodes: make(map[string]storydomain.OutlineNode),
-		storyLines:   make(map[string]storydomain.StoryLine),
-		sceneCards:   make(map[string]storydomain.SceneCard),
+		project:            project,
+		chapters:           make(map[string]projectdomain.Chapter),
+		outlineNodes:       make(map[string]storydomain.OutlineNode),
+		storyLines:         make(map[string]storydomain.StoryLine),
+		sceneCards:         make(map[string]storydomain.SceneCard),
+		characters:         make(map[string]worlddomain.Character),
+		factions:           make(map[string]worlddomain.Faction),
+		memberships:        make(map[string]worlddomain.Membership),
+		relationships:      make(map[string]worlddomain.Relationship),
+		chapterAppearances: make(map[string]worlddomain.ChapterAppearance),
+		sceneAppearances:   make(map[string]worlddomain.SceneAppearance),
 	}
 }
 
@@ -484,6 +497,140 @@ func (f *fakeStore) ListSceneCards(_ context.Context, chapterID string) ([]story
 		}
 	}
 	return cards, nil
+}
+
+func (f *fakeStore) CreateCharacter(_ context.Context, character worlddomain.Character) error {
+	f.characters[character.ID] = character
+	return nil
+}
+func (f *fakeStore) UpdateCharacter(_ context.Context, character worlddomain.Character) error {
+	f.characters[character.ID] = character
+	return nil
+}
+func (f *fakeStore) ListCharacters(context.Context) ([]worlddomain.Character, error) {
+	characters := make([]worlddomain.Character, 0, len(f.characters))
+	for _, character := range f.characters {
+		if character.DeletedAt == nil {
+			characters = append(characters, character)
+		}
+	}
+	return characters, nil
+}
+func (f *fakeStore) Character(_ context.Context, id string) (worlddomain.Character, error) {
+	character, ok := f.characters[id]
+	if !ok || character.DeletedAt != nil {
+		return worlddomain.Character{}, errors.New("character missing")
+	}
+	return character, nil
+}
+func (f *fakeStore) ArchiveCharacter(_ context.Context, id string, archivedAt time.Time) error {
+	character, ok := f.characters[id]
+	if !ok {
+		return errors.New("character missing")
+	}
+	character.DeletedAt = &archivedAt
+	f.characters[id] = character
+	return nil
+}
+func (f *fakeStore) CreateFaction(_ context.Context, faction worlddomain.Faction) error {
+	f.factions[faction.ID] = faction
+	return nil
+}
+func (f *fakeStore) UpdateFaction(_ context.Context, faction worlddomain.Faction) error {
+	f.factions[faction.ID] = faction
+	return nil
+}
+func (f *fakeStore) ListFactions(context.Context) ([]worlddomain.Faction, error) {
+	factions := make([]worlddomain.Faction, 0, len(f.factions))
+	for _, faction := range f.factions {
+		if faction.DeletedAt == nil {
+			factions = append(factions, faction)
+		}
+	}
+	return factions, nil
+}
+func (f *fakeStore) Faction(_ context.Context, id string) (worlddomain.Faction, error) {
+	faction, ok := f.factions[id]
+	if !ok || faction.DeletedAt != nil {
+		return worlddomain.Faction{}, errors.New("faction missing")
+	}
+	return faction, nil
+}
+func (f *fakeStore) ArchiveFaction(_ context.Context, id string, archivedAt time.Time) error {
+	faction, ok := f.factions[id]
+	if !ok {
+		return errors.New("faction missing")
+	}
+	faction.DeletedAt = &archivedAt
+	f.factions[id] = faction
+	return nil
+}
+func (f *fakeStore) UpsertMembership(_ context.Context, membership worlddomain.Membership) error {
+	f.memberships[membership.CharacterID+"\x00"+membership.FactionID] = membership
+	return nil
+}
+func (f *fakeStore) ListMemberships(context.Context) ([]worlddomain.Membership, error) {
+	memberships := make([]worlddomain.Membership, 0, len(f.memberships))
+	for _, membership := range f.memberships {
+		memberships = append(memberships, membership)
+	}
+	return memberships, nil
+}
+func (f *fakeStore) DeleteMembership(_ context.Context, characterID, factionID string) error {
+	delete(f.memberships, characterID+"\x00"+factionID)
+	return nil
+}
+func (f *fakeStore) CreateRelationship(_ context.Context, relationship worlddomain.Relationship) error {
+	f.relationships[relationship.ID] = relationship
+	return nil
+}
+func (f *fakeStore) ListRelationships(context.Context) ([]worlddomain.Relationship, error) {
+	relationships := make([]worlddomain.Relationship, 0, len(f.relationships))
+	for _, relationship := range f.relationships {
+		if relationship.DeletedAt == nil {
+			relationships = append(relationships, relationship)
+		}
+	}
+	return relationships, nil
+}
+func (f *fakeStore) ArchiveRelationship(_ context.Context, id string, archivedAt time.Time) error {
+	relationship, ok := f.relationships[id]
+	if !ok {
+		return errors.New("relationship missing")
+	}
+	relationship.DeletedAt = &archivedAt
+	f.relationships[id] = relationship
+	return nil
+}
+func (f *fakeStore) AddChapterAppearance(_ context.Context, appearance worlddomain.ChapterAppearance) error {
+	f.chapterAppearances[appearance.ChapterID+"\x00"+appearance.CharacterID] = appearance
+	return nil
+}
+func (f *fakeStore) ListChapterAppearances(context.Context) ([]worlddomain.ChapterAppearance, error) {
+	appearances := make([]worlddomain.ChapterAppearance, 0, len(f.chapterAppearances))
+	for _, appearance := range f.chapterAppearances {
+		appearances = append(appearances, appearance)
+	}
+	return appearances, nil
+}
+func (f *fakeStore) RemoveChapterAppearance(_ context.Context, characterID, chapterID string) error {
+	delete(f.chapterAppearances, chapterID+"\x00"+characterID)
+	return nil
+}
+func (f *fakeStore) AddSceneAppearance(_ context.Context, appearance worlddomain.SceneAppearance) error {
+	f.sceneAppearances[appearance.SceneCardID+"\x00"+appearance.CharacterID] = appearance
+	return nil
+}
+func (f *fakeStore) ListSceneAppearances(context.Context) ([]worlddomain.SceneAppearance, error) {
+	appearances := make([]worlddomain.SceneAppearance, 0, len(f.sceneAppearances))
+	for _, appearance := range f.sceneAppearances {
+		appearances = append(appearances, appearance)
+	}
+	return appearances, nil
+}
+func (f *fakeStore) RemoveSceneAppearance(_ context.Context, characterID, sceneCardID string) error {
+	delete(f.sceneAppearances, sceneCardID+"\x00"+characterID)
+	return nil
 }
 
 func (f *fakeStore) Close() error {

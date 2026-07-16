@@ -2,8 +2,16 @@
   color: #202431;
   background: #171c2c;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -46,7 +54,10 @@ button:disabled {
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     radial-gradient(circle at 50% -20%, #343c58 0%, #1d2336 42%, #151a29 100%);
-  background-size: 32px 32px, 32px 32px, auto;
+  background-size:
+    32px 32px,
+    32px 32px,
+    auto;
 }
 
 .app-shell__glow {
@@ -79,7 +90,11 @@ button:disabled {
   border-radius: 30px;
   color: #f7f1e6;
   text-align: center;
-  background: linear-gradient(145deg, rgba(42, 48, 70, 0.92), rgba(28, 33, 51, 0.88));
+  background: linear-gradient(
+    145deg,
+    rgba(42, 48, 70, 0.92),
+    rgba(28, 33, 51, 0.88)
+  );
   box-shadow:
     0 32px 80px rgba(4, 7, 16, 0.42),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -95,7 +110,11 @@ button:disabled {
   border: 1px solid rgba(231, 184, 127, 0.28);
   border-radius: 20px;
   color: #f0c792;
-  background: linear-gradient(145deg, rgba(226, 169, 102, 0.18), rgba(255, 255, 255, 0.04));
+  background: linear-gradient(
+    145deg,
+    rgba(226, 169, 102, 0.18),
+    rgba(255, 255, 255, 0.04)
+  );
 }
 
 .eyebrow {
@@ -442,8 +461,7 @@ button:disabled {
 .workspace-main {
   min-width: 0;
   background:
-    linear-gradient(rgba(79, 65, 47, 0.025) 1px, transparent 1px),
-    #f3eee5;
+    linear-gradient(rgba(79, 65, 47, 0.025) 1px, transparent 1px), #f3eee5;
   background-size: 100% 31px;
 }
 
@@ -696,6 +714,380 @@ button:disabled {
   background: #202538;
 }
 
+.world-workbench {
+  min-height: 100vh;
+  padding: 42px clamp(24px, 3.5vw, 56px) 64px;
+  background:
+    radial-gradient(
+      circle at 100% 0,
+      rgba(213, 184, 145, 0.17),
+      transparent 32%
+    ),
+    #f3eee5;
+}
+
+.world-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding-bottom: 26px;
+  border-bottom: 1px solid rgba(70, 55, 39, 0.12);
+}
+
+.world-header h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 500;
+}
+
+.world-header > div > p:last-child {
+  margin: 10px 0 0;
+  color: #81786e;
+}
+
+.world-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.world-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 13px;
+  border: 1px solid rgba(70, 55, 39, 0.12);
+  border-radius: 10px;
+  color: #554b40;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 6px 18px rgba(68, 48, 30, 0.05);
+  cursor: pointer;
+}
+
+.consistency-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(163, 104, 38, 0.14);
+  border-radius: 11px;
+  color: #785426;
+  background: rgba(226, 174, 103, 0.12);
+}
+
+.consistency-strip p {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+}
+
+.world-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.05fr) minmax(330px, 1.1fr) minmax(
+      260px,
+      0.85fr
+    );
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.world-panel {
+  min-width: 0;
+  min-height: 520px;
+  padding: 20px;
+  border: 1px solid rgba(70, 55, 39, 0.11);
+  border-radius: 16px;
+  background: rgba(255, 253, 249, 0.78);
+  box-shadow: 0 16px 42px rgba(65, 47, 30, 0.06);
+}
+
+.world-panel > h3,
+.faction-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 18px;
+  color: #554a3f;
+  font-family: Georgia, "Songti SC", serif;
+  font-weight: 500;
+}
+
+.character-list {
+  display: grid;
+  gap: 7px;
+}
+
+.character-list > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #514941;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.character-list > button:hover,
+.character-list > button.is-active {
+  border-color: rgba(113, 84, 53, 0.12);
+  background: rgba(234, 221, 201, 0.58);
+}
+
+.character-list > button > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.character-list small,
+.world-muted {
+  color: #94887b;
+  font-size: 0.72rem;
+}
+
+.character-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #6b5135;
+  font-family: Georgia, "Songti SC", serif;
+  background: #ecdbc4;
+}
+
+.character-profile {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(70, 55, 39, 0.1);
+}
+
+.character-profile > p:not(.eyebrow) {
+  color: #756b61;
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.world-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.world-card-heading h3 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.world-card-heading > div:last-child,
+.faction-card > div:last-child {
+  display: flex;
+  gap: 5px;
+}
+
+.world-card-heading button,
+.faction-card button,
+.relationship-card button {
+  display: grid;
+  min-height: 28px;
+  place-items: center;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: #806243;
+  font-size: 0.73rem;
+  background: rgba(114, 85, 54, 0.08);
+  cursor: pointer;
+}
+
+.profile-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.profile-facts div {
+  padding: 10px;
+  border-radius: 9px;
+  background: rgba(237, 225, 208, 0.5);
+}
+
+.profile-facts dt {
+  color: #9a8875;
+  font-size: 0.67rem;
+}
+
+.profile-facts dd {
+  margin: 5px 0 0;
+  color: #504941;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.world-subsection + .world-subsection {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(70, 55, 39, 0.1);
+}
+
+.world-subsection h4 {
+  margin: 0 0 10px;
+  color: #67594c;
+  font-size: 0.82rem;
+}
+
+.world-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.world-tags > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 5px 4px 9px;
+  border-radius: 99px;
+  color: #725a40;
+  font-size: 0.7rem;
+  background: #efe2d0;
+}
+
+.world-tags button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: #8b6b4b;
+  background: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+}
+
+.world-link-form {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.world-link-form label {
+  display: grid;
+  gap: 4px;
+  color: #968878;
+  font-size: 0.66rem;
+}
+
+.world-link-form input,
+.world-link-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(70, 55, 39, 0.12);
+  border-radius: 8px;
+  outline: none;
+  color: #62564a;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.world-link-form > button {
+  align-self: end;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #fff9f1;
+  background: #76614b;
+  cursor: pointer;
+}
+
+.world-link-form--compact {
+  grid-template-columns: 1.2fr 0.8fr;
+}
+
+.world-link-form--compact > button {
+  grid-column: 1 / -1;
+}
+
+.relationship-card,
+.faction-card {
+  position: relative;
+  margin-bottom: 9px;
+  padding: 12px;
+  border-radius: 11px;
+  color: #574e46;
+  background: rgba(233, 220, 201, 0.5);
+}
+
+.relationship-card > div:first-child,
+.faction-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.relationship-card span,
+.faction-card span,
+.relationship-card small,
+.faction-card small {
+  color: #968574;
+  font-size: 0.68rem;
+}
+
+.relationship-card p,
+.faction-card p {
+  margin: 7px 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.relationship-card > button {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+}
+
+.faction-heading {
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(70, 55, 39, 0.1);
+}
+
+.faction-card > div:last-child {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.world-dialog {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.world-dialog select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: none;
+  color: #f8f2e8;
+  background: #202538;
+}
+
+.dialog-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
 .chapter-editor {
   display: flex;
   width: min(100%, 960px);
@@ -900,6 +1292,23 @@ button:disabled {
 
   .story-grid {
     grid-template-columns: 1fr;
+  }
+
+  .world-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .world-actions {
+    justify-content: flex-start;
+  }
+
+  .world-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .world-panel {
+    min-height: 0;
   }
 }
 

@@ -6,6 +6,7 @@ import (
 
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
 type ProjectStore interface {
@@ -27,6 +28,28 @@ type ProjectStore interface {
 	ListStoryLineLinks(ctx context.Context) ([]storydomain.StoryLineLink, error)
 	CreateSceneCard(ctx context.Context, card storydomain.SceneCard) error
 	ListSceneCards(ctx context.Context, chapterID string) ([]storydomain.SceneCard, error)
+	CreateCharacter(ctx context.Context, character worlddomain.Character) error
+	UpdateCharacter(ctx context.Context, character worlddomain.Character) error
+	ListCharacters(ctx context.Context) ([]worlddomain.Character, error)
+	Character(ctx context.Context, id string) (worlddomain.Character, error)
+	ArchiveCharacter(ctx context.Context, id string, archivedAt time.Time) error
+	CreateFaction(ctx context.Context, faction worlddomain.Faction) error
+	UpdateFaction(ctx context.Context, faction worlddomain.Faction) error
+	ListFactions(ctx context.Context) ([]worlddomain.Faction, error)
+	Faction(ctx context.Context, id string) (worlddomain.Faction, error)
+	ArchiveFaction(ctx context.Context, id string, archivedAt time.Time) error
+	UpsertMembership(ctx context.Context, membership worlddomain.Membership) error
+	ListMemberships(ctx context.Context) ([]worlddomain.Membership, error)
+	DeleteMembership(ctx context.Context, characterID, factionID string) error
+	CreateRelationship(ctx context.Context, relationship worlddomain.Relationship) error
+	ListRelationships(ctx context.Context) ([]worlddomain.Relationship, error)
+	ArchiveRelationship(ctx context.Context, id string, archivedAt time.Time) error
+	AddChapterAppearance(ctx context.Context, appearance worlddomain.ChapterAppearance) error
+	ListChapterAppearances(ctx context.Context) ([]worlddomain.ChapterAppearance, error)
+	RemoveChapterAppearance(ctx context.Context, characterID, chapterID string) error
+	AddSceneAppearance(ctx context.Context, appearance worlddomain.SceneAppearance) error
+	ListSceneAppearances(ctx context.Context) ([]worlddomain.SceneAppearance, error)
+	RemoveSceneAppearance(ctx context.Context, characterID, sceneCardID string) error
 	Close() error
 }
 

@@ -119,6 +119,66 @@ func TestDesktopAPIForwardsStoryStructureOperations(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIForwardsStoryWorldOperations(t *testing.T) {
+	world := workspace.StoryWorldView{Characters: []workspace.CharacterView{{ID: "character", Name: "林默"}}}
+	workspaces := &fakeWorkspace{storyWorldResult: world}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	got, err := api.StoryWorld()
+	if err != nil || !reflect.DeepEqual(got, world) {
+		t.Fatalf("StoryWorld = (%#v, %v)", got, err)
+	}
+	characterInput := workspace.CharacterInput{Name: "林默", Aliases: []string{"阿默"}, Role: "protagonist"}
+	if _, err := api.CreateCharacter(characterInput); err != nil || !reflect.DeepEqual(workspaces.characterInput, characterInput) {
+		t.Fatalf("CreateCharacter input = %#v, error = %v", workspaces.characterInput, err)
+	}
+	if _, err := api.UpdateCharacter("character", characterInput); err != nil || workspaces.updatedCharacterID != "character" {
+		t.Fatalf("UpdateCharacter id = %q, error = %v", workspaces.updatedCharacterID, err)
+	}
+	if err := api.ArchiveCharacter("character"); err != nil || workspaces.archivedCharacterID != "character" {
+		t.Fatalf("ArchiveCharacter id = %q, error = %v", workspaces.archivedCharacterID, err)
+	}
+	factionInput := workspace.FactionInput{Name: "守夜人", Goal: "守护港城"}
+	if _, err := api.CreateFaction(factionInput); err != nil || workspaces.factionInput != factionInput {
+		t.Fatalf("CreateFaction input = %#v, error = %v", workspaces.factionInput, err)
+	}
+	if _, err := api.UpdateFaction("faction", factionInput); err != nil || workspaces.updatedFactionID != "faction" {
+		t.Fatalf("UpdateFaction id = %q, error = %v", workspaces.updatedFactionID, err)
+	}
+	if err := api.ArchiveFaction("faction"); err != nil || workspaces.archivedFactionID != "faction" {
+		t.Fatalf("ArchiveFaction id = %q, error = %v", workspaces.archivedFactionID, err)
+	}
+	membershipInput := workspace.MembershipInput{CharacterID: "character", FactionID: "faction", Role: "调查员", Status: "active"}
+	if _, err := api.UpsertMembership(membershipInput); err != nil || workspaces.membershipInput != membershipInput {
+		t.Fatalf("UpsertMembership input = %#v, error = %v", workspaces.membershipInput, err)
+	}
+	if err := api.DeleteMembership("character", "faction"); err != nil || workspaces.deletedMembership != "character:faction" {
+		t.Fatalf("DeleteMembership = %q, error = %v", workspaces.deletedMembership, err)
+	}
+	relationshipInput := workspace.RelationshipInput{SourceCharacterID: "character", TargetCharacterID: "other", Kind: "ally"}
+	if _, err := api.CreateRelationship(relationshipInput); err != nil || workspaces.relationshipInput != relationshipInput {
+		t.Fatalf("CreateRelationship input = %#v, error = %v", workspaces.relationshipInput, err)
+	}
+	if err := api.ArchiveRelationship("relationship"); err != nil || workspaces.archivedRelationshipID != "relationship" {
+		t.Fatalf("ArchiveRelationship id = %q, error = %v", workspaces.archivedRelationshipID, err)
+	}
+	appearanceInput := workspace.AppearanceInput{CharacterID: "character", TargetID: "chapter", Role: "pov"}
+	if err := api.LinkCharacterToChapter(appearanceInput); err != nil || workspaces.chapterAppearanceInput != appearanceInput {
+		t.Fatalf("LinkCharacterToChapter input = %#v, error = %v", workspaces.chapterAppearanceInput, err)
+	}
+	if err := api.UnlinkCharacterFromChapter("character", "chapter"); err != nil || workspaces.unlinkedChapter != "character:chapter" {
+		t.Fatalf("UnlinkCharacterFromChapter = %q, error = %v", workspaces.unlinkedChapter, err)
+	}
+	appearanceInput.TargetID = "scene"
+	if err := api.LinkCharacterToScene(appearanceInput); err != nil || workspaces.sceneAppearanceInput != appearanceInput {
+		t.Fatalf("LinkCharacterToScene input = %#v, error = %v", workspaces.sceneAppearanceInput, err)
+	}
+	if err := api.UnlinkCharacterFromScene("character", "scene"); err != nil || workspaces.unlinkedScene != "character:scene" {
+		t.Fatalf("UnlinkCharacterFromScene = %q, error = %v", workspaces.unlinkedScene, err)
+	}
+}
+
 func TestDesktopAPIDirectoryCancellationReturnsEmpty(t *testing.T) {
 	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
 	api.startup(context.Background())
@@ -278,6 +338,21 @@ type fakeWorkspace struct {
 	archivedOutlineID      string
 	movedOutlineID         string
 	moveDirection          string
+	storyWorldResult       workspace.StoryWorldView
+	characterInput         workspace.CharacterInput
+	updatedCharacterID     string
+	archivedCharacterID    string
+	factionInput           workspace.FactionInput
+	updatedFactionID       string
+	archivedFactionID      string
+	membershipInput        workspace.MembershipInput
+	deletedMembership      string
+	relationshipInput      workspace.RelationshipInput
+	archivedRelationshipID string
+	chapterAppearanceInput workspace.AppearanceInput
+	sceneAppearanceInput   workspace.AppearanceInput
+	unlinkedChapter        string
+	unlinkedScene          string
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -367,5 +442,65 @@ func (f *fakeWorkspace) ArchiveOutlineNode(_ context.Context, id string) error {
 
 func (f *fakeWorkspace) MoveOutlineNode(_ context.Context, id, direction string) error {
 	f.movedOutlineID, f.moveDirection = id, direction
+	return nil
+}
+
+func (f *fakeWorkspace) StoryWorld(context.Context) (workspace.StoryWorldView, error) {
+	return f.storyWorldResult, nil
+}
+func (f *fakeWorkspace) CreateCharacter(_ context.Context, input workspace.CharacterInput) (workspace.CharacterView, error) {
+	f.characterInput = input
+	return workspace.CharacterView{}, nil
+}
+func (f *fakeWorkspace) UpdateCharacter(_ context.Context, id string, input workspace.CharacterInput) (workspace.CharacterView, error) {
+	f.updatedCharacterID, f.characterInput = id, input
+	return workspace.CharacterView{}, nil
+}
+func (f *fakeWorkspace) ArchiveCharacter(_ context.Context, id string) error {
+	f.archivedCharacterID = id
+	return nil
+}
+func (f *fakeWorkspace) CreateFaction(_ context.Context, input workspace.FactionInput) (workspace.FactionView, error) {
+	f.factionInput = input
+	return workspace.FactionView{}, nil
+}
+func (f *fakeWorkspace) UpdateFaction(_ context.Context, id string, input workspace.FactionInput) (workspace.FactionView, error) {
+	f.updatedFactionID, f.factionInput = id, input
+	return workspace.FactionView{}, nil
+}
+func (f *fakeWorkspace) ArchiveFaction(_ context.Context, id string) error {
+	f.archivedFactionID = id
+	return nil
+}
+func (f *fakeWorkspace) UpsertMembership(_ context.Context, input workspace.MembershipInput) (workspace.MembershipView, error) {
+	f.membershipInput = input
+	return workspace.MembershipView{}, nil
+}
+func (f *fakeWorkspace) DeleteMembership(_ context.Context, characterID, factionID string) error {
+	f.deletedMembership = characterID + ":" + factionID
+	return nil
+}
+func (f *fakeWorkspace) CreateRelationship(_ context.Context, input workspace.RelationshipInput) (workspace.RelationshipView, error) {
+	f.relationshipInput = input
+	return workspace.RelationshipView{}, nil
+}
+func (f *fakeWorkspace) ArchiveRelationship(_ context.Context, id string) error {
+	f.archivedRelationshipID = id
+	return nil
+}
+func (f *fakeWorkspace) LinkCharacterToChapter(_ context.Context, input workspace.AppearanceInput) error {
+	f.chapterAppearanceInput = input
+	return nil
+}
+func (f *fakeWorkspace) UnlinkCharacterFromChapter(_ context.Context, characterID, chapterID string) error {
+	f.unlinkedChapter = characterID + ":" + chapterID
+	return nil
+}
+func (f *fakeWorkspace) LinkCharacterToScene(_ context.Context, input workspace.AppearanceInput) error {
+	f.sceneAppearanceInput = input
+	return nil
+}
+func (f *fakeWorkspace) UnlinkCharacterFromScene(_ context.Context, characterID, sceneCardID string) error {
+	f.unlinkedScene = characterID + ":" + sceneCardID
 	return nil
 }

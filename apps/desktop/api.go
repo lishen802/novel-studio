@@ -23,6 +23,21 @@ type WorkspaceUseCases interface {
 	CreateSceneCard(context.Context, workspace.CreateSceneCardInput) (workspace.SceneCardView, error)
 	ArchiveOutlineNode(context.Context, string) error
 	MoveOutlineNode(context.Context, string, string) error
+	StoryWorld(context.Context) (workspace.StoryWorldView, error)
+	CreateCharacter(context.Context, workspace.CharacterInput) (workspace.CharacterView, error)
+	UpdateCharacter(context.Context, string, workspace.CharacterInput) (workspace.CharacterView, error)
+	ArchiveCharacter(context.Context, string) error
+	CreateFaction(context.Context, workspace.FactionInput) (workspace.FactionView, error)
+	UpdateFaction(context.Context, string, workspace.FactionInput) (workspace.FactionView, error)
+	ArchiveFaction(context.Context, string) error
+	UpsertMembership(context.Context, workspace.MembershipInput) (workspace.MembershipView, error)
+	DeleteMembership(context.Context, string, string) error
+	CreateRelationship(context.Context, workspace.RelationshipInput) (workspace.RelationshipView, error)
+	ArchiveRelationship(context.Context, string) error
+	LinkCharacterToChapter(context.Context, workspace.AppearanceInput) error
+	UnlinkCharacterFromChapter(context.Context, string, string) error
+	LinkCharacterToScene(context.Context, workspace.AppearanceInput) error
+	UnlinkCharacterFromScene(context.Context, string, string) error
 	Close() error
 }
 
@@ -129,6 +144,66 @@ func (a *DesktopAPI) ArchiveOutlineNode(id string) error {
 
 func (a *DesktopAPI) MoveOutlineNode(id, direction string) error {
 	return safeDesktopError(a.workspace.MoveOutlineNode(a.ctx, id, direction))
+}
+
+func (a *DesktopAPI) StoryWorld() (workspace.StoryWorldView, error) {
+	return safeResult(a.workspace.StoryWorld(a.ctx))
+}
+
+func (a *DesktopAPI) CreateCharacter(input workspace.CharacterInput) (workspace.CharacterView, error) {
+	return safeResult(a.workspace.CreateCharacter(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateCharacter(id string, input workspace.CharacterInput) (workspace.CharacterView, error) {
+	return safeResult(a.workspace.UpdateCharacter(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveCharacter(id string) error {
+	return safeDesktopError(a.workspace.ArchiveCharacter(a.ctx, id))
+}
+
+func (a *DesktopAPI) CreateFaction(input workspace.FactionInput) (workspace.FactionView, error) {
+	return safeResult(a.workspace.CreateFaction(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateFaction(id string, input workspace.FactionInput) (workspace.FactionView, error) {
+	return safeResult(a.workspace.UpdateFaction(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveFaction(id string) error {
+	return safeDesktopError(a.workspace.ArchiveFaction(a.ctx, id))
+}
+
+func (a *DesktopAPI) UpsertMembership(input workspace.MembershipInput) (workspace.MembershipView, error) {
+	return safeResult(a.workspace.UpsertMembership(a.ctx, input))
+}
+
+func (a *DesktopAPI) DeleteMembership(characterID, factionID string) error {
+	return safeDesktopError(a.workspace.DeleteMembership(a.ctx, characterID, factionID))
+}
+
+func (a *DesktopAPI) CreateRelationship(input workspace.RelationshipInput) (workspace.RelationshipView, error) {
+	return safeResult(a.workspace.CreateRelationship(a.ctx, input))
+}
+
+func (a *DesktopAPI) ArchiveRelationship(id string) error {
+	return safeDesktopError(a.workspace.ArchiveRelationship(a.ctx, id))
+}
+
+func (a *DesktopAPI) LinkCharacterToChapter(input workspace.AppearanceInput) error {
+	return safeDesktopError(a.workspace.LinkCharacterToChapter(a.ctx, input))
+}
+
+func (a *DesktopAPI) UnlinkCharacterFromChapter(characterID, chapterID string) error {
+	return safeDesktopError(a.workspace.UnlinkCharacterFromChapter(a.ctx, characterID, chapterID))
+}
+
+func (a *DesktopAPI) LinkCharacterToScene(input workspace.AppearanceInput) error {
+	return safeDesktopError(a.workspace.LinkCharacterToScene(a.ctx, input))
+}
+
+func (a *DesktopAPI) UnlinkCharacterFromScene(characterID, sceneCardID string) error {
+	return safeDesktopError(a.workspace.UnlinkCharacterFromScene(a.ctx, characterID, sceneCardID))
 }
 
 func (a *DesktopAPI) CompleteClose() {

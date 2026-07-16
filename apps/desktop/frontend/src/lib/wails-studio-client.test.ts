@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RevisionConflictError, StudioClientError } from "./studio-client";
+import {
+  RevisionConflictError,
+  StudioClientError,
+  type AppearanceInput,
+  type CharacterInput,
+  type FactionInput,
+  type MembershipInput,
+  type RelationshipInput,
+} from "./studio-client";
 import { wailsStudioClient } from "./wails-studio-client";
 
 const project = {
@@ -34,6 +42,29 @@ function installNative(overrides: Record<string, unknown> = {}) {
     CreateSceneCard: vi.fn(),
     ArchiveOutlineNode: vi.fn(async () => undefined),
     MoveOutlineNode: vi.fn(async () => undefined),
+    StoryWorld: vi.fn(async () => ({
+      characters: [],
+      factions: [],
+      memberships: [],
+      relationships: [],
+      chapterAppearances: [],
+      sceneAppearances: [],
+      consistencyIssues: [],
+    })),
+    CreateCharacter: vi.fn(),
+    UpdateCharacter: vi.fn(),
+    ArchiveCharacter: vi.fn(async () => undefined),
+    CreateFaction: vi.fn(),
+    UpdateFaction: vi.fn(),
+    ArchiveFaction: vi.fn(async () => undefined),
+    UpsertMembership: vi.fn(),
+    DeleteMembership: vi.fn(async () => undefined),
+    CreateRelationship: vi.fn(),
+    ArchiveRelationship: vi.fn(async () => undefined),
+    LinkCharacterToChapter: vi.fn(async () => undefined),
+    UnlinkCharacterFromChapter: vi.fn(async () => undefined),
+    LinkCharacterToScene: vi.fn(async () => undefined),
+    UnlinkCharacterFromScene: vi.fn(async () => undefined),
     CompleteClose: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -62,12 +93,16 @@ describe("wailsStudioClient", () => {
       summary: "",
     };
 
-    await expect(wailsStudioClient.createProject(input)).resolves.toEqual(project);
+    await expect(wailsStudioClient.createProject(input)).resolves.toEqual(
+      project,
+    );
     expect(api.CreateProject).toHaveBeenCalledWith(input);
   });
 
   it("rejects an invalid native DTO", async () => {
-    installNative({ CreateProject: vi.fn(async () => ({ title: "missing fields" })) });
+    installNative({
+      CreateProject: vi.fn(async () => ({ title: "missing fields" })),
+    });
 
     await expect(
       wailsStudioClient.createProject({
@@ -97,6 +132,166 @@ describe("wailsStudioClient", () => {
     await wailsStudioClient.discardDraft("chapter-1", 4);
 
     expect(api.DiscardDraft).toHaveBeenCalledWith("chapter-1", 4);
+  });
+
+  it("validates the story world graph and forwards character creation", async () => {
+    const character = {
+      id: "character-1",
+      name: "林默",
+      aliases: ["阿默"],
+      role: "protagonist",
+      summary: "调查员",
+      motivation: "寻找导师",
+      fear: "失去同伴",
+      secret: "",
+      arc: "学会信任",
+      status: "active",
+    };
+    const world = {
+      characters: [character],
+      factions: [],
+      memberships: [],
+      relationships: [],
+      chapterAppearances: [],
+      sceneAppearances: [],
+      consistencyIssues: [],
+    };
+    const api = installNative({
+      StoryWorld: vi.fn(async () => world),
+      CreateCharacter: vi.fn(async () => character),
+    });
+    const input: CharacterInput = {
+      name: "林默",
+      aliases: ["阿默"],
+      role: "protagonist",
+      summary: "调查员",
+      motivation: "寻找导师",
+      fear: "失去同伴",
+      secret: "",
+      arc: "学会信任",
+      status: "active",
+    };
+
+    await expect(wailsStudioClient.storyWorld()).resolves.toEqual(world);
+    await expect(wailsStudioClient.createCharacter(input)).resolves.toEqual(
+      character,
+    );
+    expect(api.CreateCharacter).toHaveBeenCalledWith(input);
+  });
+
+  it("forwards story world mutation commands", async () => {
+    const api = installNative({
+      UpdateCharacter: vi.fn(async () => ({
+        id: "character",
+        name: "林默",
+        aliases: [],
+        role: "protagonist",
+        summary: "",
+        motivation: "",
+        fear: "",
+        secret: "",
+        arc: "",
+        status: "active",
+      })),
+      ArchiveCharacter: vi.fn(async () => undefined),
+      CreateFaction: vi.fn(async () => ({
+        id: "faction",
+        name: "守夜人",
+        summary: "",
+        goal: "",
+        status: "active",
+      })),
+      UpdateFaction: vi.fn(async () => ({
+        id: "faction",
+        name: "守夜司",
+        summary: "",
+        goal: "",
+        status: "inactive",
+      })),
+      ArchiveFaction: vi.fn(async () => undefined),
+      UpsertMembership: vi.fn(async () => ({
+        characterId: "character",
+        factionId: "faction",
+        role: "调查员",
+        status: "active",
+      })),
+      DeleteMembership: vi.fn(async () => undefined),
+      CreateRelationship: vi.fn(async () => ({
+        id: "relationship",
+        sourceCharacterId: "character",
+        targetCharacterId: "other",
+        kind: "ally",
+        label: "战友",
+        strength: 70,
+        publicState: "",
+        trueState: "",
+      })),
+      ArchiveRelationship: vi.fn(async () => undefined),
+      LinkCharacterToChapter: vi.fn(async () => undefined),
+      UnlinkCharacterFromChapter: vi.fn(async () => undefined),
+      LinkCharacterToScene: vi.fn(async () => undefined),
+      UnlinkCharacterFromScene: vi.fn(async () => undefined),
+    });
+    const character: CharacterInput = {
+      name: "林默",
+      aliases: [],
+      role: "protagonist",
+      summary: "",
+      motivation: "",
+      fear: "",
+      secret: "",
+      arc: "",
+      status: "active",
+    };
+    const faction: FactionInput = {
+      name: "守夜司",
+      summary: "",
+      goal: "",
+      status: "inactive",
+    };
+    const membership: MembershipInput = {
+      characterId: "character",
+      factionId: "faction",
+      role: "调查员",
+      status: "active",
+    };
+    const relationship: RelationshipInput = {
+      sourceCharacterId: "character",
+      targetCharacterId: "other",
+      kind: "ally",
+      label: "战友",
+      strength: 70,
+      publicState: "",
+      trueState: "",
+    };
+    const chapterAppearance: AppearanceInput = {
+      characterId: "character",
+      targetId: "chapter",
+      role: "pov",
+    };
+    const sceneAppearance: AppearanceInput = {
+      characterId: "character",
+      targetId: "scene",
+      role: "present",
+    };
+
+    await wailsStudioClient.updateCharacter("character", character);
+    await wailsStudioClient.archiveCharacter("character");
+    await wailsStudioClient.createFaction(faction);
+    await wailsStudioClient.updateFaction("faction", faction);
+    await wailsStudioClient.archiveFaction("faction");
+    await wailsStudioClient.upsertMembership(membership);
+    await wailsStudioClient.deleteMembership("character", "faction");
+    await wailsStudioClient.createRelationship(relationship);
+    await wailsStudioClient.archiveRelationship("relationship");
+    await wailsStudioClient.linkCharacterToChapter(chapterAppearance);
+    await wailsStudioClient.unlinkCharacterFromChapter("character", "chapter");
+    await wailsStudioClient.linkCharacterToScene(sceneAppearance);
+    await wailsStudioClient.unlinkCharacterFromScene("character", "scene");
+
+    expect(api.UpdateCharacter).toHaveBeenCalledWith("character", character);
+    expect(api.DeleteMembership).toHaveBeenCalledWith("character", "faction");
+    expect(api.LinkCharacterToScene).toHaveBeenCalledWith(sceneAppearance);
   });
 
   it("registers the native close event and completes the close handshake", async () => {

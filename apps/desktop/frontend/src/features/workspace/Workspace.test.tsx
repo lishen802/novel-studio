@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
@@ -58,9 +65,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "新建章节" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "新建章节" }));
     await user.type(screen.getByLabelText("章节标题"), "第一章");
     await user.click(screen.getByRole("button", { name: "确认新建" }));
 
@@ -70,14 +75,28 @@ describe("Workspace", () => {
   });
 
   it("switches between manuscript and story architecture", async () => {
-	const client = FakeStudioClient.withReadyProject();
-	const user = userEvent.setup();
-	render(<App client={client} initialProject={client.openProjectResult} />);
+    const client = FakeStudioClient.withReadyProject();
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
 
-	await user.click(await screen.findByRole("button", { name: "故事架构" }));
-	expect(await screen.findByRole("heading", { name: "故事架构" })).toBeInTheDocument();
-	await user.click(screen.getByRole("button", { name: "正文编辑" }));
-	expect(screen.getByText("选择一个章节开始创作")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "故事架构" }));
+    expect(
+      await screen.findByRole("heading", { name: "故事架构" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "正文编辑" }));
+    expect(screen.getByText("选择一个章节开始创作")).toBeInTheDocument();
+  });
+
+  it("opens the characters and factions workbench from the product navigation", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: "人物与势力" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "人物与势力" }),
+    ).toBeInTheDocument();
   });
 
   it("opens an existing project selected by the native client", async () => {
@@ -91,9 +110,7 @@ describe("Workspace", () => {
     expect(
       await screen.findByRole("heading", { name: "长夜织境" }),
     ).toBeInTheDocument();
-    expect(client.openProjectCalls).toEqual([
-      "/books/长夜织境.zjproject",
-    ]);
+    expect(client.openProjectCalls).toEqual(["/books/长夜织境.zjproject"]);
   });
 
   it("keeps the new chapter dialog open when creation fails", async () => {
@@ -102,9 +119,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "新建章节" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "新建章节" }));
     const dialog = screen.getByRole("dialog", { name: "新建章节" });
     await user.type(within(dialog).getByLabelText("章节标题"), "第一章");
     await user.click(within(dialog).getByRole("button", { name: "确认新建" }));
