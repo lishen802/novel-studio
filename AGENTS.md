@@ -16,6 +16,10 @@
 - Keep Go domain, application, persistence, agent runtime, provider adapters, platform adapters, and UI boundaries explicit.
 - Keep Wails bindings thin; React components must not call persistence or model providers directly.
 - Use test-driven development for production features and verify Windows/macOS implications.
+- Small, narrowly scoped feature optimizations and maintenance changes may be implemented directly on `main` without a separate implementation plan.
+- For large features or changes spanning multiple modules, database schema, or major product capabilities, create an isolated Git worktree automatically without requesting confirmation.
+- After a large feature is complete and verified, merge its feature branch into `main` automatically without requesting confirmation.
+- Present implementation plans in the conversation only. Do not create implementation-plan files unless the user explicitly requests one.
 - Never commit API keys, model credentials, signing certificates, user manuscripts, or local databases.
 - Keep the accepted prototype operational while production code is developed separately.
 - Wails v3 is not the production baseline while it remains Alpha. Re-evaluate it through a new architecture decision after a stable release.
