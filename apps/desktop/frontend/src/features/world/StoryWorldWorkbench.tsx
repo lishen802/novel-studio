@@ -297,13 +297,14 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
   };
 
   const saveMembership = async () => {
-    if (!selectedCharacter || !membershipFactionId) return;
+    const role = membershipRole.trim();
+    if (!selectedCharacter || !membershipFactionId || !role) return;
     const saved = await mutate(
       () =>
         client.upsertMembership({
           characterId: selectedCharacter.id,
           factionId: membershipFactionId,
-          role: membershipRole,
+          role,
           status: membershipStatus,
         }),
       "无法保存势力归属",
@@ -545,12 +546,18 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                       <label>
                         势力身份
                         <input
+                          required
                           aria-label="势力身份"
                           value={membershipRole}
                           onChange={(event) =>
                             setMembershipRole(event.target.value)
                           }
                         />
+                        {membershipFactionId && !membershipRole.trim() && (
+                          <small className="world-field-hint">
+                            请填写角色在该势力中的身份
+                          </small>
+                        )}
                       </label>
                       <label>
                         归属状态
@@ -569,7 +576,7 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                       </label>
                       <button
                         type="button"
-                        disabled={!membershipFactionId}
+                        disabled={!membershipFactionId || !membershipRole.trim()}
                         onClick={() => void saveMembership()}
                       >
                         保存归属

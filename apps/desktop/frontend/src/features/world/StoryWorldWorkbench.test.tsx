@@ -238,6 +238,38 @@ describe("StoryWorldWorkbench", () => {
     ]);
   });
 
+  it("requires and trims a faction membership role", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.storyWorldResult = {
+      characters: [linMo],
+      factions: [faction],
+      memberships: [],
+      relationships: [],
+      chapterAppearances: [],
+      sceneAppearances: [],
+      consistencyIssues: [],
+    };
+    const user = userEvent.setup();
+    render(<StoryWorldWorkbench client={client} chapters={[]} />);
+
+    await user.selectOptions(await screen.findByLabelText("加入势力"), faction.id);
+    const save = screen.getByRole("button", { name: "保存归属" });
+    expect(save).toBeDisabled();
+    expect(screen.getByText("请填写角色在该势力中的身份")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("势力身份"), "  调查员  ");
+    expect(save).toBeEnabled();
+    await user.click(save);
+    expect(client.upsertMembershipCalls).toEqual([
+      {
+        characterId: linMo.id,
+        factionId: faction.id,
+        role: "调查员",
+        status: "active",
+      },
+    ]);
+  });
+
   it("creates and archives relationships through explicit controls", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.storyWorldResult = {

@@ -247,6 +247,17 @@ func TestSafeDesktopErrorExplainsReferencedWorldEntity(t *testing.T) {
 	}
 }
 
+func TestSafeDesktopErrorExplainsBlankWorldValue(t *testing.T) {
+	var safe *desktopError
+	err := safeDesktopError(worlddomain.ErrBlankValue)
+	if !errors.As(err, &safe) {
+		t.Fatalf("error = %#v, want desktop error", err)
+	}
+	if safe.Code != desktopErrorCode("VALIDATION_FAILED") || safe.Message != "请填写完整的角色、势力或归属信息。" {
+		t.Fatalf("safe error = %#v", safe)
+	}
+}
+
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if strings.Contains(value, candidate) {

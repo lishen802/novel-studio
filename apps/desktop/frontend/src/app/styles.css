@@ -989,6 +989,12 @@ button:disabled {
   font-size: 0.66rem;
 }
 
+.world-field-hint {
+  color: #a54d43;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
 .world-link-form input,
 .world-link-form select {
   width: 100%;

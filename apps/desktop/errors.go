@@ -23,6 +23,7 @@ const (
 	errorWriteFailed       desktopErrorCode = "WRITE_FAILED"
 	errorDatabaseBusy      desktopErrorCode = "DATABASE_BUSY"
 	errorReferenceConflict desktopErrorCode = "REFERENCE_CONFLICT"
+	errorValidationFailed  desktopErrorCode = "VALIDATION_FAILED"
 	errorOperationFailed   desktopErrorCode = "OPERATION_FAILED"
 )
 
@@ -56,6 +57,8 @@ func safeDesktopError(err error) error {
 		code, message = errorRevisionConflict, "章节已在其他位置更新，本地文本已保留。"
 	case errors.Is(err, worlddomain.ErrReferenced):
 		code, message = errorReferenceConflict, "该内容仍被其他故事资料引用，请先解除关联后再归档。"
+	case errors.Is(err, worlddomain.ErrBlankValue):
+		code, message = errorValidationFailed, "请填写完整的角色、势力或归属信息。"
 	case errors.Is(err, sqlite.ErrDatabaseWrite), strings.Contains(lowerMessage, "no space left"), strings.Contains(lowerMessage, "disk full"):
 		code, message = errorWriteFailed, "无法写入项目，请检查磁盘空间和目录权限。"
 	case strings.Contains(lowerMessage, "database is locked"), strings.Contains(lowerMessage, "database table is locked"):
