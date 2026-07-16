@@ -10,6 +10,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
@@ -239,6 +240,17 @@ func TestSafeDesktopErrorClassifiesRecoveryFailures(t *testing.T) {
 func TestSafeDesktopErrorExplainsReferencedWorldEntity(t *testing.T) {
 	var safe *desktopError
 	err := safeDesktopError(worlddomain.ErrReferenced)
+	if !errors.As(err, &safe) {
+		t.Fatalf("error = %#v, want desktop error", err)
+	}
+	if safe.Code != desktopErrorCode("REFERENCE_CONFLICT") || safe.Message != "该内容仍被其他故事资料引用，请先解除关联后再归档。" {
+		t.Fatalf("safe error = %#v", safe)
+	}
+}
+
+func TestSafeDesktopErrorExplainsReferencedStoryEntity(t *testing.T) {
+	var safe *desktopError
+	err := safeDesktopError(storydomain.ErrReferenced)
 	if !errors.As(err, &safe) {
 		t.Fatalf("error = %#v, want desktop error", err)
 	}

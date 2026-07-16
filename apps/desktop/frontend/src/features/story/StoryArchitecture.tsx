@@ -29,6 +29,7 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
   const [conflict, setConflict] = useState("");
   const [outcome, setOutcome] = useState("");
   const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
+  const [archiveTarget, setArchiveTarget] = useState<OutlineNodeView | null>(null);
 
   const load = useCallback(async () => {
     try { setStructure(await client.storyStructure()); setError(null); }
@@ -95,10 +96,16 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法调整节点顺序"); }
   };
 
-  const archiveOutline = async (node: OutlineNodeView) => {
-    if (!window.confirm(`归档“${node.title}”？仍被引用的节点不会被删除。`)) return;
-    try { await client.archiveOutlineNode(node.id); await load(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "无法归档节点"); }
+  const confirmArchive = async () => {
+    if (!archiveTarget) return;
+    try {
+      await client.archiveOutlineNode(archiveTarget.id);
+      setArchiveTarget(null);
+      await load();
+    } catch (cause) {
+      setArchiveTarget(null);
+      setError(cause instanceof Error ? cause.message : "无法归档节点");
+    }
   };
 
   const renderBranch = (parentKey: string, depth = 0): React.ReactNode =>
@@ -111,7 +118,7 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
             {node.chapterId && <button type="button" onClick={() => onOpenChapter(node.chapterId)} aria-label={`打开章节：${node.title}`}>打开正文</button>}
             <button type="button" onClick={() => void moveOutline(node.id, "up")} aria-label={`上移：${node.title}`}><ArrowUp size={14} /></button>
             <button type="button" onClick={() => void moveOutline(node.id, "down")} aria-label={`下移：${node.title}`}><ArrowDown size={14} /></button>
-            <button type="button" onClick={() => void archiveOutline(node)} aria-label={`归档：${node.title}`}><Archive size={14} /></button>
+            <button type="button" onClick={() => setArchiveTarget(node)} aria-label={`归档：${node.title}`}><Archive size={14} /></button>
           </div>
         </div>
         {renderBranch(node.id, depth + 1)}
@@ -152,6 +159,13 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
         {dialog === "card" && <><label>POV<input value={pov} onChange={(event) => setPOV(event.target.value)} /></label><label>地点<input value={location} onChange={(event) => setLocation(event.target.value)} /></label></>}
         <div className="dialog-actions"><button type="button" className="secondary-action" onClick={resetForm}>取消</button><button type="submit" className="primary-action">{dialog === "outline" ? "保存节点" : dialog === "line" ? "保存故事线" : "保存场景卡"}</button></div>
       </form></div>}
+
+      {archiveTarget && <div className="dialog-backdrop"><section className="project-dialog" role="dialog" aria-label="归档大纲节点">
+        <p className="eyebrow">Archive Confirmation</p>
+        <h2>确认归档“{archiveTarget.title}”？</h2>
+        <p>归档后不会在当前大纲中显示。仍被子节点、故事线或场景卡引用的节点无法归档。</p>
+        <div className="dialog-actions"><button type="button" className="secondary-action" onClick={() => setArchiveTarget(null)}>取消</button><button type="button" className="danger-action" onClick={() => void confirmArchive()}>确认归档</button></div>
+      </section></div>}
     </section>
   );
 }

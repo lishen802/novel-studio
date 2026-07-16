@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
@@ -55,7 +56,7 @@ func safeDesktopError(err error) error {
 		code, message = errorProjectTooNew, "该项目由更新版本创建，请升级应用后再打开。"
 	case errors.Is(err, projectdomain.ErrRevisionConflict):
 		code, message = errorRevisionConflict, "章节已在其他位置更新，本地文本已保留。"
-	case errors.Is(err, worlddomain.ErrReferenced):
+	case errors.Is(err, worlddomain.ErrReferenced), errors.Is(err, storydomain.ErrReferenced):
 		code, message = errorReferenceConflict, "该内容仍被其他故事资料引用，请先解除关联后再归档。"
 	case errors.Is(err, worlddomain.ErrBlankValue):
 		code, message = errorValidationFailed, "请填写完整的角色、势力或归属信息。"

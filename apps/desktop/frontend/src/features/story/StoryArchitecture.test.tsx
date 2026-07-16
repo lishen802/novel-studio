@@ -71,12 +71,18 @@ describe("StoryArchitecture", () => {
       storyLines: [], storyLineLinks: [], sceneCards: [],
     };
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<StoryArchitecture client={client} chapters={[]} onOpenChapter={() => undefined} />);
 
     await user.click(await screen.findByRole("button", { name: "下移：第一卷" }));
     expect(client.moveOutlineNodeCalls).toEqual([{ id: "volume", direction: "down" }]);
     await user.click(screen.getByRole("button", { name: "归档：第一卷" }));
+    const dialog = screen.getByRole("dialog", { name: "归档大纲节点" });
+    expect(client.archiveOutlineNodeCalls).toEqual([]);
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(client.archiveOutlineNodeCalls).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "归档：第一卷" }));
+    await user.click(within(screen.getByRole("dialog", { name: "归档大纲节点" })).getByRole("button", { name: "确认归档" }));
     expect(client.archiveOutlineNodeCalls).toEqual(["volume"]);
     expect(screen.queryByText("第一卷")).not.toBeInTheDocument();
   });
