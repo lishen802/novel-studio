@@ -70,6 +70,30 @@ func NewWorldRegion(id, projectID string, parent *WorldRegion, kind RegionKind, 
 	return WorldRegion{ID: id, ProjectID: projectID, ParentID: parentID, Kind: kind, Name: name, Direction: direction, CreatedAt: now, UpdatedAt: now}, nil
 }
 
+func (r WorldRegion) UpdateProfile(parent *WorldRegion, kind RegionKind, name string, direction RelativeDirection, summary, terrain, climate string, now time.Time) (WorldRegion, error) {
+	name = strings.TrimSpace(name)
+	if r.ID == "" || r.ProjectID == "" || r.DeletedAt != nil || name == "" {
+		return WorldRegion{}, ErrBlankValue
+	}
+	if !validRegionKind(kind) || !validDirection(direction) {
+		return WorldRegion{}, ErrInvalidStatus
+	}
+	parentID := ""
+	if parent == nil {
+		if kind != RegionWorld {
+			return WorldRegion{}, ErrInvalidHierarchy
+		}
+	} else {
+		if kind == RegionWorld || parent.ID == r.ID || parent.ProjectID != r.ProjectID || parent.DeletedAt != nil {
+			return WorldRegion{}, ErrInvalidHierarchy
+		}
+		parentID = parent.ID
+	}
+	r.ParentID, r.Kind, r.Name, r.Direction = parentID, kind, name, direction
+	r.Summary, r.Terrain, r.Climate, r.UpdatedAt = strings.TrimSpace(summary), strings.TrimSpace(terrain), strings.TrimSpace(climate), now.UTC()
+	return r, nil
+}
+
 func validRegionKind(kind RegionKind) bool {
 	switch kind {
 	case RegionWorld, RegionContinent, RegionTerritory, RegionSettlement, RegionTerrain, RegionSecretRealm, RegionResource:
@@ -135,6 +159,26 @@ func NewLocation(id, projectID string, region WorldRegion, kind LocationKind, na
 	return Location{ID: id, ProjectID: projectID, RegionID: region.ID, Kind: kind, Name: name, Summary: strings.TrimSpace(summary), Status: LocationActive, CreatedAt: now, UpdatedAt: now}, nil
 }
 
+func (l Location) UpdateProfile(region WorldRegion, kind LocationKind, name, summary string, status LocationStatus, now time.Time) (Location, error) {
+	name = strings.TrimSpace(name)
+	if l.ID == "" || l.ProjectID == "" || l.DeletedAt != nil || name == "" {
+		return Location{}, ErrBlankValue
+	}
+	if region.ID == "" || region.ProjectID != l.ProjectID || region.DeletedAt != nil {
+		return Location{}, ErrInvalidReference
+	}
+	if !validLocationKind(kind) {
+		return Location{}, ErrInvalidStatus
+	}
+	switch status {
+	case LocationActive, LocationInactive, LocationDestroyed:
+	default:
+		return Location{}, ErrInvalidStatus
+	}
+	l.RegionID, l.Kind, l.Name, l.Summary, l.Status, l.UpdatedAt = region.ID, kind, name, strings.TrimSpace(summary), status, now.UTC()
+	return l, nil
+}
+
 func validLocationKind(kind LocationKind) bool {
 	switch kind {
 	case LocationCity, LocationSettlement, LocationBuilding, LocationLandmark, LocationWilderness, LocationOther:
@@ -142,6 +186,37 @@ func validLocationKind(kind LocationKind) bool {
 	default:
 		return false
 	}
+}
+
+type LocationTargetType string
+
+const (
+	LocationTargetChapter   LocationTargetType = "chapter"
+	LocationTargetScene     LocationTargetType = "scene"
+	LocationTargetCharacter LocationTargetType = "character"
+	LocationTargetFaction   LocationTargetType = "faction"
+)
+
+type LocationLink struct {
+	ProjectID  string
+	LocationID string
+	TargetType LocationTargetType
+	TargetID   string
+	Role       string
+	CreatedAt  time.Time
+}
+
+func NewLocationLink(location Location, targetType LocationTargetType, targetID, role string, now time.Time) (LocationLink, error) {
+	targetID = strings.TrimSpace(targetID)
+	if location.ID == "" || location.ProjectID == "" || location.DeletedAt != nil || targetID == "" {
+		return LocationLink{}, ErrInvalidReference
+	}
+	switch targetType {
+	case LocationTargetChapter, LocationTargetScene, LocationTargetCharacter, LocationTargetFaction:
+	default:
+		return LocationLink{}, ErrInvalidReference
+	}
+	return LocationLink{ProjectID: location.ProjectID, LocationID: location.ID, TargetType: targetType, TargetID: targetID, Role: strings.TrimSpace(role), CreatedAt: now.UTC()}, nil
 }
 
 type ItemStatus string
@@ -193,6 +268,20 @@ func NewItem(id, projectID, name, summary string, now time.Time) (Item, error) {
 	}
 	now = now.UTC()
 	return Item{ID: id, ProjectID: projectID, Name: name, Summary: strings.TrimSpace(summary), Status: ItemActive, CreatedAt: now, UpdatedAt: now}, nil
+}
+
+func (i Item) UpdateProfile(name, summary string, status ItemStatus, now time.Time) (Item, error) {
+	name = strings.TrimSpace(name)
+	if i.ID == "" || i.ProjectID == "" || i.DeletedAt != nil || name == "" {
+		return Item{}, ErrBlankValue
+	}
+	switch status {
+	case ItemActive, ItemLost, ItemDestroyed:
+	default:
+		return Item{}, ErrInvalidStatus
+	}
+	i.Name, i.Summary, i.Status, i.UpdatedAt = name, strings.TrimSpace(summary), status, now.UTC()
+	return i, nil
 }
 
 func (i Item) Transfer(id string, toType HolderType, toID, chapterID, note string, now time.Time) (Item, ItemTransfer, error) {
@@ -266,6 +355,30 @@ func NewWorldRule(id, projectID, name, description string, scopeType RuleScopeTy
 	}
 	now = now.UTC()
 	return WorldRule{ID: id, ProjectID: projectID, Name: name, Description: strings.TrimSpace(description), ScopeType: scopeType, ScopeID: scopeID, Status: RuleActive, CreatedAt: now, UpdatedAt: now}, nil
+}
+
+func (r WorldRule) UpdateProfile(name, description string, scopeType RuleScopeType, scopeID string, status RuleStatus, now time.Time) (WorldRule, error) {
+	name, description, scopeID = strings.TrimSpace(name), strings.TrimSpace(description), strings.TrimSpace(scopeID)
+	if r.ID == "" || r.ProjectID == "" || r.DeletedAt != nil || name == "" || description == "" {
+		return WorldRule{}, ErrBlankValue
+	}
+	switch scopeType {
+	case RuleScopeProject:
+		if scopeID != "" {
+			return WorldRule{}, ErrInvalidReference
+		}
+	case RuleScopeRegion, RuleScopeLocation:
+		if scopeID == "" {
+			return WorldRule{}, ErrInvalidReference
+		}
+	default:
+		return WorldRule{}, ErrInvalidStatus
+	}
+	if status != RuleActive && status != RuleInactive {
+		return WorldRule{}, ErrInvalidStatus
+	}
+	r.Name, r.Description, r.ScopeType, r.ScopeID, r.Status, r.UpdatedAt = name, description, scopeType, scopeID, status, now.UTC()
+	return r, nil
 }
 
 type HookStatus string

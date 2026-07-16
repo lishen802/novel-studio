@@ -42,6 +42,19 @@ func TestLocationRequiresRegionFromSameProject(t *testing.T) {
 	}
 }
 
+func TestLocationLinkRequiresSupportedTarget(t *testing.T) {
+	now := time.Unix(100, 0)
+	region, _ := NewWorldRegion("region-1", "project-1", nil, RegionWorld, "镜海世界", DirectionCenter, now)
+	location, _ := NewLocation("location-1", "project-1", region, LocationCity, "雾港城", "", now)
+	link, err := NewLocationLink(location, LocationTargetChapter, "chapter-1", "主场景", now)
+	if err != nil || link.TargetID != "chapter-1" {
+		t.Fatalf("link = %#v, error = %v", link, err)
+	}
+	if _, err := NewLocationLink(location, LocationTargetType("unknown"), "target-1", "", now); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("invalid target error = %v", err)
+	}
+}
+
 func TestItemTransferUpdatesCurrentHolderAndKeepsHistoryRecord(t *testing.T) {
 	now := time.Unix(100, 0)
 	item, err := NewItem("item-1", "project-1", "问天剑", "宗门信物", now)
@@ -89,5 +102,26 @@ func TestForeshadowingHookRequiresResolvedChapterWhenResolved(t *testing.T) {
 	resolved, err := hook.Update("断剑之谜", "主角得到断剑", "chapter-1", "chapter-8", "chapter-7", HookResolved, "真相揭晓", now)
 	if err != nil || resolved.ResolvedChapterID != "chapter-7" {
 		t.Fatalf("resolved hook = %#v, error = %v", resolved, err)
+	}
+}
+
+func TestWorldAssetsRejectInvalidProfileUpdates(t *testing.T) {
+	now := time.Unix(100, 0)
+	root, _ := NewWorldRegion("region-root", "project-1", nil, RegionWorld, "镜海世界", DirectionCenter, now)
+	child, _ := NewWorldRegion("region-1", "project-1", &root, RegionTerritory, "北境", DirectionNorth, now)
+	if _, err := child.UpdateProfile(&child, RegionTerritory, "循环区域", DirectionNorth, "", "", "", now); !errors.Is(err, ErrInvalidHierarchy) {
+		t.Fatalf("cyclic region error = %v", err)
+	}
+	location, _ := NewLocation("location-1", "project-1", child, LocationCity, "雾港城", "", now)
+	if _, err := location.UpdateProfile(root, LocationKind("unknown"), "雾港", "", LocationActive, now); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("invalid location kind error = %v", err)
+	}
+	item, _ := NewItem("item-1", "project-1", "问天剑", "", now)
+	if _, err := item.UpdateProfile("问天剑", "", ItemStatus("unknown"), now); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("invalid item status error = %v", err)
+	}
+	rule, _ := NewWorldRule("rule-1", "project-1", "禁空", "无法飞行", RuleScopeProject, "", now)
+	if _, err := rule.UpdateProfile("禁空", "无法飞行", RuleScopeRegion, "", RuleActive, now); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("invalid rule scope error = %v", err)
 	}
 }

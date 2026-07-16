@@ -367,6 +367,13 @@ type fakeStore struct {
 	relationships       map[string]worlddomain.Relationship
 	chapterAppearances  map[string]worlddomain.ChapterAppearance
 	sceneAppearances    map[string]worlddomain.SceneAppearance
+	worldRegions        map[string]worlddomain.WorldRegion
+	locations           map[string]worlddomain.Location
+	locationLinks       map[string]worlddomain.LocationLink
+	items               map[string]worlddomain.Item
+	itemTransfers       []worlddomain.ItemTransfer
+	worldRules          map[string]worlddomain.WorldRule
+	foreshadowingHooks  map[string]worlddomain.ForeshadowingHook
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -382,6 +389,12 @@ func newFakeStore(project projectdomain.Project) *fakeStore {
 		relationships:      make(map[string]worlddomain.Relationship),
 		chapterAppearances: make(map[string]worlddomain.ChapterAppearance),
 		sceneAppearances:   make(map[string]worlddomain.SceneAppearance),
+		worldRegions:       make(map[string]worlddomain.WorldRegion),
+		locations:          make(map[string]worlddomain.Location),
+		locationLinks:      make(map[string]worlddomain.LocationLink),
+		items:              make(map[string]worlddomain.Item),
+		worldRules:         make(map[string]worlddomain.WorldRule),
+		foreshadowingHooks: make(map[string]worlddomain.ForeshadowingHook),
 	}
 }
 
@@ -630,6 +643,201 @@ func (f *fakeStore) ListSceneAppearances(context.Context) ([]worlddomain.SceneAp
 }
 func (f *fakeStore) RemoveSceneAppearance(_ context.Context, characterID, sceneCardID string) error {
 	delete(f.sceneAppearances, sceneCardID+"\x00"+characterID)
+	return nil
+}
+
+func (f *fakeStore) CreateWorldRegion(_ context.Context, region worlddomain.WorldRegion) error {
+	f.worldRegions[region.ID] = region
+	return nil
+}
+func (f *fakeStore) UpdateWorldRegion(_ context.Context, region worlddomain.WorldRegion) error {
+	f.worldRegions[region.ID] = region
+	return nil
+}
+func (f *fakeStore) ListWorldRegions(context.Context) ([]worlddomain.WorldRegion, error) {
+	regions := make([]worlddomain.WorldRegion, 0, len(f.worldRegions))
+	for _, region := range f.worldRegions {
+		if region.DeletedAt == nil {
+			regions = append(regions, region)
+		}
+	}
+	return regions, nil
+}
+func (f *fakeStore) WorldRegion(_ context.Context, id string) (worlddomain.WorldRegion, error) {
+	region, ok := f.worldRegions[id]
+	if !ok || region.DeletedAt != nil {
+		return worlddomain.WorldRegion{}, errors.New("world region missing")
+	}
+	return region, nil
+}
+func (f *fakeStore) ArchiveWorldRegion(_ context.Context, id string, archivedAt time.Time) error {
+	region, ok := f.worldRegions[id]
+	if !ok {
+		return errors.New("world region missing")
+	}
+	region.DeletedAt = &archivedAt
+	f.worldRegions[id] = region
+	return nil
+}
+func (f *fakeStore) CreateLocation(_ context.Context, location worlddomain.Location) error {
+	f.locations[location.ID] = location
+	return nil
+}
+func (f *fakeStore) UpdateLocation(_ context.Context, location worlddomain.Location) error {
+	f.locations[location.ID] = location
+	return nil
+}
+func (f *fakeStore) ListLocations(context.Context) ([]worlddomain.Location, error) {
+	locations := make([]worlddomain.Location, 0, len(f.locations))
+	for _, location := range f.locations {
+		if location.DeletedAt == nil {
+			locations = append(locations, location)
+		}
+	}
+	return locations, nil
+}
+func (f *fakeStore) Location(_ context.Context, id string) (worlddomain.Location, error) {
+	location, ok := f.locations[id]
+	if !ok || location.DeletedAt != nil {
+		return worlddomain.Location{}, errors.New("location missing")
+	}
+	return location, nil
+}
+func (f *fakeStore) ArchiveLocation(_ context.Context, id string, archivedAt time.Time) error {
+	location, ok := f.locations[id]
+	if !ok {
+		return errors.New("location missing")
+	}
+	location.DeletedAt = &archivedAt
+	f.locations[id] = location
+	return nil
+}
+func (f *fakeStore) UpsertLocationLink(_ context.Context, link worlddomain.LocationLink) error {
+	f.locationLinks[link.LocationID+"\x00"+string(link.TargetType)+"\x00"+link.TargetID] = link
+	return nil
+}
+func (f *fakeStore) ListLocationLinks(context.Context) ([]worlddomain.LocationLink, error) {
+	links := make([]worlddomain.LocationLink, 0, len(f.locationLinks))
+	for _, link := range f.locationLinks {
+		links = append(links, link)
+	}
+	return links, nil
+}
+func (f *fakeStore) DeleteLocationLink(_ context.Context, locationID string, targetType worlddomain.LocationTargetType, targetID string) error {
+	delete(f.locationLinks, locationID+"\x00"+string(targetType)+"\x00"+targetID)
+	return nil
+}
+func (f *fakeStore) CreateItem(_ context.Context, item worlddomain.Item) error {
+	f.items[item.ID] = item
+	return nil
+}
+func (f *fakeStore) UpdateItem(_ context.Context, item worlddomain.Item) error {
+	f.items[item.ID] = item
+	return nil
+}
+func (f *fakeStore) ListItems(context.Context) ([]worlddomain.Item, error) {
+	items := make([]worlddomain.Item, 0, len(f.items))
+	for _, item := range f.items {
+		if item.DeletedAt == nil {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+func (f *fakeStore) Item(_ context.Context, id string) (worlddomain.Item, error) {
+	item, ok := f.items[id]
+	if !ok || item.DeletedAt != nil {
+		return worlddomain.Item{}, errors.New("item missing")
+	}
+	return item, nil
+}
+func (f *fakeStore) TransferItem(_ context.Context, item worlddomain.Item, transfer worlddomain.ItemTransfer) error {
+	f.items[item.ID] = item
+	f.itemTransfers = append(f.itemTransfers, transfer)
+	return nil
+}
+func (f *fakeStore) ListItemTransfers(_ context.Context, itemID string) ([]worlddomain.ItemTransfer, error) {
+	transfers := make([]worlddomain.ItemTransfer, 0)
+	for _, transfer := range f.itemTransfers {
+		if transfer.ItemID == itemID {
+			transfers = append(transfers, transfer)
+		}
+	}
+	return transfers, nil
+}
+func (f *fakeStore) ArchiveItem(_ context.Context, id string, archivedAt time.Time) error {
+	item, ok := f.items[id]
+	if !ok {
+		return errors.New("item missing")
+	}
+	item.DeletedAt = &archivedAt
+	f.items[id] = item
+	return nil
+}
+func (f *fakeStore) CreateWorldRule(_ context.Context, rule worlddomain.WorldRule) error {
+	f.worldRules[rule.ID] = rule
+	return nil
+}
+func (f *fakeStore) UpdateWorldRule(_ context.Context, rule worlddomain.WorldRule) error {
+	f.worldRules[rule.ID] = rule
+	return nil
+}
+func (f *fakeStore) ListWorldRules(context.Context) ([]worlddomain.WorldRule, error) {
+	rules := make([]worlddomain.WorldRule, 0, len(f.worldRules))
+	for _, rule := range f.worldRules {
+		if rule.DeletedAt == nil {
+			rules = append(rules, rule)
+		}
+	}
+	return rules, nil
+}
+func (f *fakeStore) WorldRule(_ context.Context, id string) (worlddomain.WorldRule, error) {
+	rule, ok := f.worldRules[id]
+	if !ok || rule.DeletedAt != nil {
+		return worlddomain.WorldRule{}, errors.New("world rule missing")
+	}
+	return rule, nil
+}
+func (f *fakeStore) ArchiveWorldRule(_ context.Context, id string, archivedAt time.Time) error {
+	rule, ok := f.worldRules[id]
+	if !ok {
+		return errors.New("world rule missing")
+	}
+	rule.DeletedAt = &archivedAt
+	f.worldRules[id] = rule
+	return nil
+}
+func (f *fakeStore) CreateForeshadowingHook(_ context.Context, hook worlddomain.ForeshadowingHook) error {
+	f.foreshadowingHooks[hook.ID] = hook
+	return nil
+}
+func (f *fakeStore) UpdateForeshadowingHook(_ context.Context, hook worlddomain.ForeshadowingHook) error {
+	f.foreshadowingHooks[hook.ID] = hook
+	return nil
+}
+func (f *fakeStore) ListForeshadowingHooks(context.Context) ([]worlddomain.ForeshadowingHook, error) {
+	hooks := make([]worlddomain.ForeshadowingHook, 0, len(f.foreshadowingHooks))
+	for _, hook := range f.foreshadowingHooks {
+		if hook.DeletedAt == nil {
+			hooks = append(hooks, hook)
+		}
+	}
+	return hooks, nil
+}
+func (f *fakeStore) ForeshadowingHook(_ context.Context, id string) (worlddomain.ForeshadowingHook, error) {
+	hook, ok := f.foreshadowingHooks[id]
+	if !ok || hook.DeletedAt != nil {
+		return worlddomain.ForeshadowingHook{}, errors.New("foreshadowing hook missing")
+	}
+	return hook, nil
+}
+func (f *fakeStore) ArchiveForeshadowingHook(_ context.Context, id string, archivedAt time.Time) error {
+	hook, ok := f.foreshadowingHooks[id]
+	if !ok {
+		return errors.New("foreshadowing hook missing")
+	}
+	hook.DeletedAt = &archivedAt
+	f.foreshadowingHooks[id] = hook
 	return nil
 }
 

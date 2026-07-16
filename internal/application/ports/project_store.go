@@ -50,6 +50,36 @@ type ProjectStore interface {
 	AddSceneAppearance(ctx context.Context, appearance worlddomain.SceneAppearance) error
 	ListSceneAppearances(ctx context.Context) ([]worlddomain.SceneAppearance, error)
 	RemoveSceneAppearance(ctx context.Context, characterID, sceneCardID string) error
+	CreateWorldRegion(ctx context.Context, region worlddomain.WorldRegion) error
+	UpdateWorldRegion(ctx context.Context, region worlddomain.WorldRegion) error
+	ListWorldRegions(ctx context.Context) ([]worlddomain.WorldRegion, error)
+	WorldRegion(ctx context.Context, id string) (worlddomain.WorldRegion, error)
+	ArchiveWorldRegion(ctx context.Context, id string, archivedAt time.Time) error
+	CreateLocation(ctx context.Context, location worlddomain.Location) error
+	UpdateLocation(ctx context.Context, location worlddomain.Location) error
+	ListLocations(ctx context.Context) ([]worlddomain.Location, error)
+	Location(ctx context.Context, id string) (worlddomain.Location, error)
+	ArchiveLocation(ctx context.Context, id string, archivedAt time.Time) error
+	UpsertLocationLink(ctx context.Context, link worlddomain.LocationLink) error
+	ListLocationLinks(ctx context.Context) ([]worlddomain.LocationLink, error)
+	DeleteLocationLink(ctx context.Context, locationID string, targetType worlddomain.LocationTargetType, targetID string) error
+	CreateItem(ctx context.Context, item worlddomain.Item) error
+	UpdateItem(ctx context.Context, item worlddomain.Item) error
+	ListItems(ctx context.Context) ([]worlddomain.Item, error)
+	Item(ctx context.Context, id string) (worlddomain.Item, error)
+	TransferItem(ctx context.Context, item worlddomain.Item, transfer worlddomain.ItemTransfer) error
+	ListItemTransfers(ctx context.Context, itemID string) ([]worlddomain.ItemTransfer, error)
+	ArchiveItem(ctx context.Context, id string, archivedAt time.Time) error
+	CreateWorldRule(ctx context.Context, rule worlddomain.WorldRule) error
+	UpdateWorldRule(ctx context.Context, rule worlddomain.WorldRule) error
+	ListWorldRules(ctx context.Context) ([]worlddomain.WorldRule, error)
+	WorldRule(ctx context.Context, id string) (worlddomain.WorldRule, error)
+	ArchiveWorldRule(ctx context.Context, id string, archivedAt time.Time) error
+	CreateForeshadowingHook(ctx context.Context, hook worlddomain.ForeshadowingHook) error
+	UpdateForeshadowingHook(ctx context.Context, hook worlddomain.ForeshadowingHook) error
+	ListForeshadowingHooks(ctx context.Context) ([]worlddomain.ForeshadowingHook, error)
+	ForeshadowingHook(ctx context.Context, id string) (worlddomain.ForeshadowingHook, error)
+	ArchiveForeshadowingHook(ctx context.Context, id string, archivedAt time.Time) error
 	Close() error
 }
 
