@@ -1,7 +1,16 @@
 import type {
   ChapterView,
   CreateProjectInput,
+  CreateOutlineNodeInput,
+  CreateSceneCardInput,
+  CreateStoryLineInput,
+  LinkStoryLineInput,
+  OutlineNodeView,
   ProjectView,
+  SceneCardView,
+  StoryLineLinkView,
+  StoryLineView,
+  StoryStructureView,
   StudioClient,
 } from "./studio-client";
 
@@ -38,6 +47,7 @@ export class FakeStudioClient implements StudioClient {
     ...this.createChapterResult,
     revision: 2,
   };
+  storyStructureResult: StoryStructureView = { outlineNodes: [], storyLines: [], storyLineLinks: [], sceneCards: [] };
 
   createProjectError: Error | null = null;
   openProjectError: Error | null = null;
@@ -54,6 +64,12 @@ export class FakeStudioClient implements StudioClient {
   saveDraftCalls: ChapterWriteCall[] = [];
   discardDraftCalls: Array<{ chapterId: string; baseRevision: number }> = [];
   commitChapterCalls: ChapterWriteCall[] = [];
+  createOutlineNodeCalls: CreateOutlineNodeInput[] = [];
+  createStoryLineCalls: CreateStoryLineInput[] = [];
+  linkStoryLineCalls: LinkStoryLineInput[] = [];
+  createSceneCardCalls: CreateSceneCardInput[] = [];
+  archiveOutlineNodeCalls: string[] = [];
+  moveOutlineNodeCalls: Array<{ id: string; direction: "up" | "down" }> = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -125,6 +141,47 @@ export class FakeStudioClient implements StudioClient {
     this.commitChapterCalls.push({ chapterId, body, baseRevision });
     if (this.commitChapterError) throw this.commitChapterError;
     return { ...this.commitChapterResult, id: chapterId, body };
+  }
+
+  async storyStructure(): Promise<StoryStructureView> {
+    return this.storyStructureResult;
+  }
+
+  async createOutlineNode(input: CreateOutlineNodeInput): Promise<OutlineNodeView> {
+    this.createOutlineNodeCalls.push(input);
+    const node: OutlineNodeView = { ...input, id: `outline-${this.storyStructureResult.outlineNodes.length + 1}`, position: this.storyStructureResult.outlineNodes.filter((item) => item.parentId === input.parentId).length + 1 };
+    this.storyStructureResult = { ...this.storyStructureResult, outlineNodes: [...this.storyStructureResult.outlineNodes, node] };
+    return node;
+  }
+
+  async createStoryLine(input: CreateStoryLineInput): Promise<StoryLineView> {
+    this.createStoryLineCalls.push(input);
+    const line = { ...input, id: `line-${this.storyStructureResult.storyLines.length + 1}`, status: "planned" };
+    this.storyStructureResult = { ...this.storyStructureResult, storyLines: [...this.storyStructureResult.storyLines, line] };
+    return line;
+  }
+
+  async linkStoryLine(input: LinkStoryLineInput): Promise<StoryLineLinkView> {
+    this.linkStoryLineCalls.push(input);
+    const link = { ...input, position: this.storyStructureResult.storyLineLinks.filter((item) => item.storyLineId === input.storyLineId).length + 1 };
+    this.storyStructureResult = { ...this.storyStructureResult, storyLineLinks: [...this.storyStructureResult.storyLineLinks, link] };
+    return link;
+  }
+
+  async createSceneCard(input: CreateSceneCardInput): Promise<SceneCardView> {
+    this.createSceneCardCalls.push(input);
+    const card = { ...input, id: `card-${this.storyStructureResult.sceneCards.length + 1}`, position: this.storyStructureResult.sceneCards.filter((item) => item.chapterId === input.chapterId).length + 1, status: "planned" };
+    this.storyStructureResult = { ...this.storyStructureResult, sceneCards: [...this.storyStructureResult.sceneCards, card] };
+    return card;
+  }
+
+  async archiveOutlineNode(id: string): Promise<void> {
+    this.archiveOutlineNodeCalls.push(id);
+    this.storyStructureResult = { ...this.storyStructureResult, outlineNodes: this.storyStructureResult.outlineNodes.filter((item) => item.id !== id) };
+  }
+
+  async moveOutlineNode(id: string, direction: "up" | "down"): Promise<void> {
+    this.moveOutlineNodeCalls.push({ id, direction });
   }
 
   onBeforeClose(handler: () => Promise<void>): () => void {

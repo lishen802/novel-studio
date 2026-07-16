@@ -10,6 +10,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
 
@@ -291,12 +292,14 @@ func (s *sequenceIDs) NewID() string {
 }
 
 type fakeLicense struct {
-	events *[]string
-	err    error
+	events         *[]string
+	err            error
+	lastCapability license.Capability
 }
 
-func (f *fakeLicense) Require(context.Context, license.Capability) error {
+func (f *fakeLicense) Require(_ context.Context, capability license.Capability) error {
 	appendEvent(f.events, "license")
+	f.lastCapability = capability
 	return f.err
 }
 
@@ -353,10 +356,20 @@ type fakeStore struct {
 	deleteDraftRevision int64
 	closeEvent          string
 	events              *[]string
+	outlineNodes        map[string]storydomain.OutlineNode
+	storyLines          map[string]storydomain.StoryLine
+	storyLinks          []storydomain.StoryLineLink
+	sceneCards          map[string]storydomain.SceneCard
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
-	return &fakeStore{project: project, chapters: make(map[string]projectdomain.Chapter)}
+	return &fakeStore{
+		project:      project,
+		chapters:     make(map[string]projectdomain.Chapter),
+		outlineNodes: make(map[string]storydomain.OutlineNode),
+		storyLines:   make(map[string]storydomain.StoryLine),
+		sceneCards:   make(map[string]storydomain.SceneCard),
+	}
 }
 
 func (f *fakeStore) Project(context.Context) (projectdomain.Project, error) {
@@ -407,6 +420,70 @@ func (f *fakeStore) CommitChapter(_ context.Context, chapter, _ projectdomain.Ch
 	f.commitCalls++
 	f.chapters[chapter.ID] = chapter
 	return nil
+}
+
+func (f *fakeStore) CreateOutlineNode(_ context.Context, node storydomain.OutlineNode) error {
+	f.outlineNodes[node.ID] = node
+	return nil
+}
+func (f *fakeStore) ListOutlineNodes(context.Context) ([]storydomain.OutlineNode, error) {
+	nodes := make([]storydomain.OutlineNode, 0, len(f.outlineNodes))
+	for _, node := range f.outlineNodes {
+		if node.DeletedAt == nil {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes, nil
+}
+func (f *fakeStore) ArchiveOutlineNode(_ context.Context, id string, archivedAt time.Time) error {
+	node, ok := f.outlineNodes[id]
+	if !ok {
+		return errors.New("outline missing")
+	}
+	node.DeletedAt = &archivedAt
+	f.outlineNodes[id] = node
+	return nil
+}
+func (f *fakeStore) SwapOutlineNodePositions(_ context.Context, firstID, secondID string, _ time.Time) error {
+	first, firstOK := f.outlineNodes[firstID]
+	second, secondOK := f.outlineNodes[secondID]
+	if !firstOK || !secondOK {
+		return errors.New("outline missing")
+	}
+	first.Position, second.Position = second.Position, first.Position
+	f.outlineNodes[firstID], f.outlineNodes[secondID] = first, second
+	return nil
+}
+func (f *fakeStore) CreateStoryLine(_ context.Context, line storydomain.StoryLine) error {
+	f.storyLines[line.ID] = line
+	return nil
+}
+func (f *fakeStore) ListStoryLines(context.Context) ([]storydomain.StoryLine, error) {
+	lines := make([]storydomain.StoryLine, 0, len(f.storyLines))
+	for _, line := range f.storyLines {
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+func (f *fakeStore) LinkStoryLine(_ context.Context, _ string, link storydomain.StoryLineLink) error {
+	f.storyLinks = append(f.storyLinks, link)
+	return nil
+}
+func (f *fakeStore) ListStoryLineLinks(context.Context) ([]storydomain.StoryLineLink, error) {
+	return append([]storydomain.StoryLineLink(nil), f.storyLinks...), nil
+}
+func (f *fakeStore) CreateSceneCard(_ context.Context, card storydomain.SceneCard) error {
+	f.sceneCards[card.ID] = card
+	return nil
+}
+func (f *fakeStore) ListSceneCards(_ context.Context, chapterID string) ([]storydomain.SceneCard, error) {
+	cards := make([]storydomain.SceneCard, 0)
+	for _, card := range f.sceneCards {
+		if card.ChapterID == chapterID {
+			cards = append(cards, card)
+		}
+	}
+	return cards, nil
 }
 
 func (f *fakeStore) Close() error {

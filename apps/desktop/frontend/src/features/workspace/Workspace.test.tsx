@@ -69,6 +69,17 @@ describe("Workspace", () => {
     expect(client.createChapterCalls).toEqual(["第一章"]);
   });
 
+  it("switches between manuscript and story architecture", async () => {
+	const client = FakeStudioClient.withReadyProject();
+	const user = userEvent.setup();
+	render(<App client={client} initialProject={client.openProjectResult} />);
+
+	await user.click(await screen.findByRole("button", { name: "故事架构" }));
+	expect(await screen.findByRole("heading", { name: "故事架构" })).toBeInTheDocument();
+	await user.click(screen.getByRole("button", { name: "正文编辑" }));
+	expect(screen.getByText("选择一个章节开始创作")).toBeInTheDocument();
+  });
+
   it("opens an existing project selected by the native client", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.projectToOpen = "/books/长夜织境.zjproject";

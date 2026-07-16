@@ -1,7 +1,8 @@
-import { FilePlus2, Feather, LibraryBig } from "lucide-react";
+import { BookOpenText, FilePlus2, Feather, LibraryBig, Network } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { ChapterView, StudioClient } from "../../lib/studio-client";
 import { ChapterEditor } from "../editor/ChapterEditor";
+import { StoryArchitecture } from "../story/StoryArchitecture";
 import type { WorkspaceStatus } from "./workspace-store";
 
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
@@ -30,6 +31,7 @@ export function Workspace({
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
+  const [activeView, setActiveView] = useState<"manuscript" | "story">("manuscript");
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
   );
@@ -71,7 +73,16 @@ export function Workspace({
           <p>{workspace.project.genre || "未设置类型"}</p>
         </section>
 
-        <div className="chapter-list__header">
+        <nav className="workspace-sections" aria-label="作品功能">
+          <button type="button" className={activeView === "manuscript" ? "is-active" : ""} onClick={() => setActiveView("manuscript")}>
+            <BookOpenText size={17} />正文编辑
+          </button>
+          <button type="button" className={activeView === "story" ? "is-active" : ""} onClick={() => setActiveView("story")}>
+            <Network size={17} />故事架构
+          </button>
+        </nav>
+
+        {activeView === "manuscript" && <><div className="chapter-list__header">
           <span>章节</span>
           <button type="button" aria-label="新建章节" onClick={openNewChapter}>
             <FilePlus2 size={17} />
@@ -100,7 +111,7 @@ export function Workspace({
               </button>
             ))
           )}
-        </nav>
+        </nav></>}
       </aside>
 
       <section className="workspace-main">
@@ -110,7 +121,16 @@ export function Workspace({
             <button type="button" onClick={onDismissError}>关闭</button>
           </div>
         )}
-        {activeChapter ? (
+        {activeView === "story" ? (
+          <StoryArchitecture
+            client={client}
+            chapters={workspace.chapters}
+            onOpenChapter={(id) => {
+              setActiveView("manuscript");
+              void onSelectChapter(id);
+            }}
+          />
+        ) : activeChapter ? (
           <ChapterEditor
             key={activeChapter.id}
             chapter={activeChapter}

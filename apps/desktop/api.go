@@ -16,6 +16,13 @@ type WorkspaceUseCases interface {
 	SaveDraft(context.Context, string, string, int64) error
 	DiscardDraft(context.Context, string, int64) error
 	CommitChapter(context.Context, string, string, int64) (workspace.ChapterView, error)
+	StoryStructure(context.Context) (workspace.StoryStructureView, error)
+	CreateOutlineNode(context.Context, workspace.CreateOutlineNodeInput) (workspace.OutlineNodeView, error)
+	CreateStoryLine(context.Context, workspace.CreateStoryLineInput) (workspace.StoryLineView, error)
+	LinkStoryLine(context.Context, workspace.LinkStoryLineInput) (workspace.StoryLineLinkView, error)
+	CreateSceneCard(context.Context, workspace.CreateSceneCardInput) (workspace.SceneCardView, error)
+	ArchiveOutlineNode(context.Context, string) error
+	MoveOutlineNode(context.Context, string, string) error
 	Close() error
 }
 
@@ -94,6 +101,34 @@ func (a *DesktopAPI) DiscardDraft(id string, revision int64) error {
 
 func (a *DesktopAPI) CommitChapter(id, body string, revision int64) (workspace.ChapterView, error) {
 	return safeResult(a.workspace.CommitChapter(a.ctx, id, body, revision))
+}
+
+func (a *DesktopAPI) StoryStructure() (workspace.StoryStructureView, error) {
+	return safeResult(a.workspace.StoryStructure(a.ctx))
+}
+
+func (a *DesktopAPI) CreateOutlineNode(input workspace.CreateOutlineNodeInput) (workspace.OutlineNodeView, error) {
+	return safeResult(a.workspace.CreateOutlineNode(a.ctx, input))
+}
+
+func (a *DesktopAPI) CreateStoryLine(input workspace.CreateStoryLineInput) (workspace.StoryLineView, error) {
+	return safeResult(a.workspace.CreateStoryLine(a.ctx, input))
+}
+
+func (a *DesktopAPI) LinkStoryLine(input workspace.LinkStoryLineInput) (workspace.StoryLineLinkView, error) {
+	return safeResult(a.workspace.LinkStoryLine(a.ctx, input))
+}
+
+func (a *DesktopAPI) CreateSceneCard(input workspace.CreateSceneCardInput) (workspace.SceneCardView, error) {
+	return safeResult(a.workspace.CreateSceneCard(a.ctx, input))
+}
+
+func (a *DesktopAPI) ArchiveOutlineNode(id string) error {
+	return safeDesktopError(a.workspace.ArchiveOutlineNode(a.ctx, id))
+}
+
+func (a *DesktopAPI) MoveOutlineNode(id, direction string) error {
+	return safeDesktopError(a.workspace.MoveOutlineNode(a.ctx, id, direction))
 }
 
 func (a *DesktopAPI) CompleteClose() {

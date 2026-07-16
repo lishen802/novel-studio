@@ -85,6 +85,40 @@ func TestDesktopAPIForwardsChapterOperations(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIForwardsStoryStructureOperations(t *testing.T) {
+	structure := workspace.StoryStructureView{OutlineNodes: []workspace.OutlineNodeView{{ID: "book", Title: "全书大纲"}}}
+	workspaces := &fakeWorkspace{storyStructureResult: structure}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	got, err := api.StoryStructure()
+	if err != nil || !reflect.DeepEqual(got, structure) {
+		t.Fatalf("StoryStructure = (%#v, %v)", got, err)
+	}
+	outlineInput := workspace.CreateOutlineNodeInput{Level: "book", Title: "全书大纲"}
+	if _, err := api.CreateOutlineNode(outlineInput); err != nil || workspaces.outlineInput != outlineInput {
+		t.Fatalf("CreateOutlineNode input = %#v, error = %v", workspaces.outlineInput, err)
+	}
+	lineInput := workspace.CreateStoryLineInput{Name: "主线"}
+	if _, err := api.CreateStoryLine(lineInput); err != nil || workspaces.storyLineInput != lineInput {
+		t.Fatalf("CreateStoryLine input = %#v, error = %v", workspaces.storyLineInput, err)
+	}
+	linkInput := workspace.LinkStoryLineInput{StoryLineID: "line", OutlineNodeID: "book"}
+	if _, err := api.LinkStoryLine(linkInput); err != nil || workspaces.storyLinkInput != linkInput {
+		t.Fatalf("LinkStoryLine input = %#v, error = %v", workspaces.storyLinkInput, err)
+	}
+	cardInput := workspace.CreateSceneCardInput{ChapterID: "chapter", OutlineNodeID: "scene", Title: "场景"}
+	if _, err := api.CreateSceneCard(cardInput); err != nil || workspaces.sceneCardInput != cardInput {
+		t.Fatalf("CreateSceneCard input = %#v, error = %v", workspaces.sceneCardInput, err)
+	}
+	if err := api.ArchiveOutlineNode("book"); err != nil || workspaces.archivedOutlineID != "book" {
+		t.Fatalf("ArchiveOutlineNode id = %q, error = %v", workspaces.archivedOutlineID, err)
+	}
+	if err := api.MoveOutlineNode("book", "down"); err != nil || workspaces.movedOutlineID != "book" || workspaces.moveDirection != "down" {
+		t.Fatalf("MoveOutlineNode = (%q, %q, %v)", workspaces.movedOutlineID, workspaces.moveDirection, err)
+	}
+}
+
 func TestDesktopAPIDirectoryCancellationReturnsEmpty(t *testing.T) {
 	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
 	api.startup(context.Background())
@@ -236,6 +270,14 @@ type fakeWorkspace struct {
 	commitErr              error
 	committed              draftCall
 	closeCalls             int
+	storyStructureResult   workspace.StoryStructureView
+	outlineInput           workspace.CreateOutlineNodeInput
+	storyLineInput         workspace.CreateStoryLineInput
+	storyLinkInput         workspace.LinkStoryLineInput
+	sceneCardInput         workspace.CreateSceneCardInput
+	archivedOutlineID      string
+	movedOutlineID         string
+	moveDirection          string
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -291,5 +333,39 @@ func (f *fakeWorkspace) CommitChapter(
 
 func (f *fakeWorkspace) Close() error {
 	f.closeCalls++
+	return nil
+}
+
+func (f *fakeWorkspace) StoryStructure(context.Context) (workspace.StoryStructureView, error) {
+	return f.storyStructureResult, nil
+}
+
+func (f *fakeWorkspace) CreateOutlineNode(_ context.Context, input workspace.CreateOutlineNodeInput) (workspace.OutlineNodeView, error) {
+	f.outlineInput = input
+	return workspace.OutlineNodeView{}, nil
+}
+
+func (f *fakeWorkspace) CreateStoryLine(_ context.Context, input workspace.CreateStoryLineInput) (workspace.StoryLineView, error) {
+	f.storyLineInput = input
+	return workspace.StoryLineView{}, nil
+}
+
+func (f *fakeWorkspace) LinkStoryLine(_ context.Context, input workspace.LinkStoryLineInput) (workspace.StoryLineLinkView, error) {
+	f.storyLinkInput = input
+	return workspace.StoryLineLinkView{}, nil
+}
+
+func (f *fakeWorkspace) CreateSceneCard(_ context.Context, input workspace.CreateSceneCardInput) (workspace.SceneCardView, error) {
+	f.sceneCardInput = input
+	return workspace.SceneCardView{}, nil
+}
+
+func (f *fakeWorkspace) ArchiveOutlineNode(_ context.Context, id string) error {
+	f.archivedOutlineID = id
+	return nil
+}
+
+func (f *fakeWorkspace) MoveOutlineNode(_ context.Context, id, direction string) error {
+	f.movedOutlineID, f.moveDirection = id, direction
 	return nil
 }

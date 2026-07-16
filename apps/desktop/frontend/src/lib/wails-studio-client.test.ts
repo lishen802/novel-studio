@@ -22,6 +22,18 @@ function installNative(overrides: Record<string, unknown> = {}) {
     SaveDraft: vi.fn(async () => undefined),
     DiscardDraft: vi.fn(async () => undefined),
     CommitChapter: vi.fn(),
+    StoryStructure: vi.fn(async () => ({
+      outlineNodes: [],
+      storyLines: [],
+      storyLineLinks: [],
+      sceneCards: [],
+    })),
+    CreateOutlineNode: vi.fn(),
+    CreateStoryLine: vi.fn(),
+    LinkStoryLine: vi.fn(),
+    CreateSceneCard: vi.fn(),
+    ArchiveOutlineNode: vi.fn(async () => undefined),
+    MoveOutlineNode: vi.fn(async () => undefined),
     CompleteClose: vi.fn(async () => undefined),
     ...overrides,
   };

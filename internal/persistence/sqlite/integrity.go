@@ -19,7 +19,7 @@ var (
 )
 
 const (
-	currentSchemaVersion int64 = 1
+	currentSchemaVersion int64 = 2
 	sqliteHeader               = "SQLite format 3\x00"
 )
 

@@ -3,8 +3,17 @@ import {
   RevisionConflictError,
   StudioClientError,
   type ChapterView,
+  type CreateOutlineNodeInput,
   type CreateProjectInput,
+  type CreateSceneCardInput,
+  type CreateStoryLineInput,
+  type LinkStoryLineInput,
+  type OutlineNodeView,
   type ProjectView,
+  type SceneCardView,
+  type StoryLineLinkView,
+  type StoryLineView,
+  type StoryStructureView,
   type StudioClient,
 } from "./studio-client";
 
@@ -29,6 +38,20 @@ const chapterSchema = z.object({
   hasRecoveryDraft: z.boolean(),
 });
 
+const outlineNodeSchema = z.object({
+  id: z.string(), parentId: z.string(), level: z.enum(["book", "volume", "arc", "chapter", "scene"]),
+  title: z.string(), summary: z.string(), goal: z.string(), conflict: z.string(), outcome: z.string(), position: z.number(), chapterId: z.string(),
+});
+const storyLineSchema = z.object({ id: z.string(), name: z.string(), summary: z.string(), status: z.string() });
+const storyLineLinkSchema = z.object({ storyLineId: z.string(), outlineNodeId: z.string(), position: z.number() });
+const sceneCardSchema = z.object({
+  id: z.string(), chapterId: z.string(), outlineNodeId: z.string(), title: z.string(), pov: z.string(), location: z.string(), goal: z.string(), conflict: z.string(), outcome: z.string(), position: z.number(), status: z.string(),
+});
+const storyStructureSchema = z.object({
+  outlineNodes: z.array(outlineNodeSchema), storyLines: z.array(storyLineSchema),
+  storyLineLinks: z.array(storyLineLinkSchema), sceneCards: z.array(sceneCardSchema),
+});
+
 type NativeDesktopAPI = {
   ChooseProjectParent(): Promise<string>;
   ChooseProjectToOpen(): Promise<string>;
@@ -40,6 +63,13 @@ type NativeDesktopAPI = {
   SaveDraft(id: string, body: string, revision: number): Promise<void>;
   DiscardDraft(id: string, revision: number): Promise<void>;
   CommitChapter(id: string, body: string, revision: number): Promise<unknown>;
+  StoryStructure(): Promise<unknown>;
+  CreateOutlineNode(input: CreateOutlineNodeInput): Promise<unknown>;
+  CreateStoryLine(input: CreateStoryLineInput): Promise<unknown>;
+  LinkStoryLine(input: LinkStoryLineInput): Promise<unknown>;
+  CreateSceneCard(input: CreateSceneCardInput): Promise<unknown>;
+  ArchiveOutlineNode(id: string): Promise<void>;
+  MoveOutlineNode(id: string, direction: string): Promise<void>;
   CompleteClose(): Promise<void>;
 };
 
@@ -75,6 +105,12 @@ function chapterView(value: unknown): ChapterView {
 function chapterViews(value: unknown): ChapterView[] {
   return z.array(chapterSchema).parse(value);
 }
+
+const storyStructureView = (value: unknown): StoryStructureView => storyStructureSchema.parse(value);
+const outlineNodeView = (value: unknown): OutlineNodeView => outlineNodeSchema.parse(value);
+const storyLineView = (value: unknown): StoryLineView => storyLineSchema.parse(value);
+const storyLineLinkView = (value: unknown): StoryLineLinkView => storyLineLinkSchema.parse(value);
+const sceneCardView = (value: unknown): SceneCardView => sceneCardSchema.parse(value);
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
@@ -122,6 +158,27 @@ export const wailsStudioClient: StudioClient = {
     return chapterView(
       await safeCall(() => nativeAPI().CommitChapter(id, body, revision)),
     );
+  },
+  async storyStructure() {
+    return storyStructureView(await safeCall(() => nativeAPI().StoryStructure()));
+  },
+  async createOutlineNode(input) {
+    return outlineNodeView(await safeCall(() => nativeAPI().CreateOutlineNode(input)));
+  },
+  async createStoryLine(input) {
+    return storyLineView(await safeCall(() => nativeAPI().CreateStoryLine(input)));
+  },
+  async linkStoryLine(input) {
+    return storyLineLinkView(await safeCall(() => nativeAPI().LinkStoryLine(input)));
+  },
+  async createSceneCard(input) {
+    return sceneCardView(await safeCall(() => nativeAPI().CreateSceneCard(input)));
+  },
+  async archiveOutlineNode(id) {
+    await safeCall(() => nativeAPI().ArchiveOutlineNode(id));
+  },
+  async moveOutlineNode(id, direction) {
+    await safeCall(() => nativeAPI().MoveOutlineNode(id, direction));
   },
   onBeforeClose(handler) {
     if (!window.runtime) return () => undefined;

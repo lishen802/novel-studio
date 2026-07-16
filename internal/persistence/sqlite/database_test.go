@@ -54,10 +54,16 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 		t.Fatalf("MaxOpenConnections = %d, want 1", got)
 	}
 
-	for _, name := range []string{"projects", "chapters", "chapter_revisions", "drafts"} {
+	for _, name := range []string{
+		"projects", "chapters", "chapter_revisions", "drafts",
+		"outline_nodes", "story_lines", "story_line_links", "scene_cards",
+	} {
 		assertSchemaObjectExists(t, db, "table", name)
 	}
 	assertSchemaObjectExists(t, db, "index", "idx_chapters_project_position")
+	assertSchemaObjectExists(t, db, "index", "idx_outline_nodes_parent_position")
+	assertSchemaObjectExists(t, db, "index", "idx_story_line_links_position")
+	assertSchemaObjectExists(t, db, "index", "idx_scene_cards_chapter_position")
 }
 
 func TestOpenDatabaseClassifiesCorruptFileWithoutOverwritingIt(t *testing.T) {
