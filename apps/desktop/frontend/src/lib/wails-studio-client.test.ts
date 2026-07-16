@@ -5,8 +5,10 @@ import {
   type AppearanceInput,
   type CharacterInput,
   type FactionInput,
+  type ItemTransferInput,
   type MembershipInput,
   type RelationshipInput,
+  type WorldRegionInput,
 } from "./studio-client";
 import { wailsStudioClient } from "./wails-studio-client";
 
@@ -65,6 +67,34 @@ function installNative(overrides: Record<string, unknown> = {}) {
     UnlinkCharacterFromChapter: vi.fn(async () => undefined),
     LinkCharacterToScene: vi.fn(async () => undefined),
     UnlinkCharacterFromScene: vi.fn(async () => undefined),
+    WorldAssets: vi.fn(async () => ({
+      regions: [],
+      locations: [],
+      locationLinks: [],
+      items: [],
+      itemTransfers: [],
+      rules: [],
+      hooks: [],
+      consistencyIssues: [],
+    })),
+    CreateWorldRegion: vi.fn(),
+    UpdateWorldRegion: vi.fn(),
+    ArchiveWorldRegion: vi.fn(async () => undefined),
+    CreateLocation: vi.fn(),
+    UpdateLocation: vi.fn(),
+    ArchiveLocation: vi.fn(async () => undefined),
+    LinkLocation: vi.fn(),
+    UnlinkLocation: vi.fn(async () => undefined),
+    CreateItem: vi.fn(),
+    UpdateItem: vi.fn(),
+    TransferItem: vi.fn(),
+    ArchiveItem: vi.fn(async () => undefined),
+    CreateWorldRule: vi.fn(),
+    UpdateWorldRule: vi.fn(),
+    ArchiveWorldRule: vi.fn(async () => undefined),
+    CreateForeshadowingHook: vi.fn(),
+    UpdateForeshadowingHook: vi.fn(),
+    ArchiveForeshadowingHook: vi.fn(async () => undefined),
     CompleteClose: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -292,6 +322,66 @@ describe("wailsStudioClient", () => {
     expect(api.UpdateCharacter).toHaveBeenCalledWith("character", character);
     expect(api.DeleteMembership).toHaveBeenCalledWith("character", "faction");
     expect(api.LinkCharacterToScene).toHaveBeenCalledWith(sceneAppearance);
+  });
+
+  it("validates world assets and forwards structured mutations", async () => {
+    const region = {
+      id: "region-root",
+      parentId: "",
+      kind: "world",
+      name: "镜海世界",
+      direction: "center",
+      summary: "",
+      terrain: "",
+      climate: "",
+    };
+    const assets = {
+      regions: [region],
+      locations: [],
+      locationLinks: [],
+      items: [],
+      itemTransfers: [],
+      rules: [],
+      hooks: [],
+      consistencyIssues: [],
+    };
+    const api = installNative({
+      WorldAssets: vi.fn(async () => assets),
+      CreateWorldRegion: vi.fn(async () => region),
+      TransferItem: vi.fn(async () => ({
+        id: "transfer-1",
+        itemId: "item-1",
+        fromType: "",
+        fromId: "",
+        toType: "location",
+        toId: "location-1",
+        chapterId: "chapter-1",
+        note: "存放",
+      })),
+    });
+    const regionInput: WorldRegionInput = {
+      parentId: "",
+      kind: "world",
+      name: "镜海世界",
+      direction: "center",
+      summary: "",
+      terrain: "",
+      climate: "",
+    };
+    const transferInput: ItemTransferInput = {
+      itemId: "item-1",
+      holderType: "location",
+      holderId: "location-1",
+      chapterId: "chapter-1",
+      note: "存放",
+    };
+
+    await expect(wailsStudioClient.worldAssets()).resolves.toEqual(assets);
+    await wailsStudioClient.createWorldRegion(regionInput);
+    await wailsStudioClient.transferItem(transferInput);
+
+    expect(api.CreateWorldRegion).toHaveBeenCalledWith(regionInput);
+    expect(api.TransferItem).toHaveBeenCalledWith(transferInput);
   });
 
   it("registers the native close event and completes the close handshake", async () => {

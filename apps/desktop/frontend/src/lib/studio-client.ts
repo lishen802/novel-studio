@@ -157,6 +157,117 @@ export type StoryWorldView = {
   consistencyIssues: ConsistencyIssueView[];
 };
 
+export type WorldRegionKind =
+  | "world"
+  | "continent"
+  | "territory"
+  | "settlement"
+  | "terrain"
+  | "secret_realm"
+  | "resource";
+export type RelativeDirection =
+  | "north"
+  | "north_east"
+  | "east"
+  | "south_east"
+  | "south"
+  | "south_west"
+  | "west"
+  | "north_west"
+  | "center"
+  | "surrounding";
+export type WorldRegionView = {
+  id: string;
+  parentId: string;
+  kind: WorldRegionKind;
+  name: string;
+  direction: RelativeDirection;
+  summary: string;
+  terrain: string;
+  climate: string;
+};
+export type WorldRegionInput = Omit<WorldRegionView, "id">;
+export type LocationKind =
+  "city" | "settlement" | "building" | "landmark" | "wilderness" | "other";
+export type LocationStatus = "active" | "inactive" | "destroyed";
+export type LocationView = {
+  id: string;
+  regionId: string;
+  kind: LocationKind;
+  name: string;
+  summary: string;
+  status: LocationStatus;
+};
+export type LocationInput = Omit<LocationView, "id">;
+export type LocationTargetType = "chapter" | "scene" | "character" | "faction";
+export type LocationLinkView = {
+  locationId: string;
+  targetType: LocationTargetType;
+  targetId: string;
+  role: string;
+};
+export type LocationLinkInput = LocationLinkView;
+export type ItemStatus = "active" | "lost" | "destroyed";
+export type HolderType = "character" | "faction" | "location";
+export type ItemView = {
+  id: string;
+  name: string;
+  summary: string;
+  status: ItemStatus;
+  holderType: HolderType | "";
+  holderId: string;
+};
+export type ItemInput = Pick<ItemView, "name" | "summary" | "status">;
+export type ItemTransferView = {
+  id: string;
+  itemId: string;
+  fromType: HolderType | "";
+  fromId: string;
+  toType: HolderType;
+  toId: string;
+  chapterId: string;
+  note: string;
+};
+export type ItemTransferInput = {
+  itemId: string;
+  holderType: HolderType;
+  holderId: string;
+  chapterId: string;
+  note: string;
+};
+export type RuleScopeType = "project" | "region" | "location";
+export type WorldRuleView = {
+  id: string;
+  name: string;
+  description: string;
+  scopeType: RuleScopeType;
+  scopeId: string;
+  status: "active" | "inactive";
+};
+export type WorldRuleInput = Omit<WorldRuleView, "id">;
+export type HookStatus = "planted" | "progressing" | "resolved" | "abandoned";
+export type ForeshadowingHookView = {
+  id: string;
+  title: string;
+  setup: string;
+  plantedChapterId: string;
+  dueChapterId: string;
+  resolvedChapterId: string;
+  status: HookStatus;
+  notes: string;
+};
+export type ForeshadowingHookInput = Omit<ForeshadowingHookView, "id">;
+export type WorldAssetsView = {
+  regions: WorldRegionView[];
+  locations: LocationView[];
+  locationLinks: LocationLinkView[];
+  items: ItemView[];
+  itemTransfers: ItemTransferView[];
+  rules: WorldRuleView[];
+  hooks: ForeshadowingHookView[];
+  consistencyIssues: ConsistencyIssueView[];
+};
+
 export interface StudioClient {
   chooseProjectParent(): Promise<string | null>;
   chooseProjectToOpen(): Promise<string | null>;
@@ -204,6 +315,37 @@ export interface StudioClient {
     characterId: string,
     sceneCardId: string,
   ): Promise<void>;
+  worldAssets(): Promise<WorldAssetsView>;
+  createWorldRegion(input: WorldRegionInput): Promise<WorldRegionView>;
+  updateWorldRegion(
+    id: string,
+    input: WorldRegionInput,
+  ): Promise<WorldRegionView>;
+  archiveWorldRegion(id: string): Promise<void>;
+  createLocation(input: LocationInput): Promise<LocationView>;
+  updateLocation(id: string, input: LocationInput): Promise<LocationView>;
+  archiveLocation(id: string): Promise<void>;
+  linkLocation(input: LocationLinkInput): Promise<LocationLinkView>;
+  unlinkLocation(
+    locationId: string,
+    targetType: LocationTargetType,
+    targetId: string,
+  ): Promise<void>;
+  createItem(input: ItemInput): Promise<ItemView>;
+  updateItem(id: string, input: ItemInput): Promise<ItemView>;
+  transferItem(input: ItemTransferInput): Promise<ItemTransferView>;
+  archiveItem(id: string): Promise<void>;
+  createWorldRule(input: WorldRuleInput): Promise<WorldRuleView>;
+  updateWorldRule(id: string, input: WorldRuleInput): Promise<WorldRuleView>;
+  archiveWorldRule(id: string): Promise<void>;
+  createForeshadowingHook(
+    input: ForeshadowingHookInput,
+  ): Promise<ForeshadowingHookView>;
+  updateForeshadowingHook(
+    id: string,
+    input: ForeshadowingHookInput,
+  ): Promise<ForeshadowingHookView>;
+  archiveForeshadowingHook(id: string): Promise<void>;
   onBeforeClose(handler: () => Promise<void>): () => void;
   completeClose(): Promise<void>;
 }

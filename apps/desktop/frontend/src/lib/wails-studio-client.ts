@@ -13,6 +13,11 @@ import {
   type FactionInput,
   type FactionView,
   type LinkStoryLineInput,
+  type LocationInput,
+  type LocationLinkInput,
+  type LocationLinkView,
+  type LocationTargetType,
+  type LocationView,
   type MembershipInput,
   type MembershipView,
   type OutlineNodeView,
@@ -25,6 +30,17 @@ import {
   type StoryStructureView,
   type StoryWorldView,
   type StudioClient,
+  type ItemInput,
+  type ItemTransferInput,
+  type ItemTransferView,
+  type ItemView,
+  type WorldAssetsView,
+  type WorldRegionInput,
+  type WorldRegionView,
+  type WorldRuleInput,
+  type WorldRuleView,
+  type ForeshadowingHookInput,
+  type ForeshadowingHookView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -164,6 +180,115 @@ const storyWorldSchema = z.object({
   ),
 });
 
+const worldRegionSchema = z.object({
+  id: z.string(),
+  parentId: z.string(),
+  kind: z.enum([
+    "world",
+    "continent",
+    "territory",
+    "settlement",
+    "terrain",
+    "secret_realm",
+    "resource",
+  ]),
+  name: z.string(),
+  direction: z.enum([
+    "north",
+    "north_east",
+    "east",
+    "south_east",
+    "south",
+    "south_west",
+    "west",
+    "north_west",
+    "center",
+    "surrounding",
+  ]),
+  summary: z.string(),
+  terrain: z.string(),
+  climate: z.string(),
+});
+const locationSchema = z.object({
+  id: z.string(),
+  regionId: z.string(),
+  kind: z.enum([
+    "city",
+    "settlement",
+    "building",
+    "landmark",
+    "wilderness",
+    "other",
+  ]),
+  name: z.string(),
+  summary: z.string(),
+  status: z.enum(["active", "inactive", "destroyed"]),
+});
+const locationLinkSchema = z.object({
+  locationId: z.string(),
+  targetType: z.enum(["chapter", "scene", "character", "faction"]),
+  targetId: z.string(),
+  role: z.string(),
+});
+const itemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  summary: z.string(),
+  status: z.enum(["active", "lost", "destroyed"]),
+  holderType: z.union([
+    z.enum(["character", "faction", "location"]),
+    z.literal(""),
+  ]),
+  holderId: z.string(),
+});
+const itemTransferSchema = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  fromType: z.union([
+    z.enum(["character", "faction", "location"]),
+    z.literal(""),
+  ]),
+  fromId: z.string(),
+  toType: z.enum(["character", "faction", "location"]),
+  toId: z.string(),
+  chapterId: z.string(),
+  note: z.string(),
+});
+const worldRuleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  scopeType: z.enum(["project", "region", "location"]),
+  scopeId: z.string(),
+  status: z.enum(["active", "inactive"]),
+});
+const foreshadowingHookSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  setup: z.string(),
+  plantedChapterId: z.string(),
+  dueChapterId: z.string(),
+  resolvedChapterId: z.string(),
+  status: z.enum(["planted", "progressing", "resolved", "abandoned"]),
+  notes: z.string(),
+});
+const consistencyIssueSchema = z.object({
+  code: z.string(),
+  severity: z.string(),
+  message: z.string(),
+  entityIds: z.array(z.string()),
+});
+const worldAssetsSchema = z.object({
+  regions: z.array(worldRegionSchema),
+  locations: z.array(locationSchema),
+  locationLinks: z.array(locationLinkSchema),
+  items: z.array(itemSchema),
+  itemTransfers: z.array(itemTransferSchema),
+  rules: z.array(worldRuleSchema),
+  hooks: z.array(foreshadowingHookSchema),
+  consistencyIssues: z.array(consistencyIssueSchema),
+});
+
 type NativeDesktopAPI = {
   ChooseProjectParent(): Promise<string>;
   ChooseProjectToOpen(): Promise<string>;
@@ -203,6 +328,32 @@ type NativeDesktopAPI = {
     characterId: string,
     sceneCardId: string,
   ): Promise<void>;
+  WorldAssets(): Promise<unknown>;
+  CreateWorldRegion(input: WorldRegionInput): Promise<unknown>;
+  UpdateWorldRegion(id: string, input: WorldRegionInput): Promise<unknown>;
+  ArchiveWorldRegion(id: string): Promise<void>;
+  CreateLocation(input: LocationInput): Promise<unknown>;
+  UpdateLocation(id: string, input: LocationInput): Promise<unknown>;
+  ArchiveLocation(id: string): Promise<void>;
+  LinkLocation(input: LocationLinkInput): Promise<unknown>;
+  UnlinkLocation(
+    locationId: string,
+    targetType: LocationTargetType,
+    targetId: string,
+  ): Promise<void>;
+  CreateItem(input: ItemInput): Promise<unknown>;
+  UpdateItem(id: string, input: ItemInput): Promise<unknown>;
+  TransferItem(input: ItemTransferInput): Promise<unknown>;
+  ArchiveItem(id: string): Promise<void>;
+  CreateWorldRule(input: WorldRuleInput): Promise<unknown>;
+  UpdateWorldRule(id: string, input: WorldRuleInput): Promise<unknown>;
+  ArchiveWorldRule(id: string): Promise<void>;
+  CreateForeshadowingHook(input: ForeshadowingHookInput): Promise<unknown>;
+  UpdateForeshadowingHook(
+    id: string,
+    input: ForeshadowingHookInput,
+  ): Promise<unknown>;
+  ArchiveForeshadowingHook(id: string): Promise<void>;
   CompleteClose(): Promise<void>;
 };
 
@@ -258,6 +409,21 @@ const membershipView = (value: unknown): MembershipView =>
   membershipSchema.parse(value);
 const relationshipView = (value: unknown): RelationshipView =>
   relationshipSchema.parse(value);
+const worldAssetsView = (value: unknown): WorldAssetsView =>
+  worldAssetsSchema.parse(value);
+const worldRegionView = (value: unknown): WorldRegionView =>
+  worldRegionSchema.parse(value);
+const locationView = (value: unknown): LocationView =>
+  locationSchema.parse(value);
+const locationLinkView = (value: unknown): LocationLinkView =>
+  locationLinkSchema.parse(value);
+const itemView = (value: unknown): ItemView => itemSchema.parse(value);
+const itemTransferView = (value: unknown): ItemTransferView =>
+  itemTransferSchema.parse(value);
+const worldRuleView = (value: unknown): WorldRuleView =>
+  worldRuleSchema.parse(value);
+const foreshadowingHookView = (value: unknown): ForeshadowingHookView =>
+  foreshadowingHookSchema.parse(value);
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
@@ -395,6 +561,85 @@ export const wailsStudioClient: StudioClient = {
     await safeCall(() =>
       nativeAPI().UnlinkCharacterFromScene(characterId, sceneCardId),
     );
+  },
+  async worldAssets() {
+    return worldAssetsView(await safeCall(() => nativeAPI().WorldAssets()));
+  },
+  async createWorldRegion(input) {
+    return worldRegionView(
+      await safeCall(() => nativeAPI().CreateWorldRegion(input)),
+    );
+  },
+  async updateWorldRegion(id, input) {
+    return worldRegionView(
+      await safeCall(() => nativeAPI().UpdateWorldRegion(id, input)),
+    );
+  },
+  async archiveWorldRegion(id) {
+    await safeCall(() => nativeAPI().ArchiveWorldRegion(id));
+  },
+  async createLocation(input) {
+    return locationView(
+      await safeCall(() => nativeAPI().CreateLocation(input)),
+    );
+  },
+  async updateLocation(id, input) {
+    return locationView(
+      await safeCall(() => nativeAPI().UpdateLocation(id, input)),
+    );
+  },
+  async archiveLocation(id) {
+    await safeCall(() => nativeAPI().ArchiveLocation(id));
+  },
+  async linkLocation(input) {
+    return locationLinkView(
+      await safeCall(() => nativeAPI().LinkLocation(input)),
+    );
+  },
+  async unlinkLocation(locationId, targetType, targetId) {
+    await safeCall(() =>
+      nativeAPI().UnlinkLocation(locationId, targetType, targetId),
+    );
+  },
+  async createItem(input) {
+    return itemView(await safeCall(() => nativeAPI().CreateItem(input)));
+  },
+  async updateItem(id, input) {
+    return itemView(await safeCall(() => nativeAPI().UpdateItem(id, input)));
+  },
+  async transferItem(input) {
+    return itemTransferView(
+      await safeCall(() => nativeAPI().TransferItem(input)),
+    );
+  },
+  async archiveItem(id) {
+    await safeCall(() => nativeAPI().ArchiveItem(id));
+  },
+  async createWorldRule(input) {
+    return worldRuleView(
+      await safeCall(() => nativeAPI().CreateWorldRule(input)),
+    );
+  },
+  async updateWorldRule(id, input) {
+    return worldRuleView(
+      await safeCall(() => nativeAPI().UpdateWorldRule(id, input)),
+    );
+  },
+  async archiveWorldRule(id) {
+    await safeCall(() => nativeAPI().ArchiveWorldRule(id));
+  },
+  async createForeshadowingHook(input) {
+    return foreshadowingHookView(
+      await safeCall(() => nativeAPI().CreateForeshadowingHook(input)),
+    );
+  },
+  async updateForeshadowingHook(id, input) {
+    return foreshadowingHookView(
+      await safeCall(() => nativeAPI().UpdateForeshadowingHook(id, input)),
+    );
+  },
+  async archiveForeshadowingHook(id) {
+    await safeCall(() => nativeAPI().ArchiveForeshadowingHook(id));
   },
   onBeforeClose(handler) {
     if (!window.runtime) return () => undefined;

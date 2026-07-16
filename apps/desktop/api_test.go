@@ -181,6 +181,41 @@ func TestDesktopAPIForwardsStoryWorldOperations(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIForwardsWorldAssetOperations(t *testing.T) {
+	assets := workspace.WorldAssetsView{Regions: []workspace.WorldRegionView{{ID: "region-root", Name: "镜海世界"}}}
+	workspaces := &fakeWorkspace{worldAssetsResult: assets}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	got, err := api.WorldAssets()
+	if err != nil || !reflect.DeepEqual(got, assets) {
+		t.Fatalf("WorldAssets = (%#v, %v)", got, err)
+	}
+	regionInput := workspace.WorldRegionInput{Kind: "world", Name: "镜海世界", Direction: "center"}
+	if _, err := api.CreateWorldRegion(regionInput); err != nil || workspaces.worldRegionInput != regionInput {
+		t.Fatalf("CreateWorldRegion input = %#v, error = %v", workspaces.worldRegionInput, err)
+	}
+	locationInput := workspace.LocationInput{RegionID: "region-root", Kind: "city", Name: "雾港城"}
+	if _, err := api.UpdateLocation("location-1", locationInput); err != nil || workspaces.updatedLocationID != "location-1" {
+		t.Fatalf("UpdateLocation id = %q, error = %v", workspaces.updatedLocationID, err)
+	}
+	transferInput := workspace.ItemTransferInput{ItemID: "item-1", HolderType: "location", HolderID: "location-1"}
+	if _, err := api.TransferItem(transferInput); err != nil || workspaces.itemTransferInput != transferInput {
+		t.Fatalf("TransferItem input = %#v, error = %v", workspaces.itemTransferInput, err)
+	}
+	ruleInput := workspace.WorldRuleInput{Name: "禁空", Description: "无法飞行", ScopeType: "project"}
+	if _, err := api.CreateWorldRule(ruleInput); err != nil || workspaces.worldRuleInput != ruleInput {
+		t.Fatalf("CreateWorldRule input = %#v, error = %v", workspaces.worldRuleInput, err)
+	}
+	hookInput := workspace.ForeshadowingHookInput{Title: "断剑之谜", Setup: "获得断剑", PlantedChapterID: "chapter-1"}
+	if _, err := api.UpdateForeshadowingHook("hook-1", hookInput); err != nil || workspaces.updatedHookID != "hook-1" {
+		t.Fatalf("UpdateForeshadowingHook id = %q, error = %v", workspaces.updatedHookID, err)
+	}
+	if err := api.ArchiveWorldRegion("region-root"); err != nil || workspaces.archivedWorldRegionID != "region-root" {
+		t.Fatalf("ArchiveWorldRegion id = %q, error = %v", workspaces.archivedWorldRegionID, err)
+	}
+}
+
 func TestDesktopAPIDirectoryCancellationReturnsEmpty(t *testing.T) {
 	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
 	api.startup(context.Background())
@@ -388,6 +423,25 @@ type fakeWorkspace struct {
 	sceneAppearanceInput   workspace.AppearanceInput
 	unlinkedChapter        string
 	unlinkedScene          string
+	worldAssetsResult      workspace.WorldAssetsView
+	worldRegionInput       workspace.WorldRegionInput
+	updatedWorldRegionID   string
+	archivedWorldRegionID  string
+	locationInput          workspace.LocationInput
+	updatedLocationID      string
+	archivedLocationID     string
+	locationLinkInput      workspace.LocationLinkInput
+	unlinkedLocation       string
+	itemInput              workspace.ItemInput
+	updatedItemID          string
+	itemTransferInput      workspace.ItemTransferInput
+	archivedItemID         string
+	worldRuleInput         workspace.WorldRuleInput
+	updatedWorldRuleID     string
+	archivedWorldRuleID    string
+	hookInput              workspace.ForeshadowingHookInput
+	updatedHookID          string
+	archivedHookID         string
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -537,5 +591,80 @@ func (f *fakeWorkspace) LinkCharacterToScene(_ context.Context, input workspace.
 }
 func (f *fakeWorkspace) UnlinkCharacterFromScene(_ context.Context, characterID, sceneCardID string) error {
 	f.unlinkedScene = characterID + ":" + sceneCardID
+	return nil
+}
+func (f *fakeWorkspace) WorldAssets(context.Context) (workspace.WorldAssetsView, error) {
+	return f.worldAssetsResult, nil
+}
+func (f *fakeWorkspace) CreateWorldRegion(_ context.Context, input workspace.WorldRegionInput) (workspace.WorldRegionView, error) {
+	f.worldRegionInput = input
+	return workspace.WorldRegionView{}, nil
+}
+func (f *fakeWorkspace) UpdateWorldRegion(_ context.Context, id string, input workspace.WorldRegionInput) (workspace.WorldRegionView, error) {
+	f.updatedWorldRegionID, f.worldRegionInput = id, input
+	return workspace.WorldRegionView{}, nil
+}
+func (f *fakeWorkspace) ArchiveWorldRegion(_ context.Context, id string) error {
+	f.archivedWorldRegionID = id
+	return nil
+}
+func (f *fakeWorkspace) CreateLocation(_ context.Context, input workspace.LocationInput) (workspace.LocationView, error) {
+	f.locationInput = input
+	return workspace.LocationView{}, nil
+}
+func (f *fakeWorkspace) UpdateLocation(_ context.Context, id string, input workspace.LocationInput) (workspace.LocationView, error) {
+	f.updatedLocationID, f.locationInput = id, input
+	return workspace.LocationView{}, nil
+}
+func (f *fakeWorkspace) ArchiveLocation(_ context.Context, id string) error {
+	f.archivedLocationID = id
+	return nil
+}
+func (f *fakeWorkspace) LinkLocation(_ context.Context, input workspace.LocationLinkInput) (workspace.LocationLinkView, error) {
+	f.locationLinkInput = input
+	return workspace.LocationLinkView{}, nil
+}
+func (f *fakeWorkspace) UnlinkLocation(_ context.Context, locationID, targetType, targetID string) error {
+	f.unlinkedLocation = locationID + ":" + targetType + ":" + targetID
+	return nil
+}
+func (f *fakeWorkspace) CreateItem(_ context.Context, input workspace.ItemInput) (workspace.ItemView, error) {
+	f.itemInput = input
+	return workspace.ItemView{}, nil
+}
+func (f *fakeWorkspace) UpdateItem(_ context.Context, id string, input workspace.ItemInput) (workspace.ItemView, error) {
+	f.updatedItemID, f.itemInput = id, input
+	return workspace.ItemView{}, nil
+}
+func (f *fakeWorkspace) TransferItem(_ context.Context, input workspace.ItemTransferInput) (workspace.ItemTransferView, error) {
+	f.itemTransferInput = input
+	return workspace.ItemTransferView{}, nil
+}
+func (f *fakeWorkspace) ArchiveItem(_ context.Context, id string) error {
+	f.archivedItemID = id
+	return nil
+}
+func (f *fakeWorkspace) CreateWorldRule(_ context.Context, input workspace.WorldRuleInput) (workspace.WorldRuleView, error) {
+	f.worldRuleInput = input
+	return workspace.WorldRuleView{}, nil
+}
+func (f *fakeWorkspace) UpdateWorldRule(_ context.Context, id string, input workspace.WorldRuleInput) (workspace.WorldRuleView, error) {
+	f.updatedWorldRuleID, f.worldRuleInput = id, input
+	return workspace.WorldRuleView{}, nil
+}
+func (f *fakeWorkspace) ArchiveWorldRule(_ context.Context, id string) error {
+	f.archivedWorldRuleID = id
+	return nil
+}
+func (f *fakeWorkspace) CreateForeshadowingHook(_ context.Context, input workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error) {
+	f.hookInput = input
+	return workspace.ForeshadowingHookView{}, nil
+}
+func (f *fakeWorkspace) UpdateForeshadowingHook(_ context.Context, id string, input workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error) {
+	f.updatedHookID, f.hookInput = id, input
+	return workspace.ForeshadowingHookView{}, nil
+}
+func (f *fakeWorkspace) ArchiveForeshadowingHook(_ context.Context, id string) error {
+	f.archivedHookID = id
 	return nil
 }

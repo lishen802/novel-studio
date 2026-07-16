@@ -38,6 +38,25 @@ type WorkspaceUseCases interface {
 	UnlinkCharacterFromChapter(context.Context, string, string) error
 	LinkCharacterToScene(context.Context, workspace.AppearanceInput) error
 	UnlinkCharacterFromScene(context.Context, string, string) error
+	WorldAssets(context.Context) (workspace.WorldAssetsView, error)
+	CreateWorldRegion(context.Context, workspace.WorldRegionInput) (workspace.WorldRegionView, error)
+	UpdateWorldRegion(context.Context, string, workspace.WorldRegionInput) (workspace.WorldRegionView, error)
+	ArchiveWorldRegion(context.Context, string) error
+	CreateLocation(context.Context, workspace.LocationInput) (workspace.LocationView, error)
+	UpdateLocation(context.Context, string, workspace.LocationInput) (workspace.LocationView, error)
+	ArchiveLocation(context.Context, string) error
+	LinkLocation(context.Context, workspace.LocationLinkInput) (workspace.LocationLinkView, error)
+	UnlinkLocation(context.Context, string, string, string) error
+	CreateItem(context.Context, workspace.ItemInput) (workspace.ItemView, error)
+	UpdateItem(context.Context, string, workspace.ItemInput) (workspace.ItemView, error)
+	TransferItem(context.Context, workspace.ItemTransferInput) (workspace.ItemTransferView, error)
+	ArchiveItem(context.Context, string) error
+	CreateWorldRule(context.Context, workspace.WorldRuleInput) (workspace.WorldRuleView, error)
+	UpdateWorldRule(context.Context, string, workspace.WorldRuleInput) (workspace.WorldRuleView, error)
+	ArchiveWorldRule(context.Context, string) error
+	CreateForeshadowingHook(context.Context, workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error)
+	UpdateForeshadowingHook(context.Context, string, workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error)
+	ArchiveForeshadowingHook(context.Context, string) error
 	Close() error
 }
 
@@ -204,6 +223,82 @@ func (a *DesktopAPI) LinkCharacterToScene(input workspace.AppearanceInput) error
 
 func (a *DesktopAPI) UnlinkCharacterFromScene(characterID, sceneCardID string) error {
 	return safeDesktopError(a.workspace.UnlinkCharacterFromScene(a.ctx, characterID, sceneCardID))
+}
+
+func (a *DesktopAPI) WorldAssets() (workspace.WorldAssetsView, error) {
+	return safeResult(a.workspace.WorldAssets(a.ctx))
+}
+
+func (a *DesktopAPI) CreateWorldRegion(input workspace.WorldRegionInput) (workspace.WorldRegionView, error) {
+	return safeResult(a.workspace.CreateWorldRegion(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateWorldRegion(id string, input workspace.WorldRegionInput) (workspace.WorldRegionView, error) {
+	return safeResult(a.workspace.UpdateWorldRegion(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveWorldRegion(id string) error {
+	return safeDesktopError(a.workspace.ArchiveWorldRegion(a.ctx, id))
+}
+
+func (a *DesktopAPI) CreateLocation(input workspace.LocationInput) (workspace.LocationView, error) {
+	return safeResult(a.workspace.CreateLocation(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateLocation(id string, input workspace.LocationInput) (workspace.LocationView, error) {
+	return safeResult(a.workspace.UpdateLocation(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveLocation(id string) error {
+	return safeDesktopError(a.workspace.ArchiveLocation(a.ctx, id))
+}
+
+func (a *DesktopAPI) LinkLocation(input workspace.LocationLinkInput) (workspace.LocationLinkView, error) {
+	return safeResult(a.workspace.LinkLocation(a.ctx, input))
+}
+
+func (a *DesktopAPI) UnlinkLocation(locationID, targetType, targetID string) error {
+	return safeDesktopError(a.workspace.UnlinkLocation(a.ctx, locationID, targetType, targetID))
+}
+
+func (a *DesktopAPI) CreateItem(input workspace.ItemInput) (workspace.ItemView, error) {
+	return safeResult(a.workspace.CreateItem(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateItem(id string, input workspace.ItemInput) (workspace.ItemView, error) {
+	return safeResult(a.workspace.UpdateItem(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) TransferItem(input workspace.ItemTransferInput) (workspace.ItemTransferView, error) {
+	return safeResult(a.workspace.TransferItem(a.ctx, input))
+}
+
+func (a *DesktopAPI) ArchiveItem(id string) error {
+	return safeDesktopError(a.workspace.ArchiveItem(a.ctx, id))
+}
+
+func (a *DesktopAPI) CreateWorldRule(input workspace.WorldRuleInput) (workspace.WorldRuleView, error) {
+	return safeResult(a.workspace.CreateWorldRule(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateWorldRule(id string, input workspace.WorldRuleInput) (workspace.WorldRuleView, error) {
+	return safeResult(a.workspace.UpdateWorldRule(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveWorldRule(id string) error {
+	return safeDesktopError(a.workspace.ArchiveWorldRule(a.ctx, id))
+}
+
+func (a *DesktopAPI) CreateForeshadowingHook(input workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error) {
+	return safeResult(a.workspace.CreateForeshadowingHook(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateForeshadowingHook(id string, input workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error) {
+	return safeResult(a.workspace.UpdateForeshadowingHook(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveForeshadowingHook(id string) error {
+	return safeDesktopError(a.workspace.ArchiveForeshadowingHook(a.ctx, id))
 }
 
 func (a *DesktopAPI) CompleteClose() {

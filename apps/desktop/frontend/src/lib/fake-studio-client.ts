@@ -9,7 +9,18 @@ import type {
   CreateStoryLineInput,
   FactionInput,
   FactionView,
+  ForeshadowingHookInput,
+  ForeshadowingHookView,
+  ItemInput,
+  ItemTransferInput,
+  ItemTransferView,
+  ItemView,
   LinkStoryLineInput,
+  LocationInput,
+  LocationLinkInput,
+  LocationLinkView,
+  LocationTargetType,
+  LocationView,
   MembershipInput,
   MembershipView,
   OutlineNodeView,
@@ -22,6 +33,11 @@ import type {
   StoryStructureView,
   StoryWorldView,
   StudioClient,
+  WorldAssetsView,
+  WorldRegionInput,
+  WorldRegionView,
+  WorldRuleInput,
+  WorldRuleView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -72,6 +88,16 @@ export class FakeStudioClient implements StudioClient {
     sceneAppearances: [],
     consistencyIssues: [],
   };
+  worldAssetsResult: WorldAssetsView = {
+    regions: [],
+    locations: [],
+    locationLinks: [],
+    items: [],
+    itemTransfers: [],
+    rules: [],
+    hooks: [],
+    consistencyIssues: [],
+  };
 
   createProjectError: Error | null = null;
   openProjectError: Error | null = null;
@@ -82,6 +108,7 @@ export class FakeStudioClient implements StudioClient {
   commitChapterError: Error | null = null;
   storyWorldError: Error | null = null;
   worldMutationError: Error | null = null;
+  worldAssetMutationError: Error | null = null;
 
   createProjectCalls: CreateProjectInput[] = [];
   openProjectCalls: string[] = [];
@@ -110,6 +137,31 @@ export class FakeStudioClient implements StudioClient {
   unlinkChapterCalls: Array<{ characterId: string; chapterId: string }> = [];
   linkSceneCalls: AppearanceInput[] = [];
   unlinkSceneCalls: Array<{ characterId: string; sceneCardId: string }> = [];
+  createWorldRegionCalls: WorldRegionInput[] = [];
+  updateWorldRegionCalls: Array<{ id: string; input: WorldRegionInput }> = [];
+  archiveWorldRegionCalls: string[] = [];
+  createLocationCalls: LocationInput[] = [];
+  updateLocationCalls: Array<{ id: string; input: LocationInput }> = [];
+  archiveLocationCalls: string[] = [];
+  linkLocationCalls: LocationLinkInput[] = [];
+  unlinkLocationCalls: Array<{
+    locationId: string;
+    targetType: LocationTargetType;
+    targetId: string;
+  }> = [];
+  createItemCalls: ItemInput[] = [];
+  updateItemCalls: Array<{ id: string; input: ItemInput }> = [];
+  transferItemCalls: ItemTransferInput[] = [];
+  archiveItemCalls: string[] = [];
+  createWorldRuleCalls: WorldRuleInput[] = [];
+  updateWorldRuleCalls: Array<{ id: string; input: WorldRuleInput }> = [];
+  archiveWorldRuleCalls: string[] = [];
+  createForeshadowingHookCalls: ForeshadowingHookInput[] = [];
+  updateForeshadowingHookCalls: Array<{
+    id: string;
+    input: ForeshadowingHookInput;
+  }> = [];
+  archiveForeshadowingHookCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -476,6 +528,284 @@ export class FakeStudioClient implements StudioClient {
         (item) =>
           item.characterId !== characterId || item.sceneCardId !== sceneCardId,
       ),
+    };
+  }
+
+  async worldAssets(): Promise<WorldAssetsView> {
+    return this.worldAssetsResult;
+  }
+
+  async createWorldRegion(input: WorldRegionInput): Promise<WorldRegionView> {
+    this.createWorldRegionCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const region = {
+      ...input,
+      id: `region-${this.worldAssetsResult.regions.length + 1}`,
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      regions: [...this.worldAssetsResult.regions, region],
+    };
+    return region;
+  }
+
+  async updateWorldRegion(
+    id: string,
+    input: WorldRegionInput,
+  ): Promise<WorldRegionView> {
+    this.updateWorldRegionCalls.push({ id, input });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const region = { ...input, id };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      regions: this.worldAssetsResult.regions.map((item) =>
+        item.id === id ? region : item,
+      ),
+    };
+    return region;
+  }
+
+  async archiveWorldRegion(id: string): Promise<void> {
+    this.archiveWorldRegionCalls.push(id);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      regions: this.worldAssetsResult.regions.filter((item) => item.id !== id),
+    };
+  }
+
+  async createLocation(input: LocationInput): Promise<LocationView> {
+    this.createLocationCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const location = {
+      ...input,
+      id: `location-${this.worldAssetsResult.locations.length + 1}`,
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      locations: [...this.worldAssetsResult.locations, location],
+    };
+    return location;
+  }
+
+  async updateLocation(
+    id: string,
+    input: LocationInput,
+  ): Promise<LocationView> {
+    this.updateLocationCalls.push({ id, input });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const location = { ...input, id };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      locations: this.worldAssetsResult.locations.map((item) =>
+        item.id === id ? location : item,
+      ),
+    };
+    return location;
+  }
+
+  async archiveLocation(id: string): Promise<void> {
+    this.archiveLocationCalls.push(id);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      locations: this.worldAssetsResult.locations.filter(
+        (item) => item.id !== id,
+      ),
+    };
+  }
+
+  async linkLocation(input: LocationLinkInput): Promise<LocationLinkView> {
+    this.linkLocationCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      locationLinks: [
+        ...this.worldAssetsResult.locationLinks.filter(
+          (item) =>
+            item.locationId !== input.locationId ||
+            item.targetType !== input.targetType ||
+            item.targetId !== input.targetId,
+        ),
+        input,
+      ],
+    };
+    return input;
+  }
+
+  async unlinkLocation(
+    locationId: string,
+    targetType: LocationTargetType,
+    targetId: string,
+  ): Promise<void> {
+    this.unlinkLocationCalls.push({ locationId, targetType, targetId });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      locationLinks: this.worldAssetsResult.locationLinks.filter(
+        (item) =>
+          item.locationId !== locationId ||
+          item.targetType !== targetType ||
+          item.targetId !== targetId,
+      ),
+    };
+  }
+
+  async createItem(input: ItemInput): Promise<ItemView> {
+    this.createItemCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const item: ItemView = {
+      ...input,
+      id: `item-${this.worldAssetsResult.items.length + 1}`,
+      holderType: "",
+      holderId: "",
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      items: [...this.worldAssetsResult.items, item],
+    };
+    return item;
+  }
+
+  async updateItem(id: string, input: ItemInput): Promise<ItemView> {
+    this.updateItemCalls.push({ id, input });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const existing = this.worldAssetsResult.items.find(
+      (item) => item.id === id,
+    );
+    const item: ItemView = {
+      ...input,
+      id,
+      holderType: existing?.holderType ?? "",
+      holderId: existing?.holderId ?? "",
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      items: this.worldAssetsResult.items.map((candidate) =>
+        candidate.id === id ? item : candidate,
+      ),
+    };
+    return item;
+  }
+
+  async transferItem(input: ItemTransferInput): Promise<ItemTransferView> {
+    this.transferItemCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const item = this.worldAssetsResult.items.find(
+      (candidate) => candidate.id === input.itemId,
+    );
+    const transfer: ItemTransferView = {
+      id: `transfer-${this.worldAssetsResult.itemTransfers.length + 1}`,
+      itemId: input.itemId,
+      fromType: item?.holderType ?? "",
+      fromId: item?.holderId ?? "",
+      toType: input.holderType,
+      toId: input.holderId,
+      chapterId: input.chapterId,
+      note: input.note,
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      items: this.worldAssetsResult.items.map((candidate) =>
+        candidate.id === input.itemId
+          ? {
+              ...candidate,
+              holderType: input.holderType,
+              holderId: input.holderId,
+            }
+          : candidate,
+      ),
+      itemTransfers: [...this.worldAssetsResult.itemTransfers, transfer],
+    };
+    return transfer;
+  }
+
+  async archiveItem(id: string): Promise<void> {
+    this.archiveItemCalls.push(id);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      items: this.worldAssetsResult.items.filter((item) => item.id !== id),
+    };
+  }
+
+  async createWorldRule(input: WorldRuleInput): Promise<WorldRuleView> {
+    this.createWorldRuleCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const rule = {
+      ...input,
+      id: `rule-${this.worldAssetsResult.rules.length + 1}`,
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      rules: [...this.worldAssetsResult.rules, rule],
+    };
+    return rule;
+  }
+
+  async updateWorldRule(
+    id: string,
+    input: WorldRuleInput,
+  ): Promise<WorldRuleView> {
+    this.updateWorldRuleCalls.push({ id, input });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const rule = { ...input, id };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      rules: this.worldAssetsResult.rules.map((item) =>
+        item.id === id ? rule : item,
+      ),
+    };
+    return rule;
+  }
+
+  async archiveWorldRule(id: string): Promise<void> {
+    this.archiveWorldRuleCalls.push(id);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      rules: this.worldAssetsResult.rules.filter((item) => item.id !== id),
+    };
+  }
+
+  async createForeshadowingHook(
+    input: ForeshadowingHookInput,
+  ): Promise<ForeshadowingHookView> {
+    this.createForeshadowingHookCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const hook = {
+      ...input,
+      id: `hook-${this.worldAssetsResult.hooks.length + 1}`,
+    };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      hooks: [...this.worldAssetsResult.hooks, hook],
+    };
+    return hook;
+  }
+
+  async updateForeshadowingHook(
+    id: string,
+    input: ForeshadowingHookInput,
+  ): Promise<ForeshadowingHookView> {
+    this.updateForeshadowingHookCalls.push({ id, input });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const hook = { ...input, id };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      hooks: this.worldAssetsResult.hooks.map((item) =>
+        item.id === id ? hook : item,
+      ),
+    };
+    return hook;
+  }
+
+  async archiveForeshadowingHook(id: string): Promise<void> {
+    this.archiveForeshadowingHookCalls.push(id);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      hooks: this.worldAssetsResult.hooks.filter((item) => item.id !== id),
     };
   }
 
