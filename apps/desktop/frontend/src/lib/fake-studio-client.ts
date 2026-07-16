@@ -30,6 +30,7 @@ export class FakeStudioClient implements StudioClient {
     position: 1,
     body: "",
     revision: 1,
+    updatedAt: "2026-07-15T08:00:00Z",
     hasRecoveryDraft: false,
   };
   openChapterResult: ChapterView = this.createChapterResult;
@@ -43,6 +44,7 @@ export class FakeStudioClient implements StudioClient {
   createChapterError: Error | null = null;
   openChapterError: Error | null = null;
   saveDraftError: Error | null = null;
+  discardDraftError: Error | null = null;
   commitChapterError: Error | null = null;
 
   createProjectCalls: CreateProjectInput[] = [];
@@ -50,7 +52,10 @@ export class FakeStudioClient implements StudioClient {
   createChapterCalls: string[] = [];
   openChapterCalls: string[] = [];
   saveDraftCalls: ChapterWriteCall[] = [];
+  discardDraftCalls: Array<{ chapterId: string; baseRevision: number }> = [];
   commitChapterCalls: ChapterWriteCall[] = [];
+  completeCloseCalls = 0;
+  beforeCloseHandler: (() => Promise<void>) | null = null;
 
   static withReadyProject(): FakeStudioClient {
     const client = new FakeStudioClient();
@@ -107,6 +112,11 @@ export class FakeStudioClient implements StudioClient {
     if (this.saveDraftError) throw this.saveDraftError;
   }
 
+  async discardDraft(chapterId: string, baseRevision: number): Promise<void> {
+    this.discardDraftCalls.push({ chapterId, baseRevision });
+    if (this.discardDraftError) throw this.discardDraftError;
+  }
+
   async commitChapter(
     chapterId: string,
     body: string,
@@ -115,5 +125,20 @@ export class FakeStudioClient implements StudioClient {
     this.commitChapterCalls.push({ chapterId, body, baseRevision });
     if (this.commitChapterError) throw this.commitChapterError;
     return { ...this.commitChapterResult, id: chapterId, body };
+  }
+
+  onBeforeClose(handler: () => Promise<void>): () => void {
+    this.beforeCloseHandler = handler;
+    return () => {
+      if (this.beforeCloseHandler === handler) this.beforeCloseHandler = null;
+    };
+  }
+
+  async completeClose(): Promise<void> {
+    this.completeCloseCalls++;
+  }
+
+  async requestNativeClose(): Promise<void> {
+    await this.beforeCloseHandler?.();
   }
 }

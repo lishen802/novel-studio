@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/application/workspace"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
 
 func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
@@ -63,6 +67,15 @@ func TestDesktopAPIForwardsChapterOperations(t *testing.T) {
 	if workspaces.savedDraft != (draftCall{id: chapter.ID, body: "草稿", revision: 1}) {
 		t.Fatalf("saved draft = %#v", workspaces.savedDraft)
 	}
+	if err := api.DiscardDraft(chapter.ID, chapter.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if workspaces.discardedDraftID != chapter.ID {
+		t.Fatalf("discarded draft id = %q", workspaces.discardedDraftID)
+	}
+	if workspaces.discardedDraftRevision != chapter.Revision {
+		t.Fatalf("discarded draft revision = %d", workspaces.discardedDraftRevision)
+	}
 	gotCommit, err := api.CommitChapter(chapter.ID, "正文", 1)
 	if err != nil || gotCommit != committed {
 		t.Fatalf("CommitChapter = (%#v, %v)", gotCommit, err)
@@ -86,18 +99,55 @@ func TestDesktopAPIDirectoryCancellationReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestDesktopAPIPropagatesWorkspaceError(t *testing.T) {
-	want := errors.New("project is corrupt")
+func TestDesktopAPIMapsWorkspaceErrorToSafeDesktopError(t *testing.T) {
+	internal := errors.New("SELECT body FROM chapters failed: secret text")
 	api := newDesktopAPI(
-		&fakeWorkspace{openErr: want},
+		&fakeWorkspace{openErr: internal},
 		&fakeDirectoryPicker{},
 	)
 	api.startup(context.Background())
 
 	_, err := api.OpenProject("/books/broken.zjproject")
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
+	var safe *desktopError
+	if !errors.As(err, &safe) || safe.Code != errorOperationFailed {
+		t.Fatalf("error = %#v, want safe operation error", err)
 	}
+	if got := err.Error(); got == "" || containsAny(got, "SELECT", "secret text") {
+		t.Fatalf("unsafe error was exposed: %q", got)
+	}
+}
+
+func TestSafeDesktopErrorClassifiesRecoveryFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code desktopErrorCode
+	}{
+		{name: "missing", err: os.ErrNotExist, code: errorProjectNotFound},
+		{name: "permission", err: os.ErrPermission, code: errorPermissionDenied},
+		{name: "corrupt", err: sqlite.ErrDatabaseCorrupt, code: errorProjectCorrupt},
+		{name: "too new", err: sqlite.ErrDatabaseTooNew, code: errorProjectTooNew},
+		{name: "revision", err: projectdomain.ErrRevisionConflict, code: errorRevisionConflict},
+		{name: "write", err: sqlite.ErrDatabaseWrite, code: errorWriteFailed},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var safe *desktopError
+			if err := safeDesktopError(test.err); !errors.As(err, &safe) || safe.Code != test.code {
+				t.Fatalf("error = %#v, want code %q", err, test.code)
+			}
+		})
+	}
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAppShutdownClosesWorkspace(t *testing.T) {
@@ -108,6 +158,38 @@ func TestAppShutdownClosesWorkspace(t *testing.T) {
 
 	if workspaces.closeCalls != 1 {
 		t.Fatalf("Close called %d times, want 1", workspaces.closeCalls)
+	}
+}
+
+func TestAppWaitsForFrontendFlushBeforeClosing(t *testing.T) {
+	workspaces := &fakeWorkspace{}
+	emitCalls := 0
+	quitCalls := 0
+	app := &App{
+		api: newDesktopAPI(workspaces, &fakeDirectoryPicker{}),
+		emitBeforeClose: func(context.Context) {
+			emitCalls++
+		},
+		quit: func(context.Context) {
+			quitCalls++
+		},
+	}
+	app.api.completeClose = app.completeClose
+	app.startup(context.Background())
+
+	if prevent := app.beforeClose(context.Background()); !prevent {
+		t.Fatal("first close was not prevented for frontend draft flush")
+	}
+	if emitCalls != 1 || quitCalls != 0 {
+		t.Fatalf("before flush: emit=%d quit=%d", emitCalls, quitCalls)
+	}
+
+	app.api.CompleteClose()
+	if quitCalls != 1 {
+		t.Fatalf("quit calls = %d, want 1 after frontend flush", quitCalls)
+	}
+	if prevent := app.beforeClose(context.Background()); prevent {
+		t.Fatal("close was prevented after frontend completed its flush")
 	}
 }
 
@@ -133,25 +215,27 @@ type draftCall struct {
 }
 
 type fakeWorkspace struct {
-	createInput         CreateProjectInput
-	createResult        workspace.ProjectView
-	createErr           error
-	openResult          workspace.ProjectView
-	openErr             error
-	listResult          []workspace.ChapterView
-	listErr             error
-	createChapterResult workspace.ChapterView
-	createChapterErr    error
-	createdChapterTitle string
-	openChapterResult   workspace.ChapterView
-	openChapterErr      error
-	openedChapterID     string
-	savedDraft          draftCall
-	saveDraftErr        error
-	commitResult        workspace.ChapterView
-	commitErr           error
-	committed           draftCall
-	closeCalls          int
+	createInput            CreateProjectInput
+	createResult           workspace.ProjectView
+	createErr              error
+	openResult             workspace.ProjectView
+	openErr                error
+	listResult             []workspace.ChapterView
+	listErr                error
+	createChapterResult    workspace.ChapterView
+	createChapterErr       error
+	createdChapterTitle    string
+	openChapterResult      workspace.ChapterView
+	openChapterErr         error
+	openedChapterID        string
+	savedDraft             draftCall
+	discardedDraftID       string
+	discardedDraftRevision int64
+	saveDraftErr           error
+	commitResult           workspace.ChapterView
+	commitErr              error
+	committed              draftCall
+	closeCalls             int
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -188,6 +272,12 @@ func (f *fakeWorkspace) OpenChapter(_ context.Context, id string) (workspace.Cha
 func (f *fakeWorkspace) SaveDraft(_ context.Context, id, body string, revision int64) error {
 	f.savedDraft = draftCall{id: id, body: body, revision: revision}
 	return f.saveDraftErr
+}
+
+func (f *fakeWorkspace) DiscardDraft(_ context.Context, id string, revision int64) error {
+	f.discardedDraftID = id
+	f.discardedDraftRevision = revision
+	return nil
 }
 
 func (f *fakeWorkspace) CommitChapter(

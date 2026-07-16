@@ -4,11 +4,13 @@ import {
   type ChapterView,
   type StudioClient,
 } from "../../lib/studio-client";
+import { RecoveryDialog } from "./RecoveryDialog";
 
 type ChapterEditorProps = {
   chapter: ChapterView;
   client: StudioClient;
   onChapterUpdated?: (chapter: ChapterView) => void;
+  onFlushAvailable?: (flush: (() => Promise<void>) | null) => void;
 };
 
 type SaveState = "committed" | "drafting" | "drafted" | "conflict" | "error";
@@ -17,11 +19,14 @@ export function ChapterEditor({
   chapter,
   client,
   onChapterUpdated,
+  onFlushAvailable,
 }: ChapterEditorProps) {
   const [body, setBody] = useState(chapter.body);
   const [revision, setRevision] = useState(chapter.revision);
   const [saveState, setSaveState] = useState<SaveState>("committed");
+  const [reloading, setReloading] = useState(false);
   const [showRecovery, setShowRecovery] = useState(chapter.hasRecoveryDraft);
+  const [recoveryDeferred, setRecoveryDeferred] = useState(false);
   const bodyRef = useRef(body);
   const revisionRef = useRef(revision);
   const dirtyRef = useRef(false);
@@ -29,7 +34,12 @@ export function ChapterEditor({
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const committing = useRef(false);
   const commitQueued = useRef(false);
+  const reloadingRef = useRef(false);
+  const editVersion = useRef(0);
+  const reloadRequest = useRef(0);
+  const activeCommit = useRef<Promise<void>>(Promise.resolve());
   const commitNow = useRef<() => Promise<void>>(async () => undefined);
+  const flushDraft = useRef<() => Promise<void>>(async () => undefined);
 
   const clearTimers = () => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -40,8 +50,9 @@ export function ChapterEditor({
 
   const scheduleSaves = (nextBody: string) => {
     clearTimers();
+    editVersion.current++;
     dirtyRef.current = true;
-    setSaveState("drafting");
+    setSaveState(reloadingRef.current ? "conflict" : "drafting");
 
     draftTimer.current = setTimeout(async () => {
       const draftBody = bodyRef.current;
@@ -63,47 +74,71 @@ export function ChapterEditor({
     bodyRef.current = nextBody;
   };
 
-  commitNow.current = async () => {
+  commitNow.current = () => {
     if (committing.current) {
       commitQueued.current = true;
-      return;
+      return activeCommit.current;
     }
 
     committing.current = true;
-    const committedBody = bodyRef.current;
-    const baseRevision = revisionRef.current;
-    try {
-      const updated = await client.commitChapter(
-        chapter.id,
-        committedBody,
-        baseRevision,
-      );
-      revisionRef.current = updated.revision;
-      setRevision(updated.revision);
-      onChapterUpdated?.(updated);
-      if (bodyRef.current === committedBody) {
-        dirtyRef.current = false;
-        setSaveState("committed");
-      } else {
-        try {
-          await client.saveDraft(
-            chapter.id,
-            bodyRef.current,
-            updated.revision,
-          );
-          setSaveState("drafting");
-        } catch {
-          setSaveState("error");
+    const operation = (async () => {
+      const committedBody = bodyRef.current;
+      const baseRevision = revisionRef.current;
+      try {
+        const updated = await client.commitChapter(
+          chapter.id,
+          committedBody,
+          baseRevision,
+        );
+        revisionRef.current = updated.revision;
+        setRevision(updated.revision);
+        onChapterUpdated?.(updated);
+        if (bodyRef.current === committedBody) {
+          dirtyRef.current = false;
+          setSaveState("committed");
+        } else {
+          try {
+            await client.saveDraft(
+              chapter.id,
+              bodyRef.current,
+              updated.revision,
+            );
+            setSaveState("drafting");
+          } catch {
+            setSaveState("error");
+          }
+        }
+      } catch (error) {
+        setSaveState(error instanceof RevisionConflictError ? "conflict" : "error");
+      } finally {
+        committing.current = false;
+        if (commitQueued.current) {
+          commitQueued.current = false;
+          void commitNow.current();
         }
       }
-    } catch (error) {
-      setSaveState(error instanceof RevisionConflictError ? "conflict" : "error");
-    } finally {
-      committing.current = false;
-      if (commitQueued.current) {
-        commitQueued.current = false;
-        void commitNow.current();
+    })();
+    activeCommit.current = operation;
+    return operation;
+  };
+
+  flushDraft.current = async () => {
+    clearTimers();
+    while (committing.current) {
+      await activeCommit.current;
+    }
+    if (!dirtyRef.current) return;
+
+    const draftBody = bodyRef.current;
+    const draftRevision = revisionRef.current;
+    try {
+      await client.saveDraft(chapter.id, draftBody, draftRevision);
+      if (bodyRef.current === draftBody && revisionRef.current === draftRevision) {
+        setSaveState("drafted");
       }
+    } catch (error) {
+      setSaveState("error");
+      throw error;
     }
   };
 
@@ -116,38 +151,75 @@ export function ChapterEditor({
     dirtyRef.current = false;
     setSaveState("committed");
     setShowRecovery(chapter.hasRecoveryDraft);
+    setRecoveryDeferred(false);
 
     return () => {
       clearTimers();
-      if (dirtyRef.current) {
-        void client.saveDraft(
-          chapter.id,
-          bodyRef.current,
-          revisionRef.current,
-        );
+      if (dirtyRef.current && !onFlushAvailable) {
+        void flushDraft.current().catch(() => undefined);
       }
     };
     // A changed ID means the author switched chapters. Same-chapter commits must
     // not replace newer local input when the parent updates its revision.
   }, [chapter.id, client]);
 
+  useEffect(() => {
+    const registeredFlush = flushDraft.current;
+    onFlushAvailable?.(registeredFlush);
+    return () => onFlushAvailable?.(null);
+  }, [chapter.id, onFlushAvailable]);
+
   const reload = async () => {
-    const current = await client.openChapter(chapter.id);
-    setBody(current.body);
-    bodyRef.current = current.body;
-    setRevision(current.revision);
-    revisionRef.current = current.revision;
-    dirtyRef.current = false;
-    setSaveState("committed");
-    onChapterUpdated?.(current);
+    const editVersionAtRequest = editVersion.current;
+    const request = ++reloadRequest.current;
+    reloadingRef.current = true;
+    setReloading(true);
+    try {
+      const current = await client.openChapter(chapter.id);
+      if (
+        request !== reloadRequest.current ||
+        editVersion.current !== editVersionAtRequest
+      ) {
+        setSaveState("conflict");
+        return;
+      }
+      clearTimers();
+      setBody(current.body);
+      bodyRef.current = current.body;
+      setRevision(current.revision);
+      revisionRef.current = current.revision;
+      dirtyRef.current = false;
+      setSaveState("committed");
+      onChapterUpdated?.(current);
+    } catch {
+      setSaveState("conflict");
+    } finally {
+      if (request === reloadRequest.current) {
+        reloadingRef.current = false;
+        setReloading(false);
+      }
+    }
   };
 
   const restoreDraft = () => {
     const recovered = chapter.recoveryBody ?? chapter.body;
     setShowRecovery(false);
+    setRecoveryDeferred(false);
     setBody(recovered);
     bodyRef.current = recovered;
     scheduleSaves(recovered);
+  };
+
+  const discardDraft = async () => {
+    await client.discardDraft(chapter.id, chapter.revision);
+    setShowRecovery(false);
+    setRecoveryDeferred(false);
+    onChapterUpdated?.({
+      ...chapter,
+      recoveryBody: undefined,
+      recoveryUpdatedAt: undefined,
+      hasRecoveryDraft: false,
+    });
   };
 
   return (
@@ -169,8 +241,17 @@ export function ChapterEditor({
       {saveState === "conflict" && (
         <div className="editor-alert" role="alert">
           <span>检测到版本冲突，请比较本地文本或重新加载最新版本。</span>
-          <button type="button" onClick={() => void reload()}>
-            重新加载服务器版本
+          <button type="button" disabled={reloading} onClick={() => void reload()}>
+            {reloading ? "正在加载…" : "重新加载服务器版本"}
+          </button>
+        </div>
+      )}
+
+      {recoveryDeferred && (
+        <div className="editor-alert recovery-deferred" role="status">
+          <span>恢复草稿仍被安全保留；决定前正文只读。</span>
+          <button type="button" onClick={() => setShowRecovery(true)}>
+            处理恢复草稿
           </button>
         </div>
       )}
@@ -180,6 +261,7 @@ export function ChapterEditor({
         aria-label="章节正文"
         className="chapter-editor__textarea"
         value={body}
+        readOnly={showRecovery || recoveryDeferred}
         onChange={(event) => {
           const nextBody = event.target.value;
           setBody(nextBody);
@@ -191,21 +273,15 @@ export function ChapterEditor({
       />
 
       {showRecovery && (
-        <div className="dialog-backdrop">
-          <section className="project-dialog recovery-dialog" role="dialog" aria-label="发现恢复草稿">
-            <p className="eyebrow">安全恢复</p>
-            <h2>发现恢复草稿</h2>
-            <p>上次关闭前有一份尚未正式提交的文本。请选择使用哪一版继续。</p>
-            <div className="dialog-actions">
-              <button type="button" className="secondary-action" onClick={() => setShowRecovery(false)}>
-                保留已提交版
-              </button>
-              <button type="button" className="primary-action" onClick={restoreDraft}>
-                恢复草稿
-              </button>
-            </div>
-          </section>
-        </div>
+        <RecoveryDialog
+          chapter={chapter}
+          onRestore={restoreDraft}
+          onDiscard={discardDraft}
+          onLater={() => {
+            setShowRecovery(false);
+            setRecoveryDeferred(true);
+          }}
+        />
       )}
     </section>
   );

@@ -14,6 +14,7 @@ type WorkspaceProps = {
   onSelectChapter(id: string): Promise<void>;
   onChapterUpdated(chapter: ChapterView): void;
   onDismissError(): void;
+  onFlushAvailable(flush: (() => Promise<void>) | null): void;
 };
 
 export function Workspace({
@@ -24,6 +25,7 @@ export function Workspace({
   onSelectChapter,
   onChapterUpdated,
   onDismissError,
+  onFlushAvailable,
 }: WorkspaceProps) {
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
@@ -114,6 +116,7 @@ export function Workspace({
             chapter={activeChapter}
             client={client}
             onChapterUpdated={onChapterUpdated}
+            onFlushAvailable={onFlushAvailable}
           />
         ) : (
           <div className="editor-empty">

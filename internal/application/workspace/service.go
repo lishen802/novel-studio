@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -157,12 +158,13 @@ func (s *Service) OpenChapter(ctx context.Context, chapterID string) (ChapterVie
 		return ChapterView{}, fmt.Errorf("open chapter: %w", err)
 	}
 	view := chapterView(chapter)
-	body, baseRevision, found, err := s.active.store.Draft(ctx, chapterID)
+	body, baseRevision, draftUpdatedAt, found, err := s.active.store.Draft(ctx, chapterID)
 	if err != nil {
 		return ChapterView{}, fmt.Errorf("read recovery draft: %w", err)
 	}
 	if found && baseRevision == chapter.Revision {
 		view.RecoveryBody = body
+		view.RecoveryUpdatedAt = draftUpdatedAt.UTC().Format(time.RFC3339Nano)
 		view.HasRecoveryDraft = true
 	}
 	return view, nil
@@ -180,6 +182,22 @@ func (s *Service) SaveDraft(ctx context.Context, chapterID, body string, baseRev
 	}
 	if err := s.active.store.SaveDraft(ctx, chapterID, body, baseRevision); err != nil {
 		return fmt.Errorf("save draft: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) DiscardDraft(ctx context.Context, chapterID string, baseRevision int64) error {
+	if err := s.license.Require(ctx, license.EditManuscript); err != nil {
+		return err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return ErrNoActiveProject
+	}
+	if err := s.active.store.DeleteDraft(ctx, chapterID, baseRevision); err != nil {
+		return fmt.Errorf("discard recovery draft: %w", err)
 	}
 	return nil
 }

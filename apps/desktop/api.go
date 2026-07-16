@@ -14,6 +14,7 @@ type WorkspaceUseCases interface {
 	CreateChapter(context.Context, string) (workspace.ChapterView, error)
 	OpenChapter(context.Context, string) (workspace.ChapterView, error)
 	SaveDraft(context.Context, string, string, int64) error
+	DiscardDraft(context.Context, string, int64) error
 	CommitChapter(context.Context, string, string, int64) (workspace.ChapterView, error)
 	Close() error
 }
@@ -31,9 +32,10 @@ type CreateProjectInput struct {
 }
 
 type DesktopAPI struct {
-	ctx       context.Context
-	workspace WorkspaceUseCases
-	picker    DirectoryPicker
+	ctx           context.Context
+	workspace     WorkspaceUseCases
+	picker        DirectoryPicker
+	completeClose func()
 }
 
 func newDesktopAPI(workspaceService WorkspaceUseCases, picker DirectoryPicker) *DesktopAPI {
@@ -49,45 +51,55 @@ func (a *DesktopAPI) startup(ctx context.Context) {
 }
 
 func (a *DesktopAPI) ChooseProjectParent() (string, error) {
-	return a.picker.ChooseProjectParent(a.ctx)
+	return safeResult(a.picker.ChooseProjectParent(a.ctx))
 }
 
 func (a *DesktopAPI) ChooseProjectToOpen() (string, error) {
-	return a.picker.ChooseProjectToOpen(a.ctx)
+	return safeResult(a.picker.ChooseProjectToOpen(a.ctx))
 }
 
 func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectView, error) {
-	return a.workspace.CreateProject(
+	return safeResult(a.workspace.CreateProject(
 		a.ctx,
 		input.ParentDirectory,
 		input.Title,
 		input.Genre,
 		input.Summary,
-	)
+	))
 }
 
 func (a *DesktopAPI) OpenProject(path string) (workspace.ProjectView, error) {
-	return a.workspace.OpenProject(a.ctx, path)
+	return safeResult(a.workspace.OpenProject(a.ctx, path))
 }
 
 func (a *DesktopAPI) ListChapters() ([]workspace.ChapterView, error) {
-	return a.workspace.ListChapters(a.ctx)
+	return safeResult(a.workspace.ListChapters(a.ctx))
 }
 
 func (a *DesktopAPI) CreateChapter(title string) (workspace.ChapterView, error) {
-	return a.workspace.CreateChapter(a.ctx, title)
+	return safeResult(a.workspace.CreateChapter(a.ctx, title))
 }
 
 func (a *DesktopAPI) OpenChapter(id string) (workspace.ChapterView, error) {
-	return a.workspace.OpenChapter(a.ctx, id)
+	return safeResult(a.workspace.OpenChapter(a.ctx, id))
 }
 
 func (a *DesktopAPI) SaveDraft(id, body string, revision int64) error {
-	return a.workspace.SaveDraft(a.ctx, id, body, revision)
+	return safeDesktopError(a.workspace.SaveDraft(a.ctx, id, body, revision))
+}
+
+func (a *DesktopAPI) DiscardDraft(id string, revision int64) error {
+	return safeDesktopError(a.workspace.DiscardDraft(a.ctx, id, revision))
 }
 
 func (a *DesktopAPI) CommitChapter(id, body string, revision int64) (workspace.ChapterView, error) {
-	return a.workspace.CommitChapter(a.ctx, id, body, revision)
+	return safeResult(a.workspace.CommitChapter(a.ctx, id, body, revision))
+}
+
+func (a *DesktopAPI) CompleteClose() {
+	if a.completeClose != nil {
+		a.completeClose()
+	}
 }
 
 type wailsDirectoryPicker struct{}

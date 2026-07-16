@@ -14,8 +14,6 @@ import (
 	sqlitedriver "modernc.org/sqlite"
 )
 
-var ErrDatabaseCorrupt = errors.New("database is corrupt")
-
 //go:embed migrations/*.sql
 var migrations embed.FS
 
@@ -23,7 +21,17 @@ func OpenDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	if err := ensureDatabaseFile(path); err != nil {
 		return nil, err
 	}
+	return openDatabase(ctx, path)
+}
 
+func OpenExistingDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	if err := probeExistingDatabase(path); err != nil {
+		return nil, err
+	}
+	return openDatabase(ctx, path)
+}
+
+func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, classifyDatabaseError(err)
@@ -45,6 +53,9 @@ func OpenDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
 		return closeWithError(err)
 	}
+	if err := verifySupportedSchema(ctx, db); err != nil {
+		return closeWithError(err)
+	}
 	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		return closeWithError(err)
 	}
@@ -59,6 +70,9 @@ func OpenDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	}
 	if _, err := provider.Up(ctx); err != nil {
 		return closeWithError(fmt.Errorf("migrate database: %w", err))
+	}
+	if err := quickCheck(ctx, db); err != nil {
+		return closeWithError(err)
 	}
 
 	return db, nil
@@ -77,6 +91,13 @@ func classifyDatabaseError(err error) error {
 		return nil
 	}
 
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: %v", ErrDatabaseMissing, err)
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("%w: %v", ErrDatabasePermission, err)
+	}
+
 	var sqliteErr *sqlitedriver.Error
 	if errors.As(err, &sqliteErr) {
 		const (
@@ -93,5 +114,15 @@ func classifyDatabaseError(err error) error {
 	if strings.Contains(message, "not a database") || strings.Contains(message, "database disk image is malformed") {
 		return fmt.Errorf("%w: %v", ErrDatabaseCorrupt, err)
 	}
+	if strings.Contains(message, "permission denied") || strings.Contains(message, "readonly") || strings.Contains(message, "read-only") {
+		return fmt.Errorf("%w: %v", ErrDatabasePermission, err)
+	}
+	if strings.Contains(message, "disk is full") || strings.Contains(message, "disk i/o") || strings.Contains(message, "ioerr") {
+		return fmt.Errorf("%w: %v", ErrDatabaseWrite, err)
+	}
 	return err
+}
+
+func databaseOperationError(operation string, err error) error {
+	return fmt.Errorf("%s: %w", operation, classifyDatabaseError(err))
 }

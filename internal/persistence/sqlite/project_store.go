@@ -44,7 +44,7 @@ func (Factory) Create(ctx context.Context, databasePath string, project projectd
 }
 
 func (Factory) Open(ctx context.Context, databasePath string) (ports.ProjectStore, error) {
-	db, err := OpenDatabase(ctx, databasePath)
+	db, err := OpenExistingDatabase(ctx, databasePath)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (s *Store) Chapter(ctx context.Context, id string) (projectdomain.Chapter, 
 func (s *Store) SaveDraft(ctx context.Context, chapterID, body string, baseRevision int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin draft transaction: %w", err)
+		return databaseOperationError("begin draft transaction", err)
 	}
 	defer tx.Rollback()
 
@@ -145,7 +145,7 @@ func (s *Store) SaveDraft(ctx context.Context, chapterID, body string, baseRevis
 		return fmt.Errorf("%w: %s", ErrChapterMissing, chapterID)
 	}
 	if err != nil {
-		return fmt.Errorf("read chapter revision: %w", err)
+		return databaseOperationError("read chapter revision", err)
 	}
 	if currentRevision != baseRevision {
 		return projectdomain.ErrRevisionConflict
@@ -159,29 +159,60 @@ func (s *Store) SaveDraft(ctx context.Context, chapterID, body string, baseRevis
 			updated_at = excluded.updated_at
 	`, chapterID, body, baseRevision, formatTime(time.Now()))
 	if err != nil {
-		return fmt.Errorf("save chapter draft: %w", err)
+		return databaseOperationError("save chapter draft", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit chapter draft: %w", err)
+		return databaseOperationError("commit chapter draft", err)
 	}
 	return nil
 }
 
-func (s *Store) Draft(ctx context.Context, chapterID string) (string, int64, bool, error) {
+func (s *Store) Draft(ctx context.Context, chapterID string) (string, int64, time.Time, bool, error) {
 	var body string
 	var baseRevision int64
+	var updatedAtValue string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT body, base_revision
+		SELECT body, base_revision, updated_at
 		FROM drafts
 		WHERE chapter_id = ?
-	`, chapterID).Scan(&body, &baseRevision)
+	`, chapterID).Scan(&body, &baseRevision, &updatedAtValue)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", 0, false, nil
+		return "", 0, time.Time{}, false, nil
 	}
 	if err != nil {
-		return "", 0, false, fmt.Errorf("read chapter draft: %w", err)
+		return "", 0, time.Time{}, false, fmt.Errorf("read chapter draft: %w", err)
 	}
-	return body, baseRevision, true, nil
+	updatedAt, err := parseTime(updatedAtValue)
+	if err != nil {
+		return "", 0, time.Time{}, false, fmt.Errorf("parse draft updated_at: %w", err)
+	}
+	return body, baseRevision, updatedAt, true, nil
+}
+
+func (s *Store) DeleteDraft(ctx context.Context, chapterID string, baseRevision int64) error {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM drafts
+		WHERE chapter_id = ? AND base_revision = ?
+	`, chapterID, baseRevision)
+	if err != nil {
+		return databaseOperationError("delete chapter draft", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return databaseOperationError("read deleted draft count", err)
+	}
+	if deleted == 1 {
+		return nil
+	}
+	var currentRevision int64
+	err = s.db.QueryRowContext(ctx, "SELECT base_revision FROM drafts WHERE chapter_id = ?", chapterID).Scan(&currentRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return databaseOperationError("read recovery draft revision", err)
+	}
+	return projectdomain.ErrRevisionConflict
 }
 
 func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdomain.Chapter) error {
@@ -191,7 +222,7 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin chapter transaction: %w", err)
+		return databaseOperationError("begin chapter transaction", err)
 	}
 	defer tx.Rollback()
 
@@ -201,7 +232,7 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 		return fmt.Errorf("%w: %s", ErrChapterMissing, previous.ID)
 	}
 	if err != nil {
-		return fmt.Errorf("read chapter revision: %w", err)
+		return databaseOperationError("read chapter revision", err)
 	}
 	if currentRevision != previous.Revision {
 		return projectdomain.ErrRevisionConflict
@@ -218,7 +249,7 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 		formatTime(chapter.UpdatedAt),
 	)
 	if err != nil {
-		return fmt.Errorf("archive chapter revision: %w", err)
+		return databaseOperationError("archive chapter revision", err)
 	}
 
 	result, err := tx.ExecContext(ctx, `
@@ -234,21 +265,21 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 		previous.Revision,
 	)
 	if err != nil {
-		return fmt.Errorf("update chapter: %w", err)
+		return databaseOperationError("update chapter", err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("read updated chapter count: %w", err)
+		return databaseOperationError("read updated chapter count", err)
 	}
 	if rowsAffected != 1 {
 		return projectdomain.ErrRevisionConflict
 	}
 
 	if _, err := tx.ExecContext(ctx, "DELETE FROM drafts WHERE chapter_id = ?", chapter.ID); err != nil {
-		return fmt.Errorf("clear chapter draft: %w", err)
+		return databaseOperationError("clear chapter draft", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit chapter transaction: %w", err)
+		return databaseOperationError("commit chapter transaction", err)
 	}
 	return nil
 }

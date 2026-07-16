@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -71,12 +72,15 @@ func TestSaveDraftUpsertsWithoutChangingCommittedChapter(t *testing.T) {
 		t.Fatalf("committed chapter = %#v", committed)
 	}
 
-	body, baseRevision, found, err := store.Draft(context.Background(), chapter.ID)
+	body, baseRevision, updatedAt, found, err := store.Draft(context.Background(), chapter.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !found || body != "更新后的未提交草稿" || baseRevision != 1 {
 		t.Fatalf("draft = (%q, %d, %v)", body, baseRevision, found)
+	}
+	if updatedAt.IsZero() || updatedAt.Location() != time.UTC {
+		t.Fatalf("draft updated_at = %v, want non-zero UTC time", updatedAt)
 	}
 }
 
@@ -96,11 +100,65 @@ func TestSaveDraftRejectsStaleRevisionWithoutReplacingRecoveryDraft(t *testing.T
 		t.Fatalf("error = %v, want ErrRevisionConflict", err)
 	}
 
-	body, baseRevision, found, err := store.Draft(context.Background(), chapter.ID)
+	body, baseRevision, _, found, err := store.Draft(context.Background(), chapter.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !found || body != "当前草稿" || baseRevision != chapter.Revision {
+		t.Fatalf("draft = (%q, %d, %v)", body, baseRevision, found)
+	}
+}
+
+func TestDeleteDraftKeepsCommittedChapter(t *testing.T) {
+	store, project := createTestStore(t)
+	defer store.Close()
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	if err := store.CreateChapter(context.Background(), chapter); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveDraft(context.Background(), chapter.ID, "待丢弃草稿", chapter.Revision); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteDraft(context.Background(), chapter.ID, chapter.Revision); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, found, err := store.Draft(context.Background(), chapter.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("draft still exists after explicit deletion")
+	}
+	committed, err := store.Chapter(context.Background(), chapter.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed != chapter {
+		t.Fatalf("committed chapter changed: %#v", committed)
+	}
+}
+
+func TestDeleteDraftRejectsStaleRevisionAndKeepsNewerDraft(t *testing.T) {
+	store, project := createTestStore(t)
+	defer store.Close()
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	if err := store.CreateChapter(context.Background(), chapter); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveDraft(context.Background(), chapter.ID, "新版恢复草稿", chapter.Revision); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.DeleteDraft(context.Background(), chapter.ID, chapter.Revision-1)
+	if !errors.Is(err, projectdomain.ErrRevisionConflict) {
+		t.Fatalf("error = %v, want ErrRevisionConflict", err)
+	}
+	body, baseRevision, _, found, err := store.Draft(context.Background(), chapter.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || body != "新版恢复草稿" || baseRevision != chapter.Revision {
 		t.Fatalf("draft = (%q, %d, %v)", body, baseRevision, found)
 	}
 }
@@ -131,7 +189,7 @@ func TestCommitChapterArchivesPreviousRevisionAndClearsDraft(t *testing.T) {
 	if got.Body != "第一版正文" || got.Revision != 2 {
 		t.Fatalf("chapter = %#v", got)
 	}
-	_, _, found, err := store.Draft(context.Background(), previous.ID)
+	_, _, _, found, err := store.Draft(context.Background(), previous.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,12 +256,68 @@ func TestCommitChapterRollsBackAllWritesOnRevisionConflict(t *testing.T) {
 	if revisionCount != 1 {
 		t.Fatalf("revision count = %d, want 1", revisionCount)
 	}
-	body, baseRevision, found, err := store.Draft(context.Background(), stale.ID)
+	body, baseRevision, _, found, err := store.Draft(context.Background(), stale.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !found || body != "窗口二的草稿" || baseRevision != firstUpdate.Revision {
 		t.Fatalf("draft = (%q, %d, %v)", body, baseRevision, found)
+	}
+}
+
+func TestSaveDraftReturnsWhenAnotherWriterHoldsDatabaseLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.db")
+	project, err := projectdomain.NewProject(
+		"project-1",
+		"长夜织境",
+		"东方奇幻",
+		"",
+		time.Unix(100, 0),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err := (Factory{}).Create(context.Background(), path, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := opened.(*Store)
+	defer store.Close()
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	if err := store.CreateChapter(context.Background(), chapter); err != nil {
+		t.Fatal(err)
+	}
+
+	locker, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	if _, err := locker.Exec("PRAGMA busy_timeout = 0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := locker.Exec("BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Exec("ROLLBACK")
+	if _, err := store.db.Exec("PRAGMA busy_timeout = 100"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	err = store.SaveDraft(context.Background(), chapter.ID, "不会写入的草稿", chapter.Revision)
+	if err == nil {
+		t.Fatal("SaveDraft succeeded while another writer held the lock")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("locked write took %s, want under 1s", elapsed)
+	}
+	_, _, _, found, err := store.Draft(context.Background(), chapter.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("draft was partially written while database was locked")
 	}
 }
 

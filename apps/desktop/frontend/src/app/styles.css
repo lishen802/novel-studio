@@ -545,7 +545,63 @@ button:disabled {
 }
 
 .recovery-dialog {
-  width: min(100%, 560px);
+  width: min(100%, 640px);
+}
+
+.recovery-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.recovery-comparison article {
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(10, 13, 23, 0.24);
+}
+
+.recovery-comparison h3,
+.recovery-comparison p {
+  margin: 0;
+}
+
+.recovery-comparison h3 {
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.recovery-comparison p {
+  padding: 8px 0 14px;
+  color: #979eb0;
+  font-size: 0.78rem;
+}
+
+.recovery-comparison strong {
+  color: #e3bd8b;
+  font-size: 0.82rem;
+}
+
+.recovery-warning {
+  margin: 16px 0 0;
+  padding: 11px 13px;
+  border-radius: 9px;
+  color: #f0b4aa;
+  font-size: 0.82rem;
+  background: rgba(163, 67, 58, 0.13);
+}
+
+.danger-action {
+  color: #fff7ef;
+  background: #9d493f;
+}
+
+.recovery-deferred {
+  border-color: rgba(178, 126, 60, 0.25);
+  color: #765627;
+  background: rgba(222, 174, 105, 0.1);
 }
 
 @media (max-width: 520px) {
@@ -564,6 +620,10 @@ button:disabled {
 
   .welcome-actions button {
     width: 100%;
+  }
+
+  .recovery-comparison {
+    grid-template-columns: 1fr;
   }
 }
 

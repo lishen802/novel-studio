@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   RevisionConflictError,
+  StudioClientError,
   type ChapterView,
   type CreateProjectInput,
   type ProjectView,
@@ -22,7 +23,9 @@ const chapterSchema = z.object({
   position: z.number(),
   body: z.string(),
   revision: z.number(),
+  updatedAt: z.string(),
   recoveryBody: z.string().optional(),
+  recoveryUpdatedAt: z.string().optional(),
   hasRecoveryDraft: z.boolean(),
 });
 
@@ -35,12 +38,23 @@ type NativeDesktopAPI = {
   CreateChapter(title: string): Promise<unknown>;
   OpenChapter(id: string): Promise<unknown>;
   SaveDraft(id: string, body: string, revision: number): Promise<void>;
+  DiscardDraft(id: string, revision: number): Promise<void>;
   CommitChapter(id: string, body: string, revision: number): Promise<unknown>;
+  CompleteClose(): Promise<void>;
+};
+
+type NativeRuntime = {
+  EventsOnMultiple(
+    eventName: string,
+    callback: (...data: unknown[]) => void,
+    maxCallbacks: number,
+  ): () => void;
 };
 
 declare global {
   interface Window {
     go?: { main?: { DesktopAPI?: NativeDesktopAPI } };
+    runtime?: NativeRuntime;
   }
 }
 
@@ -51,22 +65,26 @@ function nativeAPI(): NativeDesktopAPI {
 }
 
 function projectView(value: unknown): ProjectView {
-  return import.meta.env.DEV ? projectSchema.parse(value) : (value as ProjectView);
+  return projectSchema.parse(value);
 }
 
 function chapterView(value: unknown): ChapterView {
-  return import.meta.env.DEV ? chapterSchema.parse(value) : (value as ChapterView);
+  return chapterSchema.parse(value);
 }
 
 function chapterViews(value: unknown): ChapterView[] {
-  return import.meta.env.DEV
-    ? z.array(chapterSchema).parse(value)
-    : (value as ChapterView[]);
+  return z.array(chapterSchema).parse(value);
 }
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
+    const coded = message.match(/([A-Z][A-Z_]+)\|(.+)$/s);
+    if (coded) {
+      const [, code, safeMessage] = coded;
+      if (code === "REVISION_CONFLICT") throw new RevisionConflictError();
+      throw new StudioClientError(code, safeMessage);
+    }
     if (/revision|版本冲突/i.test(message)) throw new RevisionConflictError();
     throw error instanceof Error ? error : new Error("桌面操作失败");
   });
@@ -97,9 +115,23 @@ export const wailsStudioClient: StudioClient = {
   async saveDraft(id, body, revision) {
     await safeCall(() => nativeAPI().SaveDraft(id, body, revision));
   },
+  async discardDraft(id, revision) {
+    await safeCall(() => nativeAPI().DiscardDraft(id, revision));
+  },
   async commitChapter(id, body, revision) {
     return chapterView(
       await safeCall(() => nativeAPI().CommitChapter(id, body, revision)),
     );
+  },
+  onBeforeClose(handler) {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOnMultiple(
+      "app:before-close",
+      () => void handler().catch(() => undefined),
+      -1,
+    );
+  },
+  async completeClose() {
+    await safeCall(() => nativeAPI().CompleteClose());
   },
 };

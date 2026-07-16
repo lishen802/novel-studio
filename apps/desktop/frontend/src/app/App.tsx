@@ -1,5 +1,5 @@
 import { BookOpenText, FolderOpen, Plus } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { Workspace } from "../features/workspace/Workspace";
 import { createWorkspaceStore } from "../features/workspace/workspace-store";
@@ -21,6 +21,38 @@ export function App({
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("");
   const [summary, setSummary] = useState("");
+  const flushActiveChapter = useRef<() => Promise<void>>(async () => undefined);
+  const pendingChapterFlushes = useRef(new Set<Promise<void>>());
+
+  const onFlushAvailable = useCallback(
+    (flush: (() => Promise<void>) | null) => {
+      if (flush) {
+        flushActiveChapter.current = flush;
+        return;
+      }
+
+      const pending = flushActiveChapter.current();
+      pendingChapterFlushes.current.add(pending);
+      void pending.then(
+        () => pendingChapterFlushes.current.delete(pending),
+        () => pendingChapterFlushes.current.delete(pending),
+      );
+      flushActiveChapter.current = async () => undefined;
+    },
+    [],
+  );
+
+  useEffect(
+    () =>
+      client.onBeforeClose(async () => {
+        await flushActiveChapter.current();
+        while (pendingChapterFlushes.current.size > 0) {
+          await Promise.all([...pendingChapterFlushes.current]);
+        }
+        await client.completeClose();
+      }),
+    [client],
+  );
 
   useEffect(() => {
     if (initialProject) void store.getState().loadProject(initialProject);
@@ -42,6 +74,7 @@ export function App({
         onSelectChapter={state.selectChapter}
         onChapterUpdated={state.updateChapter}
         onDismissError={state.clearWorkspaceError}
+        onFlushAvailable={onFlushAvailable}
       />
     );
   }

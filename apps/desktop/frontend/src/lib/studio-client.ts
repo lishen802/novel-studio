@@ -13,7 +13,9 @@ export type ChapterView = {
   position: number;
   body: string;
   revision: number;
+  updatedAt: string;
   recoveryBody?: string;
+  recoveryUpdatedAt?: string;
   hasRecoveryDraft: boolean;
 };
 
@@ -37,16 +39,29 @@ export interface StudioClient {
     body: string,
     baseRevision: number,
   ): Promise<void>;
+  discardDraft(chapterId: string, baseRevision: number): Promise<void>;
   commitChapter(
     chapterId: string,
     body: string,
     baseRevision: number,
   ): Promise<ChapterView>;
+  onBeforeClose(handler: () => Promise<void>): () => void;
+  completeClose(): Promise<void>;
 }
 
 export class RevisionConflictError extends Error {
   constructor() {
     super("章节版本冲突");
     this.name = "RevisionConflictError";
+  }
+}
+
+export class StudioClientError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "StudioClientError";
   }
 }

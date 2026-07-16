@@ -10,6 +10,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
 
 func TestCreateProjectChecksLicenseBeforeCreatingPackage(t *testing.T) {
@@ -94,6 +95,40 @@ func TestOpenProjectClosesPreviousStoreAfterNewStoreIsReady(t *testing.T) {
 	}
 }
 
+func TestOpenProjectFailureKeepsCurrentWorkspaceActive(t *testing.T) {
+	firstProject := mustProject(t, "project-1", "第一本书")
+	firstStore := newFakeStore(firstProject)
+	chapter := mustChapter(t, "chapter-1", firstProject.ID, "第一章", 1)
+	firstStore.chapters[chapter.ID] = chapter
+	service := NewService(
+		&fakePackageManager{
+			createPackage: testPackage("/books/first.zjproject"),
+			openPackage:   testPackage("/books/broken.zjproject"),
+		},
+		&fakeStoreFactory{
+			createStore: firstStore,
+			openErr:     sqlite.ErrDatabaseCorrupt,
+		},
+		&fakeLicense{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"project-1"}},
+	)
+	if _, err := service.CreateProject(context.Background(), "/books", "第一本书", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.OpenProject(context.Background(), "/books/broken.zjproject"); !errors.Is(err, sqlite.ErrDatabaseCorrupt) {
+		t.Fatalf("error = %v, want ErrDatabaseCorrupt", err)
+	}
+	chapters, err := service.ListChapters(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 1 || chapters[0].ID != chapter.ID {
+		t.Fatalf("active workspace changed after failed open: %#v", chapters)
+	}
+}
+
 func TestCreateChapterAssignsNextPosition(t *testing.T) {
 	project := mustProject(t, "project-1", "长夜织境")
 	store := newFakeStore(project)
@@ -165,6 +200,31 @@ func TestOpenChapterReturnsRecoverableDraft(t *testing.T) {
 	}
 	if !view.HasRecoveryDraft || view.RecoveryBody != "恢复草稿" {
 		t.Fatalf("chapter view = %#v", view)
+	}
+	if view.RecoveryUpdatedAt != time.Unix(150, 0).UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("recovery updated at = %q", view.RecoveryUpdatedAt)
+	}
+}
+
+func TestDiscardDraftRequiresEditCapabilityAndKeepsChapter(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeStore(project)
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	store.chapters[chapter.ID] = chapter
+	store.draft = draftRecord{chapterID: chapter.ID, body: "恢复草稿", baseRevision: 1, found: true}
+	service := openTestService(t, store, &sequenceIDs{})
+
+	if err := service.DiscardDraft(context.Background(), chapter.ID, chapter.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if store.deleteDraftID != chapter.ID {
+		t.Fatalf("deleted draft id = %q", store.deleteDraftID)
+	}
+	if store.deleteDraftRevision != chapter.Revision {
+		t.Fatalf("deleted draft revision = %d", store.deleteDraftRevision)
+	}
+	if got := store.chapters[chapter.ID]; got != chapter {
+		t.Fatalf("committed chapter changed: %#v", got)
 	}
 }
 
@@ -284,13 +344,15 @@ type draftRecord struct {
 }
 
 type fakeStore struct {
-	project     projectdomain.Project
-	chapters    map[string]projectdomain.Chapter
-	draft       draftRecord
-	savedDraft  draftRecord
-	commitCalls int
-	closeEvent  string
-	events      *[]string
+	project             projectdomain.Project
+	chapters            map[string]projectdomain.Chapter
+	draft               draftRecord
+	savedDraft          draftRecord
+	commitCalls         int
+	deleteDraftID       string
+	deleteDraftRevision int64
+	closeEvent          string
+	events              *[]string
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -327,11 +389,18 @@ func (f *fakeStore) SaveDraft(_ context.Context, chapterID, body string, baseRev
 	return nil
 }
 
-func (f *fakeStore) Draft(_ context.Context, chapterID string) (string, int64, bool, error) {
+func (f *fakeStore) Draft(_ context.Context, chapterID string) (string, int64, time.Time, bool, error) {
 	if !f.draft.found || f.draft.chapterID != chapterID {
-		return "", 0, false, nil
+		return "", 0, time.Time{}, false, nil
 	}
-	return f.draft.body, f.draft.baseRevision, true, nil
+	return f.draft.body, f.draft.baseRevision, time.Unix(150, 0).UTC(), true, nil
+}
+
+func (f *fakeStore) DeleteDraft(_ context.Context, chapterID string, baseRevision int64) error {
+	f.deleteDraftID = chapterID
+	f.deleteDraftRevision = baseRevision
+	f.draft = draftRecord{}
+	return nil
 }
 
 func (f *fakeStore) CommitChapter(_ context.Context, chapter, _ projectdomain.Chapter) error {

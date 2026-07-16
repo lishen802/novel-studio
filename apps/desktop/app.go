@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
@@ -9,10 +10,16 @@ import (
 	"github.com/lishen802/novel-studio/internal/platform/ids"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 	"github.com/lishen802/novel-studio/internal/platform/timeutil"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const beforeCloseEvent = "app:before-close"
+
 type App struct {
-	api *DesktopAPI
+	api             *DesktopAPI
+	emitBeforeClose func(context.Context)
+	quit            func(context.Context)
+	closeAllowed    atomic.Bool
 }
 
 func newApp() *App {
@@ -23,7 +30,15 @@ func newApp() *App {
 		timeutil.SystemClock{},
 		ids.UUIDGenerator{},
 	)
-	return &App{api: newDesktopAPI(workspaceService, wailsDirectoryPicker{})}
+	app := &App{
+		api: newDesktopAPI(workspaceService, wailsDirectoryPicker{}),
+		emitBeforeClose: func(ctx context.Context) {
+			runtime.EventsEmit(ctx, beforeCloseEvent)
+		},
+		quit: runtime.Quit,
+	}
+	app.api.completeClose = app.completeClose
+	return app
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -32,4 +47,23 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(context.Context) {
 	_ = a.api.workspace.Close()
+}
+
+func (a *App) beforeClose(ctx context.Context) bool {
+	if a.closeAllowed.Load() {
+		return false
+	}
+	if a.emitBeforeClose != nil {
+		a.emitBeforeClose(ctx)
+	}
+	return true
+}
+
+func (a *App) completeClose() {
+	if !a.closeAllowed.CompareAndSwap(false, true) {
+		return
+	}
+	if a.quit != nil {
+		a.quit(a.api.ctx)
+	}
 }

@@ -921,7 +921,7 @@ git commit -m "feat: create projects and edit chapters"
 - Create: `apps/desktop/frontend/src/features/editor/RecoveryDialog.test.tsx`
 - Create: `docs/operations/project-recovery.md`
 
-- [ ] **Step 1: 写端到端式 Go 恢复测试**
+- [x] **Step 1: 写端到端式 Go 恢复测试**
 
 使用真实临时 SQLite 数据库，不使用 fake store：
 
@@ -932,13 +932,13 @@ git commit -m "feat: create projects and edit chapters"
 5. 断言 committed body 是 A，recovery body 是 B，用户选择前两者都未被改写。
 6. 接受恢复后提交 B，revision 递增且 draft 清除。
 
-- [ ] **Step 2: 实现打开时完整性检查**
+- [x] **Step 2: 实现打开时完整性检查**
 
 项目打开顺序：路径/后缀验证 → 只读探测 → SQLite header/open → migration → `PRAGMA quick_check` → 验证唯一 project row → 激活 workspace。任一步失败都不替换当前已打开项目。
 
 错误至少分类为：项目不存在、无权限、数据库损坏、版本过新、revision 冲突、磁盘写入失败。UI 只显示安全摘要和恢复动作，不显示 SQL 或正文。
 
-- [ ] **Step 3: 实现恢复对话框**
+- [x] **Step 3: 实现恢复对话框**
 
 对话框显示已提交版和恢复草稿的时间/字数摘要，提供：
 
@@ -946,7 +946,7 @@ git commit -m "feat: create projects and edit chapters"
 - 保留已提交版：明确确认后删除 draft。
 - 稍后决定：保持 draft，不阻止只读查看。
 
-- [ ] **Step 4: 编写操作文档并验证异常路径**
+- [x] **Step 4: 编写操作文档并验证异常路径**
 
 `project-recovery.md` 说明备份项目包、只读复制、恢复草稿和损坏库处理。测试磁盘只读、目录被删除、数据库锁等待超时和旧窗口 revision 冲突。
 

@@ -121,6 +121,50 @@ describe("ChapterEditor", () => {
     ]);
   });
 
+  it("flushes the old chapter identity when the component is reused", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    let registeredFlush: (() => Promise<void>) | null = null;
+    const onFlushAvailable = (flush: (() => Promise<void>) | null) => {
+      if (flush) {
+        registeredFlush = flush;
+      } else {
+        void registeredFlush?.();
+      }
+    };
+    const view = render(
+      <ChapterEditor
+        chapter={client.createChapterResult}
+        client={client}
+        onFlushAvailable={onFlushAvailable}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "章节正文" }), {
+      target: { value: "第一章切换前文本" },
+    });
+
+    view.rerender(
+      <ChapterEditor
+        chapter={{
+          ...client.createChapterResult,
+          id: "chapter-2",
+          title: "第二章",
+        }}
+        client={client}
+        onFlushAvailable={onFlushAvailable}
+      />,
+    );
+    await act(async () => Promise.resolve());
+
+    expect(client.saveDraftCalls).toContainEqual({
+      chapterId: "chapter-1",
+      body: "第一章切换前文本",
+      baseRevision: 1,
+    });
+    expect(client.saveDraftCalls).not.toContainEqual(
+      expect.objectContaining({ chapterId: "chapter-2", body: "第一章切换前文本" }),
+    );
+  });
+
   it("preserves local text and offers reload after a revision conflict", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.commitChapterError = new RevisionConflictError();
@@ -137,6 +181,67 @@ describe("ChapterEditor", () => {
     ).toBeEnabled();
   });
 
+  it("does not overwrite newer local input while conflict reload is pending", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.commitChapterError = new RevisionConflictError();
+    let finishReload: ((chapter: typeof client.openChapterResult) => void) | undefined;
+    client.openChapter = vi.fn(
+      () =>
+        new Promise<typeof client.openChapterResult>((resolve) => {
+          finishReload = resolve;
+        }),
+    );
+    render(<ChapterEditor chapter={client.createChapterResult} client={client} />);
+    const editor = screen.getByRole("textbox", { name: "章节正文" });
+
+    fireEvent.change(editor, { target: { value: "冲突时的本地文本" } });
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+    fireEvent.click(screen.getByRole("button", { name: "重新加载服务器版本" }));
+    fireEvent.change(editor, { target: { value: "等待重载时继续输入的文本" } });
+    await act(async () => {
+      finishReload?.({
+        ...client.openChapterResult,
+        body: "服务器正文",
+        revision: 2,
+      });
+      await Promise.resolve();
+    });
+
+    expect(editor).toHaveValue("等待重载时继续输入的文本");
+    expect(screen.getByText("版本冲突 · 本地文本已保留")).toBeInTheDocument();
+  });
+
+  it("detects edits that return to the same text while reload is pending", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.commitChapterError = new RevisionConflictError();
+    let finishReload: ((chapter: typeof client.openChapterResult) => void) | undefined;
+    client.openChapter = vi.fn(
+      () =>
+        new Promise<typeof client.openChapterResult>((resolve) => {
+          finishReload = resolve;
+        }),
+    );
+    render(<ChapterEditor chapter={client.createChapterResult} client={client} />);
+    const editor = screen.getByRole("textbox", { name: "章节正文" });
+
+    fireEvent.change(editor, { target: { value: "冲突正文" } });
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+    fireEvent.click(screen.getByRole("button", { name: "重新加载服务器版本" }));
+    fireEvent.change(editor, { target: { value: "临时输入" } });
+    fireEvent.change(editor, { target: { value: "冲突正文" } });
+    await act(async () => {
+      finishReload?.({
+        ...client.openChapterResult,
+        body: "服务器正文",
+        revision: 2,
+      });
+      await Promise.resolve();
+    });
+
+    expect(editor).toHaveValue("冲突正文");
+    expect(screen.getByText("版本冲突 · 本地文本已保留")).toBeInTheDocument();
+  });
+
   it("asks whether to restore a recovery draft", () => {
     const client = FakeStudioClient.withReadyProject();
     const chapter = {
@@ -148,10 +253,60 @@ describe("ChapterEditor", () => {
     render(<ChapterEditor chapter={chapter} client={client} />);
 
     expect(screen.getByRole("dialog", { name: "发现恢复草稿" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveAttribute(
+      "readonly",
+    );
     fireEvent.click(screen.getByRole("button", { name: "恢复草稿" }));
 
     expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveValue(
       "崩溃前草稿",
+    );
+    expect(screen.getByRole("textbox", { name: "章节正文" })).not.toHaveAttribute(
+      "readonly",
+    );
+  });
+
+  it("keeps deferred recovery read-only until the author decides", () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = {
+      ...client.createChapterResult,
+      body: "已提交正文",
+      recoveryBody: "崩溃前草稿",
+      recoveryUpdatedAt: "2026-07-15T08:05:00Z",
+      hasRecoveryDraft: true,
+    };
+    render(<ChapterEditor chapter={chapter} client={client} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "稍后决定" }));
+
+    expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveAttribute(
+      "readonly",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "处理恢复草稿" }));
+    expect(screen.getByRole("dialog", { name: "发现恢复草稿" })).toBeInTheDocument();
+  });
+
+  it("deletes only the recovery draft after explicit confirmation", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = {
+      ...client.createChapterResult,
+      body: "已提交正文",
+      recoveryBody: "将被丢弃的草稿",
+      recoveryUpdatedAt: "2026-07-15T08:05:00Z",
+      hasRecoveryDraft: true,
+    };
+    render(<ChapterEditor chapter={chapter} client={client} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "保留已提交版" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认丢弃恢复草稿" }));
+    await act(async () => Promise.resolve());
+
+    expect(client.discardDraftCalls).toEqual([
+      { chapterId: chapter.id, baseRevision: chapter.revision },
+    ]);
+    expect(screen.queryByRole("dialog", { name: "发现恢复草稿" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "章节正文" })).not.toHaveAttribute(
+      "readonly",
     );
   });
 });
