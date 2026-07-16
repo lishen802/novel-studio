@@ -272,6 +272,14 @@ func (s *Service) CreateLocation(ctx context.Context, input LocationInput) (Loca
 	if err != nil {
 		return LocationView{}, err
 	}
+	status := worlddomain.LocationStatus(input.Status)
+	if status == "" {
+		status = worlddomain.LocationActive
+	}
+	location, err = location.UpdateProfile(region, worlddomain.LocationKind(input.Kind), input.Name, input.Summary, status, s.clock.Now())
+	if err != nil {
+		return LocationView{}, err
+	}
 	if err := s.active.store.CreateLocation(ctx, location); err != nil {
 		return LocationView{}, fmt.Errorf("create location: %w", err)
 	}
@@ -357,6 +365,14 @@ func (s *Service) CreateItem(ctx context.Context, input ItemInput) (ItemView, er
 		return ItemView{}, err
 	}
 	item, err := worlddomain.NewItem(s.ids.NewID(), project.ID, input.Name, input.Summary, s.clock.Now())
+	if err != nil {
+		return ItemView{}, err
+	}
+	status := worlddomain.ItemStatus(input.Status)
+	if status == "" {
+		status = worlddomain.ItemActive
+	}
+	item, err = item.UpdateProfile(input.Name, input.Summary, status, s.clock.Now())
 	if err != nil {
 		return ItemView{}, err
 	}
@@ -447,6 +463,14 @@ func (s *Service) CreateWorldRule(ctx context.Context, input WorldRuleInput) (Wo
 	if err != nil {
 		return WorldRuleView{}, err
 	}
+	status := worlddomain.RuleStatus(input.Status)
+	if status == "" {
+		status = worlddomain.RuleActive
+	}
+	rule, err = rule.UpdateProfile(input.Name, input.Description, worlddomain.RuleScopeType(input.ScopeType), input.ScopeID, status, s.clock.Now())
+	if err != nil {
+		return WorldRuleView{}, err
+	}
 	if err := s.active.store.CreateWorldRule(ctx, rule); err != nil {
 		return WorldRuleView{}, fmt.Errorf("create world rule: %w", err)
 	}
@@ -497,10 +521,18 @@ func (s *Service) CreateForeshadowingHook(ctx context.Context, input Foreshadowi
 	if err != nil {
 		return ForeshadowingHookView{}, err
 	}
-	if err := s.validateHookChaptersLocked(ctx, project.ID, input.PlantedChapterID, input.DueChapterID, ""); err != nil {
+	if err := s.validateHookChaptersLocked(ctx, project.ID, input.PlantedChapterID, input.DueChapterID, input.ResolvedChapterID); err != nil {
 		return ForeshadowingHookView{}, err
 	}
 	hook, err := worlddomain.NewForeshadowingHook(s.ids.NewID(), project.ID, input.Title, input.Setup, input.PlantedChapterID, input.DueChapterID, s.clock.Now())
+	if err != nil {
+		return ForeshadowingHookView{}, err
+	}
+	status := worlddomain.HookStatus(input.Status)
+	if status == "" {
+		status = worlddomain.HookPlanted
+	}
+	hook, err = hook.Update(input.Title, input.Setup, input.PlantedChapterID, input.DueChapterID, input.ResolvedChapterID, status, input.Notes, s.clock.Now())
 	if err != nil {
 		return ForeshadowingHookView{}, err
 	}

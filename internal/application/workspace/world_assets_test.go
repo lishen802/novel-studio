@@ -96,6 +96,34 @@ func TestWorldAssetReferencesMustBelongToCurrentProject(t *testing.T) {
 	}
 }
 
+func TestWorldAssetCreationPreservesRequestedState(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeStore(project)
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	store.chapters[chapter.ID] = chapter
+	root, _ := worlddomain.NewWorldRegion("region-root", project.ID, nil, worlddomain.RegionWorld, "镜海世界", worlddomain.DirectionCenter, time.Unix(100, 0))
+	store.worldRegions[root.ID] = root
+	service := openTestService(t, store, &sequenceIDs{ids: []string{"location-1", "item-1", "rule-1", "hook-1"}})
+	ctx := context.Background()
+
+	location, err := service.CreateLocation(ctx, LocationInput{RegionID: root.ID, Kind: "city", Name: "旧都", Status: "destroyed"})
+	if err != nil || location.Status != "destroyed" {
+		t.Fatalf("location = %#v, error = %v", location, err)
+	}
+	item, err := service.CreateItem(ctx, ItemInput{Name: "遗失王冠", Status: "lost"})
+	if err != nil || item.Status != "lost" {
+		t.Fatalf("item = %#v, error = %v", item, err)
+	}
+	rule, err := service.CreateWorldRule(ctx, WorldRuleInput{Name: "旧律", Description: "已经失效", ScopeType: "project", Status: "inactive"})
+	if err != nil || rule.Status != "inactive" {
+		t.Fatalf("rule = %#v, error = %v", rule, err)
+	}
+	hook, err := service.CreateForeshadowingHook(ctx, ForeshadowingHookInput{Title: "旧王之谜", Setup: "残碑记载旧王", PlantedChapterID: chapter.ID, ResolvedChapterID: chapter.ID, Status: "resolved", Notes: "创建时已回收"})
+	if err != nil || hook.Status != "resolved" || hook.ResolvedChapterID != chapter.ID || hook.Notes != "创建时已回收" {
+		t.Fatalf("hook = %#v, error = %v", hook, err)
+	}
+}
+
 func TestWorldAssetUpdatesAndArchivesUseDomainRules(t *testing.T) {
 	project := mustProject(t, "project-1", "长夜织境")
 	store := newFakeStore(project)
