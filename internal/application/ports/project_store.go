@@ -4,8 +4,10 @@ import (
 	"context"
 	"time"
 
+	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
@@ -80,6 +82,29 @@ type ProjectStore interface {
 	ListForeshadowingHooks(ctx context.Context) ([]worlddomain.ForeshadowingHook, error)
 	ForeshadowingHook(ctx context.Context, id string) (worlddomain.ForeshadowingHook, error)
 	ArchiveForeshadowingHook(ctx context.Context, id string, archivedAt time.Time) error
+	CreateStoryEvent(ctx context.Context, event timelinedomain.StoryEvent) error
+	UpdateStoryEvent(ctx context.Context, event timelinedomain.StoryEvent) error
+	ListStoryEvents(ctx context.Context) ([]timelinedomain.StoryEvent, error)
+	StoryEvent(ctx context.Context, id string) (timelinedomain.StoryEvent, error)
+	ArchiveStoryEvent(ctx context.Context, id string, archivedAt time.Time) error
+	UpsertStoryEventLink(ctx context.Context, link timelinedomain.EventLink) error
+	ListStoryEventLinks(ctx context.Context) ([]timelinedomain.EventLink, error)
+	DeleteStoryEventLink(ctx context.Context, eventID string, targetType timelinedomain.EventTargetType, targetID string) error
+	CreateFact(ctx context.Context, fact canondomain.Fact) error
+	UpdateFact(ctx context.Context, fact canondomain.Fact) error
+	ListFacts(ctx context.Context) ([]canondomain.Fact, error)
+	Fact(ctx context.Context, id string) (canondomain.Fact, error)
+	ArchiveFact(ctx context.Context, id string, archivedAt time.Time) error
+	CreateFactEvidence(ctx context.Context, evidence canondomain.Evidence) error
+	ListFactEvidence(ctx context.Context) ([]canondomain.Evidence, error)
+	DeleteFactEvidence(ctx context.Context, id string) error
+	CreateFactScope(ctx context.Context, scope canondomain.Scope) error
+	ListFactScopes(ctx context.Context) ([]canondomain.Scope, error)
+	DeleteFactScope(ctx context.Context, id string) error
+	CreateFactConflict(ctx context.Context, conflict canondomain.Conflict) error
+	UpdateFactConflict(ctx context.Context, conflict canondomain.Conflict) error
+	ListFactConflicts(ctx context.Context) ([]canondomain.Conflict, error)
+	DeleteFactConflict(ctx context.Context, id string) error
 	Close() error
 }
 

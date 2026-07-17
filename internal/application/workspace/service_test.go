@@ -9,8 +9,10 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
@@ -374,6 +376,12 @@ type fakeStore struct {
 	itemTransfers       []worlddomain.ItemTransfer
 	worldRules          map[string]worlddomain.WorldRule
 	foreshadowingHooks  map[string]worlddomain.ForeshadowingHook
+	storyEvents         map[string]timelinedomain.StoryEvent
+	storyEventLinks     map[string]timelinedomain.EventLink
+	facts               map[string]canondomain.Fact
+	factEvidence        map[string]canondomain.Evidence
+	factScopes          map[string]canondomain.Scope
+	factConflicts       map[string]canondomain.Conflict
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -395,6 +403,12 @@ func newFakeStore(project projectdomain.Project) *fakeStore {
 		items:              make(map[string]worlddomain.Item),
 		worldRules:         make(map[string]worlddomain.WorldRule),
 		foreshadowingHooks: make(map[string]worlddomain.ForeshadowingHook),
+		storyEvents:        make(map[string]timelinedomain.StoryEvent),
+		storyEventLinks:    make(map[string]timelinedomain.EventLink),
+		facts:              make(map[string]canondomain.Fact),
+		factEvidence:       make(map[string]canondomain.Evidence),
+		factScopes:         make(map[string]canondomain.Scope),
+		factConflicts:      make(map[string]canondomain.Conflict),
 	}
 }
 
@@ -838,6 +852,137 @@ func (f *fakeStore) ArchiveForeshadowingHook(_ context.Context, id string, archi
 	}
 	hook.DeletedAt = &archivedAt
 	f.foreshadowingHooks[id] = hook
+	return nil
+}
+
+func (f *fakeStore) CreateStoryEvent(_ context.Context, event timelinedomain.StoryEvent) error {
+	f.storyEvents[event.ID] = event
+	return nil
+}
+func (f *fakeStore) UpdateStoryEvent(_ context.Context, event timelinedomain.StoryEvent) error {
+	f.storyEvents[event.ID] = event
+	return nil
+}
+func (f *fakeStore) ListStoryEvents(context.Context) ([]timelinedomain.StoryEvent, error) {
+	result := make([]timelinedomain.StoryEvent, 0)
+	for _, value := range f.storyEvents {
+		if value.DeletedAt == nil {
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+func (f *fakeStore) StoryEvent(_ context.Context, id string) (timelinedomain.StoryEvent, error) {
+	value, ok := f.storyEvents[id]
+	if !ok || value.DeletedAt != nil {
+		return timelinedomain.StoryEvent{}, errors.New("story event missing")
+	}
+	return value, nil
+}
+func (f *fakeStore) ArchiveStoryEvent(_ context.Context, id string, at time.Time) error {
+	value, ok := f.storyEvents[id]
+	if !ok {
+		return errors.New("story event missing")
+	}
+	value.DeletedAt = &at
+	f.storyEvents[id] = value
+	return nil
+}
+func (f *fakeStore) UpsertStoryEventLink(_ context.Context, link timelinedomain.EventLink) error {
+	f.storyEventLinks[link.EventID+"\x00"+string(link.TargetType)+"\x00"+link.TargetID] = link
+	return nil
+}
+func (f *fakeStore) ListStoryEventLinks(context.Context) ([]timelinedomain.EventLink, error) {
+	result := make([]timelinedomain.EventLink, 0, len(f.storyEventLinks))
+	for _, value := range f.storyEventLinks {
+		result = append(result, value)
+	}
+	return result, nil
+}
+func (f *fakeStore) DeleteStoryEventLink(_ context.Context, eventID string, targetType timelinedomain.EventTargetType, targetID string) error {
+	delete(f.storyEventLinks, eventID+"\x00"+string(targetType)+"\x00"+targetID)
+	return nil
+}
+func (f *fakeStore) CreateFact(_ context.Context, fact canondomain.Fact) error {
+	f.facts[fact.ID] = fact
+	return nil
+}
+func (f *fakeStore) UpdateFact(_ context.Context, fact canondomain.Fact) error {
+	f.facts[fact.ID] = fact
+	return nil
+}
+func (f *fakeStore) ListFacts(context.Context) ([]canondomain.Fact, error) {
+	result := make([]canondomain.Fact, 0)
+	for _, value := range f.facts {
+		if value.DeletedAt == nil {
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+func (f *fakeStore) Fact(_ context.Context, id string) (canondomain.Fact, error) {
+	value, ok := f.facts[id]
+	if !ok || value.DeletedAt != nil {
+		return canondomain.Fact{}, errors.New("fact missing")
+	}
+	return value, nil
+}
+func (f *fakeStore) ArchiveFact(_ context.Context, id string, at time.Time) error {
+	value, ok := f.facts[id]
+	if !ok {
+		return errors.New("fact missing")
+	}
+	value.DeletedAt = &at
+	f.facts[id] = value
+	return nil
+}
+func (f *fakeStore) CreateFactEvidence(_ context.Context, value canondomain.Evidence) error {
+	f.factEvidence[value.ID] = value
+	return nil
+}
+func (f *fakeStore) ListFactEvidence(context.Context) ([]canondomain.Evidence, error) {
+	result := make([]canondomain.Evidence, 0, len(f.factEvidence))
+	for _, value := range f.factEvidence {
+		result = append(result, value)
+	}
+	return result, nil
+}
+func (f *fakeStore) DeleteFactEvidence(_ context.Context, id string) error {
+	delete(f.factEvidence, id)
+	return nil
+}
+func (f *fakeStore) CreateFactScope(_ context.Context, value canondomain.Scope) error {
+	f.factScopes[value.ID] = value
+	return nil
+}
+func (f *fakeStore) ListFactScopes(context.Context) ([]canondomain.Scope, error) {
+	result := make([]canondomain.Scope, 0, len(f.factScopes))
+	for _, value := range f.factScopes {
+		result = append(result, value)
+	}
+	return result, nil
+}
+func (f *fakeStore) DeleteFactScope(_ context.Context, id string) error {
+	delete(f.factScopes, id)
+	return nil
+}
+func (f *fakeStore) CreateFactConflict(_ context.Context, value canondomain.Conflict) error {
+	f.factConflicts[value.ID] = value
+	return nil
+}
+func (f *fakeStore) UpdateFactConflict(_ context.Context, value canondomain.Conflict) error {
+	f.factConflicts[value.ID] = value
+	return nil
+}
+func (f *fakeStore) ListFactConflicts(context.Context) ([]canondomain.Conflict, error) {
+	result := make([]canondomain.Conflict, 0, len(f.factConflicts))
+	for _, value := range f.factConflicts {
+		result = append(result, value)
+	}
+	return result, nil
+}
+func (f *fakeStore) DeleteFactConflict(_ context.Context, id string) error {
+	delete(f.factConflicts, id)
 	return nil
 }
 
