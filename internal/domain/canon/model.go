@@ -121,11 +121,11 @@ type Evidence struct {
 	Quote           string
 	StartOffset     int
 	EndOffset       int
-	ChapterRevision int
+	ChapterRevision int64
 	CreatedAt       time.Time
 }
 
-func NewEvidence(id, projectID, factID, chapterID, quote string, startOffset, endOffset, chapterRevision int, now time.Time) (Evidence, error) {
+func NewEvidence(id, projectID, factID, chapterID, quote string, startOffset, endOffset int, chapterRevision int64, now time.Time) (Evidence, error) {
 	id, projectID, factID, chapterID, quote = strings.TrimSpace(id), strings.TrimSpace(projectID), strings.TrimSpace(factID), strings.TrimSpace(chapterID), strings.TrimSpace(quote)
 	if id == "" || projectID == "" || factID == "" || chapterID == "" || quote == "" {
 		return Evidence{}, ErrBlankValue
