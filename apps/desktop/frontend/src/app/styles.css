@@ -1577,15 +1577,22 @@ button:disabled {
   font-size: 0.82rem;
 }
 
-.continuity-toolbar select,
+.continuity-toolbar select {
+  padding: 10px 11px;
+  border: 1px solid rgba(77, 59, 40, 0.15);
+  border-radius: 9px;
+  color: #4c443c;
+  background: #fffdf9;
+}
+
 .continuity-dialog input,
 .continuity-dialog select,
 .continuity-dialog textarea {
   padding: 10px 11px;
   border: 1px solid rgba(77, 59, 40, 0.15);
   border-radius: 9px;
-  color: #4c443c;
-  background: #fffdf9;
+  color: var(--continuity-dialog-field-text);
+  background: var(--continuity-dialog-field-surface);
 }
 
 .timeline-list {
@@ -1785,23 +1792,72 @@ button:disabled {
   color: #9a8e81;
 }
 .continuity-dialog {
+  --continuity-dialog-surface: #faf5ed;
+  --continuity-dialog-text: #4d443c;
+  --continuity-dialog-accent-text: #8a5c2b;
+  --continuity-dialog-label: #5f5449;
+  --continuity-dialog-muted-text: #71665c;
+  --continuity-dialog-field-surface: #fffdf9;
+  --continuity-dialog-field-text: #3f3832;
+  --continuity-dialog-placeholder: #756b61;
+  --continuity-dialog-secondary-surface: #e6d9c8;
+  --continuity-dialog-secondary-text: #44382f;
+  --continuity-dialog-primary-surface: #e8bd86;
+  --continuity-dialog-primary-text: #28231f;
   max-height: min(86vh, 780px);
   overflow-y: auto;
-  color: #4d443c;
-  background: #faf5ed;
+  color: var(--continuity-dialog-text);
+  background: var(--continuity-dialog-surface);
+}
+.continuity-dialog label {
+  color: var(--continuity-dialog-label);
+}
+.continuity-dialog .eyebrow {
+  color: var(--continuity-dialog-accent-text);
 }
 .continuity-dialog form > label {
   display: grid;
   gap: 7px;
   margin-top: 12px;
 }
+.continuity-dialog input::placeholder,
+.continuity-dialog textarea::placeholder {
+  color: var(--continuity-dialog-placeholder);
+  opacity: 1;
+}
+.continuity-dialog input:focus,
+.continuity-dialog select:focus,
+.continuity-dialog textarea:focus {
+  border-color: #a66d35;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(166, 109, 53, 0.18);
+}
 .continuity-dialog textarea {
   min-height: 84px;
   resize: vertical;
 }
+.continuity-dialog .secondary-action {
+  border: 1px solid #cdbca8;
+  color: var(--continuity-dialog-secondary-text);
+  background: var(--continuity-dialog-secondary-surface);
+}
+.continuity-dialog .secondary-action:hover {
+  background: #dcccc0;
+}
+.continuity-dialog .primary-action {
+  color: var(--continuity-dialog-primary-text);
+  background: var(--continuity-dialog-primary-surface);
+}
+.continuity-dialog .primary-action:hover {
+  background: #dfad6d;
+}
+.continuity-dialog .dialog-actions button:focus-visible {
+  outline: 3px solid rgba(166, 109, 53, 0.34);
+  outline-offset: 2px;
+}
 .continuity-dialog > p,
 .continuity-dialog form > p:not(.eyebrow) {
-  color: #82776c;
+  color: var(--continuity-dialog-muted-text);
 }
 
 .recovery-deferred {
