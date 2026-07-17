@@ -101,6 +101,13 @@ CREATE TABLE fact_conflicts (
 CREATE INDEX idx_fact_conflicts_status
     ON fact_conflicts(project_id, status, fact_id);
 
+CREATE UNIQUE INDEX idx_fact_conflicts_pair
+    ON fact_conflicts(
+        project_id,
+        CASE WHEN fact_id < other_fact_id THEN fact_id ELSE other_fact_id END,
+        CASE WHEN fact_id < other_fact_id THEN other_fact_id ELSE fact_id END
+    );
+
 -- +goose Down
 DROP TABLE fact_conflicts;
 DROP TABLE fact_scopes;

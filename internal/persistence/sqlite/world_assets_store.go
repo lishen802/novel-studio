@@ -80,6 +80,11 @@ func (s *Store) ArchiveWorldRegion(ctx context.Context, id string, archivedAt ti
 	`, id, id, id).Scan(&references); err != nil {
 		return databaseOperationError("count world region references", err)
 	}
+	continuityReferences, err := countContinuityTargetReferences(ctx, tx, "region", id)
+	if err != nil {
+		return err
+	}
+	references += continuityReferences
 	if references > 0 {
 		return worlddomain.ErrReferenced
 	}
@@ -163,6 +168,11 @@ func (s *Store) ArchiveLocation(ctx context.Context, id string, archivedAt time.
 	`, id, id, id).Scan(&references); err != nil {
 		return databaseOperationError("count location references", err)
 	}
+	continuityReferences, err := countContinuityTargetReferences(ctx, tx, "location", id)
+	if err != nil {
+		return err
+	}
+	references += continuityReferences
 	if references > 0 {
 		return worlddomain.ErrReferenced
 	}
@@ -326,11 +336,29 @@ func (s *Store) UpdateItem(ctx context.Context, item worlddomain.Item) error {
 }
 
 func (s *Store) ArchiveItem(ctx context.Context, id string, archivedAt time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE items SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin archive item transaction", err)
+	}
+	defer tx.Rollback()
+	references, err := countContinuityTargetReferences(ctx, tx, "item", id)
+	if err != nil {
+		return err
+	}
+	if references > 0 {
+		return worlddomain.ErrReferenced
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE items SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
 	if err != nil {
 		return databaseOperationError("archive item", err)
 	}
-	return requireOneRow(result, "item", id)
+	if err := requireOneRow(result, "item", id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit archive item transaction", err)
+	}
+	return nil
 }
 
 func (s *Store) CreateWorldRule(ctx context.Context, rule worlddomain.WorldRule) error {
@@ -374,11 +402,29 @@ func (s *Store) UpdateWorldRule(ctx context.Context, rule worlddomain.WorldRule)
 }
 
 func (s *Store) ArchiveWorldRule(ctx context.Context, id string, archivedAt time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE world_rules SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin archive world rule transaction", err)
+	}
+	defer tx.Rollback()
+	references, err := countContinuityTargetReferences(ctx, tx, "rule", id)
+	if err != nil {
+		return err
+	}
+	if references > 0 {
+		return worlddomain.ErrReferenced
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE world_rules SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
 	if err != nil {
 		return databaseOperationError("archive world rule", err)
 	}
-	return requireOneRow(result, "world rule", id)
+	if err := requireOneRow(result, "world rule", id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit archive world rule transaction", err)
+	}
+	return nil
 }
 
 func (s *Store) CreateForeshadowingHook(ctx context.Context, hook worlddomain.ForeshadowingHook) error {

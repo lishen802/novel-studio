@@ -130,6 +130,20 @@ describe("ContinuityWorkbench", () => {
     );
   });
 
+  it("does not let generic editing bypass author confirmation provenance", async () => {
+    const user = userEvent.setup();
+    render(
+      <ContinuityWorkbench client={client} chapters={client.chaptersResult} />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "事实库" }));
+    await user.click(screen.getByRole("button", { name: "编辑雾港禁止御剑" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑事实" });
+
+    expect(
+      within(dialog).queryByRole("option", { name: "作者确认" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("records and resolves an explicit fact conflict", async () => {
     client.continuityResult.facts.push({
       ...client.continuityResult.facts[0],
@@ -153,9 +167,9 @@ describe("ContinuityWorkbench", () => {
     );
     await user.type(within(dialog).getByLabelText("冲突原因"), "御剑规则互斥");
     await user.click(within(dialog).getByRole("button", { name: "保存冲突" }));
-    expect(await screen.findByText("御剑规则互斥")).toBeInTheDocument();
+    expect(await screen.findAllByText("御剑规则互斥")).toHaveLength(2);
     await user.click(
-      screen.getByRole("button", { name: "解决冲突御剑规则互斥" }),
+      screen.getByRole("button", { name: "解决冲突雾港禁止御剑御剑规则互斥" }),
     );
     await waitFor(() =>
       expect(client.resolveFactConflictCalls).toEqual(["conflict-1"]),

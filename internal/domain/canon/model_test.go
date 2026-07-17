@@ -21,6 +21,20 @@ func TestModelFactCannotBecomeConfirmedOnCreation(t *testing.T) {
 	}
 }
 
+func TestFactRequiresDedicatedTransitionForAuthorConfirmation(t *testing.T) {
+	fact, err := NewFact("fact-1", "project-1", "雾港禁飞", "rule", OriginModel, StatusAIInferred, .8, "", "", time.Unix(100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fact.Update(fact.Text, fact.Category, StatusAuthorConfirmed, 1, "", "", time.Unix(101, 0)); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("update to confirmed error = %v, want ErrInvalidStatus", err)
+	}
+	confirmed, err := fact.Confirm("author", time.Unix(102, 0))
+	if err != nil || confirmed.ConfirmedBy != "author" {
+		t.Fatalf("confirmed fact = %#v, error = %v", confirmed, err)
+	}
+}
+
 func TestFactValidatesConfidenceAndRequiredValues(t *testing.T) {
 	now := time.Unix(100, 0)
 	if _, err := NewFact("fact-1", "project-1", "事实", "identity", OriginAuthor, StatusAuthorConfirmed, 1.1, "", "", now); !errors.Is(err, ErrInvalidConfidence) {
@@ -44,6 +58,16 @@ func TestEvidenceKeepsRevisionAndTextPosition(t *testing.T) {
 	}
 }
 
+func TestEvidencePreservesExactWhitespace(t *testing.T) {
+	evidence, err := NewEvidence("evidence-1", "project-1", "fact-1", "chapter-1", "\n 原文 ", 2, 7, 1, time.Unix(100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Quote != "\n 原文 " {
+		t.Fatalf("quote = %q, want exact whitespace", evidence.Quote)
+	}
+}
+
 func TestFactScopeAndConflictRequireValidReferences(t *testing.T) {
 	scope, err := NewScope("scope-1", "project-1", "fact-1", ScopeCharacter, "character-1", time.Unix(100, 0))
 	if err != nil || scope.TargetID != "character-1" {
@@ -58,5 +82,15 @@ func TestFactScopeAndConflictRequireValidReferences(t *testing.T) {
 	}
 	if _, err := NewConflict("conflict-2", "project-1", "fact-1", "fact-1", "", time.Now()); !errors.Is(err, ErrInvalidReference) {
 		t.Fatalf("self conflict error = %v", err)
+	}
+}
+
+func TestConflictCanonicalizesTheSymmetricFactPair(t *testing.T) {
+	conflict, err := NewConflict("conflict-1", "project-1", "fact-z", "fact-a", "互斥", time.Unix(100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflict.FactID != "fact-a" || conflict.OtherFactID != "fact-z" {
+		t.Fatalf("pair = (%q, %q), want canonical order", conflict.FactID, conflict.OtherFactID)
 	}
 }

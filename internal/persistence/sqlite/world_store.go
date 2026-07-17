@@ -97,6 +97,11 @@ func (s *Store) ArchiveCharacter(ctx context.Context, id string, archivedAt time
 	if err != nil {
 		return databaseOperationError("count character references", err)
 	}
+	continuityReferences, err := countContinuityTargetReferences(ctx, tx, "character", id)
+	if err != nil {
+		return err
+	}
+	references += continuityReferences
 	if references > 0 {
 		return worlddomain.ErrReferenced
 	}
@@ -175,6 +180,11 @@ func (s *Store) ArchiveFaction(ctx context.Context, id string, archivedAt time.T
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM faction_memberships WHERE faction_id = ?`, id).Scan(&references); err != nil {
 		return databaseOperationError("count faction references", err)
 	}
+	continuityReferences, err := countContinuityTargetReferences(ctx, tx, "faction", id)
+	if err != nil {
+		return err
+	}
+	references += continuityReferences
 	if references > 0 {
 		return worlddomain.ErrReferenced
 	}

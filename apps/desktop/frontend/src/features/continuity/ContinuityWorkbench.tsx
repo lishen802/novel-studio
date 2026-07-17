@@ -722,7 +722,10 @@ export function ContinuityWorkbench({ client, chapters }: Props) {
                     ))}
                 </div>
                 {data.conflicts
-                  .filter((value) => value.factId === item.id)
+                  .filter(
+                    (value) =>
+                      value.factId === item.id || value.otherFactId === item.id,
+                  )
                   .map((value) => (
                     <div
                       className={`fact-conflict ${value.status === "resolved" ? "is-resolved" : ""}`}
@@ -733,7 +736,7 @@ export function ContinuityWorkbench({ client, chapters }: Props) {
                       {value.status === "open" ? (
                         <button
                           type="button"
-                          aria-label={`解决冲突${value.reason}`}
+                          aria-label={`解决冲突${item.text}${value.reason}`}
                           onClick={() =>
                             void mutate(
                               () => client.resolveFactConflict(value.id),
@@ -748,7 +751,7 @@ export function ContinuityWorkbench({ client, chapters }: Props) {
                       )}
                       <button
                         type="button"
-                        aria-label={`删除冲突${value.reason}`}
+                        aria-label={`删除冲突${item.text}${value.reason}`}
                         onClick={() =>
                           void mutate(
                             () => client.deleteFactConflict(value.id),
@@ -941,11 +944,18 @@ export function ContinuityWorkbench({ client, chapters }: Props) {
                     })
                   }
                 >
-                  {Object.entries(factStatusNames).map(([value, name]) => (
-                    <option key={value} value={value}>
-                      {name}
-                    </option>
-                  ))}
+                  {Object.entries(factStatusNames)
+                    .filter(
+                      ([value]) =>
+                        value !== "author_confirmed" ||
+                        !editingId ||
+                        fact.status === "author_confirmed",
+                    )
+                    .map(([value, name]) => (
+                      <option key={value} value={value}>
+                        {name}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label>

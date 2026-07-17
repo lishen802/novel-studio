@@ -110,6 +110,27 @@ func TestContinuityReportsStaleEvidenceAndInvalidIntervals(t *testing.T) {
 	}
 }
 
+func TestContinuityPreservesWhitespaceInExactEvidenceAnchor(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeStore(project)
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	chapter.Body = "序章\n 证据原文 \n尾声"
+	store.chapters[chapter.ID] = chapter
+	service := openTestService(t, store, &sequenceIDs{ids: []string{"fact-1", "evidence-1"}})
+	ctx := context.Background()
+	fact, err := service.CreateFact(ctx, FactInput{Text: "证据存在", Category: "evidence", Origin: "text", Status: "text_evidenced", Confidence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := service.AddFactEvidence(ctx, FactEvidenceInput{FactID: fact.ID, ChapterID: chapter.ID, Quote: "\n 证据原文 ", StartOffset: 2, EndOffset: 9, ChapterRevision: chapter.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Quote != "\n 证据原文 " {
+		t.Fatalf("quote = %q", evidence.Quote)
+	}
+}
+
 func TestContinuityUsesLicenseGate(t *testing.T) {
 	denied := errors.New("license denied")
 	service := NewService(&fakePackageManager{}, &fakeStoreFactory{}, &fakeLicense{err: denied}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{})

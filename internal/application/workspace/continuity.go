@@ -351,7 +351,7 @@ func (s *Service) AddFactEvidence(ctx context.Context, input FactEvidenceInput) 
 		return FactEvidenceView{}, err
 	}
 	runes := []rune(chapter.Body)
-	if input.ChapterRevision != chapter.Revision || input.EndOffset > len(runes) || string(runes[input.StartOffset:input.EndOffset]) != strings.TrimSpace(input.Quote) {
+	if input.ChapterRevision != chapter.Revision || input.EndOffset > len(runes) || string(runes[input.StartOffset:input.EndOffset]) != input.Quote {
 		return FactEvidenceView{}, canondomain.ErrInvalidEvidence
 	}
 	if err := s.active.store.CreateFactEvidence(ctx, evidence); err != nil {

@@ -51,19 +51,51 @@ func (s *Store) UpdateStoryEvent(ctx context.Context, event timelinedomain.Story
 }
 
 func (s *Store) ArchiveStoryEvent(ctx context.Context, id string, archivedAt time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin story event archive transaction", err)
+	}
+	defer tx.Rollback()
 	var references int
-	err := s.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM canon_facts WHERE deleted_at IS NULL AND (valid_from_event_id = ? OR valid_until_event_id = ?)) + (SELECT COUNT(*) FROM story_event_links WHERE event_id = ?)`, id, id, id).Scan(&references)
+	err = tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM canon_facts WHERE deleted_at IS NULL AND (valid_from_event_id = ? OR valid_until_event_id = ?)) + (SELECT COUNT(*) FROM story_event_links WHERE event_id = ?)`, id, id, id).Scan(&references)
 	if err != nil {
 		return databaseOperationError("check story event references", err)
 	}
+	continuityReferences, err := countContinuityTargetReferences(ctx, tx, "event", id)
+	if err != nil {
+		return err
+	}
+	references += continuityReferences
 	if references > 0 {
 		return timelinedomain.ErrReferenced
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE story_events SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
+	result, err := tx.ExecContext(ctx, `UPDATE story_events SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
 	if err != nil {
 		return databaseOperationError("archive story event", err)
 	}
-	return requireOneRow(result, "story event", id)
+	if err := requireOneRow(result, "story event", id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit story event archive transaction", err)
+	}
+	return nil
+}
+
+type continuityReferenceQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func countContinuityTargetReferences(ctx context.Context, queryer continuityReferenceQuerier, targetType, targetID string) (int, error) {
+	var references int
+	err := queryer.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM story_event_links WHERE target_type = ? AND target_id = ?)
+		     + (SELECT COUNT(*) FROM fact_scopes WHERE target_type = ? AND target_id = ?)
+	`, targetType, targetID, targetType, targetID).Scan(&references)
+	if err != nil {
+		return 0, databaseOperationError("count continuity target references", err)
+	}
+	return references, nil
 }
 
 func scanStoryEvent(scanner interface{ Scan(...any) error }) (timelinedomain.StoryEvent, error) {

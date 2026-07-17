@@ -82,6 +82,9 @@ func (f Fact) Update(text, category string, status FactStatus, confidence float6
 	if !validFactStatus(status) {
 		return Fact{}, ErrInvalidStatus
 	}
+	if status == StatusAuthorConfirmed && f.ConfirmedBy == "" {
+		return Fact{}, ErrInvalidStatus
+	}
 	f.Text, f.Category, f.Status, f.Confidence = text, category, status, confidence
 	f.ValidFromEventID, f.ValidUntilEventID = strings.TrimSpace(validFromEventID), strings.TrimSpace(validUntilEventID)
 	if status != StatusAuthorConfirmed {
@@ -126,8 +129,8 @@ type Evidence struct {
 }
 
 func NewEvidence(id, projectID, factID, chapterID, quote string, startOffset, endOffset int, chapterRevision int64, now time.Time) (Evidence, error) {
-	id, projectID, factID, chapterID, quote = strings.TrimSpace(id), strings.TrimSpace(projectID), strings.TrimSpace(factID), strings.TrimSpace(chapterID), strings.TrimSpace(quote)
-	if id == "" || projectID == "" || factID == "" || chapterID == "" || quote == "" {
+	id, projectID, factID, chapterID = strings.TrimSpace(id), strings.TrimSpace(projectID), strings.TrimSpace(factID), strings.TrimSpace(chapterID)
+	if id == "" || projectID == "" || factID == "" || chapterID == "" || strings.TrimSpace(quote) == "" {
 		return Evidence{}, ErrBlankValue
 	}
 	if startOffset < 0 || endOffset <= startOffset || chapterRevision < 1 {
@@ -202,6 +205,9 @@ func NewConflict(id, projectID, factID, otherFactID, reason string, now time.Tim
 	}
 	if factID == otherFactID {
 		return Conflict{}, ErrInvalidReference
+	}
+	if factID > otherFactID {
+		factID, otherFactID = otherFactID, factID
 	}
 	return Conflict{ID: id, ProjectID: projectID, FactID: factID, OtherFactID: otherFactID, Reason: strings.TrimSpace(reason), Status: ConflictOpen, CreatedAt: now.UTC()}, nil
 }
