@@ -1474,6 +1474,336 @@ button:disabled {
   background: #9d493f;
 }
 
+.continuity-workbench {
+  min-height: 100vh;
+  padding: 42px clamp(24px, 3.5vw, 56px) 64px;
+  background:
+    radial-gradient(
+      circle at 100% 0,
+      rgba(188, 151, 105, 0.17),
+      transparent 34%
+    ),
+    #f3eee5;
+}
+
+.continuity-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding-bottom: 25px;
+  border-bottom: 1px solid rgba(70, 55, 39, 0.12);
+}
+
+.continuity-header h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 500;
+}
+
+.continuity-header > div > p:last-child {
+  margin: 10px 0 0;
+  color: #81786e;
+}
+
+.continuity-header > button,
+.fact-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 13px;
+  border: 1px solid rgba(70, 55, 39, 0.12);
+  border-radius: 10px;
+  color: #554b40;
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.continuity-issues {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 17px;
+  padding: 12px 14px;
+  border: 1px solid rgba(163, 104, 38, 0.14);
+  border-radius: 11px;
+  color: #785426;
+  background: rgba(226, 174, 103, 0.12);
+}
+
+.continuity-issues p {
+  margin: 0 0 3px;
+  font-size: 0.84rem;
+}
+
+.continuity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 22px 0;
+}
+
+.continuity-tabs {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(219, 207, 188, 0.58);
+}
+
+.continuity-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 9px;
+  color: #74695d;
+  background: transparent;
+  cursor: pointer;
+}
+
+.continuity-tabs button.is-active {
+  color: #4e4338;
+  background: #fffaf3;
+  box-shadow: 0 5px 14px rgba(73, 54, 35, 0.08);
+}
+
+.continuity-toolbar > label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #766b60;
+  font-size: 0.82rem;
+}
+
+.continuity-toolbar select,
+.continuity-dialog input,
+.continuity-dialog select,
+.continuity-dialog textarea {
+  padding: 10px 11px;
+  border: 1px solid rgba(77, 59, 40, 0.15);
+  border-radius: 9px;
+  color: #4c443c;
+  background: #fffdf9;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 13px;
+}
+.timeline-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+}
+.timeline-marker {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+.timeline-marker::after {
+  position: absolute;
+  top: 40px;
+  bottom: -14px;
+  width: 1px;
+  content: "";
+  background: rgba(128, 99, 65, 0.22);
+}
+.timeline-card:last-child .timeline-marker::after {
+  display: none;
+}
+.timeline-marker span {
+  z-index: 1;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(129, 96, 59, 0.2);
+  border-radius: 50%;
+  color: #8b6641;
+  font-size: 0.75rem;
+  background: #eee1cd;
+}
+.timeline-card__body,
+.fact-card {
+  padding: 19px 20px;
+  border: 1px solid rgba(70, 55, 39, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 253, 249, 0.84);
+  box-shadow: 0 10px 28px rgba(65, 47, 30, 0.05);
+}
+
+.continuity-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.continuity-card-heading h3 {
+  margin: 8px 0 5px;
+  color: #403931;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+.continuity-card-heading p {
+  margin: 0;
+  color: #8a8177;
+  font-size: 0.78rem;
+}
+.continuity-card-heading > div:last-child {
+  display: flex;
+  gap: 5px;
+}
+.continuity-card-heading > div:last-child button,
+.fact-evidence button,
+.fact-conflict button {
+  padding: 7px;
+  border-radius: 8px;
+  color: #74685c;
+  background: #f1e9de;
+  cursor: pointer;
+}
+.continuity-status {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #6a6158;
+  font-size: 0.68rem;
+  background: #eee8df;
+}
+.status-occurred,
+.status-author_confirmed,
+.status-text_evidenced {
+  color: #42614e;
+  background: #e1ede3;
+}
+.status-uncertain,
+.status-ai_inferred {
+  color: #775c29;
+  background: #f2e6c8;
+}
+.status-conflicted,
+.status-rejected {
+  color: #873f38;
+  background: #f2ddda;
+}
+.continuity-causality {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 13px;
+}
+.continuity-causality span {
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: #70665b;
+  font-size: 0.78rem;
+  background: #f5eee4;
+}
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 15px;
+  align-items: start;
+}
+.fact-validity {
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: #76634e;
+  font-size: 0.78rem;
+  background: #f4ecdf;
+}
+.fact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 13px 0;
+}
+.fact-actions button {
+  padding: 7px 9px;
+  font-size: 0.75rem;
+}
+.fact-detail {
+  padding-top: 11px;
+  border-top: 1px solid rgba(78, 58, 39, 0.1);
+}
+.fact-detail h4 {
+  margin: 0 0 8px;
+  color: #6b6055;
+  font-size: 0.78rem;
+}
+.fact-evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 7px;
+  padding: 9px;
+  border-radius: 8px;
+  background: #f6efe5;
+}
+.fact-evidence q {
+  overflow: hidden;
+  color: #50473e;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fact-evidence span {
+  color: #8b8075;
+  font-size: 0.68rem;
+}
+.fact-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: #833e38;
+  font-size: 0.78rem;
+  background: #f3dfdc;
+}
+.fact-conflict span {
+  flex: 1;
+}
+.fact-conflict.is-resolved {
+  color: #5f6e60;
+  background: #e6eee5;
+}
+.fact-conflict em {
+  font-style: normal;
+}
+.continuity-empty {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  color: #9a8e81;
+}
+.continuity-dialog {
+  max-height: min(86vh, 780px);
+  overflow-y: auto;
+  color: #4d443c;
+  background: #faf5ed;
+}
+.continuity-dialog form > label {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+.continuity-dialog textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+.continuity-dialog > p,
+.continuity-dialog form > p:not(.eyebrow) {
+  color: #82776c;
+}
+
 .recovery-deferred {
   border-color: rgba(178, 126, 60, 0.25);
   color: #765627;

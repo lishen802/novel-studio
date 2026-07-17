@@ -57,6 +57,23 @@ type WorkspaceUseCases interface {
 	CreateForeshadowingHook(context.Context, workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error)
 	UpdateForeshadowingHook(context.Context, string, workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error)
 	ArchiveForeshadowingHook(context.Context, string) error
+	Continuity(context.Context) (workspace.ContinuityView, error)
+	CreateStoryEvent(context.Context, workspace.StoryEventInput) (workspace.StoryEventView, error)
+	UpdateStoryEvent(context.Context, string, workspace.StoryEventInput) (workspace.StoryEventView, error)
+	ArchiveStoryEvent(context.Context, string) error
+	LinkStoryEvent(context.Context, workspace.StoryEventLinkInput) (workspace.StoryEventLinkView, error)
+	UnlinkStoryEvent(context.Context, string, string, string) error
+	CreateFact(context.Context, workspace.FactInput) (workspace.FactView, error)
+	UpdateFact(context.Context, string, workspace.FactInput) (workspace.FactView, error)
+	ConfirmFact(context.Context, string) (workspace.FactView, error)
+	ArchiveFact(context.Context, string) error
+	AddFactEvidence(context.Context, workspace.FactEvidenceInput) (workspace.FactEvidenceView, error)
+	RemoveFactEvidence(context.Context, string) error
+	AddFactScope(context.Context, workspace.FactScopeInput) (workspace.FactScopeView, error)
+	RemoveFactScope(context.Context, string) error
+	CreateFactConflict(context.Context, workspace.FactConflictInput) (workspace.FactConflictView, error)
+	ResolveFactConflict(context.Context, string) (workspace.FactConflictView, error)
+	DeleteFactConflict(context.Context, string) error
 	Close() error
 }
 
@@ -299,6 +316,74 @@ func (a *DesktopAPI) UpdateForeshadowingHook(id string, input workspace.Foreshad
 
 func (a *DesktopAPI) ArchiveForeshadowingHook(id string) error {
 	return safeDesktopError(a.workspace.ArchiveForeshadowingHook(a.ctx, id))
+}
+
+func (a *DesktopAPI) Continuity() (workspace.ContinuityView, error) {
+	return safeResult(a.workspace.Continuity(a.ctx))
+}
+
+func (a *DesktopAPI) CreateStoryEvent(input workspace.StoryEventInput) (workspace.StoryEventView, error) {
+	return safeResult(a.workspace.CreateStoryEvent(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateStoryEvent(id string, input workspace.StoryEventInput) (workspace.StoryEventView, error) {
+	return safeResult(a.workspace.UpdateStoryEvent(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ArchiveStoryEvent(id string) error {
+	return safeDesktopError(a.workspace.ArchiveStoryEvent(a.ctx, id))
+}
+
+func (a *DesktopAPI) LinkStoryEvent(input workspace.StoryEventLinkInput) (workspace.StoryEventLinkView, error) {
+	return safeResult(a.workspace.LinkStoryEvent(a.ctx, input))
+}
+
+func (a *DesktopAPI) UnlinkStoryEvent(eventID, targetType, targetID string) error {
+	return safeDesktopError(a.workspace.UnlinkStoryEvent(a.ctx, eventID, targetType, targetID))
+}
+
+func (a *DesktopAPI) CreateFact(input workspace.FactInput) (workspace.FactView, error) {
+	return safeResult(a.workspace.CreateFact(a.ctx, input))
+}
+
+func (a *DesktopAPI) UpdateFact(id string, input workspace.FactInput) (workspace.FactView, error) {
+	return safeResult(a.workspace.UpdateFact(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) ConfirmFact(id string) (workspace.FactView, error) {
+	return safeResult(a.workspace.ConfirmFact(a.ctx, id))
+}
+
+func (a *DesktopAPI) ArchiveFact(id string) error {
+	return safeDesktopError(a.workspace.ArchiveFact(a.ctx, id))
+}
+
+func (a *DesktopAPI) AddFactEvidence(input workspace.FactEvidenceInput) (workspace.FactEvidenceView, error) {
+	return safeResult(a.workspace.AddFactEvidence(a.ctx, input))
+}
+
+func (a *DesktopAPI) RemoveFactEvidence(id string) error {
+	return safeDesktopError(a.workspace.RemoveFactEvidence(a.ctx, id))
+}
+
+func (a *DesktopAPI) AddFactScope(input workspace.FactScopeInput) (workspace.FactScopeView, error) {
+	return safeResult(a.workspace.AddFactScope(a.ctx, input))
+}
+
+func (a *DesktopAPI) RemoveFactScope(id string) error {
+	return safeDesktopError(a.workspace.RemoveFactScope(a.ctx, id))
+}
+
+func (a *DesktopAPI) CreateFactConflict(input workspace.FactConflictInput) (workspace.FactConflictView, error) {
+	return safeResult(a.workspace.CreateFactConflict(a.ctx, input))
+}
+
+func (a *DesktopAPI) ResolveFactConflict(id string) (workspace.FactConflictView, error) {
+	return safeResult(a.workspace.ResolveFactConflict(a.ctx, id))
+}
+
+func (a *DesktopAPI) DeleteFactConflict(id string) error {
+	return safeDesktopError(a.workspace.DeleteFactConflict(a.ctx, id))
 }
 
 func (a *DesktopAPI) CompleteClose() {

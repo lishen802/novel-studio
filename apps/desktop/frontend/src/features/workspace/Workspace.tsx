@@ -1,5 +1,6 @@
 import {
   BookOpenText,
+  Clock3,
   FilePlus2,
   Feather,
   Globe2,
@@ -11,6 +12,7 @@ import { useState, type FormEvent } from "react";
 import type { ChapterView, StudioClient } from "../../lib/studio-client";
 import { ChapterEditor } from "../editor/ChapterEditor";
 import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
+import { ContinuityWorkbench } from "../continuity/ContinuityWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import type { WorkspaceStatus } from "./workspace-store";
@@ -42,7 +44,7 @@ export function Workspace({
   const [chapterTitle, setChapterTitle] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
   const [activeView, setActiveView] = useState<
-    "manuscript" | "story" | "world" | "assets"
+    "manuscript" | "story" | "world" | "assets" | "continuity"
   >("manuscript");
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
@@ -118,6 +120,14 @@ export function Workspace({
             <Globe2 size={17} />
             世界设定
           </button>
+          <button
+            type="button"
+            className={activeView === "continuity" ? "is-active" : ""}
+            onClick={() => setActiveView("continuity")}
+          >
+            <Clock3 size={17} />
+            时间线与事实
+          </button>
         </nav>
 
         {activeView === "manuscript" && (
@@ -186,6 +196,8 @@ export function Workspace({
           <StoryWorldWorkbench client={client} chapters={workspace.chapters} />
         ) : activeView === "assets" ? (
           <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
+        ) : activeView === "continuity" ? (
+          <ContinuityWorkbench client={client} chapters={workspace.chapters} />
         ) : activeChapter ? (
           <ChapterEditor
             key={activeChapter.id}

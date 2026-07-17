@@ -41,6 +41,20 @@ import {
   type WorldRuleView,
   type ForeshadowingHookInput,
   type ForeshadowingHookView,
+  type ContinuityView,
+  type StoryEventInput,
+  type StoryEventView,
+  type StoryEventLinkInput,
+  type StoryEventLinkView,
+  type EventTargetType,
+  type FactInput,
+  type FactView,
+  type FactEvidenceInput,
+  type FactEvidenceView,
+  type FactScopeInput,
+  type FactScopeView,
+  type FactConflictInput,
+  type FactConflictView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -288,6 +302,80 @@ const worldAssetsSchema = z.object({
   hooks: z.array(foreshadowingHookSchema),
   consistencyIssues: z.array(consistencyIssueSchema),
 });
+const storyEventSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  cause: z.string(),
+  result: z.string(),
+  storyTime: z.string(),
+  storyOrder: z.number(),
+  narrativeOrder: z.number(),
+  status: z.enum(["planned", "occurred", "uncertain"]),
+});
+const storyEventLinkSchema = z.object({
+  eventId: z.string(),
+  targetType: z.enum(["chapter", "character", "faction", "location", "item"]),
+  targetId: z.string(),
+  role: z.string(),
+});
+const factSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  category: z.string(),
+  origin: z.enum(["author", "text", "model", "rule"]),
+  status: z.enum([
+    "author_confirmed",
+    "text_evidenced",
+    "ai_inferred",
+    "conflicted",
+    "rejected",
+  ]),
+  confidence: z.number(),
+  validFromEventId: z.string(),
+  validUntilEventId: z.string(),
+  createdBy: z.string(),
+  confirmedBy: z.string(),
+});
+const factEvidenceSchema = z.object({
+  id: z.string(),
+  factId: z.string(),
+  chapterId: z.string(),
+  quote: z.string(),
+  startOffset: z.number(),
+  endOffset: z.number(),
+  chapterRevision: z.number(),
+});
+const factScopeSchema = z.object({
+  id: z.string(),
+  factId: z.string(),
+  targetType: z.enum([
+    "character",
+    "faction",
+    "location",
+    "item",
+    "region",
+    "rule",
+    "event",
+  ]),
+  targetId: z.string(),
+});
+const factConflictSchema = z.object({
+  id: z.string(),
+  factId: z.string(),
+  otherFactId: z.string(),
+  reason: z.string(),
+  status: z.enum(["open", "resolved"]),
+});
+const continuitySchema = z.object({
+  events: z.array(storyEventSchema),
+  eventLinks: z.array(storyEventLinkSchema),
+  facts: z.array(factSchema),
+  evidence: z.array(factEvidenceSchema),
+  scopes: z.array(factScopeSchema),
+  conflicts: z.array(factConflictSchema),
+  consistencyIssues: z.array(consistencyIssueSchema),
+});
 
 type NativeDesktopAPI = {
   ChooseProjectParent(): Promise<string>;
@@ -354,6 +442,27 @@ type NativeDesktopAPI = {
     input: ForeshadowingHookInput,
   ): Promise<unknown>;
   ArchiveForeshadowingHook(id: string): Promise<void>;
+  Continuity(): Promise<unknown>;
+  CreateStoryEvent(input: StoryEventInput): Promise<unknown>;
+  UpdateStoryEvent(id: string, input: StoryEventInput): Promise<unknown>;
+  ArchiveStoryEvent(id: string): Promise<void>;
+  LinkStoryEvent(input: StoryEventLinkInput): Promise<unknown>;
+  UnlinkStoryEvent(
+    eventId: string,
+    targetType: EventTargetType,
+    targetId: string,
+  ): Promise<void>;
+  CreateFact(input: FactInput): Promise<unknown>;
+  UpdateFact(id: string, input: FactInput): Promise<unknown>;
+  ConfirmFact(id: string): Promise<unknown>;
+  ArchiveFact(id: string): Promise<void>;
+  AddFactEvidence(input: FactEvidenceInput): Promise<unknown>;
+  RemoveFactEvidence(id: string): Promise<void>;
+  AddFactScope(input: FactScopeInput): Promise<unknown>;
+  RemoveFactScope(id: string): Promise<void>;
+  CreateFactConflict(input: FactConflictInput): Promise<unknown>;
+  ResolveFactConflict(id: string): Promise<unknown>;
+  DeleteFactConflict(id: string): Promise<void>;
   CompleteClose(): Promise<void>;
 };
 
@@ -424,6 +533,19 @@ const worldRuleView = (value: unknown): WorldRuleView =>
   worldRuleSchema.parse(value);
 const foreshadowingHookView = (value: unknown): ForeshadowingHookView =>
   foreshadowingHookSchema.parse(value);
+const continuityView = (value: unknown): ContinuityView =>
+  continuitySchema.parse(value);
+const storyEventView = (value: unknown): StoryEventView =>
+  storyEventSchema.parse(value);
+const storyEventLinkView = (value: unknown): StoryEventLinkView =>
+  storyEventLinkSchema.parse(value);
+const factView = (value: unknown): FactView => factSchema.parse(value);
+const factEvidenceView = (value: unknown): FactEvidenceView =>
+  factEvidenceSchema.parse(value);
+const factScopeView = (value: unknown): FactScopeView =>
+  factScopeSchema.parse(value);
+const factConflictView = (value: unknown): FactConflictView =>
+  factConflictSchema.parse(value);
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
@@ -640,6 +762,71 @@ export const wailsStudioClient: StudioClient = {
   },
   async archiveForeshadowingHook(id) {
     await safeCall(() => nativeAPI().ArchiveForeshadowingHook(id));
+  },
+  async continuity() {
+    return continuityView(await safeCall(() => nativeAPI().Continuity()));
+  },
+  async createStoryEvent(input) {
+    return storyEventView(
+      await safeCall(() => nativeAPI().CreateStoryEvent(input)),
+    );
+  },
+  async updateStoryEvent(id, input) {
+    return storyEventView(
+      await safeCall(() => nativeAPI().UpdateStoryEvent(id, input)),
+    );
+  },
+  async archiveStoryEvent(id) {
+    await safeCall(() => nativeAPI().ArchiveStoryEvent(id));
+  },
+  async linkStoryEvent(input) {
+    return storyEventLinkView(
+      await safeCall(() => nativeAPI().LinkStoryEvent(input)),
+    );
+  },
+  async unlinkStoryEvent(eventId, targetType, targetId) {
+    await safeCall(() =>
+      nativeAPI().UnlinkStoryEvent(eventId, targetType, targetId),
+    );
+  },
+  async createFact(input) {
+    return factView(await safeCall(() => nativeAPI().CreateFact(input)));
+  },
+  async updateFact(id, input) {
+    return factView(await safeCall(() => nativeAPI().UpdateFact(id, input)));
+  },
+  async confirmFact(id) {
+    return factView(await safeCall(() => nativeAPI().ConfirmFact(id)));
+  },
+  async archiveFact(id) {
+    await safeCall(() => nativeAPI().ArchiveFact(id));
+  },
+  async addFactEvidence(input) {
+    return factEvidenceView(
+      await safeCall(() => nativeAPI().AddFactEvidence(input)),
+    );
+  },
+  async removeFactEvidence(id) {
+    await safeCall(() => nativeAPI().RemoveFactEvidence(id));
+  },
+  async addFactScope(input) {
+    return factScopeView(await safeCall(() => nativeAPI().AddFactScope(input)));
+  },
+  async removeFactScope(id) {
+    await safeCall(() => nativeAPI().RemoveFactScope(id));
+  },
+  async createFactConflict(input) {
+    return factConflictView(
+      await safeCall(() => nativeAPI().CreateFactConflict(input)),
+    );
+  },
+  async resolveFactConflict(id) {
+    return factConflictView(
+      await safeCall(() => nativeAPI().ResolveFactConflict(id)),
+    );
+  },
+  async deleteFactConflict(id) {
+    await safeCall(() => nativeAPI().DeleteFactConflict(id));
   },
   onBeforeClose(handler) {
     if (!window.runtime) return () => undefined;

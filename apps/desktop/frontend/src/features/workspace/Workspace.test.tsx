@@ -111,6 +111,20 @@ describe("Workspace", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens timeline and canon controls from the product navigation", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "时间线与事实" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "时间线与事实" }),
+    ).toBeInTheDocument();
+  });
+
   it("opens an existing project selected by the native client", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.projectToOpen = "/books/长夜织境.zjproject";

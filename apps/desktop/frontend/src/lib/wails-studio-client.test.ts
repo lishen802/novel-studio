@@ -95,6 +95,31 @@ function installNative(overrides: Record<string, unknown> = {}) {
     CreateForeshadowingHook: vi.fn(),
     UpdateForeshadowingHook: vi.fn(),
     ArchiveForeshadowingHook: vi.fn(async () => undefined),
+    Continuity: vi.fn(async () => ({
+      events: [],
+      eventLinks: [],
+      facts: [],
+      evidence: [],
+      scopes: [],
+      conflicts: [],
+      consistencyIssues: [],
+    })),
+    CreateStoryEvent: vi.fn(),
+    UpdateStoryEvent: vi.fn(),
+    ArchiveStoryEvent: vi.fn(async () => undefined),
+    LinkStoryEvent: vi.fn(),
+    UnlinkStoryEvent: vi.fn(async () => undefined),
+    CreateFact: vi.fn(),
+    UpdateFact: vi.fn(),
+    ConfirmFact: vi.fn(),
+    ArchiveFact: vi.fn(async () => undefined),
+    AddFactEvidence: vi.fn(),
+    RemoveFactEvidence: vi.fn(async () => undefined),
+    AddFactScope: vi.fn(),
+    RemoveFactScope: vi.fn(async () => undefined),
+    CreateFactConflict: vi.fn(),
+    ResolveFactConflict: vi.fn(),
+    DeleteFactConflict: vi.fn(async () => undefined),
     CompleteClose: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -382,6 +407,67 @@ describe("wailsStudioClient", () => {
 
     expect(api.CreateWorldRegion).toHaveBeenCalledWith(regionInput);
     expect(api.TransferItem).toHaveBeenCalledWith(transferInput);
+  });
+
+  it("validates continuity data and forwards timeline and fact commands", async () => {
+    const event = {
+      id: "event-1",
+      title: "雾港失火",
+      summary: "",
+      cause: "",
+      result: "",
+      storyTime: "初冬",
+      storyOrder: 10,
+      narrativeOrder: 1,
+      status: "occurred",
+    };
+    const fact = {
+      id: "fact-1",
+      text: "雾港禁飞",
+      category: "规则",
+      origin: "model",
+      status: "ai_inferred",
+      confidence: 0.8,
+      validFromEventId: "event-1",
+      validUntilEventId: "",
+      createdBy: "model",
+      confirmedBy: "",
+    };
+    const continuity = {
+      events: [event],
+      eventLinks: [],
+      facts: [fact],
+      evidence: [],
+      scopes: [],
+      conflicts: [],
+      consistencyIssues: [],
+    };
+    const api = installNative({
+      Continuity: vi.fn(async () => continuity),
+      CreateStoryEvent: vi.fn(async () => event),
+      ConfirmFact: vi.fn(async () => ({
+        ...fact,
+        status: "author_confirmed",
+        confirmedBy: "author",
+      })),
+    });
+    const eventInput = {
+      title: event.title,
+      summary: "",
+      cause: "",
+      result: "",
+      storyTime: event.storyTime,
+      storyOrder: 10,
+      narrativeOrder: 1,
+      status: "occurred" as const,
+    };
+
+    await expect(wailsStudioClient.continuity()).resolves.toEqual(continuity);
+    await wailsStudioClient.createStoryEvent(eventInput);
+    await wailsStudioClient.confirmFact("fact-1");
+
+    expect(api.CreateStoryEvent).toHaveBeenCalledWith(eventInput);
+    expect(api.ConfirmFact).toHaveBeenCalledWith("fact-1");
   });
 
   it("registers the native close event and completes the close handshake", async () => {

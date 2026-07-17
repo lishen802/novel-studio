@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/application/workspace"
+	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
@@ -216,6 +218,66 @@ func TestDesktopAPIForwardsWorldAssetOperations(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIForwardsContinuityOperations(t *testing.T) {
+	continuity := workspace.ContinuityView{Events: []workspace.StoryEventView{{ID: "event-1", Title: "雾港失火"}}}
+	workspaces := &fakeWorkspace{continuityResult: continuity}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	got, err := api.Continuity()
+	if err != nil || !reflect.DeepEqual(got, continuity) {
+		t.Fatalf("Continuity = (%#v, %v)", got, err)
+	}
+	eventInput := workspace.StoryEventInput{Title: "雾港失火", StoryOrder: 10, NarrativeOrder: 1, Status: "occurred"}
+	if _, err := api.CreateStoryEvent(eventInput); err != nil || workspaces.storyEventInput != eventInput {
+		t.Fatalf("CreateStoryEvent input = %#v, error = %v", workspaces.storyEventInput, err)
+	}
+	if _, err := api.UpdateStoryEvent("event-1", eventInput); err != nil || workspaces.updatedStoryEventID != "event-1" {
+		t.Fatalf("UpdateStoryEvent id = %q, error = %v", workspaces.updatedStoryEventID, err)
+	}
+	linkInput := workspace.StoryEventLinkInput{EventID: "event-1", TargetType: "chapter", TargetID: "chapter-1", Role: "发生章节"}
+	if _, err := api.LinkStoryEvent(linkInput); err != nil || workspaces.storyEventLinkInput != linkInput {
+		t.Fatalf("LinkStoryEvent input = %#v, error = %v", workspaces.storyEventLinkInput, err)
+	}
+	if err := api.UnlinkStoryEvent("event-1", "chapter", "chapter-1"); err != nil || workspaces.unlinkedStoryEvent != "event-1:chapter:chapter-1" {
+		t.Fatalf("UnlinkStoryEvent = %q, error = %v", workspaces.unlinkedStoryEvent, err)
+	}
+	factInput := workspace.FactInput{Text: "雾港城禁止御剑", Origin: "author", Status: "author_confirmed", Confidence: 1}
+	if _, err := api.CreateFact(factInput); err != nil || workspaces.factInput != factInput {
+		t.Fatalf("CreateFact input = %#v, error = %v", workspaces.factInput, err)
+	}
+	if _, err := api.UpdateFact("fact-1", factInput); err != nil || workspaces.updatedFactID != "fact-1" {
+		t.Fatalf("UpdateFact id = %q, error = %v", workspaces.updatedFactID, err)
+	}
+	if _, err := api.ConfirmFact("fact-1"); err != nil || workspaces.confirmedFactID != "fact-1" {
+		t.Fatalf("ConfirmFact id = %q, error = %v", workspaces.confirmedFactID, err)
+	}
+	evidenceInput := workspace.FactEvidenceInput{FactID: "fact-1", ChapterID: "chapter-1", Quote: "不可御剑", StartOffset: 3, EndOffset: 7, ChapterRevision: 2}
+	if _, err := api.AddFactEvidence(evidenceInput); err != nil || workspaces.factEvidenceInput != evidenceInput {
+		t.Fatalf("AddFactEvidence input = %#v, error = %v", workspaces.factEvidenceInput, err)
+	}
+	if err := api.RemoveFactEvidence("evidence-1"); err != nil || workspaces.removedFactEvidenceID != "evidence-1" {
+		t.Fatalf("RemoveFactEvidence id = %q, error = %v", workspaces.removedFactEvidenceID, err)
+	}
+	scopeInput := workspace.FactScopeInput{FactID: "fact-1", TargetType: "location", TargetID: "location-1"}
+	if _, err := api.AddFactScope(scopeInput); err != nil || workspaces.factScopeInput != scopeInput {
+		t.Fatalf("AddFactScope input = %#v, error = %v", workspaces.factScopeInput, err)
+	}
+	conflictInput := workspace.FactConflictInput{FactID: "fact-1", OtherFactID: "fact-2", Reason: "规则互斥"}
+	if _, err := api.CreateFactConflict(conflictInput); err != nil || workspaces.factConflictInput != conflictInput {
+		t.Fatalf("CreateFactConflict input = %#v, error = %v", workspaces.factConflictInput, err)
+	}
+	if _, err := api.ResolveFactConflict("conflict-1"); err != nil || workspaces.resolvedFactConflictID != "conflict-1" {
+		t.Fatalf("ResolveFactConflict id = %q, error = %v", workspaces.resolvedFactConflictID, err)
+	}
+	if err := api.ArchiveStoryEvent("event-1"); err != nil || workspaces.archivedStoryEventID != "event-1" {
+		t.Fatalf("ArchiveStoryEvent id = %q, error = %v", workspaces.archivedStoryEventID, err)
+	}
+	if err := api.ArchiveFact("fact-1"); err != nil || workspaces.archivedFactID != "fact-1" {
+		t.Fatalf("ArchiveFact id = %q, error = %v", workspaces.archivedFactID, err)
+	}
+}
+
 func TestDesktopAPIDirectoryCancellationReturnsEmpty(t *testing.T) {
 	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
 	api.startup(context.Background())
@@ -319,6 +381,25 @@ func TestSafeDesktopErrorExplainsInvalidWorldAssets(t *testing.T) {
 		}
 		if safe.Code != errorValidationFailed || safe.Message != "故事资料包含无效状态、层级或关联，请检查后重试。" {
 			t.Fatalf("safe error = %#v", safe)
+		}
+	}
+}
+
+func TestSafeDesktopErrorExplainsInvalidContinuityData(t *testing.T) {
+	tests := []error{
+		timelinedomain.ErrInvalidOrder,
+		timelinedomain.ErrInvalidStatus,
+		canondomain.ErrInvalidEvidence,
+		canondomain.ErrInvalidConfidence,
+	}
+	for _, internal := range tests {
+		var safe *desktopError
+		err := safeDesktopError(internal)
+		if !errors.As(err, &safe) || safe.Code != errorValidationFailed {
+			t.Fatalf("error = %#v, want continuity validation error", err)
+		}
+		if safe.Message != "时间线或事实资料包含无效顺序、状态、证据或关联，请检查后重试。" {
+			t.Fatalf("message = %q", safe.Message)
 		}
 	}
 }
@@ -460,6 +541,23 @@ type fakeWorkspace struct {
 	hookInput              workspace.ForeshadowingHookInput
 	updatedHookID          string
 	archivedHookID         string
+	continuityResult       workspace.ContinuityView
+	storyEventInput        workspace.StoryEventInput
+	updatedStoryEventID    string
+	archivedStoryEventID   string
+	storyEventLinkInput    workspace.StoryEventLinkInput
+	unlinkedStoryEvent     string
+	factInput              workspace.FactInput
+	updatedFactID          string
+	confirmedFactID        string
+	archivedFactID         string
+	factEvidenceInput      workspace.FactEvidenceInput
+	removedFactEvidenceID  string
+	factScopeInput         workspace.FactScopeInput
+	removedFactScopeID     string
+	factConflictInput      workspace.FactConflictInput
+	resolvedFactConflictID string
+	deletedFactConflictID  string
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -684,5 +782,72 @@ func (f *fakeWorkspace) UpdateForeshadowingHook(_ context.Context, id string, in
 }
 func (f *fakeWorkspace) ArchiveForeshadowingHook(_ context.Context, id string) error {
 	f.archivedHookID = id
+	return nil
+}
+func (f *fakeWorkspace) Continuity(context.Context) (workspace.ContinuityView, error) {
+	return f.continuityResult, nil
+}
+func (f *fakeWorkspace) CreateStoryEvent(_ context.Context, input workspace.StoryEventInput) (workspace.StoryEventView, error) {
+	f.storyEventInput = input
+	return workspace.StoryEventView{}, nil
+}
+func (f *fakeWorkspace) UpdateStoryEvent(_ context.Context, id string, input workspace.StoryEventInput) (workspace.StoryEventView, error) {
+	f.updatedStoryEventID, f.storyEventInput = id, input
+	return workspace.StoryEventView{}, nil
+}
+func (f *fakeWorkspace) ArchiveStoryEvent(_ context.Context, id string) error {
+	f.archivedStoryEventID = id
+	return nil
+}
+func (f *fakeWorkspace) LinkStoryEvent(_ context.Context, input workspace.StoryEventLinkInput) (workspace.StoryEventLinkView, error) {
+	f.storyEventLinkInput = input
+	return workspace.StoryEventLinkView{}, nil
+}
+func (f *fakeWorkspace) UnlinkStoryEvent(_ context.Context, eventID, targetType, targetID string) error {
+	f.unlinkedStoryEvent = eventID + ":" + targetType + ":" + targetID
+	return nil
+}
+func (f *fakeWorkspace) CreateFact(_ context.Context, input workspace.FactInput) (workspace.FactView, error) {
+	f.factInput = input
+	return workspace.FactView{}, nil
+}
+func (f *fakeWorkspace) UpdateFact(_ context.Context, id string, input workspace.FactInput) (workspace.FactView, error) {
+	f.updatedFactID, f.factInput = id, input
+	return workspace.FactView{}, nil
+}
+func (f *fakeWorkspace) ConfirmFact(_ context.Context, id string) (workspace.FactView, error) {
+	f.confirmedFactID = id
+	return workspace.FactView{}, nil
+}
+func (f *fakeWorkspace) ArchiveFact(_ context.Context, id string) error {
+	f.archivedFactID = id
+	return nil
+}
+func (f *fakeWorkspace) AddFactEvidence(_ context.Context, input workspace.FactEvidenceInput) (workspace.FactEvidenceView, error) {
+	f.factEvidenceInput = input
+	return workspace.FactEvidenceView{}, nil
+}
+func (f *fakeWorkspace) RemoveFactEvidence(_ context.Context, id string) error {
+	f.removedFactEvidenceID = id
+	return nil
+}
+func (f *fakeWorkspace) AddFactScope(_ context.Context, input workspace.FactScopeInput) (workspace.FactScopeView, error) {
+	f.factScopeInput = input
+	return workspace.FactScopeView{}, nil
+}
+func (f *fakeWorkspace) RemoveFactScope(_ context.Context, id string) error {
+	f.removedFactScopeID = id
+	return nil
+}
+func (f *fakeWorkspace) CreateFactConflict(_ context.Context, input workspace.FactConflictInput) (workspace.FactConflictView, error) {
+	f.factConflictInput = input
+	return workspace.FactConflictView{}, nil
+}
+func (f *fakeWorkspace) ResolveFactConflict(_ context.Context, id string) (workspace.FactConflictView, error) {
+	f.resolvedFactConflictID = id
+	return workspace.FactConflictView{}, nil
+}
+func (f *fakeWorkspace) DeleteFactConflict(_ context.Context, id string) error {
+	f.deletedFactConflictID = id
 	return nil
 }

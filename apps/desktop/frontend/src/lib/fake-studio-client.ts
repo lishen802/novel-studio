@@ -38,6 +38,20 @@ import type {
   WorldRegionView,
   WorldRuleInput,
   WorldRuleView,
+  ContinuityView,
+  StoryEventInput,
+  StoryEventView,
+  StoryEventLinkInput,
+  StoryEventLinkView,
+  EventTargetType,
+  FactInput,
+  FactView,
+  FactEvidenceInput,
+  FactEvidenceView,
+  FactScopeInput,
+  FactScopeView,
+  FactConflictInput,
+  FactConflictView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -96,6 +110,15 @@ export class FakeStudioClient implements StudioClient {
     itemTransfers: [],
     rules: [],
     hooks: [],
+    consistencyIssues: [],
+  };
+  continuityResult: ContinuityView = {
+    events: [],
+    eventLinks: [],
+    facts: [],
+    evidence: [],
+    scopes: [],
+    conflicts: [],
     consistencyIssues: [],
   };
 
@@ -162,6 +185,26 @@ export class FakeStudioClient implements StudioClient {
     input: ForeshadowingHookInput;
   }> = [];
   archiveForeshadowingHookCalls: string[] = [];
+  createStoryEventCalls: StoryEventInput[] = [];
+  updateStoryEventCalls: Array<{ id: string; input: StoryEventInput }> = [];
+  archiveStoryEventCalls: string[] = [];
+  linkStoryEventCalls: StoryEventLinkInput[] = [];
+  unlinkStoryEventCalls: Array<{
+    eventId: string;
+    targetType: EventTargetType;
+    targetId: string;
+  }> = [];
+  createFactCalls: FactInput[] = [];
+  updateFactCalls: Array<{ id: string; input: FactInput }> = [];
+  confirmFactCalls: string[] = [];
+  archiveFactCalls: string[] = [];
+  addFactEvidenceCalls: FactEvidenceInput[] = [];
+  removeFactEvidenceCalls: string[] = [];
+  addFactScopeCalls: FactScopeInput[] = [];
+  removeFactScopeCalls: string[] = [];
+  createFactConflictCalls: FactConflictInput[] = [];
+  resolveFactConflictCalls: string[] = [];
+  deleteFactConflictCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -806,6 +849,199 @@ export class FakeStudioClient implements StudioClient {
     this.worldAssetsResult = {
       ...this.worldAssetsResult,
       hooks: this.worldAssetsResult.hooks.filter((item) => item.id !== id),
+    };
+  }
+
+  async continuity(): Promise<ContinuityView> {
+    return this.continuityResult;
+  }
+  async createStoryEvent(input: StoryEventInput): Promise<StoryEventView> {
+    this.createStoryEventCalls.push(input);
+    const event = {
+      ...input,
+      id: `event-${this.continuityResult.events.length + 1}`,
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      events: [...this.continuityResult.events, event],
+    };
+    return event;
+  }
+  async updateStoryEvent(
+    id: string,
+    input: StoryEventInput,
+  ): Promise<StoryEventView> {
+    this.updateStoryEventCalls.push({ id, input });
+    const event = { ...input, id };
+    this.continuityResult = {
+      ...this.continuityResult,
+      events: this.continuityResult.events.map((item) =>
+        item.id === id ? event : item,
+      ),
+    };
+    return event;
+  }
+  async archiveStoryEvent(id: string): Promise<void> {
+    this.archiveStoryEventCalls.push(id);
+    this.continuityResult = {
+      ...this.continuityResult,
+      events: this.continuityResult.events.filter((item) => item.id !== id),
+    };
+  }
+  async linkStoryEvent(
+    input: StoryEventLinkInput,
+  ): Promise<StoryEventLinkView> {
+    this.linkStoryEventCalls.push(input);
+    this.continuityResult = {
+      ...this.continuityResult,
+      eventLinks: [...this.continuityResult.eventLinks, input],
+    };
+    return input;
+  }
+  async unlinkStoryEvent(
+    eventId: string,
+    targetType: EventTargetType,
+    targetId: string,
+  ): Promise<void> {
+    this.unlinkStoryEventCalls.push({ eventId, targetType, targetId });
+    this.continuityResult = {
+      ...this.continuityResult,
+      eventLinks: this.continuityResult.eventLinks.filter(
+        (item) =>
+          item.eventId !== eventId ||
+          item.targetType !== targetType ||
+          item.targetId !== targetId,
+      ),
+    };
+  }
+  async createFact(input: FactInput): Promise<FactView> {
+    this.createFactCalls.push(input);
+    const fact: FactView = {
+      ...input,
+      id: `fact-${this.continuityResult.facts.length + 1}`,
+      createdBy: input.origin,
+      confirmedBy: input.status === "author_confirmed" ? "author" : "",
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      facts: [...this.continuityResult.facts, fact],
+    };
+    return fact;
+  }
+  async updateFact(id: string, input: FactInput): Promise<FactView> {
+    this.updateFactCalls.push({ id, input });
+    const old = this.continuityResult.facts.find((item) => item.id === id);
+    const fact: FactView = {
+      ...input,
+      id,
+      createdBy: old?.createdBy ?? input.origin,
+      confirmedBy: input.status === "author_confirmed" ? "author" : "",
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      facts: this.continuityResult.facts.map((item) =>
+        item.id === id ? fact : item,
+      ),
+    };
+    return fact;
+  }
+  async confirmFact(id: string): Promise<FactView> {
+    this.confirmFactCalls.push(id);
+    const existing = this.continuityResult.facts.find((item) => item.id === id);
+    if (!existing) throw new Error("事实不存在");
+    const fact: FactView = {
+      ...existing,
+      status: "author_confirmed",
+      confirmedBy: "author",
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      facts: this.continuityResult.facts.map((item) =>
+        item.id === id ? fact : item,
+      ),
+    };
+    return fact;
+  }
+  async archiveFact(id: string): Promise<void> {
+    this.archiveFactCalls.push(id);
+    this.continuityResult = {
+      ...this.continuityResult,
+      facts: this.continuityResult.facts.filter((item) => item.id !== id),
+    };
+  }
+  async addFactEvidence(input: FactEvidenceInput): Promise<FactEvidenceView> {
+    this.addFactEvidenceCalls.push(input);
+    const value = {
+      ...input,
+      id: `evidence-${this.continuityResult.evidence.length + 1}`,
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      evidence: [...this.continuityResult.evidence, value],
+    };
+    return value;
+  }
+  async removeFactEvidence(id: string): Promise<void> {
+    this.removeFactEvidenceCalls.push(id);
+    this.continuityResult = {
+      ...this.continuityResult,
+      evidence: this.continuityResult.evidence.filter((item) => item.id !== id),
+    };
+  }
+  async addFactScope(input: FactScopeInput): Promise<FactScopeView> {
+    this.addFactScopeCalls.push(input);
+    const value = {
+      ...input,
+      id: `scope-${this.continuityResult.scopes.length + 1}`,
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      scopes: [...this.continuityResult.scopes, value],
+    };
+    return value;
+  }
+  async removeFactScope(id: string): Promise<void> {
+    this.removeFactScopeCalls.push(id);
+    this.continuityResult = {
+      ...this.continuityResult,
+      scopes: this.continuityResult.scopes.filter((item) => item.id !== id),
+    };
+  }
+  async createFactConflict(
+    input: FactConflictInput,
+  ): Promise<FactConflictView> {
+    this.createFactConflictCalls.push(input);
+    const value: FactConflictView = {
+      ...input,
+      id: `conflict-${this.continuityResult.conflicts.length + 1}`,
+      status: "open",
+    };
+    this.continuityResult = {
+      ...this.continuityResult,
+      conflicts: [...this.continuityResult.conflicts, value],
+    };
+    return value;
+  }
+  async resolveFactConflict(id: string): Promise<FactConflictView> {
+    this.resolveFactConflictCalls.push(id);
+    const old = this.continuityResult.conflicts.find((item) => item.id === id);
+    if (!old) throw new Error("冲突不存在");
+    const value: FactConflictView = { ...old, status: "resolved" };
+    this.continuityResult = {
+      ...this.continuityResult,
+      conflicts: this.continuityResult.conflicts.map((item) =>
+        item.id === id ? value : item,
+      ),
+    };
+    return value;
+  }
+  async deleteFactConflict(id: string): Promise<void> {
+    this.deleteFactConflictCalls.push(id);
+    this.continuityResult = {
+      ...this.continuityResult,
+      conflicts: this.continuityResult.conflicts.filter(
+        (item) => item.id !== id,
+      ),
     };
   }
 

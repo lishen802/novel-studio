@@ -268,6 +268,97 @@ export type WorldAssetsView = {
   consistencyIssues: ConsistencyIssueView[];
 };
 
+export type EventStatus = "planned" | "occurred" | "uncertain";
+export type EventTargetType =
+  "chapter" | "character" | "faction" | "location" | "item";
+export type StoryEventView = {
+  id: string;
+  title: string;
+  summary: string;
+  cause: string;
+  result: string;
+  storyTime: string;
+  storyOrder: number;
+  narrativeOrder: number;
+  status: EventStatus;
+};
+export type StoryEventInput = Omit<StoryEventView, "id">;
+export type StoryEventLinkView = {
+  eventId: string;
+  targetType: EventTargetType;
+  targetId: string;
+  role: string;
+};
+export type StoryEventLinkInput = StoryEventLinkView;
+export type FactOrigin = "author" | "text" | "model" | "rule";
+export type FactStatus =
+  | "author_confirmed"
+  | "text_evidenced"
+  | "ai_inferred"
+  | "conflicted"
+  | "rejected";
+export type FactView = {
+  id: string;
+  text: string;
+  category: string;
+  origin: FactOrigin;
+  status: FactStatus;
+  confidence: number;
+  validFromEventId: string;
+  validUntilEventId: string;
+  createdBy: string;
+  confirmedBy: string;
+};
+export type FactInput = Pick<
+  FactView,
+  | "text"
+  | "category"
+  | "origin"
+  | "status"
+  | "confidence"
+  | "validFromEventId"
+  | "validUntilEventId"
+>;
+export type FactEvidenceView = {
+  id: string;
+  factId: string;
+  chapterId: string;
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+  chapterRevision: number;
+};
+export type FactEvidenceInput = Omit<FactEvidenceView, "id">;
+export type FactScopeTargetType =
+  "character" | "faction" | "location" | "item" | "region" | "rule" | "event";
+export type FactScopeView = {
+  id: string;
+  factId: string;
+  targetType: FactScopeTargetType;
+  targetId: string;
+};
+export type FactScopeInput = Omit<FactScopeView, "id">;
+export type FactConflictView = {
+  id: string;
+  factId: string;
+  otherFactId: string;
+  reason: string;
+  status: "open" | "resolved";
+};
+export type FactConflictInput = Pick<
+  FactConflictView,
+  "factId" | "otherFactId" | "reason"
+>;
+export type ContinuityView = {
+  events: StoryEventView[];
+  eventLinks: StoryEventLinkView[];
+  facts: FactView[];
+  evidence: FactEvidenceView[];
+  scopes: FactScopeView[];
+  conflicts: FactConflictView[];
+  consistencyIssues: ConsistencyIssueView[];
+};
+
 export interface StudioClient {
   chooseProjectParent(): Promise<string | null>;
   chooseProjectToOpen(): Promise<string | null>;
@@ -346,6 +437,27 @@ export interface StudioClient {
     input: ForeshadowingHookInput,
   ): Promise<ForeshadowingHookView>;
   archiveForeshadowingHook(id: string): Promise<void>;
+  continuity(): Promise<ContinuityView>;
+  createStoryEvent(input: StoryEventInput): Promise<StoryEventView>;
+  updateStoryEvent(id: string, input: StoryEventInput): Promise<StoryEventView>;
+  archiveStoryEvent(id: string): Promise<void>;
+  linkStoryEvent(input: StoryEventLinkInput): Promise<StoryEventLinkView>;
+  unlinkStoryEvent(
+    eventId: string,
+    targetType: EventTargetType,
+    targetId: string,
+  ): Promise<void>;
+  createFact(input: FactInput): Promise<FactView>;
+  updateFact(id: string, input: FactInput): Promise<FactView>;
+  confirmFact(id: string): Promise<FactView>;
+  archiveFact(id: string): Promise<void>;
+  addFactEvidence(input: FactEvidenceInput): Promise<FactEvidenceView>;
+  removeFactEvidence(id: string): Promise<void>;
+  addFactScope(input: FactScopeInput): Promise<FactScopeView>;
+  removeFactScope(id: string): Promise<void>;
+  createFactConflict(input: FactConflictInput): Promise<FactConflictView>;
+  resolveFactConflict(id: string): Promise<FactConflictView>;
+  deleteFactConflict(id: string): Promise<void>;
   onBeforeClose(handler: () => Promise<void>): () => void;
   completeClose(): Promise<void>;
 }
