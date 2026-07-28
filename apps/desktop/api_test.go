@@ -724,6 +724,12 @@ func (f *fakeWorkspace) ArchiveWorldRegion(_ context.Context, id string) error {
 	f.archivedWorldRegionID = id
 	return nil
 }
+func (f *fakeWorkspace) UpsertRegionAdjacency(_ context.Context, input workspace.RegionAdjacencyInput) (workspace.RegionAdjacencyView, error) {
+	return workspace.RegionAdjacencyView{FirstRegionID: input.FirstRegionID, SecondRegionID: input.SecondRegionID, TravelNote: input.TravelNote}, nil
+}
+func (f *fakeWorkspace) DeleteRegionAdjacency(_ context.Context, firstRegionID, secondRegionID string) error {
+	return nil
+}
 func (f *fakeWorkspace) CreateLocation(_ context.Context, input workspace.LocationInput) (workspace.LocationView, error) {
 	f.locationInput = input
 	return workspace.LocationView{}, nil

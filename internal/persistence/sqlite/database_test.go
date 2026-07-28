@@ -60,7 +60,7 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 		"characters", "factions", "faction_memberships", "character_relationships",
 		"chapter_characters", "scene_card_characters",
 		"world_regions", "locations", "location_links", "items", "item_transfers",
-		"world_rules", "foreshadowing_hooks",
+		"world_rules", "foreshadowing_hooks", "region_adjacencies",
 		"story_events", "story_event_links", "canon_facts", "fact_evidence",
 		"fact_scopes", "fact_conflicts",
 	} {

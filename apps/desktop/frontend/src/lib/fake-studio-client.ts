@@ -27,6 +27,8 @@ import type {
   ProjectView,
   RelationshipInput,
   RelationshipView,
+  RegionAdjacencyInput,
+  RegionAdjacencyView,
   SceneCardView,
   StoryLineLinkView,
   StoryLineView,
@@ -104,6 +106,7 @@ export class FakeStudioClient implements StudioClient {
   };
   worldAssetsResult: WorldAssetsView = {
     regions: [],
+    regionAdjacencies: [],
     locations: [],
     locationLinks: [],
     items: [],
@@ -163,6 +166,8 @@ export class FakeStudioClient implements StudioClient {
   createWorldRegionCalls: WorldRegionInput[] = [];
   updateWorldRegionCalls: Array<{ id: string; input: WorldRegionInput }> = [];
   archiveWorldRegionCalls: string[] = [];
+  upsertRegionAdjacencyCalls: RegionAdjacencyInput[] = [];
+  deleteRegionAdjacencyCalls: Array<{ firstRegionId: string; secondRegionId: string }> = [];
   createLocationCalls: LocationInput[] = [];
   updateLocationCalls: Array<{ id: string; input: LocationInput }> = [];
   archiveLocationCalls: string[] = [];
@@ -614,6 +619,48 @@ export class FakeStudioClient implements StudioClient {
     this.worldAssetsResult = {
       ...this.worldAssetsResult,
       regions: this.worldAssetsResult.regions.filter((item) => item.id !== id),
+    };
+  }
+
+  async upsertRegionAdjacency(
+    input: RegionAdjacencyInput,
+  ): Promise<RegionAdjacencyView> {
+    this.upsertRegionAdjacencyCalls.push(input);
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const firstRegionId = input.firstRegionId < input.secondRegionId
+      ? input.firstRegionId
+      : input.secondRegionId;
+    const secondRegionId = input.firstRegionId < input.secondRegionId
+      ? input.secondRegionId
+      : input.firstRegionId;
+    const adjacency = { ...input, firstRegionId, secondRegionId };
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      regionAdjacencies: [
+        ...this.worldAssetsResult.regionAdjacencies.filter(
+          (item) =>
+            item.firstRegionId !== firstRegionId ||
+            item.secondRegionId !== secondRegionId,
+        ),
+        adjacency,
+      ],
+    };
+    return adjacency;
+  }
+
+  async deleteRegionAdjacency(
+    firstRegionId: string,
+    secondRegionId: string,
+  ): Promise<void> {
+    this.deleteRegionAdjacencyCalls.push({ firstRegionId, secondRegionId });
+    if (this.worldAssetMutationError) throw this.worldAssetMutationError;
+    const first = firstRegionId < secondRegionId ? firstRegionId : secondRegionId;
+    const second = firstRegionId < secondRegionId ? secondRegionId : firstRegionId;
+    this.worldAssetsResult = {
+      ...this.worldAssetsResult,
+      regionAdjacencies: this.worldAssetsResult.regionAdjacencies.filter(
+        (item) => item.firstRegionId !== first || item.secondRegionId !== second,
+      ),
     };
   }
 

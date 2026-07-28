@@ -21,6 +21,7 @@ import type {
   LocationInput,
   LocationTargetType,
   LocationView,
+  RegionAdjacencyInput,
   StoryStructureView,
   StoryWorldView,
   StudioClient,
@@ -35,6 +36,7 @@ type Props = { client: StudioClient; chapters: ChapterView[] };
 type Tab = "geography" | "items" | "rules" | "hooks";
 type DialogKind =
   | "region"
+  | "region-adjacency"
   | "location"
   | "location-link"
   | "item"
@@ -50,6 +52,7 @@ type ArchiveTarget = {
 
 const emptyAssets: WorldAssetsView = {
   regions: [],
+  regionAdjacencies: [],
   locations: [],
   locationLinks: [],
   items: [],
@@ -81,6 +84,11 @@ const emptyRegion: WorldRegionInput = {
   summary: "",
   terrain: "",
   climate: "",
+};
+const emptyRegionAdjacency: RegionAdjacencyInput = {
+  firstRegionId: "",
+  secondRegionId: "",
+  travelNote: "",
 };
 const emptyLocation: LocationInput = {
   regionId: "",
@@ -175,6 +183,8 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
   const [editingId, setEditingId] = useState("");
   const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget | null>(null);
   const [region, setRegion] = useState(emptyRegion);
+  const [selectedRegionId, setSelectedRegionId] = useState("");
+  const [regionAdjacency, setRegionAdjacency] = useState(emptyRegionAdjacency);
   const [location, setLocation] = useState(emptyLocation);
   const [linkLocationId, setLinkLocationId] = useState("");
   const [linkType, setLinkType] = useState<LocationTargetType>("chapter");
@@ -215,6 +225,18 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
     () => new Map(assets.regions.map((value) => [value.id, value])),
     [assets.regions],
   );
+  const regionsByParentId = useMemo(() => {
+    const values = new Map<string, WorldRegionView[]>();
+    for (const value of assets.regions) {
+      const children = values.get(value.parentId) ?? [];
+      children.push(value);
+      values.set(value.parentId, children);
+    }
+    for (const children of values.values()) {
+      children.sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
+    }
+    return values;
+  }, [assets.regions]);
   const locationById = useMemo(
     () => new Map(assets.locations.map((value) => [value.id, value])),
     [assets.locations],
@@ -223,6 +245,11 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
     () => new Map(chapters.map((value) => [value.id, value])),
     [chapters],
   );
+
+  useEffect(() => {
+    if (selectedRegionId && regionById.has(selectedRegionId)) return;
+    setSelectedRegionId(assets.regions.find((value) => !value.parentId)?.id ?? assets.regions[0]?.id ?? "");
+  }, [assets.regions, regionById, selectedRegionId]);
 
   const mutate = async (operation: () => Promise<unknown>, fallback: string) => {
     setSaving(true);
@@ -254,6 +281,16 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
       setRegion({ ...emptyRegion, kind: assets.regions.length ? "territory" : "world" });
     }
     setDialog("region");
+  };
+
+  const openRegionAdjacency = () => {
+    const other = assets.regions.find((value) => value.id !== selectedRegionId);
+    setRegionAdjacency({
+      firstRegionId: selectedRegionId,
+      secondRegionId: other?.id ?? "",
+      travelNote: "",
+    });
+    setDialog("region-adjacency");
   };
 
   const openLocation = (value?: LocationView) => {
@@ -306,6 +343,15 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
           ? client.updateWorldRegion(editingId, region)
           : client.createWorldRegion(region),
       "无法保存区域",
+    );
+    if (ok) closeDialog();
+  };
+
+  const saveRegionAdjacency = async (event: FormEvent) => {
+    event.preventDefault();
+    const ok = await mutate(
+      () => client.upsertRegionAdjacency(regionAdjacency),
+      "无法保存区域相邻关系",
     );
     if (ok) closeDialog();
   };
@@ -418,6 +464,45 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
     return locationById.get(value.holderId)?.name ?? "未知地点";
   };
 
+  const selectedRegion = regionById.get(selectedRegionId);
+  const selectedAdjacencies = assets.regionAdjacencies.filter(
+    (value) =>
+      value.firstRegionId === selectedRegionId ||
+      value.secondRegionId === selectedRegionId,
+  );
+  const adjacencyRegionName = (value: { firstRegionId: string; secondRegionId: string }) => {
+    const otherID = value.firstRegionId === selectedRegionId ? value.secondRegionId : value.firstRegionId;
+    return regionById.get(otherID)?.name ?? "已删除区域";
+  };
+
+  const renderRegionTree = (parentId: string, seen = new Set<string>()): React.ReactNode => {
+    const children = regionsByParentId.get(parentId) ?? [];
+    if (!children.length) return null;
+    return (
+      <ul className="region-tree">
+        {children.map((value) => {
+          if (seen.has(value.id)) return null;
+          const nextSeen = new Set(seen);
+          nextSeen.add(value.id);
+          return (
+            <li key={value.id}>
+              <button
+                type="button"
+                aria-label={`选择${value.name}`}
+                className={selectedRegionId === value.id ? "is-selected" : ""}
+                onClick={() => setSelectedRegionId(value.id)}
+              >
+                <span>{directionNames.find(([direction]) => direction === value.direction)?.[1]}</span>
+                {value.name}
+              </button>
+              {renderRegionTree(value.id, nextSeen)}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
   if (loading) return <div className="world-workbench world-muted">正在读取世界设定…</div>;
 
   return (
@@ -461,6 +546,35 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
             </div>
           </div>
           {!assets.regions.length ? <p className="world-muted">先建立世界或根区域。</p> : (
+            <>
+            <div className="geography-overview">
+              <section className="region-map" aria-label="方位地图">
+                <div className="region-map__heading"><div><p className="eyebrow">SPATIAL MAP</p><h4>方位地图</h4></div><span>{selectedRegion?.name || "未选择区域"}</span></div>
+                <div className="region-map__grid">
+                  {(regionsByParentId.get(selectedRegionId) ?? []).map((value) => (
+                    <button key={value.id} type="button" className={`region-map__node region-map__node--${value.direction}`} onClick={() => setSelectedRegionId(value.id)}>
+                      <small>{directionNames.find(([direction]) => direction === value.direction)?.[1]}</small>{value.name}
+                    </button>
+                  ))}
+                  {!regionsByParentId.get(selectedRegionId)?.length && <p className="world-muted">此区域尚未建立下级区域。</p>}
+                </div>
+              </section>
+              <section className="region-tree-panel">
+                <h4>区域层级</h4>
+                {renderRegionTree("")}
+              </section>
+              <section className="region-inspector" aria-label="区域空间关系">
+                <div className="region-inspector__heading"><div><span>当前区域</span><h4>{selectedRegion?.name || "未选择"}</h4></div><button type="button" disabled={!selectedRegion || assets.regions.length < 2} onClick={openRegionAdjacency}><Link2 size={15} />新增相邻区域</button></div>
+                <p>{selectedRegion?.summary || "选择区域后，可维护其相邻区域与通行说明。"}</p>
+                <div className="region-adjacencies">
+                  {selectedAdjacencies.map((value) => {
+                    const otherName = adjacencyRegionName(value);
+                    return <div key={`${value.firstRegionId}-${value.secondRegionId}`}><div><strong>{selectedRegion?.name} ↔ {otherName}</strong><span>{value.travelNote || "未填写通行说明"}</span></div><button type="button" aria-label={`解除${selectedRegion?.name}与${otherName}的相邻关系`} onClick={() => void mutate(() => client.deleteRegionAdjacency(value.firstRegionId, value.secondRegionId), "无法解除区域相邻关系")}>解除</button></div>;
+                  })}
+                  {!selectedAdjacencies.length && <span className="world-muted">尚未设置相邻区域。</span>}
+                </div>
+              </section>
+            </div>
             <div className="asset-card-grid">
               {assets.regions.map((value) => {
                 let depth = 0;
@@ -496,6 +610,7 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
                 );
               })}
             </div>
+            </>
           )}
         </section>
       )}
@@ -551,6 +666,8 @@ export function WorldAssetsWorkbench({ client, chapters }: Props) {
       )}
 
       {dialog === "region" && <Dialog label={editingId ? "编辑区域" : "新建区域"}><form onSubmit={saveRegion}><p className="eyebrow">地理层级</p><h2>{editingId ? "编辑区域" : "新建区域"}</h2><label>上级区域<select value={region.parentId} onChange={(event) => setRegion({ ...region, parentId: event.target.value })}><option value="">无（根区域）</option>{assets.regions.filter((value) => value.id !== editingId).map((value) => <option value={value.id} key={value.id}>{value.name}</option>)}</select></label><label>区域类型<select value={region.kind} onChange={(event) => setRegion({ ...region, kind: event.target.value as WorldRegionInput["kind"] })}>{regionKinds.map(([value, name]) => <option value={value} key={value}>{name}</option>)}</select></label><label>区域名称<input required value={region.name} onChange={(event) => setRegion({ ...region, name: event.target.value })} /></label><label>相对方位<select value={region.direction} onChange={(event) => setRegion({ ...region, direction: event.target.value as WorldRegionInput["direction"] })}>{directionNames.map(([value, name]) => <option value={value} key={value}>{name}</option>)}</select></label><label>概述<textarea value={region.summary} onChange={(event) => setRegion({ ...region, summary: event.target.value })} /></label><div className="dialog-field-grid"><label>地貌<input value={region.terrain} onChange={(event) => setRegion({ ...region, terrain: event.target.value })} /></label><label>气候<input value={region.climate} onChange={(event) => setRegion({ ...region, climate: event.target.value })} /></label></div><div className="dialog-actions"><button type="button" className="secondary-action" onClick={closeDialog}>取消</button><button type="submit" className="primary-action" disabled={saving}>保存区域</button></div></form></Dialog>}
+
+      {dialog === "region-adjacency" && <Dialog label="新增区域相邻关系"><form onSubmit={saveRegionAdjacency}><p className="eyebrow">SPATIAL MAP</p><h2>新增区域相邻关系</h2><label>当前区域<input readOnly value={regionById.get(regionAdjacency.firstRegionId)?.name || ""} /></label><label>相邻区域<select required value={regionAdjacency.secondRegionId} onChange={(event) => setRegionAdjacency({ ...regionAdjacency, secondRegionId: event.target.value })}><option value="">请选择</option>{assets.regions.filter((value) => value.id !== regionAdjacency.firstRegionId).map((value) => <option value={value.id} key={value.id}>{value.name}</option>)}</select></label><label>通行说明<textarea value={regionAdjacency.travelNote} onChange={(event) => setRegionAdjacency({ ...regionAdjacency, travelNote: event.target.value })} placeholder="例如：沿海船路可直达，冬季封航" /></label><div className="dialog-actions"><button type="button" className="secondary-action" onClick={closeDialog}>取消</button><button type="submit" className="primary-action" disabled={saving || !regionAdjacency.secondRegionId}>保存相邻关系</button></div></form></Dialog>}
 
       {dialog === "location" && <Dialog label={editingId ? "编辑地点" : "新建地点"}><form onSubmit={saveLocation}><p className="eyebrow">具体地点</p><h2>{editingId ? "编辑地点" : "新建地点"}</h2><label>所属区域<select required value={location.regionId} onChange={(event) => setLocation({ ...location, regionId: event.target.value })}>{assets.regions.map((value) => <option value={value.id} key={value.id}>{value.name}</option>)}</select></label><label>地点类型<select value={location.kind} onChange={(event) => setLocation({ ...location, kind: event.target.value as LocationInput["kind"] })}>{locationKinds.map(([value, name]) => <option value={value} key={value}>{name}</option>)}</select></label><label>地点名称<input required value={location.name} onChange={(event) => setLocation({ ...location, name: event.target.value })} /></label><label>状态<select value={location.status} onChange={(event) => setLocation({ ...location, status: event.target.value as LocationInput["status"] })}><option value="active">启用</option><option value="inactive">停用</option><option value="destroyed">已毁</option></select></label><label>概述<textarea value={location.summary} onChange={(event) => setLocation({ ...location, summary: event.target.value })} /></label><div className="dialog-actions"><button type="button" className="secondary-action" onClick={closeDialog}>取消</button><button type="submit" className="primary-action" disabled={saving}>保存地点</button></div></form></Dialog>}
 

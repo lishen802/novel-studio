@@ -105,3 +105,36 @@ func TestStoreBlocksArchivingReferencedRegionAndLocation(t *testing.T) {
 		t.Fatalf("archive location error = %v", err)
 	}
 }
+
+func TestStorePersistsUndirectedRegionAdjacencyAndProtectsReferences(t *testing.T) {
+	store, project := createTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Unix(100, 0)
+	root, _ := worlddomain.NewWorldRegion("region-root", project.ID, nil, worlddomain.RegionWorld, "镜海世界", worlddomain.DirectionCenter, now)
+	east, _ := worlddomain.NewWorldRegion("region-east", project.ID, &root, worlddomain.RegionTerritory, "东境", worlddomain.DirectionEast, now)
+	west, _ := worlddomain.NewWorldRegion("region-west", project.ID, &root, worlddomain.RegionTerritory, "西境", worlddomain.DirectionWest, now)
+	for _, region := range []worlddomain.WorldRegion{root, east, west} {
+		if err := store.CreateWorldRegion(ctx, region); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adjacency, _ := worlddomain.NewRegionAdjacency(west, east, "渡口往来", now)
+	if err := store.UpsertRegionAdjacency(ctx, adjacency); err != nil {
+		t.Fatal(err)
+	}
+
+	adjacencies, err := store.ListRegionAdjacencies(ctx)
+	if err != nil || len(adjacencies) != 1 || adjacencies[0].FirstRegionID != east.ID || adjacencies[0].SecondRegionID != west.ID {
+		t.Fatalf("adjacencies = %#v, error = %v", adjacencies, err)
+	}
+	if err := store.ArchiveWorldRegion(ctx, east.ID, now.Add(time.Hour)); !errors.Is(err, worlddomain.ErrReferenced) {
+		t.Fatalf("archive adjacent region error = %v", err)
+	}
+	if err := store.DeleteRegionAdjacency(ctx, west.ID, east.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ArchiveWorldRegion(ctx, east.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("archive unlinked region: %v", err)
+	}
+}

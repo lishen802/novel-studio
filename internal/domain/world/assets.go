@@ -112,6 +112,37 @@ func validDirection(direction RelativeDirection) bool {
 	}
 }
 
+// RegionAdjacency is an undirected connection between two world regions.
+// Region IDs are stored in lexical order so the same connection cannot be
+// represented twice with its endpoints reversed.
+type RegionAdjacency struct {
+	ProjectID      string
+	FirstRegionID  string
+	SecondRegionID string
+	TravelNote     string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func NewRegionAdjacency(first, second WorldRegion, travelNote string, now time.Time) (RegionAdjacency, error) {
+	if first.ID == "" || second.ID == "" || first.ID == second.ID || first.ProjectID == "" || first.ProjectID != second.ProjectID || first.DeletedAt != nil || second.DeletedAt != nil {
+		return RegionAdjacency{}, ErrInvalidReference
+	}
+	firstID, secondID := first.ID, second.ID
+	if secondID < firstID {
+		firstID, secondID = secondID, firstID
+	}
+	now = now.UTC()
+	return RegionAdjacency{
+		ProjectID:      first.ProjectID,
+		FirstRegionID:  firstID,
+		SecondRegionID: secondID,
+		TravelNote:     strings.TrimSpace(travelNote),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}, nil
+}
+
 type LocationKind string
 
 const (

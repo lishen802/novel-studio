@@ -370,6 +370,7 @@ type fakeStore struct {
 	chapterAppearances  map[string]worlddomain.ChapterAppearance
 	sceneAppearances    map[string]worlddomain.SceneAppearance
 	worldRegions        map[string]worlddomain.WorldRegion
+	regionAdjacencies   map[string]worlddomain.RegionAdjacency
 	locations           map[string]worlddomain.Location
 	locationLinks       map[string]worlddomain.LocationLink
 	items               map[string]worlddomain.Item
@@ -398,6 +399,7 @@ func newFakeStore(project projectdomain.Project) *fakeStore {
 		chapterAppearances: make(map[string]worlddomain.ChapterAppearance),
 		sceneAppearances:   make(map[string]worlddomain.SceneAppearance),
 		worldRegions:       make(map[string]worlddomain.WorldRegion),
+		regionAdjacencies:  make(map[string]worlddomain.RegionAdjacency),
 		locations:          make(map[string]worlddomain.Location),
 		locationLinks:      make(map[string]worlddomain.LocationLink),
 		items:              make(map[string]worlddomain.Item),
@@ -691,6 +693,24 @@ func (f *fakeStore) ArchiveWorldRegion(_ context.Context, id string, archivedAt 
 	}
 	region.DeletedAt = &archivedAt
 	f.worldRegions[id] = region
+	return nil
+}
+func (f *fakeStore) UpsertRegionAdjacency(_ context.Context, adjacency worlddomain.RegionAdjacency) error {
+	f.regionAdjacencies[adjacency.FirstRegionID+"\x00"+adjacency.SecondRegionID] = adjacency
+	return nil
+}
+func (f *fakeStore) ListRegionAdjacencies(context.Context) ([]worlddomain.RegionAdjacency, error) {
+	adjacencies := make([]worlddomain.RegionAdjacency, 0, len(f.regionAdjacencies))
+	for _, adjacency := range f.regionAdjacencies {
+		adjacencies = append(adjacencies, adjacency)
+	}
+	return adjacencies, nil
+}
+func (f *fakeStore) DeleteRegionAdjacency(_ context.Context, firstRegionID, secondRegionID string) error {
+	if secondRegionID < firstRegionID {
+		firstRegionID, secondRegionID = secondRegionID, firstRegionID
+	}
+	delete(f.regionAdjacencies, firstRegionID+"\x00"+secondRegionID)
 	return nil
 }
 func (f *fakeStore) CreateLocation(_ context.Context, location worlddomain.Location) error {

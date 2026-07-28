@@ -24,6 +24,7 @@ import type {
   MembershipStatus,
   RelationshipInput,
   RelationshipKind,
+  RelationshipView,
   StoryStructureView,
   StoryWorldView,
   StudioClient,
@@ -112,6 +113,45 @@ const appearanceNames: Record<AppearanceRole, string> = {
 
 function messageOf(cause: unknown, fallback: string) {
   return cause instanceof Error ? cause.message : fallback;
+}
+
+function topologyPosition(index: number, count: number) {
+  if (count <= 1) return { x: 50, y: 50 };
+  const angle = -Math.PI / 2 + (index / count) * Math.PI * 2;
+  return { x: 50 + Math.cos(angle) * 34, y: 50 + Math.sin(angle) * 34 };
+}
+
+function RelationshipTopology({
+  characters,
+  relationships,
+  selectedCharacterId,
+  onSelect,
+}: {
+  characters: CharacterView[];
+  relationships: RelationshipView[];
+  selectedCharacterId: string;
+  onSelect: (id: string) => void;
+}) {
+  const positions = new Map(
+    characters.map((item, index) => [item.id, topologyPosition(index, characters.length)]),
+  );
+  return (
+    <section className="relationship-topology" aria-label="人物关系拓扑">
+      <svg viewBox="0 0 100 100" aria-hidden="true" preserveAspectRatio="none">
+        <defs><marker id="relationship-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" /></marker></defs>
+        {relationships.map((item) => {
+          const source = positions.get(item.sourceCharacterId);
+          const target = positions.get(item.targetCharacterId);
+          if (!source || !target) return null;
+          return <line key={item.id} x1={source.x} y1={source.y} x2={target.x} y2={target.y} markerEnd="url(#relationship-arrow)" />;
+        })}
+      </svg>
+      {characters.map((item) => {
+        const position = positions.get(item.id)!;
+        return <button key={item.id} type="button" aria-label={`查看角色：${item.name}`} className={item.id === selectedCharacterId ? "is-selected" : ""} style={{ left: `${position.x}%`, top: `${position.y}%` }} onClick={() => onSelect(item.id)}><span>{item.name.slice(0, 1)}</span><small>{item.name}</small></button>;
+      })}
+    </section>
+  );
 }
 
 export function StoryWorldWorkbench({ client, chapters }: Props) {
@@ -738,6 +778,14 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                 <Link2 size={18} />
                 关系网络
               </h3>
+              {world.characters.length > 0 && (
+                <RelationshipTopology
+                  characters={world.characters}
+                  relationships={world.relationships}
+                  selectedCharacterId={selectedCharacterId}
+                  onSelect={setSelectedCharacterId}
+                />
+              )}
               {world.relationships.length === 0 ? (
                 <p className="story-empty">
                   用有方向的关系描述人物之间的真实连接。

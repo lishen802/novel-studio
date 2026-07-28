@@ -66,6 +66,59 @@ func (s *Store) UpdateWorldRegion(ctx context.Context, region worlddomain.WorldR
 	return requireOneRow(result, "world region", region.ID)
 }
 
+func (s *Store) UpsertRegionAdjacency(ctx context.Context, adjacency worlddomain.RegionAdjacency) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO region_adjacencies(project_id, first_region_id, second_region_id, travel_note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_id, first_region_id, second_region_id) DO UPDATE SET
+			travel_note = excluded.travel_note,
+			updated_at = excluded.updated_at
+	`, adjacency.ProjectID, adjacency.FirstRegionID, adjacency.SecondRegionID, adjacency.TravelNote,
+		formatTime(adjacency.CreatedAt), formatTime(adjacency.UpdatedAt))
+	if err != nil {
+		return databaseOperationError("upsert region adjacency", err)
+	}
+	return nil
+}
+
+func (s *Store) ListRegionAdjacencies(ctx context.Context) ([]worlddomain.RegionAdjacency, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT project_id, first_region_id, second_region_id, travel_note, created_at, updated_at
+		FROM region_adjacencies
+		ORDER BY first_region_id, second_region_id
+	`)
+	if err != nil {
+		return nil, databaseOperationError("list region adjacencies", err)
+	}
+	defer rows.Close()
+	adjacencies := make([]worlddomain.RegionAdjacency, 0)
+	for rows.Next() {
+		adjacency, err := scanRegionAdjacency(rows)
+		if err != nil {
+			return nil, err
+		}
+		adjacencies = append(adjacencies, adjacency)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseOperationError("iterate region adjacencies", err)
+	}
+	return adjacencies, nil
+}
+
+func (s *Store) DeleteRegionAdjacency(ctx context.Context, firstRegionID, secondRegionID string) error {
+	if secondRegionID < firstRegionID {
+		firstRegionID, secondRegionID = secondRegionID, firstRegionID
+	}
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM region_adjacencies
+		WHERE first_region_id = ? AND second_region_id = ?
+	`, firstRegionID, secondRegionID)
+	if err != nil {
+		return databaseOperationError("delete region adjacency", err)
+	}
+	return nil
+}
+
 func (s *Store) ArchiveWorldRegion(ctx context.Context, id string, archivedAt time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -77,7 +130,8 @@ func (s *Store) ArchiveWorldRegion(ctx context.Context, id string, archivedAt ti
 		SELECT (SELECT COUNT(*) FROM world_regions WHERE parent_id = ? AND deleted_at IS NULL)
 		     + (SELECT COUNT(*) FROM locations WHERE region_id = ? AND deleted_at IS NULL)
 		     + (SELECT COUNT(*) FROM world_rules WHERE scope_type = 'region' AND scope_id = ? AND deleted_at IS NULL)
-	`, id, id, id).Scan(&references); err != nil {
+		     + (SELECT COUNT(*) FROM region_adjacencies WHERE first_region_id = ? OR second_region_id = ?)
+	`, id, id, id, id, id).Scan(&references); err != nil {
 		return databaseOperationError("count world region references", err)
 	}
 	continuityReferences, err := countContinuityTargetReferences(ctx, tx, "region", id)
@@ -490,6 +544,24 @@ func scanWorldRegion(row scanner) (worlddomain.WorldRegion, error) {
 	}
 	region.UpdatedAt, err = parseTime(updatedAt)
 	return region, err
+}
+
+func scanRegionAdjacency(row scanner) (worlddomain.RegionAdjacency, error) {
+	var adjacency worlddomain.RegionAdjacency
+	var createdAt, updatedAt string
+	if err := row.Scan(&adjacency.ProjectID, &adjacency.FirstRegionID, &adjacency.SecondRegionID, &adjacency.TravelNote, &createdAt, &updatedAt); err != nil {
+		return worlddomain.RegionAdjacency{}, scanAssetError("region adjacency", err)
+	}
+	var err error
+	adjacency.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return worlddomain.RegionAdjacency{}, err
+	}
+	adjacency.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return worlddomain.RegionAdjacency{}, err
+	}
+	return adjacency, nil
 }
 
 func scanLocation(row scanner) (worlddomain.Location, error) {

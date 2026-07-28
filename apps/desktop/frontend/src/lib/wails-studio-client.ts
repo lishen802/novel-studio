@@ -24,6 +24,8 @@ import {
   type ProjectView,
   type RelationshipInput,
   type RelationshipView,
+  type RegionAdjacencyInput,
+  type RegionAdjacencyView,
   type SceneCardView,
   type StoryLineLinkView,
   type StoryLineView,
@@ -244,6 +246,11 @@ const locationLinkSchema = z.object({
   targetId: z.string(),
   role: z.string(),
 });
+const regionAdjacencySchema = z.object({
+  firstRegionId: z.string(),
+  secondRegionId: z.string(),
+  travelNote: z.string(),
+});
 const itemSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -294,6 +301,7 @@ const consistencyIssueSchema = z.object({
 });
 const worldAssetsSchema = z.object({
   regions: z.array(worldRegionSchema),
+  regionAdjacencies: z.array(regionAdjacencySchema).default([]),
   locations: z.array(locationSchema),
   locationLinks: z.array(locationLinkSchema),
   items: z.array(itemSchema),
@@ -420,6 +428,8 @@ type NativeDesktopAPI = {
   CreateWorldRegion(input: WorldRegionInput): Promise<unknown>;
   UpdateWorldRegion(id: string, input: WorldRegionInput): Promise<unknown>;
   ArchiveWorldRegion(id: string): Promise<void>;
+  UpsertRegionAdjacency(input: RegionAdjacencyInput): Promise<unknown>;
+  DeleteRegionAdjacency(firstRegionId: string, secondRegionId: string): Promise<void>;
   CreateLocation(input: LocationInput): Promise<unknown>;
   UpdateLocation(id: string, input: LocationInput): Promise<unknown>;
   ArchiveLocation(id: string): Promise<void>;
@@ -526,6 +536,8 @@ const locationView = (value: unknown): LocationView =>
   locationSchema.parse(value);
 const locationLinkView = (value: unknown): LocationLinkView =>
   locationLinkSchema.parse(value);
+const regionAdjacencyView = (value: unknown): RegionAdjacencyView =>
+  regionAdjacencySchema.parse(value);
 const itemView = (value: unknown): ItemView => itemSchema.parse(value);
 const itemTransferView = (value: unknown): ItemTransferView =>
   itemTransferSchema.parse(value);
@@ -699,6 +711,16 @@ export const wailsStudioClient: StudioClient = {
   },
   async archiveWorldRegion(id) {
     await safeCall(() => nativeAPI().ArchiveWorldRegion(id));
+  },
+  async upsertRegionAdjacency(input) {
+    return regionAdjacencyView(
+      await safeCall(() => nativeAPI().UpsertRegionAdjacency(input)),
+    );
+  },
+  async deleteRegionAdjacency(firstRegionId, secondRegionId) {
+    await safeCall(() =>
+      nativeAPI().DeleteRegionAdjacency(firstRegionId, secondRegionId),
+    );
   },
   async createLocation(input) {
     return locationView(

@@ -69,6 +69,7 @@ function installNative(overrides: Record<string, unknown> = {}) {
     UnlinkCharacterFromScene: vi.fn(async () => undefined),
     WorldAssets: vi.fn(async () => ({
       regions: [],
+      regionAdjacencies: [],
       locations: [],
       locationLinks: [],
       items: [],
@@ -80,6 +81,8 @@ function installNative(overrides: Record<string, unknown> = {}) {
     CreateWorldRegion: vi.fn(),
     UpdateWorldRegion: vi.fn(),
     ArchiveWorldRegion: vi.fn(async () => undefined),
+    UpsertRegionAdjacency: vi.fn(),
+    DeleteRegionAdjacency: vi.fn(async () => undefined),
     CreateLocation: vi.fn(),
     UpdateLocation: vi.fn(),
     ArchiveLocation: vi.fn(async () => undefined),
@@ -362,6 +365,7 @@ describe("wailsStudioClient", () => {
     };
     const assets = {
       regions: [region],
+      regionAdjacencies: [],
       locations: [],
       locationLinks: [],
       items: [],

@@ -26,6 +26,34 @@ func TestWorldRegionHierarchyRequiresSameProjectAndValidParent(t *testing.T) {
 	}
 }
 
+func TestRegionAdjacencyCanonicalizesPairsAndRejectsInvalidRegions(t *testing.T) {
+	now := time.Unix(100, 0)
+	root, err := NewWorldRegion("region-root", "project-1", nil, RegionWorld, "镜海世界", DirectionCenter, now)
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	west, err := NewWorldRegion("region-west", "project-1", &root, RegionTerritory, "西境", DirectionWest, now)
+	if err != nil {
+		t.Fatalf("create west: %v", err)
+	}
+	east, err := NewWorldRegion("region-east", "project-1", &root, RegionTerritory, "东境", DirectionEast, now)
+	if err != nil {
+		t.Fatalf("create east: %v", err)
+	}
+
+	adjacency, err := NewRegionAdjacency(west, east, "渡口往来", now)
+	if err != nil {
+		t.Fatalf("create adjacency: %v", err)
+	}
+	if adjacency.FirstRegionID != "region-east" || adjacency.SecondRegionID != "region-west" || adjacency.TravelNote != "渡口往来" {
+		t.Fatalf("adjacency = %#v", adjacency)
+	}
+
+	if _, err := NewRegionAdjacency(west, west, "", now); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("self adjacency error = %v", err)
+	}
+}
+
 func TestLocationRequiresRegionFromSameProject(t *testing.T) {
 	now := time.Unix(100, 0)
 	region, err := NewWorldRegion("region-1", "project-1", nil, RegionWorld, "镜海世界", DirectionCenter, now)

@@ -92,6 +92,32 @@ describe("StoryWorldWorkbench", () => {
     expect(screen.getByText("调查员 · 守夜人")).toBeInTheDocument();
   });
 
+  it("lets the author navigate character profiles from the relationship topology", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.storyWorldResult = {
+      ...client.storyWorldResult,
+      characters: [linMo, guQing],
+      relationships: [
+        {
+          id: "relationship",
+          sourceCharacterId: linMo.id,
+          targetCharacterId: guQing.id,
+          kind: "ally",
+          label: "战友",
+          strength: 70,
+          publicState: "",
+          trueState: "",
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    render(<StoryWorldWorkbench client={client} chapters={[]} />);
+
+    expect(await screen.findByLabelText("人物关系拓扑")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看角色：顾青" }));
+    expect(screen.getByRole("heading", { name: "顾青" })).toBeInTheDocument();
+  });
+
   it("creates and edits a character", async () => {
     const client = FakeStudioClient.withReadyProject();
     const user = userEvent.setup();

@@ -37,6 +37,7 @@ function readyClient() {
         climate: "潮湿",
       },
     ],
+    regionAdjacencies: [],
     locations: [
       {
         id: "location-1",
@@ -108,7 +109,7 @@ describe("WorldAssetsWorkbench", () => {
     expect(
       await screen.findByRole("heading", { name: "世界设定" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("镜海世界")).toBeInTheDocument();
+    expect(screen.getAllByText("镜海世界").length).toBeGreaterThan(0);
     expect(screen.getByText("照夜城")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "伏笔“镜中裂纹”已到计划回收章节。",
@@ -140,7 +141,57 @@ describe("WorldAssetsWorkbench", () => {
         climate: "",
       }),
     );
-    expect(await screen.findByText("北境")).toBeInTheDocument();
+    expect((await screen.findAllByText("北境")).length).toBeGreaterThan(0);
+  });
+
+  it("shows the formal region hierarchy and saves an undirected adjacency", async () => {
+    const user = userEvent.setup();
+    client.worldAssetsResult = {
+      ...client.worldAssetsResult,
+      regions: [
+        ...client.worldAssetsResult.regions,
+        {
+          id: "region-2",
+          parentId: "region-1",
+          kind: "territory",
+          name: "北境",
+          direction: "north",
+          summary: "",
+          terrain: "雪原",
+          climate: "严寒",
+        },
+        {
+          id: "region-3",
+          parentId: "region-1",
+          kind: "territory",
+          name: "东海",
+          direction: "east",
+          summary: "",
+          terrain: "海域",
+          climate: "潮湿",
+        },
+      ],
+    };
+    render(
+      <WorldAssetsWorkbench client={client} chapters={client.chaptersResult} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "区域层级" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "选择北境" }));
+    await user.click(screen.getByRole("button", { name: "新增相邻区域" }));
+    const dialog = screen.getByRole("dialog", { name: "新增区域相邻关系" });
+    await user.selectOptions(within(dialog).getByLabelText("相邻区域"), "region-3");
+    await user.type(within(dialog).getByLabelText("通行说明"), "沿海船路可直达");
+    await user.click(within(dialog).getByRole("button", { name: "保存相邻关系" }));
+
+    await waitFor(() =>
+      expect(client.upsertRegionAdjacencyCalls).toContainEqual({
+        firstRegionId: "region-2",
+        secondRegionId: "region-3",
+        travelNote: "沿海船路可直达",
+      }),
+    );
+    expect(await screen.findByText("北境 ↔ 东海")).toBeInTheDocument();
   });
 
   it("moves an item and records the chapter context", async () => {

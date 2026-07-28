@@ -42,6 +42,8 @@ type WorkspaceUseCases interface {
 	CreateWorldRegion(context.Context, workspace.WorldRegionInput) (workspace.WorldRegionView, error)
 	UpdateWorldRegion(context.Context, string, workspace.WorldRegionInput) (workspace.WorldRegionView, error)
 	ArchiveWorldRegion(context.Context, string) error
+	UpsertRegionAdjacency(context.Context, workspace.RegionAdjacencyInput) (workspace.RegionAdjacencyView, error)
+	DeleteRegionAdjacency(context.Context, string, string) error
 	CreateLocation(context.Context, workspace.LocationInput) (workspace.LocationView, error)
 	UpdateLocation(context.Context, string, workspace.LocationInput) (workspace.LocationView, error)
 	ArchiveLocation(context.Context, string) error
@@ -256,6 +258,14 @@ func (a *DesktopAPI) UpdateWorldRegion(id string, input workspace.WorldRegionInp
 
 func (a *DesktopAPI) ArchiveWorldRegion(id string) error {
 	return safeDesktopError(a.workspace.ArchiveWorldRegion(a.ctx, id))
+}
+
+func (a *DesktopAPI) UpsertRegionAdjacency(input workspace.RegionAdjacencyInput) (workspace.RegionAdjacencyView, error) {
+	return safeResult(a.workspace.UpsertRegionAdjacency(a.ctx, input))
+}
+
+func (a *DesktopAPI) DeleteRegionAdjacency(firstRegionID, secondRegionID string) error {
+	return safeDesktopError(a.workspace.DeleteRegionAdjacency(a.ctx, firstRegionID, secondRegionID))
 }
 
 func (a *DesktopAPI) CreateLocation(input workspace.LocationInput) (workspace.LocationView, error) {

@@ -57,6 +57,9 @@ type ProjectStore interface {
 	ListWorldRegions(ctx context.Context) ([]worlddomain.WorldRegion, error)
 	WorldRegion(ctx context.Context, id string) (worlddomain.WorldRegion, error)
 	ArchiveWorldRegion(ctx context.Context, id string, archivedAt time.Time) error
+	UpsertRegionAdjacency(ctx context.Context, adjacency worlddomain.RegionAdjacency) error
+	ListRegionAdjacencies(ctx context.Context) ([]worlddomain.RegionAdjacency, error)
+	DeleteRegionAdjacency(ctx context.Context, firstRegionID, secondRegionID string) error
 	CreateLocation(ctx context.Context, location worlddomain.Location) error
 	UpdateLocation(ctx context.Context, location worlddomain.Location) error
 	ListLocations(ctx context.Context) ([]worlddomain.Location, error)

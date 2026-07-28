@@ -29,6 +29,12 @@ type LocationInput struct {
 	Status   string `json:"status"`
 }
 
+type RegionAdjacencyInput struct {
+	FirstRegionID  string `json:"firstRegionId"`
+	SecondRegionID string `json:"secondRegionId"`
+	TravelNote     string `json:"travelNote"`
+}
+
 type LocationLinkInput struct {
 	LocationID string `json:"locationId"`
 	TargetType string `json:"targetType"`
@@ -88,6 +94,12 @@ type LocationView struct {
 	Status   string `json:"status"`
 }
 
+type RegionAdjacencyView struct {
+	FirstRegionID  string `json:"firstRegionId"`
+	SecondRegionID string `json:"secondRegionId"`
+	TravelNote     string `json:"travelNote"`
+}
+
 type LocationLinkView struct {
 	LocationID string `json:"locationId"`
 	TargetType string `json:"targetType"`
@@ -137,6 +149,7 @@ type ForeshadowingHookView struct {
 
 type WorldAssetsView struct {
 	Regions           []WorldRegionView       `json:"regions"`
+	RegionAdjacencies []RegionAdjacencyView   `json:"regionAdjacencies"`
 	Locations         []LocationView          `json:"locations"`
 	LocationLinks     []LocationLinkView      `json:"locationLinks"`
 	Items             []ItemView              `json:"items"`
@@ -155,6 +168,10 @@ func (s *Service) WorldAssets(ctx context.Context) (WorldAssetsView, error) {
 	regions, err := s.active.store.ListWorldRegions(ctx)
 	if err != nil {
 		return WorldAssetsView{}, fmt.Errorf("list world regions: %w", err)
+	}
+	adjacencies, err := s.active.store.ListRegionAdjacencies(ctx)
+	if err != nil {
+		return WorldAssetsView{}, fmt.Errorf("list region adjacencies: %w", err)
 	}
 	locations, err := s.active.store.ListLocations(ctx)
 	if err != nil {
@@ -188,7 +205,7 @@ func (s *Service) WorldAssets(ctx context.Context) (WorldAssetsView, error) {
 	if err != nil {
 		return WorldAssetsView{}, fmt.Errorf("list chapters for world assets: %w", err)
 	}
-	return worldAssetsView(regions, locations, links, items, transfers, rules, hooks, chapters), nil
+	return worldAssetsView(regions, adjacencies, locations, links, items, transfers, rules, hooks, chapters), nil
 }
 
 func (s *Service) CreateWorldRegion(ctx context.Context, input WorldRegionInput) (WorldRegionView, error) {
@@ -248,6 +265,60 @@ func (s *Service) UpdateWorldRegion(ctx context.Context, id string, input WorldR
 		return WorldRegionView{}, fmt.Errorf("update world region: %w", err)
 	}
 	return worldRegionView(updated), nil
+}
+
+func (s *Service) UpsertRegionAdjacency(ctx context.Context, input RegionAdjacencyInput) (RegionAdjacencyView, error) {
+	if err := s.license.Require(ctx, license.EditStory); err != nil {
+		return RegionAdjacencyView{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.activeProjectLocked(ctx); err != nil {
+		return RegionAdjacencyView{}, err
+	}
+	first, err := s.active.store.WorldRegion(ctx, strings.TrimSpace(input.FirstRegionID))
+	if err != nil {
+		return RegionAdjacencyView{}, worlddomain.ErrInvalidReference
+	}
+	second, err := s.active.store.WorldRegion(ctx, strings.TrimSpace(input.SecondRegionID))
+	if err != nil {
+		return RegionAdjacencyView{}, worlddomain.ErrInvalidReference
+	}
+	adjacency, err := worlddomain.NewRegionAdjacency(first, second, input.TravelNote, s.clock.Now())
+	if err != nil {
+		return RegionAdjacencyView{}, err
+	}
+	if err := s.active.store.UpsertRegionAdjacency(ctx, adjacency); err != nil {
+		return RegionAdjacencyView{}, fmt.Errorf("upsert region adjacency: %w", err)
+	}
+	return regionAdjacencyView(adjacency), nil
+}
+
+func (s *Service) DeleteRegionAdjacency(ctx context.Context, firstRegionID, secondRegionID string) error {
+	if err := s.license.Require(ctx, license.EditStory); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.activeProjectLocked(ctx); err != nil {
+		return err
+	}
+	first, err := s.active.store.WorldRegion(ctx, strings.TrimSpace(firstRegionID))
+	if err != nil {
+		return worlddomain.ErrInvalidReference
+	}
+	second, err := s.active.store.WorldRegion(ctx, strings.TrimSpace(secondRegionID))
+	if err != nil {
+		return worlddomain.ErrInvalidReference
+	}
+	adjacency, err := worlddomain.NewRegionAdjacency(first, second, "", s.clock.Now())
+	if err != nil {
+		return err
+	}
+	if err := s.active.store.DeleteRegionAdjacency(ctx, adjacency.FirstRegionID, adjacency.SecondRegionID); err != nil {
+		return fmt.Errorf("delete region adjacency: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) ArchiveWorldRegion(ctx context.Context, id string) error {
@@ -731,14 +802,18 @@ func regionContains(regions []worlddomain.WorldRegion, ancestorID, candidateID s
 	return false
 }
 
-func worldAssetsView(regions []worlddomain.WorldRegion, locations []worlddomain.Location, links []worlddomain.LocationLink, items []worlddomain.Item, transfers []worlddomain.ItemTransfer, rules []worlddomain.WorldRule, hooks []worlddomain.ForeshadowingHook, chapters []projectdomain.Chapter) WorldAssetsView {
+func worldAssetsView(regions []worlddomain.WorldRegion, adjacencies []worlddomain.RegionAdjacency, locations []worlddomain.Location, links []worlddomain.LocationLink, items []worlddomain.Item, transfers []worlddomain.ItemTransfer, rules []worlddomain.WorldRule, hooks []worlddomain.ForeshadowingHook, chapters []projectdomain.Chapter) WorldAssetsView {
 	view := WorldAssetsView{
 		Regions: make([]WorldRegionView, 0, len(regions)), Locations: make([]LocationView, 0, len(locations)),
-		LocationLinks: make([]LocationLinkView, 0, len(links)), Items: make([]ItemView, 0, len(items)),
+		RegionAdjacencies: make([]RegionAdjacencyView, 0, len(adjacencies)),
+		LocationLinks:     make([]LocationLinkView, 0, len(links)), Items: make([]ItemView, 0, len(items)),
 		ItemTransfers: make([]ItemTransferView, 0, len(transfers)), Rules: make([]WorldRuleView, 0, len(rules)), Hooks: make([]ForeshadowingHookView, 0, len(hooks)),
 	}
 	for _, region := range regions {
 		view.Regions = append(view.Regions, worldRegionView(region))
+	}
+	for _, adjacency := range adjacencies {
+		view.RegionAdjacencies = append(view.RegionAdjacencies, regionAdjacencyView(adjacency))
 	}
 	for _, location := range locations {
 		view.Locations = append(view.Locations, locationView(location))
@@ -794,6 +869,9 @@ func worldAssetConsistencyIssues(locations []worlddomain.Location, hooks []world
 
 func worldRegionView(region worlddomain.WorldRegion) WorldRegionView {
 	return WorldRegionView{ID: region.ID, ParentID: region.ParentID, Kind: string(region.Kind), Name: region.Name, Direction: string(region.Direction), Summary: region.Summary, Terrain: region.Terrain, Climate: region.Climate}
+}
+func regionAdjacencyView(adjacency worlddomain.RegionAdjacency) RegionAdjacencyView {
+	return RegionAdjacencyView{FirstRegionID: adjacency.FirstRegionID, SecondRegionID: adjacency.SecondRegionID, TravelNote: adjacency.TravelNote}
 }
 func locationView(location worlddomain.Location) LocationView {
 	return LocationView{ID: location.ID, RegionID: location.RegionID, Kind: string(location.Kind), Name: location.Name, Summary: location.Summary, Status: string(location.Status)}

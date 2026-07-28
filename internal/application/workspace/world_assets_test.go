@@ -96,6 +96,33 @@ func TestWorldAssetReferencesMustBelongToCurrentProject(t *testing.T) {
 	}
 }
 
+func TestWorldAssetsManageUndirectedRegionAdjacencies(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeStore(project)
+	root, _ := worlddomain.NewWorldRegion("region-root", project.ID, nil, worlddomain.RegionWorld, "镜海世界", worlddomain.DirectionCenter, time.Unix(100, 0))
+	east, _ := worlddomain.NewWorldRegion("region-east", project.ID, &root, worlddomain.RegionTerritory, "东境", worlddomain.DirectionEast, time.Unix(100, 0))
+	west, _ := worlddomain.NewWorldRegion("region-west", project.ID, &root, worlddomain.RegionTerritory, "西境", worlddomain.DirectionWest, time.Unix(100, 0))
+	store.worldRegions[root.ID] = root
+	store.worldRegions[east.ID] = east
+	store.worldRegions[west.ID] = west
+	service := openTestService(t, store, &sequenceIDs{})
+
+	adjacency, err := service.UpsertRegionAdjacency(context.Background(), RegionAdjacencyInput{FirstRegionID: west.ID, SecondRegionID: east.ID, TravelNote: "渡口往来"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adjacency.FirstRegionID != east.ID || adjacency.SecondRegionID != west.ID {
+		t.Fatalf("adjacency = %#v", adjacency)
+	}
+	view, err := service.WorldAssets(context.Background())
+	if err != nil || len(view.RegionAdjacencies) != 1 || view.RegionAdjacencies[0].TravelNote != "渡口往来" {
+		t.Fatalf("world assets = %#v, error = %v", view, err)
+	}
+	if err := service.DeleteRegionAdjacency(context.Background(), west.ID, east.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorldAssetCreationPreservesRequestedState(t *testing.T) {
 	project := mustProject(t, "project-1", "长夜织境")
 	store := newFakeStore(project)

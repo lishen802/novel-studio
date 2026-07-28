@@ -56,6 +56,7 @@ const emptyWorld: StoryWorldView = {
 };
 const emptyAssets: WorldAssetsView = {
   regions: [],
+  regionAdjacencies: [],
   locations: [],
   locationLinks: [],
   items: [],

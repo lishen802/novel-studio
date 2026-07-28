@@ -187,6 +187,12 @@ export type WorldRegionView = {
   climate: string;
 };
 export type WorldRegionInput = Omit<WorldRegionView, "id">;
+export type RegionAdjacencyView = {
+  firstRegionId: string;
+  secondRegionId: string;
+  travelNote: string;
+};
+export type RegionAdjacencyInput = RegionAdjacencyView;
 export type LocationKind =
   "city" | "settlement" | "building" | "landmark" | "wilderness" | "other";
 export type LocationStatus = "active" | "inactive" | "destroyed";
@@ -259,6 +265,7 @@ export type ForeshadowingHookView = {
 export type ForeshadowingHookInput = Omit<ForeshadowingHookView, "id">;
 export type WorldAssetsView = {
   regions: WorldRegionView[];
+  regionAdjacencies: RegionAdjacencyView[];
   locations: LocationView[];
   locationLinks: LocationLinkView[];
   items: ItemView[];
@@ -413,6 +420,10 @@ export interface StudioClient {
     input: WorldRegionInput,
   ): Promise<WorldRegionView>;
   archiveWorldRegion(id: string): Promise<void>;
+  upsertRegionAdjacency(
+    input: RegionAdjacencyInput,
+  ): Promise<RegionAdjacencyView>;
+  deleteRegionAdjacency(firstRegionId: string, secondRegionId: string): Promise<void>;
   createLocation(input: LocationInput): Promise<LocationView>;
   updateLocation(id: string, input: LocationInput): Promise<LocationView>;
   archiveLocation(id: string): Promise<void>;
