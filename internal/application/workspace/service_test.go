@@ -138,6 +138,20 @@ func TestOpenProjectFailureKeepsCurrentWorkspaceActive(t *testing.T) {
 	}
 }
 
+func TestReplaceActiveWorkspaceInvalidatesBranchMergePreviews(t *testing.T) {
+	service := &Service{
+		branchMergePreviews: map[string]branchMergePreview{
+			"old-preview": {},
+		},
+	}
+
+	service.replaceActive(activeWorkspace{})
+
+	if len(service.branchMergePreviews) != 0 {
+		t.Fatalf("branch merge previews = %#v", service.branchMergePreviews)
+	}
+}
+
 func TestCreateChapterAssignsNextPosition(t *testing.T) {
 	project := mustProject(t, "project-1", "长夜织境")
 	store := newFakeStore(project)

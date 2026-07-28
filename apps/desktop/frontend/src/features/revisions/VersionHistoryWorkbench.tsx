@@ -14,13 +14,16 @@ import type {
   SnapshotView,
   StudioClient,
 } from "../../lib/studio-client";
+import { BranchWorkbench } from "./BranchWorkbench";
 
 type Props = {
   client: StudioClient;
   project: ProjectView;
   chapters: ChapterView[];
   onChapterUpdated(chapter: ChapterView): void;
-  onWorkspaceRestored(result: SnapshotRestoreView): void;
+  onWorkspaceRestored(
+    result: Pick<SnapshotRestoreView, "project" | "chapters">,
+  ): void;
   onBeforeVersionOperation(): Promise<void>;
 };
 
@@ -208,6 +211,12 @@ export function VersionHistoryWorkbench({
           {error}
         </div>
       )}
+
+      <BranchWorkbench
+        client={client}
+        onBeforeVersionOperation={onBeforeVersionOperation}
+        onWorkspaceChanged={onWorkspaceRestored}
+      />
 
       <section className="snapshot-panel">
         <header>

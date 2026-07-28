@@ -8,10 +8,12 @@ import (
 
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
+	"github.com/lishen802/novel-studio/internal/platform/branchfs"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 )
 
@@ -26,6 +28,7 @@ const (
 	errorWriteFailed       desktopErrorCode = "WRITE_FAILED"
 	errorDatabaseBusy      desktopErrorCode = "DATABASE_BUSY"
 	errorReferenceConflict desktopErrorCode = "REFERENCE_CONFLICT"
+	errorBranchConflict    desktopErrorCode = "BRANCH_CONFLICT"
 	errorValidationFailed  desktopErrorCode = "VALIDATION_FAILED"
 	errorOperationFailed   desktopErrorCode = "OPERATION_FAILED"
 )
@@ -54,10 +57,24 @@ func safeDesktopError(err error) error {
 		code, message = errorPermissionDenied, "没有权限读取或写入该位置。"
 	case errors.Is(err, sqlite.ErrDatabaseCorrupt), errors.Is(err, sqlite.ErrProjectCount), errors.Is(err, projectfs.ErrInvalidPackage):
 		code, message = errorProjectCorrupt, "项目格式无效或数据已损坏。"
+	case errors.Is(err, branchfs.ErrBranchHeadChanged):
+		code, message = errorProjectCorrupt, "剧情分支文件已被外部修改或损坏，请从完整项目备份恢复。"
 	case errors.Is(err, sqlite.ErrDatabaseTooNew):
 		code, message = errorProjectTooNew, "该项目由更新版本创建，请升级应用后再打开。"
 	case errors.Is(err, projectdomain.ErrRevisionConflict):
 		code, message = errorRevisionConflict, "章节已在其他位置更新，本地文本已保留。"
+	case errors.Is(err, revisiondomain.ErrBranchDiverged):
+		code, message = errorBranchConflict, "目标分支在分叉后也发生了变化，暂时无法自动合并。"
+	case errors.Is(err, revisiondomain.ErrStaleBranchMerge):
+		code, message = errorBranchConflict, "合并预览已过期，请重新预览后再确认。"
+	case errors.Is(err, revisiondomain.ErrBranchUnchanged):
+		code, message = errorValidationFailed, "这个分支没有可合并的变化。"
+	case errors.Is(err, branchfs.ErrProtectedBranch):
+		code, message = errorValidationFailed, "主分支或当前分支不能删除。"
+	case errors.Is(err, branchfs.ErrBranchHasChildren):
+		code, message = errorValidationFailed, "该分支仍有子分支，请先处理子分支。"
+	case errors.Is(err, revisiondomain.ErrBlankBranchName), errors.Is(err, branchfs.ErrDuplicateBranch):
+		code, message = errorValidationFailed, "请填写不重复的分支名称。"
 	case errors.Is(err, worlddomain.ErrReferenced), errors.Is(err, storydomain.ErrReferenced), errors.Is(err, timelinedomain.ErrReferenced), errors.Is(err, canondomain.ErrReferenced):
 		code, message = errorReferenceConflict, "该内容仍被其他故事资料引用，请先解除关联后再归档。"
 	case errors.Is(err, worlddomain.ErrBlankValue):

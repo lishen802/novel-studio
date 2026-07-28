@@ -6,6 +6,7 @@ type ProjectPackage struct {
 	Attachments string
 	Exports     string
 	Snapshots   string
+	Branches    string
 }
 
 type ProjectPackageManager interface {

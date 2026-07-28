@@ -73,6 +73,51 @@ export type SnapshotRestoreView = {
   project: ProjectView;
   chapters: ChapterView[];
 };
+export type BranchView = {
+  id: string;
+  name: string;
+  description: string;
+  parentId: string;
+  active: boolean;
+  main: boolean;
+  generation: number;
+  createdAt: string;
+  updatedAt: string;
+};
+export type CreateBranchInput = Pick<BranchView, "name" | "description">;
+export type BranchSwitchView = {
+  activeBranchId: string;
+  project: ProjectView;
+  chapters: ChapterView[];
+};
+export type BranchChapterChangeKind = "added" | "modified" | "removed";
+export type BranchChapterChangeView = {
+  chapterId: string;
+  title: string;
+  kind: BranchChapterChangeKind;
+};
+export type BranchDomainChangeView = {
+  key: string;
+  label: string;
+  sourceCount: number;
+  targetCount: number;
+  changed: boolean;
+};
+export type BranchComparisonView = {
+  source: BranchView;
+  target: BranchView;
+  addedChapters: number;
+  modifiedChapters: number;
+  removedChapters: number;
+  chapterChanges: BranchChapterChangeView[];
+  domains: BranchDomainChangeView[];
+};
+export type BranchMergePreviewView = {
+  token: string;
+  sourceId: string;
+  targetId: string;
+  comparison: BranchComparisonView;
+};
 export type ChapterChangeInput = {
   chapterId: string;
   title: string;
@@ -512,6 +557,16 @@ export interface StudioClient {
   snapshots(): Promise<SnapshotView[]>;
   createSnapshot(name: string): Promise<SnapshotView>;
   restoreSnapshot(id: string): Promise<SnapshotRestoreView>;
+  branches(): Promise<BranchView[]>;
+  createBranch(input: CreateBranchInput): Promise<BranchView>;
+  switchBranch(id: string): Promise<BranchSwitchView>;
+  compareBranches(
+    sourceId: string,
+    targetId: string,
+  ): Promise<BranchComparisonView>;
+  previewBranchMerge(sourceId: string): Promise<BranchMergePreviewView>;
+  confirmBranchMerge(token: string): Promise<BranchSwitchView>;
+  deleteBranch(id: string): Promise<void>;
   storyStructure(): Promise<StoryStructureView>;
   createOutlineNode(input: CreateOutlineNodeInput): Promise<OutlineNodeView>;
   createStoryLine(input: CreateStoryLineInput): Promise<StoryLineView>;

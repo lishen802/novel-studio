@@ -18,9 +18,11 @@ type Service struct {
 	clock     ports.Clock
 	ids       ports.IDGenerator
 	snapshots ports.SnapshotArchive
+	branches  ports.BranchArchive
 
-	mu     sync.RWMutex
-	active *activeWorkspace
+	mu                  sync.RWMutex
+	active              *activeWorkspace
+	branchMergePreviews map[string]branchMergePreview
 }
 
 type activeWorkspace struct {
@@ -35,15 +37,21 @@ func NewService(
 	clock ports.Clock,
 	ids ports.IDGenerator,
 	snapshots ports.SnapshotArchive,
+	branchArchives ...ports.BranchArchive,
 ) *Service {
-	return &Service{
-		packages:  packages,
-		stores:    stores,
-		license:   licenseService,
-		clock:     clock,
-		ids:       ids,
-		snapshots: snapshots,
+	service := &Service{
+		packages:            packages,
+		stores:              stores,
+		license:             licenseService,
+		clock:               clock,
+		ids:                 ids,
+		snapshots:           snapshots,
+		branchMergePreviews: make(map[string]branchMergePreview),
 	}
+	if len(branchArchives) > 0 {
+		service.branches = branchArchives[0]
+	}
+	return service
 }
 
 func (s *Service) CreateProject(
@@ -67,7 +75,12 @@ func (s *Service) CreateProject(
 		return ProjectView{}, fmt.Errorf("create project store: %w", err)
 	}
 
-	s.replaceActive(activeWorkspace{packageInfo: packageInfo, store: store})
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
+	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
+		_ = store.Close()
+		return ProjectView{}, err
+	}
+	s.replaceActive(candidate)
 	return projectView(project, packageInfo.Root), nil
 }
 
@@ -79,6 +92,11 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 	if err := s.snapshots.RecoverInterruptedRestore(packageInfo.Database); err != nil {
 		return ProjectView{}, fmt.Errorf("recover interrupted project restore: %w", err)
 	}
+	if s.branches != nil {
+		if err := s.branches.RecoverInterruptedOperation(packageInfo.Branches, packageInfo.Database); err != nil {
+			return ProjectView{}, fmt.Errorf("recover interrupted branch operation: %w", err)
+		}
+	}
 	store, err := s.stores.Open(ctx, packageInfo.Database)
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("open project store: %w", err)
@@ -89,7 +107,12 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 		return ProjectView{}, fmt.Errorf("read project: %w", err)
 	}
 
-	s.replaceActive(activeWorkspace{packageInfo: packageInfo, store: store})
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
+	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
+		_ = store.Close()
+		return ProjectView{}, err
+	}
+	s.replaceActive(candidate)
 	return projectView(project, packageInfo.Root), nil
 }
 
@@ -240,6 +263,7 @@ func (s *Service) Close() error {
 	s.mu.Lock()
 	active := s.active
 	s.active = nil
+	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
 	if active == nil {
 		return nil
@@ -251,6 +275,7 @@ func (s *Service) replaceActive(next activeWorkspace) {
 	s.mu.Lock()
 	previous := s.active
 	s.active = &next
+	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
 	if previous != nil {
 		_ = previous.store.Close()

@@ -15,7 +15,7 @@ func TestManagerCreatesAndOpensProjectPackage(t *testing.T) {
 	if created.Root == "" || created.Database == "" {
 		t.Fatalf("created package = %#v", created)
 	}
-	for _, directory := range []string{created.Attachments, created.Exports, created.Snapshots} {
+	for _, directory := range []string{created.Attachments, created.Exports, created.Snapshots, created.Branches} {
 		info, err := os.Stat(directory)
 		if err != nil {
 			t.Fatalf("Stat(%q): %v", directory, err)

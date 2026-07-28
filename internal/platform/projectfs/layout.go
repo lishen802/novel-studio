@@ -29,6 +29,7 @@ type Layout struct {
 	Attachments string
 	Exports     string
 	Snapshots   string
+	Branches    string
 }
 
 func NewLayout(parentDirectory, projectTitle string) (Layout, error) {
@@ -49,7 +50,7 @@ func (l Layout) Create() error {
 		return fmt.Errorf("create project package: %w", err)
 	}
 
-	for _, directory := range []string{l.Attachments, l.Exports, l.Snapshots} {
+	for _, directory := range []string{l.Attachments, l.Exports, l.Snapshots, l.Branches} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return fmt.Errorf("create project directory: %w", err)
 		}
@@ -84,6 +85,7 @@ func layoutForRoot(root string) Layout {
 		Attachments: filepath.Join(root, "attachments"),
 		Exports:     filepath.Join(root, "exports"),
 		Snapshots:   filepath.Join(root, "snapshots"),
+		Branches:    filepath.Join(root, "branches"),
 	}
 }
 

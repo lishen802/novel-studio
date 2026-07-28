@@ -32,6 +32,9 @@ func TestNewLayoutSanitizesCrossPlatformName(t *testing.T) {
 	if layout.Snapshots != filepath.Join(wantRoot, "snapshots") {
 		t.Fatalf("Snapshots = %q", layout.Snapshots)
 	}
+	if layout.Branches != filepath.Join(wantRoot, "branches") {
+		t.Fatalf("Branches = %q", layout.Branches)
+	}
 }
 
 func TestNewLayoutMakesWindowsReservedNamePortable(t *testing.T) {
@@ -60,6 +63,7 @@ func TestLayoutCreateCreatesRequiredDirectories(t *testing.T) {
 		layout.Attachments,
 		layout.Exports,
 		layout.Snapshots,
+		layout.Branches,
 	} {
 		info, err := os.Stat(directory)
 		if err != nil {

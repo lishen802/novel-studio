@@ -26,6 +26,7 @@ import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import type { WorkspaceStatus } from "./workspace-store";
 
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
+type WorkspaceReplacement = Pick<SnapshotRestoreView, "project" | "chapters">;
 
 type WorkspaceProps = {
   workspace: ReadyWorkspace;
@@ -34,7 +35,7 @@ type WorkspaceProps = {
   onCreateChapter(title: string): Promise<boolean>;
   onSelectChapter(id: string): Promise<void>;
   onChapterUpdated(chapter: ChapterView): void;
-  onWorkspaceRestored(result: SnapshotRestoreView): void;
+  onWorkspaceRestored(result: WorkspaceReplacement): void;
   onBeforeVersionOperation(): Promise<void>;
   onDismissError(): void;
   onFlushAvailable(flush: (() => Promise<void>) | null): void;

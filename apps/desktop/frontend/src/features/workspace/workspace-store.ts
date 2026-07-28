@@ -7,6 +7,8 @@ import type {
   StudioClient,
 } from "../../lib/studio-client";
 
+type WorkspaceReplacement = Pick<SnapshotRestoreView, "project" | "chapters">;
+
 export type WorkspaceStatus =
   | { kind: "welcome" }
   | { kind: "opening" }
@@ -30,7 +32,7 @@ export type WorkspaceState = {
   createChapter(title: string): Promise<boolean>;
   selectChapter(id: string): Promise<void>;
   updateChapter(chapter: ChapterView): void;
-  restoreWorkspace(result: SnapshotRestoreView): void;
+  restoreWorkspace(result: WorkspaceReplacement): void;
   clearWorkspaceError(): void;
 };
 

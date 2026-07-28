@@ -29,6 +29,13 @@ type WorkspaceUseCases interface {
 	Snapshots(context.Context) ([]workspace.SnapshotView, error)
 	CreateSnapshot(context.Context, string) (workspace.SnapshotView, error)
 	RestoreSnapshot(context.Context, string) (workspace.SnapshotRestoreView, error)
+	Branches(context.Context) ([]workspace.BranchView, error)
+	CreateBranch(context.Context, string, string) (workspace.BranchView, error)
+	SwitchBranch(context.Context, string) (workspace.BranchSwitchView, error)
+	CompareBranches(context.Context, string, string) (workspace.BranchComparisonView, error)
+	PreviewBranchMerge(context.Context, string) (workspace.BranchMergePreviewView, error)
+	ConfirmBranchMerge(context.Context, string) (workspace.BranchSwitchView, error)
+	DeleteBranch(context.Context, string) error
 	StoryStructure(context.Context) (workspace.StoryStructureView, error)
 	CreateOutlineNode(context.Context, workspace.CreateOutlineNodeInput) (workspace.OutlineNodeView, error)
 	CreateStoryLine(context.Context, workspace.CreateStoryLineInput) (workspace.StoryLineView, error)
@@ -105,6 +112,11 @@ type CreateProjectInput struct {
 	Title           string `json:"title"`
 	Genre           string `json:"genre"`
 	Summary         string `json:"summary"`
+}
+
+type CreateBranchInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type DesktopAPI struct {
@@ -231,6 +243,34 @@ func (a *DesktopAPI) CreateSnapshot(name string) (workspace.SnapshotView, error)
 
 func (a *DesktopAPI) RestoreSnapshot(id string) (workspace.SnapshotRestoreView, error) {
 	return safeResult(a.workspace.RestoreSnapshot(a.ctx, id))
+}
+
+func (a *DesktopAPI) Branches() ([]workspace.BranchView, error) {
+	return safeResult(a.workspace.Branches(a.ctx))
+}
+
+func (a *DesktopAPI) CreateBranch(input CreateBranchInput) (workspace.BranchView, error) {
+	return safeResult(a.workspace.CreateBranch(a.ctx, input.Name, input.Description))
+}
+
+func (a *DesktopAPI) SwitchBranch(id string) (workspace.BranchSwitchView, error) {
+	return safeResult(a.workspace.SwitchBranch(a.ctx, id))
+}
+
+func (a *DesktopAPI) CompareBranches(sourceID, targetID string) (workspace.BranchComparisonView, error) {
+	return safeResult(a.workspace.CompareBranches(a.ctx, sourceID, targetID))
+}
+
+func (a *DesktopAPI) PreviewBranchMerge(sourceID string) (workspace.BranchMergePreviewView, error) {
+	return safeResult(a.workspace.PreviewBranchMerge(a.ctx, sourceID))
+}
+
+func (a *DesktopAPI) ConfirmBranchMerge(token string) (workspace.BranchSwitchView, error) {
+	return safeResult(a.workspace.ConfirmBranchMerge(a.ctx, token))
+}
+
+func (a *DesktopAPI) DeleteBranch(id string) error {
+	return safeDesktopError(a.workspace.DeleteBranch(a.ctx, id))
 }
 
 func (a *DesktopAPI) StoryStructure() (workspace.StoryStructureView, error) {

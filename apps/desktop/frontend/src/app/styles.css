@@ -2583,6 +2583,270 @@ button:disabled {
   background: rgba(224, 237, 226, 0.72);
 }
 
+.branch-panel {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid rgba(70, 55, 39, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 253, 249, 0.88);
+  box-shadow: 0 14px 34px rgba(65, 47, 30, 0.055);
+}
+
+.branch-panel__header,
+.branch-panel__header > div:first-child,
+.branch-panel__actions,
+.branch-card,
+.branch-card__identity,
+.branch-card__title,
+.branch-card__actions,
+.branch-compare > header,
+.branch-compare > header > div {
+  display: flex;
+  align-items: center;
+}
+
+.branch-panel__header {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.branch-panel__header > div:first-child {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.branch-panel h3,
+.branch-compare h4 {
+  margin: 0;
+  color: #443d36;
+  font-family: Georgia, "Songti SC", serif;
+  font-weight: 500;
+}
+
+.branch-panel__header p {
+  margin: 5px 0 0;
+  color: #776d63;
+  font-size: 0.78rem;
+}
+
+.branch-panel__actions,
+.branch-card__actions {
+  gap: 8px;
+}
+
+.branch-panel button,
+.branch-compare button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.branch-panel .icon-action,
+.branch-panel .danger-icon-action {
+  width: 36px;
+  padding: 0;
+}
+
+.branch-panel .danger-icon-action {
+  color: #934c44;
+  background: #f2dfda;
+}
+
+.branch-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 17px;
+}
+
+.branch-card {
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #f3eadf;
+}
+
+.branch-card.is-active {
+  border-color: rgba(77, 111, 81, 0.25);
+  background: #e8eee5;
+}
+
+.branch-card__identity {
+  min-width: 0;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.branch-card__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  color: #765e43;
+  background: #ead9c0;
+}
+
+.branch-card.is-active .branch-card__icon {
+  color: #496451;
+  background: #d5e3d4;
+}
+
+.branch-card__title {
+  gap: 7px;
+}
+
+.branch-card__title strong {
+  color: #413a34;
+  font-size: 0.9rem;
+}
+
+.branch-card__title em {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #3f6549;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 700;
+  background: #d4e5d6;
+}
+
+.branch-card__title em.is-neutral {
+  color: #6c5843;
+  background: #e9dac8;
+}
+
+.branch-card__identity p {
+  margin: 4px 0;
+  color: #6f655c;
+  font-size: 0.76rem;
+}
+
+.branch-card__identity small {
+  color: #887c70;
+  font-size: 0.67rem;
+}
+
+.branch-compare {
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px solid rgba(75, 57, 40, 0.1);
+  border-radius: 12px;
+  background: #f8f3eb;
+}
+
+.branch-compare > header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.branch-compare > header > div {
+  gap: 8px;
+}
+
+.branch-compare__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.branch-compare__stats span {
+  padding: 9px;
+  border-radius: 9px;
+  color: #6e645a;
+  font-size: 0.7rem;
+  background: #eee4d6;
+}
+
+.branch-compare__stats strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #3e3934;
+  font-size: 1rem;
+}
+
+.branch-domain-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.branch-domain-list > div {
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  border-radius: 9px;
+  background: #eee9e1;
+}
+
+.branch-domain-list > div.is-changed {
+  background: #f0dfca;
+}
+
+.branch-domain-list span {
+  color: #50473e;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.branch-domain-list small {
+  color: #7d7267;
+  font-size: 0.66rem;
+}
+
+.branch-domain-list em,
+.branch-chapter-changes em {
+  color: #7c654b;
+  font-size: 0.63rem;
+  font-style: normal;
+}
+
+.branch-chapter-changes {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.branch-chapter-changes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: #554c43;
+  font-size: 0.72rem;
+  background: #fffaf3;
+}
+
+.branch-dialog > p:not(.eyebrow),
+.branch-merge-dialog > p:not(.eyebrow) {
+  color: #6d6257;
+}
+
+.branch-merge-dialog {
+  width: min(92vw, 660px);
+}
+
+.branch-merge-dialog .branch-compare {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.branch-compare--compact {
+  margin-top: 12px;
+}
+
 .snapshot-panel,
 .revision-list-panel,
 .revision-compare-panel {
@@ -2953,10 +3217,17 @@ button:disabled {
   }
 
   .version-header,
+  .branch-panel__header,
+  .branch-card,
   .snapshot-panel > header,
   .revision-compare-panel > header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .branch-card__actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .snapshot-create {

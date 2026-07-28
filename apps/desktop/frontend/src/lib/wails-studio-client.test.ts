@@ -45,6 +45,13 @@ function installNative(overrides: Record<string, unknown> = {}) {
     Snapshots: vi.fn(async () => []),
     CreateSnapshot: vi.fn(),
     RestoreSnapshot: vi.fn(),
+    Branches: vi.fn(async () => []),
+    CreateBranch: vi.fn(),
+    SwitchBranch: vi.fn(),
+    CompareBranches: vi.fn(),
+    PreviewBranchMerge: vi.fn(),
+    ConfirmBranchMerge: vi.fn(),
+    DeleteBranch: vi.fn(async () => undefined),
     StoryStructure: vi.fn(async () => ({
       outlineNodes: [],
       storyLines: [],
@@ -613,6 +620,97 @@ describe("wailsStudioClient", () => {
     expect(api.RestoreChapterRevision).toHaveBeenCalledWith(chapter.id, 1, 2);
     expect(api.CreateSnapshot).toHaveBeenCalledWith(snapshot.name);
     expect(api.RestoreSnapshot).toHaveBeenCalledWith(snapshot.id);
+  });
+
+  it("validates and forwards complete project branch operations", async () => {
+    const main = {
+      id: "main",
+      name: "主分支",
+      description: "",
+      parentId: "",
+      active: true,
+      main: true,
+      generation: 2,
+      createdAt: "2026-07-28T06:00:00Z",
+      updatedAt: "2026-07-28T06:10:00Z",
+    };
+    const child = {
+      ...main,
+      id: "child",
+      name: "黑化线",
+      description: "主角接受魔契",
+      parentId: main.id,
+      active: false,
+      main: false,
+    };
+    const switched = {
+      activeBranchId: child.id,
+      project,
+      chapters: [],
+    };
+    const comparison = {
+      source: child,
+      target: main,
+      addedChapters: 0,
+      modifiedChapters: 1,
+      removedChapters: 0,
+      chapterChanges: [
+        { chapterId: "chapter-1", title: "第一章", kind: "modified" },
+      ],
+      domains: [
+        {
+          key: "characters",
+          label: "人物与势力",
+          sourceCount: 2,
+          targetCount: 1,
+          changed: true,
+        },
+      ],
+    };
+    const preview = {
+      token: "merge-token",
+      sourceId: child.id,
+      targetId: main.id,
+      comparison,
+    };
+    const api = installNative({
+      Branches: vi.fn(async () => [main, child]),
+      CreateBranch: vi.fn(async () => child),
+      SwitchBranch: vi.fn(async () => switched),
+      CompareBranches: vi.fn(async () => comparison),
+      PreviewBranchMerge: vi.fn(async () => preview),
+      ConfirmBranchMerge: vi.fn(async () => switched),
+    });
+
+    await expect(wailsStudioClient.branches()).resolves.toEqual([main, child]);
+    await expect(
+      wailsStudioClient.createBranch({
+        name: child.name,
+        description: child.description,
+      }),
+    ).resolves.toEqual(child);
+    await expect(wailsStudioClient.switchBranch(child.id)).resolves.toEqual(
+      switched,
+    );
+    await expect(
+      wailsStudioClient.compareBranches(child.id, main.id),
+    ).resolves.toEqual(comparison);
+    await expect(
+      wailsStudioClient.previewBranchMerge(child.id),
+    ).resolves.toEqual(preview);
+    await expect(
+      wailsStudioClient.confirmBranchMerge(preview.token),
+    ).resolves.toEqual(switched);
+    await wailsStudioClient.deleteBranch(child.id);
+
+    expect(api.CreateBranch).toHaveBeenCalledWith({
+      name: child.name,
+      description: child.description,
+    });
+    expect(api.SwitchBranch).toHaveBeenCalledWith(child.id);
+    expect(api.CompareBranches).toHaveBeenCalledWith(child.id, main.id);
+    expect(api.ConfirmBranchMerge).toHaveBeenCalledWith(preview.token);
+    expect(api.DeleteBranch).toHaveBeenCalledWith(child.id);
   });
 
   it("registers the native close event and completes the close handshake", async () => {

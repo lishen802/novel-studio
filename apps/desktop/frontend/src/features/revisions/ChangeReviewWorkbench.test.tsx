@@ -50,7 +50,7 @@ describe("ChangeReviewWorkbench", () => {
     );
 
     expect(await screen.findByText("重写第一章开场")).toBeInTheDocument();
-    const review = screen.getByLabelText("正文变更对比");
+    const review = await screen.findByLabelText("正文变更对比");
     expect(within(review).getByText("雨一直下。")).toBeInTheDocument();
     expect(
       within(review).getByText("警钟在雨幕中骤然响起。"),

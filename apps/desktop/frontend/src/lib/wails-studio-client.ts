@@ -3,6 +3,10 @@ import {
   RevisionConflictError,
   StudioClientError,
   type ChapterView,
+  type BranchComparisonView,
+  type BranchMergePreviewView,
+  type BranchSwitchView,
+  type BranchView,
   type ChapterChangeInput,
   type ChapterRevisionView,
   type ChangeSetView,
@@ -14,6 +18,7 @@ import {
   type CharacterView,
   type CreateOutlineNodeInput,
   type CreateProjectInput,
+  type CreateBranchInput,
   type CreateSceneCardInput,
   type CreateStoryLineInput,
   type FactionInput,
@@ -152,6 +157,51 @@ const snapshotRestoreSchema = z.object({
   snapshotId: z.string(),
   project: projectSchema,
   chapters: z.array(chapterSchema),
+});
+const branchSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  parentId: z.string(),
+  active: z.boolean(),
+  main: z.boolean(),
+  generation: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const branchSwitchSchema = z.object({
+  activeBranchId: z.string(),
+  project: projectSchema,
+  chapters: z.array(chapterSchema),
+});
+const branchComparisonSchema = z.object({
+  source: branchSchema,
+  target: branchSchema,
+  addedChapters: z.number(),
+  modifiedChapters: z.number(),
+  removedChapters: z.number(),
+  chapterChanges: z.array(
+    z.object({
+      chapterId: z.string(),
+      title: z.string(),
+      kind: z.enum(["added", "modified", "removed"]),
+    }),
+  ),
+  domains: z.array(
+    z.object({
+      key: z.string(),
+      label: z.string(),
+      sourceCount: z.number(),
+      targetCount: z.number(),
+      changed: z.boolean(),
+    }),
+  ),
+});
+const branchMergePreviewSchema = z.object({
+  token: z.string(),
+  sourceId: z.string(),
+  targetId: z.string(),
+  comparison: branchComparisonSchema,
 });
 
 const outlineNodeSchema = z.object({
@@ -502,6 +552,13 @@ type NativeDesktopAPI = {
   Snapshots(): Promise<unknown>;
   CreateSnapshot(name: string): Promise<unknown>;
   RestoreSnapshot(id: string): Promise<unknown>;
+  Branches(): Promise<unknown>;
+  CreateBranch(input: CreateBranchInput): Promise<unknown>;
+  SwitchBranch(id: string): Promise<unknown>;
+  CompareBranches(sourceId: string, targetId: string): Promise<unknown>;
+  PreviewBranchMerge(sourceId: string): Promise<unknown>;
+  ConfirmBranchMerge(token: string): Promise<unknown>;
+  DeleteBranch(id: string): Promise<void>;
   StoryStructure(): Promise<unknown>;
   CreateOutlineNode(input: CreateOutlineNodeInput): Promise<unknown>;
   CreateStoryLine(input: CreateStoryLineInput): Promise<unknown>;
@@ -632,6 +689,15 @@ const snapshotViews = (value: unknown): SnapshotView[] =>
   z.array(snapshotSchema).parse(value);
 const snapshotRestoreView = (value: unknown): SnapshotRestoreView =>
   snapshotRestoreSchema.parse(value);
+const branchView = (value: unknown): BranchView => branchSchema.parse(value);
+const branchViews = (value: unknown): BranchView[] =>
+  z.array(branchSchema).parse(value);
+const branchSwitchView = (value: unknown): BranchSwitchView =>
+  branchSwitchSchema.parse(value);
+const branchComparisonView = (value: unknown): BranchComparisonView =>
+  branchComparisonSchema.parse(value);
+const branchMergePreviewView = (value: unknown): BranchMergePreviewView =>
+  branchMergePreviewSchema.parse(value);
 
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
@@ -804,6 +870,35 @@ export const wailsStudioClient: StudioClient = {
     return snapshotRestoreView(
       await safeCall(() => nativeAPI().RestoreSnapshot(id)),
     );
+  },
+  async branches() {
+    return branchViews(await safeCall(() => nativeAPI().Branches()));
+  },
+  async createBranch(input) {
+    return branchView(await safeCall(() => nativeAPI().CreateBranch(input)));
+  },
+  async switchBranch(id) {
+    return branchSwitchView(
+      await safeCall(() => nativeAPI().SwitchBranch(id)),
+    );
+  },
+  async compareBranches(sourceId, targetId) {
+    return branchComparisonView(
+      await safeCall(() => nativeAPI().CompareBranches(sourceId, targetId)),
+    );
+  },
+  async previewBranchMerge(sourceId) {
+    return branchMergePreviewView(
+      await safeCall(() => nativeAPI().PreviewBranchMerge(sourceId)),
+    );
+  },
+  async confirmBranchMerge(token) {
+    return branchSwitchView(
+      await safeCall(() => nativeAPI().ConfirmBranchMerge(token)),
+    );
+  },
+  async deleteBranch(id) {
+    await safeCall(() => nativeAPI().DeleteBranch(id));
   },
   async storyStructure() {
     return storyStructureView(

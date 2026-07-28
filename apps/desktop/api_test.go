@@ -11,10 +11,12 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
+	"github.com/lishen802/novel-studio/internal/platform/branchfs"
 )
 
 func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
@@ -172,6 +174,63 @@ func TestDesktopAPIForwardsVersionHistoryAndSnapshotOperations(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(restored, restore) ||
 		workspaces.restoreSnapshotID != snapshot.ID {
 		t.Fatalf("RestoreSnapshot = (%#v, %v), id = %q", restored, err, workspaces.restoreSnapshotID)
+	}
+}
+
+func TestDesktopAPIForwardsProjectBranchOperations(t *testing.T) {
+	branch := workspace.BranchView{ID: "branch-1", Name: "黑化线", ParentID: "main"}
+	comparison := workspace.BranchComparisonView{
+		Source:           branch,
+		Target:           workspace.BranchView{ID: "main", Name: "主分支"},
+		ModifiedChapters: 1,
+	}
+	preview := workspace.BranchMergePreviewView{
+		Token:      "merge-token",
+		SourceID:   branch.ID,
+		TargetID:   "main",
+		Comparison: comparison,
+	}
+	switched := workspace.BranchSwitchView{
+		ActiveBranchID: branch.ID,
+		Chapters:       []workspace.ChapterView{{ID: "chapter-1"}},
+	}
+	workspaces := &fakeWorkspace{
+		branchesResult:      []workspace.BranchView{branch},
+		createBranchResult:  branch,
+		switchBranchResult:  switched,
+		compareBranchResult: comparison,
+		mergePreviewResult:  preview,
+		mergeConfirmResult:  switched,
+	}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	if got, err := api.Branches(); err != nil || !reflect.DeepEqual(got, workspaces.branchesResult) {
+		t.Fatalf("Branches() = (%#v, %v)", got, err)
+	}
+	input := CreateBranchInput{Name: branch.Name, Description: "主角接受魔契"}
+	if got, err := api.CreateBranch(input); err != nil || got != branch ||
+		workspaces.createBranchInput != input {
+		t.Fatalf("CreateBranch() = (%#v, %v), input %#v", got, err, workspaces.createBranchInput)
+	}
+	if got, err := api.SwitchBranch(branch.ID); err != nil || !reflect.DeepEqual(got, switched) ||
+		workspaces.switchBranchID != branch.ID {
+		t.Fatalf("SwitchBranch() = (%#v, %v), id %q", got, err, workspaces.switchBranchID)
+	}
+	if got, err := api.CompareBranches(branch.ID, "main"); err != nil ||
+		!reflect.DeepEqual(got, comparison) {
+		t.Fatalf("CompareBranches() = (%#v, %v)", got, err)
+	}
+	if got, err := api.PreviewBranchMerge(branch.ID); err != nil ||
+		!reflect.DeepEqual(got, preview) {
+		t.Fatalf("PreviewBranchMerge() = (%#v, %v)", got, err)
+	}
+	if got, err := api.ConfirmBranchMerge(preview.Token); err != nil ||
+		!reflect.DeepEqual(got, switched) {
+		t.Fatalf("ConfirmBranchMerge() = (%#v, %v)", got, err)
+	}
+	if err := api.DeleteBranch(branch.ID); err != nil || workspaces.deletedBranchID != branch.ID {
+		t.Fatalf("DeleteBranch() id = %q, error = %v", workspaces.deletedBranchID, err)
 	}
 }
 
@@ -396,6 +455,28 @@ func TestDesktopAPIMapsWorkspaceErrorToSafeDesktopError(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIMapsBranchConflictsAndGuardsToActionableMessages(t *testing.T) {
+	tests := []struct {
+		err     error
+		code    desktopErrorCode
+		message string
+	}{
+		{revisiondomain.ErrBranchDiverged, errorBranchConflict, "目标分支在分叉后也发生了变化，暂时无法自动合并。"},
+		{revisiondomain.ErrBranchUnchanged, errorValidationFailed, "这个分支没有可合并的变化。"},
+		{revisiondomain.ErrStaleBranchMerge, errorBranchConflict, "合并预览已过期，请重新预览后再确认。"},
+		{branchfs.ErrBranchHeadChanged, errorProjectCorrupt, "剧情分支文件已被外部修改或损坏，请从完整项目备份恢复。"},
+		{branchfs.ErrProtectedBranch, errorValidationFailed, "主分支或当前分支不能删除。"},
+		{branchfs.ErrBranchHasChildren, errorValidationFailed, "该分支仍有子分支，请先处理子分支。"},
+	}
+	for _, test := range tests {
+		var safe *desktopError
+		err := safeDesktopError(test.err)
+		if !errors.As(err, &safe) || safe.Code != test.code || safe.Message != test.message {
+			t.Fatalf("safeDesktopError(%v) = %#v", test.err, safe)
+		}
+	}
+}
+
 func TestSafeDesktopErrorClassifiesRecoveryFailures(t *testing.T) {
 	tests := []struct {
 		name string
@@ -598,6 +679,18 @@ type fakeWorkspace struct {
 	snapshotName             string
 	restoreSnapshotResult    workspace.SnapshotRestoreView
 	restoreSnapshotID        string
+	branchesResult           []workspace.BranchView
+	createBranchResult       workspace.BranchView
+	createBranchInput        CreateBranchInput
+	switchBranchResult       workspace.BranchSwitchView
+	switchBranchID           string
+	compareBranchResult      workspace.BranchComparisonView
+	compareBranchIDs         [2]string
+	mergePreviewResult       workspace.BranchMergePreviewView
+	mergePreviewSourceID     string
+	mergeConfirmResult       workspace.BranchSwitchView
+	mergeConfirmToken        string
+	deletedBranchID          string
 	closeCalls               int
 	storyStructureResult     workspace.StoryStructureView
 	outlineInput             workspace.CreateOutlineNodeInput
@@ -769,6 +862,40 @@ func (f *fakeWorkspace) CreateSnapshot(_ context.Context, name string) (workspac
 func (f *fakeWorkspace) RestoreSnapshot(_ context.Context, id string) (workspace.SnapshotRestoreView, error) {
 	f.restoreSnapshotID = id
 	return f.restoreSnapshotResult, nil
+}
+
+func (f *fakeWorkspace) Branches(context.Context) ([]workspace.BranchView, error) {
+	return f.branchesResult, nil
+}
+
+func (f *fakeWorkspace) CreateBranch(_ context.Context, name, description string) (workspace.BranchView, error) {
+	f.createBranchInput = CreateBranchInput{Name: name, Description: description}
+	return f.createBranchResult, nil
+}
+
+func (f *fakeWorkspace) SwitchBranch(_ context.Context, id string) (workspace.BranchSwitchView, error) {
+	f.switchBranchID = id
+	return f.switchBranchResult, nil
+}
+
+func (f *fakeWorkspace) CompareBranches(_ context.Context, sourceID, targetID string) (workspace.BranchComparisonView, error) {
+	f.compareBranchIDs = [2]string{sourceID, targetID}
+	return f.compareBranchResult, nil
+}
+
+func (f *fakeWorkspace) PreviewBranchMerge(_ context.Context, sourceID string) (workspace.BranchMergePreviewView, error) {
+	f.mergePreviewSourceID = sourceID
+	return f.mergePreviewResult, nil
+}
+
+func (f *fakeWorkspace) ConfirmBranchMerge(_ context.Context, token string) (workspace.BranchSwitchView, error) {
+	f.mergeConfirmToken = token
+	return f.mergeConfirmResult, nil
+}
+
+func (f *fakeWorkspace) DeleteBranch(_ context.Context, id string) error {
+	f.deletedBranchID = id
+	return nil
 }
 
 func (f *fakeWorkspace) Close() error {

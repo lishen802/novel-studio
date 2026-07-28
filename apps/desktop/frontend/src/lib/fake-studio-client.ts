@@ -1,6 +1,10 @@
 import { RevisionConflictError } from "./studio-client";
 import type {
   AppearanceInput,
+  BranchComparisonView,
+  BranchMergePreviewView,
+  BranchSwitchView,
+  BranchView,
   ChapterView,
   ChapterChangeInput,
   ChangeOperationEditInput,
@@ -12,6 +16,7 @@ import type {
   CharacterInput,
   CharacterView,
   CreateProjectInput,
+  CreateBranchInput,
   CreateOutlineNodeInput,
   CreateSceneCardInput,
   CreateStoryLineInput,
@@ -126,6 +131,19 @@ export class FakeStudioClient implements StudioClient {
     project: this.createProjectResult,
     chapters: [],
   };
+  branchesResult: BranchView[] = [
+    {
+      id: "main",
+      name: "主分支",
+      description: "",
+      parentId: "",
+      active: true,
+      main: true,
+      generation: 1,
+      createdAt: "2026-07-28T05:00:00Z",
+      updatedAt: "2026-07-28T05:00:00Z",
+    },
+  ];
   storyStructureResult: StoryStructureView = {
     outlineNodes: [],
     storyLines: [],
@@ -199,6 +217,12 @@ export class FakeStudioClient implements StudioClient {
   }> = [];
   createSnapshotCalls: string[] = [];
   restoreSnapshotCalls: string[] = [];
+  createBranchCalls: CreateBranchInput[] = [];
+  switchBranchCalls: string[] = [];
+  compareBranchCalls: Array<{ sourceId: string; targetId: string }> = [];
+  previewBranchMergeCalls: string[] = [];
+  confirmBranchMergeCalls: string[] = [];
+  deleteBranchCalls: string[] = [];
   createOutlineNodeCalls: CreateOutlineNodeInput[] = [];
   createStoryLineCalls: CreateStoryLineInput[] = [];
   linkStoryLineCalls: LinkStoryLineInput[] = [];
@@ -611,6 +635,91 @@ export class FakeStudioClient implements StudioClient {
     this.openChapterResult =
       this.snapshotRestoreResult.chapters[0] ?? this.openChapterResult;
     return { ...this.snapshotRestoreResult, snapshotId: id };
+  }
+
+  async branches(): Promise<BranchView[]> {
+    return this.branchesResult;
+  }
+
+  async createBranch(input: CreateBranchInput): Promise<BranchView> {
+    this.createBranchCalls.push(input);
+    const parent =
+      this.branchesResult.find((branch) => branch.active) ??
+      this.branchesResult[0];
+    const created: BranchView = {
+      id: `branch-${this.branchesResult.length + 1}`,
+      ...input,
+      parentId: parent?.id ?? "",
+      active: false,
+      main: false,
+      generation: 1,
+      createdAt: "2026-07-28T06:00:00Z",
+      updatedAt: "2026-07-28T06:00:00Z",
+    };
+    this.branchesResult = [...this.branchesResult, created];
+    return created;
+  }
+
+  async switchBranch(id: string): Promise<BranchSwitchView> {
+    this.switchBranchCalls.push(id);
+    this.branchesResult = this.branchesResult.map((branch) => ({
+      ...branch,
+      active: branch.id === id,
+    }));
+    return {
+      activeBranchId: id,
+      project: this.openProjectResult,
+      chapters: this.chaptersResult,
+    };
+  }
+
+  async compareBranches(
+    sourceId: string,
+    targetId: string,
+  ): Promise<BranchComparisonView> {
+    this.compareBranchCalls.push({ sourceId, targetId });
+    const source = this.branchesResult.find((branch) => branch.id === sourceId);
+    const target = this.branchesResult.find((branch) => branch.id === targetId);
+    if (!source || !target) throw new Error("分支不存在");
+    return {
+      source,
+      target,
+      addedChapters: 0,
+      modifiedChapters: 0,
+      removedChapters: 0,
+      chapterChanges: [],
+      domains: [],
+    };
+  }
+
+  async previewBranchMerge(sourceId: string): Promise<BranchMergePreviewView> {
+    this.previewBranchMergeCalls.push(sourceId);
+    const target = this.branchesResult.find((branch) => branch.active);
+    if (!target) throw new Error("当前分支不存在");
+    return {
+      token: "fake-branch-merge-token",
+      sourceId,
+      targetId: target.id,
+      comparison: await this.compareBranches(sourceId, target.id),
+    };
+  }
+
+  async confirmBranchMerge(token: string): Promise<BranchSwitchView> {
+    this.confirmBranchMergeCalls.push(token);
+    const active = this.branchesResult.find((branch) => branch.active);
+    if (!active) throw new Error("当前分支不存在");
+    return {
+      activeBranchId: active.id,
+      project: this.openProjectResult,
+      chapters: this.chaptersResult,
+    };
+  }
+
+  async deleteBranch(id: string): Promise<void> {
+    this.deleteBranchCalls.push(id);
+    this.branchesResult = this.branchesResult.filter(
+      (branch) => branch.id !== id,
+    );
   }
 
   async storyStructure(): Promise<StoryStructureView> {
