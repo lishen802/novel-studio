@@ -5,9 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/pressly/goose/v3"
 )
 
 func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
@@ -75,6 +79,105 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "index", "idx_characters_name")
 	assertSchemaObjectExists(t, db, "index", "idx_relationships_source")
 	assertSchemaObjectExists(t, db, "index", "idx_chapter_characters_character")
+}
+
+func TestChangeSetSchemaSupportsStructuredPartialReview(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := formatTime(time.Unix(100, 0))
+
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO change_sets(
+			id, project_id, title, summary, created_by, status, created_at, updated_at
+		) VALUES (?, ?, ?, '', 'agent:planner', 'partially_applied', ?, ?)
+	`, "change-set-structured", project.ID, "结构化候选", now, now); err != nil {
+		t.Fatalf("insert partially applied change set: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO change_operations(
+			id, change_set_id, kind, target_id, base_revision, base_fingerprint,
+			before_value, after_value, reason, status, created_at, updated_at
+		) VALUES (?, ?, 'update_character', ?, 0, ?, ?, ?, '', 'pending', ?, ?)
+	`,
+		"operation-character",
+		"change-set-structured",
+		"character-1",
+		"fingerprint",
+		`{"name":"旧名"}`,
+		`{"name":"新名"}`,
+		now,
+		now,
+	); err != nil {
+		t.Fatalf("insert structured change operation: %v", err)
+	}
+}
+
+func TestStructuredChangeSetMigrationPreservesVersionNineCandidates(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "project.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 9); err != nil {
+		t.Fatalf("migrate to version nine: %v", err)
+	}
+	now := formatTime(time.Unix(100, 0))
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects(id, title, genre, summary, created_at, updated_at)
+		VALUES ('project-1', '旧项目', '', '', ?, ?)
+	`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO change_sets(id, project_id, title, summary, created_by, status, created_at, updated_at)
+		VALUES ('change-set-1', 'project-1', '旧候选', '', 'agent:writer', 'pending', ?, ?)
+	`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO change_operations(
+			id, change_set_id, kind, target_id, base_revision, before_value,
+			after_value, reason, status, created_at, updated_at
+		) VALUES (
+			'operation-1', 'change-set-1', 'replace_chapter_body', 'chapter-1',
+			1, '旧正文', '新正文', '', 'pending', ?, ?
+		)
+	`, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("migrate existing candidate to version ten: %v", err)
+	}
+	var kind, beforeValue, afterValue, fingerprint string
+	var position int
+	if err := db.QueryRowContext(ctx, `
+		SELECT kind, position, before_value, after_value, base_fingerprint
+		FROM change_operations WHERE id = 'operation-1'
+	`).Scan(&kind, &position, &beforeValue, &afterValue, &fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "replace_chapter_body" || position != 1 ||
+		beforeValue != "旧正文" || afterValue != "新正文" || fingerprint != "" {
+		t.Fatalf(
+			"migrated operation = (%q, %d, %q, %q, %q)",
+			kind, position, beforeValue, afterValue, fingerprint,
+		)
+	}
 }
 
 func TestOpenDatabaseClassifiesCorruptFileWithoutOverwritingIt(t *testing.T) {

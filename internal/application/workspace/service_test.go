@@ -536,27 +536,40 @@ func (f *fakeStore) ChangeSet(_ context.Context, id string) (revisiondomain.Chan
 	return changeSet, nil
 }
 
-func (f *fakeStore) ApplyChangeSet(_ context.Context, id string, appliedAt time.Time) (projectdomain.Chapter, error) {
+func (f *fakeStore) ApplyChangeSet(_ context.Context, id string, appliedAt time.Time) (ports.ChangeSetApplyResult, error) {
 	changeSet, ok := f.changeSets[id]
 	if !ok {
-		return projectdomain.Chapter{}, errors.New("change set missing")
+		return ports.ChangeSetApplyResult{}, errors.New("change set missing")
 	}
 	if changeSet.Status == revisiondomain.ChangeSetApplied {
-		return f.chapters[changeSet.Operations[0].TargetID], nil
+		chapters := make([]projectdomain.Chapter, 0)
+		for _, operation := range changeSet.Operations {
+			if operation.Kind == revisiondomain.OperationReplaceChapterBody &&
+				operation.Status == revisiondomain.ChangeSetApplied {
+				chapters = append(chapters, f.chapters[operation.TargetID])
+			}
+		}
+		return ports.ChangeSetApplyResult{ChangeSet: changeSet, Chapters: chapters}, nil
 	}
 	applied, err := changeSet.Apply(appliedAt)
 	if err != nil {
-		return projectdomain.Chapter{}, err
+		return ports.ChangeSetApplyResult{}, err
 	}
-	operation := applied.Operations[0]
-	current := f.chapters[operation.TargetID]
-	updated, err := current.Commit(operation.AfterValue, operation.BaseRevision, appliedAt)
-	if err != nil {
-		return projectdomain.Chapter{}, err
+	chapters := make([]projectdomain.Chapter, 0)
+	for _, operation := range applied.Operations {
+		if operation.Kind != revisiondomain.OperationReplaceChapterBody {
+			continue
+		}
+		current := f.chapters[operation.TargetID]
+		updated, err := current.Commit(operation.AfterValue, operation.BaseRevision, appliedAt)
+		if err != nil {
+			return ports.ChangeSetApplyResult{}, err
+		}
+		f.chapters[updated.ID] = updated
+		chapters = append(chapters, updated)
 	}
-	f.chapters[updated.ID] = updated
 	f.changeSets[id] = applied
-	return updated, nil
+	return ports.ChangeSetApplyResult{ChangeSet: applied, Chapters: chapters}, nil
 }
 
 func (f *fakeStore) RejectChangeSet(_ context.Context, id string, rejectedAt time.Time) error {
@@ -569,6 +582,45 @@ func (f *fakeStore) RejectChangeSet(_ context.Context, id string, rejectedAt tim
 		return err
 	}
 	f.changeSets[id] = rejected
+	return nil
+}
+
+func (f *fakeStore) EditChangeOperation(_ context.Context, changeSetID, operationID, afterValue string, editedAt time.Time) (revisiondomain.ChangeSet, error) {
+	changeSet, ok := f.changeSets[changeSetID]
+	if !ok {
+		return revisiondomain.ChangeSet{}, errors.New("change set missing")
+	}
+	edited, err := changeSet.EditOperation(operationID, afterValue, editedAt)
+	if err != nil {
+		return revisiondomain.ChangeSet{}, err
+	}
+	f.changeSets[changeSetID] = edited
+	return edited, nil
+}
+
+func (f *fakeStore) ApplyChangeOperation(ctx context.Context, changeSetID, operationID string, appliedAt time.Time) (ports.ChangeSetApplyResult, error) {
+	changeSet, ok := f.changeSets[changeSetID]
+	if !ok {
+		return ports.ChangeSetApplyResult{}, errors.New("change set missing")
+	}
+	applied, err := changeSet.ApplyOperation(operationID, appliedAt)
+	if err != nil {
+		return ports.ChangeSetApplyResult{}, err
+	}
+	f.changeSets[changeSetID] = applied
+	return ports.ChangeSetApplyResult{ChangeSet: applied}, nil
+}
+
+func (f *fakeStore) RejectChangeOperation(_ context.Context, changeSetID, operationID string, rejectedAt time.Time) error {
+	changeSet, ok := f.changeSets[changeSetID]
+	if !ok {
+		return errors.New("change set missing")
+	}
+	rejected, err := changeSet.RejectOperation(operationID, rejectedAt)
+	if err != nil {
+		return err
+	}
+	f.changeSets[changeSetID] = rejected
 	return nil
 }
 

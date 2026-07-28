@@ -18,8 +18,12 @@ type WorkspaceUseCases interface {
 	CommitChapter(context.Context, string, string, int64) (workspace.ChapterView, error)
 	ChangeSets(context.Context) ([]workspace.ChangeSetView, error)
 	ProposeChapterChange(context.Context, workspace.ChapterChangeInput) (workspace.ChangeSetView, error)
-	ApplyChangeSet(context.Context, string) (workspace.ChapterView, error)
+	ProposeStructuredChange(context.Context, workspace.StructuredChangeInput) (workspace.ChangeSetView, error)
+	EditChangeOperation(context.Context, workspace.ChangeOperationEditInput) (workspace.ChangeSetView, error)
+	ApplyChangeSet(context.Context, string) (workspace.ChangeSetApplyView, error)
+	ApplyChangeOperation(context.Context, string, string) (workspace.ChangeSetApplyView, error)
 	RejectChangeSet(context.Context, string) error
+	RejectChangeOperation(context.Context, string, string) error
 	ChapterHistory(context.Context, string) ([]workspace.ChapterRevisionView, error)
 	RestoreChapterRevision(context.Context, string, int64, int64) (workspace.ChapterView, error)
 	Snapshots(context.Context) ([]workspace.SnapshotView, error)
@@ -176,12 +180,28 @@ func (a *DesktopAPI) ProposeChapterChange(input workspace.ChapterChangeInput) (w
 	return safeResult(a.workspace.ProposeChapterChange(a.ctx, input))
 }
 
-func (a *DesktopAPI) ApplyChangeSet(id string) (workspace.ChapterView, error) {
+func (a *DesktopAPI) ProposeStructuredChange(input workspace.StructuredChangeInput) (workspace.ChangeSetView, error) {
+	return safeResult(a.workspace.ProposeStructuredChange(a.ctx, input))
+}
+
+func (a *DesktopAPI) EditChangeOperation(input workspace.ChangeOperationEditInput) (workspace.ChangeSetView, error) {
+	return safeResult(a.workspace.EditChangeOperation(a.ctx, input))
+}
+
+func (a *DesktopAPI) ApplyChangeSet(id string) (workspace.ChangeSetApplyView, error) {
 	return safeResult(a.workspace.ApplyChangeSet(a.ctx, id))
+}
+
+func (a *DesktopAPI) ApplyChangeOperation(changeSetID, operationID string) (workspace.ChangeSetApplyView, error) {
+	return safeResult(a.workspace.ApplyChangeOperation(a.ctx, changeSetID, operationID))
 }
 
 func (a *DesktopAPI) RejectChangeSet(id string) error {
 	return safeDesktopError(a.workspace.RejectChangeSet(a.ctx, id))
+}
+
+func (a *DesktopAPI) RejectChangeOperation(changeSetID, operationID string) error {
+	return safeDesktopError(a.workspace.RejectChangeOperation(a.ctx, changeSetID, operationID))
 }
 
 func (a *DesktopAPI) ChapterHistory(id string) ([]workspace.ChapterRevisionView, error) {

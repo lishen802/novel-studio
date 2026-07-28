@@ -20,14 +20,21 @@ export type ChapterView = {
 };
 export type ChangeSetStatus =
   | "pending"
+  | "partially_applied"
   | "applied"
   | "rejected"
   | "conflicted";
+export type ChangeOperationKind =
+  | "replace_chapter_body"
+  | "update_outline_node"
+  | "update_character"
+  | "update_fact";
 export type ChangeOperationView = {
   id: string;
-  kind: "replace_chapter_body";
+  kind: ChangeOperationKind;
   targetId: string;
   baseRevision: number;
+  baseFingerprint: string;
   beforeValue: string;
   afterValue: string;
   reason: string;
@@ -73,6 +80,36 @@ export type ChapterChangeInput = {
   proposedBody: string;
   reason: string;
   createdBy: string;
+};
+export type OutlineContentInput = Pick<
+  OutlineNodeView,
+  "title" | "summary" | "goal" | "conflict" | "outcome"
+>;
+export type StructuredChangeOperationInput = {
+  kind: Exclude<ChangeOperationKind, "replace_chapter_body">;
+  targetId: string;
+  reason: string;
+  outline?: OutlineContentInput;
+  character?: CharacterInput;
+  fact?: FactInput;
+};
+export type StructuredChangeInput = {
+  title: string;
+  summary: string;
+  createdBy: string;
+  operations: StructuredChangeOperationInput[];
+};
+export type ChangeOperationEditInput = {
+  changeSetId: string;
+  operationId: string;
+  chapterBody: string;
+  outline?: OutlineContentInput;
+  character?: CharacterInput;
+  fact?: FactInput;
+};
+export type ChangeSetApplyView = {
+  changeSet: ChangeSetView;
+  chapters: ChapterView[];
 };
 
 export type CreateProjectInput = {
@@ -454,8 +491,18 @@ export interface StudioClient {
   ): Promise<ChapterView>;
   changeSets(): Promise<ChangeSetView[]>;
   proposeChapterChange(input: ChapterChangeInput): Promise<ChangeSetView>;
-  applyChangeSet(id: string): Promise<ChapterView>;
+  proposeStructuredChange(input: StructuredChangeInput): Promise<ChangeSetView>;
+  editChangeOperation(input: ChangeOperationEditInput): Promise<ChangeSetView>;
+  applyChangeSet(id: string): Promise<ChangeSetApplyView>;
+  applyChangeOperation(
+    changeSetId: string,
+    operationId: string,
+  ): Promise<ChangeSetApplyView>;
   rejectChangeSet(id: string): Promise<void>;
+  rejectChangeOperation(
+    changeSetId: string,
+    operationId: string,
+  ): Promise<void>;
   chapterHistory(chapterId: string): Promise<ChapterRevisionView[]>;
   restoreChapterRevision(
     chapterId: string,

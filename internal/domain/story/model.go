@@ -76,6 +76,27 @@ func NewOutlineNode(id, projectID string, parent *OutlineNode, level OutlineLeve
 	return OutlineNode{ID: id, ProjectID: projectID, ParentID: parentID, Level: level, Title: title, Position: position, CreatedAt: now, UpdatedAt: now}, nil
 }
 
+func (n OutlineNode) UpdateContent(
+	title string,
+	summary string,
+	goal string,
+	conflict string,
+	outcome string,
+	now time.Time,
+) (OutlineNode, error) {
+	title = strings.TrimSpace(title)
+	if n.ID == "" || n.ProjectID == "" || n.DeletedAt != nil || title == "" {
+		return OutlineNode{}, ErrBlankValue
+	}
+	n.Title = title
+	n.Summary = strings.TrimSpace(summary)
+	n.Goal = strings.TrimSpace(goal)
+	n.Conflict = strings.TrimSpace(conflict)
+	n.Outcome = strings.TrimSpace(outcome)
+	n.UpdatedAt = now.UTC()
+	return n, nil
+}
+
 type StoryLineStatus string
 
 const (

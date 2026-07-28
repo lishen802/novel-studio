@@ -34,8 +34,12 @@ function installNative(overrides: Record<string, unknown> = {}) {
     CommitChapter: vi.fn(),
     ChangeSets: vi.fn(async () => []),
     ProposeChapterChange: vi.fn(),
+    ProposeStructuredChange: vi.fn(),
+    EditChangeOperation: vi.fn(),
     ApplyChangeSet: vi.fn(),
+    ApplyChangeOperation: vi.fn(),
     RejectChangeSet: vi.fn(async () => undefined),
+    RejectChangeOperation: vi.fn(async () => undefined),
     ChapterHistory: vi.fn(async () => []),
     RestoreChapterRevision: vi.fn(),
     Snapshots: vi.fn(async () => []),
@@ -499,6 +503,7 @@ describe("wailsStudioClient", () => {
           kind: "replace_chapter_body",
           targetId: "chapter-1",
           baseRevision: 1,
+          baseFingerprint: "",
           beforeValue: "旧正文",
           afterValue: "新正文",
           reason: "更早引出危机",
@@ -520,12 +525,18 @@ describe("wailsStudioClient", () => {
     };
     const api = installNative({
       ChangeSets: vi.fn(async () => [changeSet]),
-      ApplyChangeSet: vi.fn(async () => chapter),
+      ApplyChangeSet: vi.fn(async () => ({
+        changeSet: { ...changeSet, status: "applied" },
+        chapters: [chapter],
+      })),
     });
 
     await expect(wailsStudioClient.changeSets()).resolves.toEqual([changeSet]);
     await expect(wailsStudioClient.applyChangeSet(changeSet.id)).resolves.toEqual(
-      chapter,
+      {
+        changeSet: { ...changeSet, status: "applied" },
+        chapters: [chapter],
+      },
     );
     await wailsStudioClient.rejectChangeSet(changeSet.id);
 

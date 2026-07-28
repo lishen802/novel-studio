@@ -3,6 +3,10 @@ import type {
   AppearanceInput,
   ChapterView,
   ChapterChangeInput,
+  ChangeOperationEditInput,
+  ChangeOperationView,
+  ChangeSetApplyView,
+  ChangeSetStatus,
   ChapterRevisionView,
   ChangeSetView,
   CharacterInput,
@@ -41,6 +45,7 @@ import type {
   StoryStructureView,
   StoryWorldView,
   StudioClient,
+  StructuredChangeInput,
   WorldAssetsView,
   WorldRegionInput,
   WorldRegionView,
@@ -69,6 +74,22 @@ type ChapterWriteCall = {
   body: string;
   baseRevision: number;
 };
+
+function deriveFakeChangeSetStatus(
+  operations: ChangeOperationView[],
+): ChangeSetStatus {
+  if (operations.some((item) => item.status === "conflicted")) {
+    return "conflicted";
+  }
+  if (operations.some((item) => item.status === "pending")) {
+    return operations.some((item) => item.status === "applied")
+      ? "partially_applied"
+      : "pending";
+  }
+  return operations.some((item) => item.status === "applied")
+    ? "applied"
+    : "rejected";
+}
 
 export class FakeStudioClient implements StudioClient {
   projectParent: string | null = null;
@@ -161,8 +182,16 @@ export class FakeStudioClient implements StudioClient {
   discardDraftCalls: Array<{ chapterId: string; baseRevision: number }> = [];
   commitChapterCalls: ChapterWriteCall[] = [];
   proposeChapterChangeCalls: ChapterChangeInput[] = [];
+  proposeStructuredChangeCalls: StructuredChangeInput[] = [];
+  editChangeOperationCalls: ChangeOperationEditInput[] = [];
   applyChangeSetCalls: string[] = [];
+  applyChangeOperationCalls: Array<{ changeSetId: string; operationId: string }> =
+    [];
   rejectChangeSetCalls: string[] = [];
+  rejectChangeOperationCalls: Array<{
+    changeSetId: string;
+    operationId: string;
+  }> = [];
   restoreChapterRevisionCalls: Array<{
     chapterId: string;
     targetRevision: number;
@@ -334,6 +363,7 @@ export class FakeStudioClient implements StudioClient {
           kind: "replace_chapter_body",
           targetId: input.chapterId,
           baseRevision: this.openChapterResult.revision,
+          baseFingerprint: "",
           beforeValue: this.openChapterResult.body,
           afterValue: input.proposedBody,
           reason: input.reason,
@@ -347,17 +377,84 @@ export class FakeStudioClient implements StudioClient {
     return value;
   }
 
-  async applyChangeSet(id: string): Promise<ChapterView> {
+  async proposeStructuredChange(
+    input: StructuredChangeInput,
+  ): Promise<ChangeSetView> {
+    this.proposeStructuredChangeCalls.push(input);
+    const value: ChangeSetView = {
+      id: `change-set-${this.changeSetsResult.length + 1}`,
+      title: input.title,
+      summary: input.summary,
+      createdBy: input.createdBy,
+      status: "pending",
+      operations: input.operations.map((operation, index) => ({
+        id: `operation-${this.changeSetsResult.length + 1}-${index + 1}`,
+        kind: operation.kind,
+        targetId: operation.targetId,
+        baseRevision: 0,
+        baseFingerprint: "fake-fingerprint",
+        beforeValue: "{}",
+        afterValue: JSON.stringify(
+          operation.outline ?? operation.character ?? operation.fact ?? {},
+        ),
+        reason: operation.reason,
+        status: "pending",
+      })),
+      createdAt: "2026-07-28T04:00:00Z",
+      updatedAt: "2026-07-28T04:00:00Z",
+    };
+    this.changeSetsResult = [value, ...this.changeSetsResult];
+    return value;
+  }
+
+  async editChangeOperation(
+    input: ChangeOperationEditInput,
+  ): Promise<ChangeSetView> {
+    this.editChangeOperationCalls.push(input);
+    let updated: ChangeSetView | undefined;
+    this.changeSetsResult = this.changeSetsResult.map((changeSet) => {
+      if (changeSet.id !== input.changeSetId) return changeSet;
+      updated = {
+        ...changeSet,
+        operations: changeSet.operations.map((operation) =>
+          operation.id === input.operationId
+            ? {
+                ...operation,
+                afterValue:
+                  operation.kind === "replace_chapter_body"
+                    ? input.chapterBody
+                    : JSON.stringify(
+                        input.outline ?? input.character ?? input.fact ?? {},
+                      ),
+              }
+            : operation,
+        ),
+      };
+      return updated;
+    });
+    if (!updated) throw new Error("变更集不存在");
+    return updated;
+  }
+
+  async applyChangeSet(id: string): Promise<ChangeSetApplyView> {
     this.applyChangeSetCalls.push(id);
     const changeSet = this.changeSetsResult.find((item) => item.id === id);
     if (!changeSet) throw new Error("变更集不存在");
-    const operation = changeSet.operations[0];
-    const updated = {
-      ...this.openChapterResult,
-      body: operation.afterValue,
-      revision: this.openChapterResult.revision + 1,
-    };
-    this.openChapterResult = updated;
+    const chapters: ChapterView[] = [];
+    for (const operation of changeSet.operations) {
+      if (
+        operation.status === "pending" &&
+        operation.kind === "replace_chapter_body"
+      ) {
+        const updated = {
+          ...this.openChapterResult,
+          body: operation.afterValue,
+          revision: this.openChapterResult.revision + 1,
+        };
+        this.openChapterResult = updated;
+        chapters.push(updated);
+      }
+    }
     this.changeSetsResult = this.changeSetsResult.map((item) =>
       item.id === id
         ? {
@@ -365,12 +462,50 @@ export class FakeStudioClient implements StudioClient {
             status: "applied",
             operations: item.operations.map((candidate) => ({
               ...candidate,
-              status: "applied",
+              status:
+                candidate.status === "pending" ? "applied" : candidate.status,
             })),
           }
         : item,
     );
-    return updated;
+    return {
+      changeSet: this.changeSetsResult.find((item) => item.id === id)!,
+      chapters,
+    };
+  }
+
+  async applyChangeOperation(
+    changeSetId: string,
+    operationId: string,
+  ): Promise<ChangeSetApplyView> {
+    this.applyChangeOperationCalls.push({ changeSetId, operationId });
+    let chapters: ChapterView[] = [];
+    this.changeSetsResult = this.changeSetsResult.map((item) => {
+      if (item.id !== changeSetId) return item;
+      const operations = item.operations.map((candidate) => {
+        if (candidate.id !== operationId) return candidate;
+        if (candidate.kind === "replace_chapter_body") {
+          const updated = {
+            ...this.openChapterResult,
+            body: candidate.afterValue,
+            revision: this.openChapterResult.revision + 1,
+          };
+          this.openChapterResult = updated;
+          chapters = [updated];
+        }
+        return { ...candidate, status: "applied" as const };
+      });
+      return {
+        ...item,
+        operations,
+        status: deriveFakeChangeSetStatus(operations),
+      };
+    });
+    const changeSet = this.changeSetsResult.find(
+      (item) => item.id === changeSetId,
+    );
+    if (!changeSet) throw new Error("变更集不存在");
+    return { changeSet, chapters };
   }
 
   async rejectChangeSet(id: string): Promise<void> {
@@ -387,6 +522,26 @@ export class FakeStudioClient implements StudioClient {
           }
         : item,
     );
+  }
+
+  async rejectChangeOperation(
+    changeSetId: string,
+    operationId: string,
+  ): Promise<void> {
+    this.rejectChangeOperationCalls.push({ changeSetId, operationId });
+    this.changeSetsResult = this.changeSetsResult.map((item) => {
+      if (item.id !== changeSetId) return item;
+      const operations = item.operations.map((candidate) =>
+        candidate.id === operationId
+          ? { ...candidate, status: "rejected" as const }
+          : candidate,
+      );
+      return {
+        ...item,
+        operations,
+        status: deriveFakeChangeSetStatus(operations),
+      };
+    });
   }
 
   async chapterHistory(chapterId: string): Promise<ChapterRevisionView[]> {

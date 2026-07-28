@@ -6,6 +6,9 @@ import {
   type ChapterChangeInput,
   type ChapterRevisionView,
   type ChangeSetView,
+  type ChangeOperationEditInput,
+  type ChangeSetApplyView,
+  type StructuredChangeInput,
   type AppearanceInput,
   type CharacterInput,
   type CharacterView,
@@ -88,15 +91,22 @@ const chapterSchema = z.object({
 });
 const changeSetStatusSchema = z.enum([
   "pending",
+  "partially_applied",
   "applied",
   "rejected",
   "conflicted",
 ]);
 const changeOperationSchema = z.object({
   id: z.string(),
-  kind: z.literal("replace_chapter_body"),
+  kind: z.enum([
+    "replace_chapter_body",
+    "update_outline_node",
+    "update_character",
+    "update_fact",
+  ]),
   targetId: z.string(),
   baseRevision: z.number(),
+  baseFingerprint: z.string(),
   beforeValue: z.string(),
   afterValue: z.string(),
   reason: z.string(),
@@ -111,6 +121,10 @@ const changeSetSchema = z.object({
   operations: z.array(changeOperationSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+const changeSetApplySchema = z.object({
+  changeSet: changeSetSchema,
+  chapters: z.array(chapterSchema),
 });
 const revisionSourceSchema = z.enum([
   "initial",
@@ -467,8 +481,18 @@ type NativeDesktopAPI = {
   CommitChapter(id: string, body: string, revision: number): Promise<unknown>;
   ChangeSets(): Promise<unknown>;
   ProposeChapterChange(input: ChapterChangeInput): Promise<unknown>;
+  ProposeStructuredChange(input: StructuredChangeInput): Promise<unknown>;
+  EditChangeOperation(input: ChangeOperationEditInput): Promise<unknown>;
   ApplyChangeSet(id: string): Promise<unknown>;
+  ApplyChangeOperation(
+    changeSetId: string,
+    operationId: string,
+  ): Promise<unknown>;
   RejectChangeSet(id: string): Promise<void>;
+  RejectChangeOperation(
+    changeSetId: string,
+    operationId: string,
+  ): Promise<void>;
   ChapterHistory(id: string): Promise<unknown>;
   RestoreChapterRevision(
     id: string,
@@ -598,6 +622,8 @@ const changeSetView = (value: unknown): ChangeSetView =>
   changeSetSchema.parse(value);
 const changeSetViews = (value: unknown): ChangeSetView[] =>
   z.array(changeSetSchema).parse(value);
+const changeSetApplyView = (value: unknown): ChangeSetApplyView =>
+  changeSetApplySchema.parse(value);
 const chapterRevisionViews = (value: unknown): ChapterRevisionView[] =>
   z.array(chapterRevisionSchema).parse(value);
 const snapshotView = (value: unknown): SnapshotView =>
@@ -716,11 +742,35 @@ export const wailsStudioClient: StudioClient = {
       await safeCall(() => nativeAPI().ProposeChapterChange(input)),
     );
   },
+  async proposeStructuredChange(input) {
+    return changeSetView(
+      await safeCall(() => nativeAPI().ProposeStructuredChange(input)),
+    );
+  },
+  async editChangeOperation(input) {
+    return changeSetView(
+      await safeCall(() => nativeAPI().EditChangeOperation(input)),
+    );
+  },
   async applyChangeSet(id) {
-    return chapterView(await safeCall(() => nativeAPI().ApplyChangeSet(id)));
+    return changeSetApplyView(
+      await safeCall(() => nativeAPI().ApplyChangeSet(id)),
+    );
+  },
+  async applyChangeOperation(changeSetId, operationId) {
+    return changeSetApplyView(
+      await safeCall(() =>
+        nativeAPI().ApplyChangeOperation(changeSetId, operationId),
+      ),
+    );
   },
   async rejectChangeSet(id) {
     await safeCall(() => nativeAPI().RejectChangeSet(id));
+  },
+  async rejectChangeOperation(changeSetId, operationId) {
+    await safeCall(() =>
+      nativeAPI().RejectChangeOperation(changeSetId, operationId),
+    );
   },
   async chapterHistory(chapterId) {
     return chapterRevisionViews(

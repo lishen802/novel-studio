@@ -92,9 +92,10 @@ func TestDesktopAPIForwardsChapterOperations(t *testing.T) {
 func TestDesktopAPIForwardsReviewableChangeSetOperations(t *testing.T) {
 	changeSet := workspace.ChangeSetView{ID: "change-set-1", Title: "重写开场", Status: "pending"}
 	chapter := workspace.ChapterView{ID: "chapter-1", Body: "新正文", Revision: 2}
+	applyResult := workspace.ChangeSetApplyView{ChangeSet: changeSet, Chapters: []workspace.ChapterView{chapter}}
 	workspaces := &fakeWorkspace{
 		changeSetsResult:  []workspace.ChangeSetView{changeSet},
-		applyChangeResult: chapter,
+		applyChangeResult: applyResult,
 	}
 	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
 	api.startup(context.Background())
@@ -113,7 +114,7 @@ func TestDesktopAPIForwardsReviewableChangeSetOperations(t *testing.T) {
 		t.Fatalf("ProposeChapterChange input = %#v, error = %v", workspaces.chapterChangeInput, err)
 	}
 	applied, err := api.ApplyChangeSet(changeSet.ID)
-	if err != nil || applied != chapter || workspaces.appliedChangeSetID != changeSet.ID {
+	if err != nil || !reflect.DeepEqual(applied, applyResult) || workspaces.appliedChangeSetID != changeSet.ID {
 		t.Fatalf("ApplyChangeSet = (%#v, %v), id = %q", applied, err, workspaces.appliedChangeSetID)
 	}
 	if err := api.RejectChangeSet(changeSet.ID); err != nil || workspaces.rejectedChangeSetID != changeSet.ID {
@@ -585,7 +586,7 @@ type fakeWorkspace struct {
 	committed                draftCall
 	changeSetsResult         []workspace.ChangeSetView
 	chapterChangeInput       workspace.ChapterChangeInput
-	applyChangeResult        workspace.ChapterView
+	applyChangeResult        workspace.ChangeSetApplyView
 	appliedChangeSetID       string
 	rejectedChangeSetID      string
 	chapterHistoryResult     []workspace.ChapterRevisionView
@@ -719,13 +720,29 @@ func (f *fakeWorkspace) ProposeChapterChange(_ context.Context, input workspace.
 	return workspace.ChangeSetView{}, nil
 }
 
-func (f *fakeWorkspace) ApplyChangeSet(_ context.Context, id string) (workspace.ChapterView, error) {
+func (f *fakeWorkspace) ProposeStructuredChange(_ context.Context, input workspace.StructuredChangeInput) (workspace.ChangeSetView, error) {
+	return workspace.ChangeSetView{}, nil
+}
+
+func (f *fakeWorkspace) EditChangeOperation(_ context.Context, input workspace.ChangeOperationEditInput) (workspace.ChangeSetView, error) {
+	return workspace.ChangeSetView{}, nil
+}
+
+func (f *fakeWorkspace) ApplyChangeSet(_ context.Context, id string) (workspace.ChangeSetApplyView, error) {
 	f.appliedChangeSetID = id
 	return f.applyChangeResult, nil
 }
 
+func (f *fakeWorkspace) ApplyChangeOperation(_ context.Context, changeSetID, operationID string) (workspace.ChangeSetApplyView, error) {
+	return workspace.ChangeSetApplyView{}, nil
+}
+
 func (f *fakeWorkspace) RejectChangeSet(_ context.Context, id string) error {
 	f.rejectedChangeSetID = id
+	return nil
+}
+
+func (f *fakeWorkspace) RejectChangeOperation(_ context.Context, changeSetID, operationID string) error {
 	return nil
 }
 

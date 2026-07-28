@@ -27,8 +27,11 @@ type ProjectStore interface {
 	CreateChangeSet(ctx context.Context, changeSet revisiondomain.ChangeSet) error
 	ListChangeSets(ctx context.Context) ([]revisiondomain.ChangeSet, error)
 	ChangeSet(ctx context.Context, id string) (revisiondomain.ChangeSet, error)
-	ApplyChangeSet(ctx context.Context, id string, appliedAt time.Time) (projectdomain.Chapter, error)
+	ApplyChangeSet(ctx context.Context, id string, appliedAt time.Time) (ChangeSetApplyResult, error)
 	RejectChangeSet(ctx context.Context, id string, rejectedAt time.Time) error
+	EditChangeOperation(ctx context.Context, changeSetID, operationID, afterValue string, editedAt time.Time) (revisiondomain.ChangeSet, error)
+	ApplyChangeOperation(ctx context.Context, changeSetID, operationID string, appliedAt time.Time) (ChangeSetApplyResult, error)
+	RejectChangeOperation(ctx context.Context, changeSetID, operationID string, rejectedAt time.Time) error
 	CreateOutlineNode(ctx context.Context, node storydomain.OutlineNode) error
 	ListOutlineNodes(ctx context.Context) ([]storydomain.OutlineNode, error)
 	ArchiveOutlineNode(ctx context.Context, id string, archivedAt time.Time) error
@@ -121,6 +124,11 @@ type ProjectStore interface {
 	ListFactConflicts(ctx context.Context) ([]canondomain.Conflict, error)
 	DeleteFactConflict(ctx context.Context, id string) error
 	Close() error
+}
+
+type ChangeSetApplyResult struct {
+	ChangeSet revisiondomain.ChangeSet
+	Chapters  []projectdomain.Chapter
 }
 
 type ProjectStoreFactory interface {

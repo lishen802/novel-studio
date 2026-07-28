@@ -1184,6 +1184,11 @@ button:disabled {
   background: #dce9df;
 }
 
+.change-status--partially_applied {
+  color: #635c32;
+  background: #eee8bd;
+}
+
 .change-status--rejected {
   color: #766f67;
   background: #e9e5df;
@@ -1252,7 +1257,8 @@ button:disabled {
 }
 
 .change-reason h4,
-.change-body-compare h4 {
+.change-body-compare h4,
+.change-operation-editor h4 {
   margin: 0 0 8px;
   color: #756451;
   font-size: 0.76rem;
@@ -1287,6 +1293,125 @@ button:disabled {
   word-break: break-word;
 }
 
+.change-operation-list {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0;
+  padding-bottom: 13px;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(70, 55, 39, 0.1);
+}
+
+.change-operation-list button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid rgba(90, 71, 49, 0.12);
+  border-radius: 9px;
+  color: #655a4f;
+  background: #f7f1e8;
+  cursor: pointer;
+}
+
+.change-operation-list button.is-active {
+  border-color: rgba(133, 94, 52, 0.34);
+  background: #eadcc9;
+}
+
+.structured-change-compare {
+  overflow: hidden;
+  border: 1px solid rgba(70, 55, 39, 0.1);
+  border-radius: 11px;
+}
+
+.structured-change-heading,
+.structured-change-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.35fr) repeat(2, minmax(0, 1fr));
+}
+
+.structured-change-heading {
+  color: #806e5b;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #e8ddcf;
+}
+
+.structured-change-heading span,
+.structured-change-row > * {
+  padding: 10px 12px;
+}
+
+.structured-change-row {
+  border-top: 1px solid rgba(70, 55, 39, 0.08);
+  color: #62584e;
+  font-size: 0.78rem;
+  background: #faf6ef;
+}
+
+.structured-change-row strong {
+  color: #786958;
+  background: #f2eadf;
+}
+
+.structured-change-row span {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.structured-change-row .is-changed {
+  color: #355f49;
+  background: #e8f0e8;
+}
+
+.change-operation-editor {
+  padding: 16px;
+  border: 1px solid rgba(133, 94, 52, 0.2);
+  border-radius: 11px;
+  background: #f7f0e6;
+}
+
+.change-operation-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.change-operation-fields label {
+  display: grid;
+  gap: 6px;
+  color: #796b5c;
+  font-size: 0.72rem;
+}
+
+.change-operation-fields input,
+.change-operation-fields select,
+.change-operation-fields textarea {
+  width: 100%;
+  border: 1px solid rgba(92, 73, 52, 0.2);
+  border-radius: 8px;
+  color: #403a35;
+  background: #fffdf9;
+}
+
+.change-operation-fields textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.change-operation-fields label:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.change-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 14px;
+}
+
 .change-review-detail footer {
   display: flex;
   justify-content: flex-end;
@@ -1294,6 +1419,20 @@ button:disabled {
   margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid rgba(70, 55, 39, 0.1);
+}
+
+.change-review-detail .change-group-actions {
+  align-items: center;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 9px;
+  background: rgba(231, 218, 199, 0.44);
+}
+
+.change-group-actions span {
+  margin-right: auto;
+  color: #88796a;
+  font-size: 0.7rem;
 }
 
 .change-review-detail footer button {
@@ -1323,8 +1462,14 @@ button:disabled {
 @media (max-width: 980px) {
   .change-review-layout,
   .change-review-detail > header,
-  .change-body-compare {
+  .change-body-compare,
+  .change-operation-fields {
     grid-template-columns: 1fr;
+  }
+
+  .structured-change-heading,
+  .structured-change-row {
+    grid-template-columns: minmax(80px, 0.35fr) repeat(2, minmax(120px, 1fr));
   }
 }
 

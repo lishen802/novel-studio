@@ -55,6 +55,58 @@ func TestNewOutlineNodeRejectsSkippedAndCrossProjectParents(t *testing.T) {
 	}
 }
 
+func TestOutlineNodeUpdatesAuthorFacingContentWithoutChangingStructure(t *testing.T) {
+	now := time.Unix(100, 0)
+	node, err := NewOutlineNode(
+		"book",
+		"project",
+		nil,
+		LevelBook,
+		"旧标题",
+		1,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.Summary = "旧摘要"
+
+	updated, err := node.UpdateContent(
+		"新标题",
+		"新摘要",
+		"新目标",
+		"新冲突",
+		"新结果",
+		now.Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "新标题" ||
+		updated.Summary != "新摘要" ||
+		updated.Goal != "新目标" ||
+		updated.Conflict != "新冲突" ||
+		updated.Outcome != "新结果" {
+		t.Fatalf("updated content = %#v", updated)
+	}
+	if updated.ID != node.ID ||
+		updated.ParentID != node.ParentID ||
+		updated.Level != node.Level ||
+		updated.Position != node.Position {
+		t.Fatalf("structural identity changed: %#v", updated)
+	}
+	if _, err := node.UpdateContent(
+		" ",
+		"",
+		"",
+		"",
+		"",
+		now,
+	); !errors.Is(err, ErrBlankValue) {
+		t.Fatalf("blank title error = %v", err)
+	}
+}
+
 func TestStoryLineLinksKeepAnExplicitOrder(t *testing.T) {
 	now := time.Now()
 	line, err := NewStoryLine("line", "project", "主线", "寻找失踪的导师", now)
