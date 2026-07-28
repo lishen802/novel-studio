@@ -129,17 +129,25 @@ func (s *Store) ApplyChangeSet(ctx context.Context, id string, appliedAt time.Ti
 	if err != nil {
 		return projectdomain.Chapter{}, err
 	}
+	var currentSource, currentSummary string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT revision_source, revision_summary FROM chapters WHERE id = ?
+	`, current.ID).Scan(&currentSource, &currentSummary); err != nil {
+		return projectdomain.Chapter{}, databaseOperationError("read change target revision metadata", err)
+	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO chapter_revisions(chapter_id, revision, title, body, created_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, current.ID, current.Revision, current.Title, current.Body, formatTime(updated.UpdatedAt))
+		INSERT INTO chapter_revisions(
+			chapter_id, revision, title, body, source, summary, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, current.ID, current.Revision, current.Title, current.Body, currentSource, currentSummary, formatTime(updated.UpdatedAt))
 	if err != nil {
 		return projectdomain.Chapter{}, databaseOperationError("archive chapter before change set", err)
 	}
 	result, err := tx.ExecContext(ctx, `
-		UPDATE chapters SET body = ?, revision = ?, updated_at = ?
+		UPDATE chapters
+		SET body = ?, revision = ?, revision_source = ?, revision_summary = ?, updated_at = ?
 		WHERE id = ? AND revision = ?
-	`, updated.Body, updated.Revision, formatTime(updated.UpdatedAt), updated.ID, current.Revision)
+	`, updated.Body, updated.Revision, "agent", changeSet.Title, formatTime(updated.UpdatedAt), updated.ID, current.Revision)
 	if err != nil {
 		return projectdomain.Chapter{}, databaseOperationError("apply chapter change operation", err)
 	}

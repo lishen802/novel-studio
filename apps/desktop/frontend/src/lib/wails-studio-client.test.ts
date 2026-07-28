@@ -36,6 +36,11 @@ function installNative(overrides: Record<string, unknown> = {}) {
     ProposeChapterChange: vi.fn(),
     ApplyChangeSet: vi.fn(),
     RejectChangeSet: vi.fn(async () => undefined),
+    ChapterHistory: vi.fn(async () => []),
+    RestoreChapterRevision: vi.fn(),
+    Snapshots: vi.fn(async () => []),
+    CreateSnapshot: vi.fn(),
+    RestoreSnapshot: vi.fn(),
     StoryStructure: vi.fn(async () => ({
       outlineNodes: [],
       storyLines: [],
@@ -526,6 +531,77 @@ describe("wailsStudioClient", () => {
 
     expect(api.ApplyChangeSet).toHaveBeenCalledWith(changeSet.id);
     expect(api.RejectChangeSet).toHaveBeenCalledWith(changeSet.id);
+  });
+
+  it("validates version history and forwards snapshot recovery operations", async () => {
+    const history = [
+      {
+        chapterId: "chapter-1",
+        revision: 2,
+        title: "第一章",
+        body: "当前正文",
+        source: "author",
+        summary: "",
+        createdAt: "2026-07-28T05:00:00Z",
+        isCurrent: true,
+      },
+      {
+        chapterId: "chapter-1",
+        revision: 1,
+        title: "第一章",
+        body: "初稿",
+        source: "initial",
+        summary: "",
+        createdAt: "2026-07-28T04:00:00Z",
+        isCurrent: false,
+      },
+    ];
+    const snapshot = {
+      id: "snapshot-1",
+      name: "第一幕定稿",
+      kind: "named",
+      createdAt: "2026-07-28T05:10:00Z",
+    };
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章",
+      position: 1,
+      body: "初稿",
+      revision: 3,
+      updatedAt: "2026-07-28T05:20:00Z",
+      hasRecoveryDraft: false,
+    };
+    const restore = {
+      snapshotId: snapshot.id,
+      project,
+      chapters: [chapter],
+    };
+    const api = installNative({
+      ChapterHistory: vi.fn(async () => history),
+      RestoreChapterRevision: vi.fn(async () => chapter),
+      Snapshots: vi.fn(async () => [snapshot]),
+      CreateSnapshot: vi.fn(async () => snapshot),
+      RestoreSnapshot: vi.fn(async () => restore),
+    });
+
+    await expect(wailsStudioClient.chapterHistory(chapter.id)).resolves.toEqual(
+      history,
+    );
+    await expect(
+      wailsStudioClient.restoreChapterRevision(chapter.id, 1, 2),
+    ).resolves.toEqual(chapter);
+    await expect(wailsStudioClient.snapshots()).resolves.toEqual([snapshot]);
+    await expect(
+      wailsStudioClient.createSnapshot(snapshot.name),
+    ).resolves.toEqual(snapshot);
+    await expect(
+      wailsStudioClient.restoreSnapshot(snapshot.id),
+    ).resolves.toEqual(restore);
+
+    expect(api.RestoreChapterRevision).toHaveBeenCalledWith(chapter.id, 1, 2);
+    expect(api.CreateSnapshot).toHaveBeenCalledWith(snapshot.name);
+    expect(api.RestoreSnapshot).toHaveBeenCalledWith(snapshot.id);
   });
 
   it("registers the native close event and completes the close handshake", async () => {

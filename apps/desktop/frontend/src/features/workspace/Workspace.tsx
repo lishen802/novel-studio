@@ -5,16 +5,22 @@ import {
   Feather,
   GitCompareArrows,
   Globe2,
+  History,
   LibraryBig,
   Network,
   UsersRound,
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import type { ChapterView, StudioClient } from "../../lib/studio-client";
+import type {
+  ChapterView,
+  SnapshotRestoreView,
+  StudioClient,
+} from "../../lib/studio-client";
 import { ChapterEditor } from "../editor/ChapterEditor";
 import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
 import { ContinuityWorkbench } from "../continuity/ContinuityWorkbench";
 import { ChangeReviewWorkbench } from "../revisions/ChangeReviewWorkbench";
+import { VersionHistoryWorkbench } from "../revisions/VersionHistoryWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import type { WorkspaceStatus } from "./workspace-store";
@@ -28,6 +34,8 @@ type WorkspaceProps = {
   onCreateChapter(title: string): Promise<boolean>;
   onSelectChapter(id: string): Promise<void>;
   onChapterUpdated(chapter: ChapterView): void;
+  onWorkspaceRestored(result: SnapshotRestoreView): void;
+  onBeforeVersionOperation(): Promise<void>;
   onDismissError(): void;
   onFlushAvailable(flush: (() => Promise<void>) | null): void;
 };
@@ -39,6 +47,8 @@ export function Workspace({
   onCreateChapter,
   onSelectChapter,
   onChapterUpdated,
+  onWorkspaceRestored,
+  onBeforeVersionOperation,
   onDismissError,
   onFlushAvailable,
 }: WorkspaceProps) {
@@ -46,7 +56,13 @@ export function Workspace({
   const [chapterTitle, setChapterTitle] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
   const [activeView, setActiveView] = useState<
-    "manuscript" | "story" | "world" | "assets" | "continuity" | "changes"
+    | "manuscript"
+    | "story"
+    | "world"
+    | "assets"
+    | "continuity"
+    | "changes"
+    | "versions"
   >("manuscript");
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
@@ -138,6 +154,14 @@ export function Workspace({
             <GitCompareArrows size={17} />
             候选变更
           </button>
+          <button
+            type="button"
+            className={activeView === "versions" ? "is-active" : ""}
+            onClick={() => setActiveView("versions")}
+          >
+            <History size={17} />
+            版本历史
+          </button>
         </nav>
 
         {activeView === "manuscript" && (
@@ -213,6 +237,15 @@ export function Workspace({
             client={client}
             chapters={workspace.chapters}
             onChapterUpdated={onChapterUpdated}
+          />
+        ) : activeView === "versions" ? (
+          <VersionHistoryWorkbench
+            client={client}
+            project={workspace.project}
+            chapters={workspace.chapters}
+            onChapterUpdated={onChapterUpdated}
+            onWorkspaceRestored={onWorkspaceRestored}
+            onBeforeVersionOperation={onBeforeVersionOperation}
           />
         ) : activeChapter ? (
           <ChapterEditor

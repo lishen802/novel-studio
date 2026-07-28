@@ -42,16 +42,20 @@ export function App({
     [],
   );
 
+  const flushPendingChapterChanges = useCallback(async () => {
+    await flushActiveChapter.current();
+    while (pendingChapterFlushes.current.size > 0) {
+      await Promise.all([...pendingChapterFlushes.current]);
+    }
+  }, []);
+
   useEffect(
     () =>
       client.onBeforeClose(async () => {
-        await flushActiveChapter.current();
-        while (pendingChapterFlushes.current.size > 0) {
-          await Promise.all([...pendingChapterFlushes.current]);
-        }
+        await flushPendingChapterChanges();
         await client.completeClose();
       }),
-    [client],
+    [client, flushPendingChapterChanges],
   );
 
   useEffect(() => {
@@ -73,6 +77,8 @@ export function App({
         onCreateChapter={state.createChapter}
         onSelectChapter={state.selectChapter}
         onChapterUpdated={state.updateChapter}
+        onWorkspaceRestored={state.restoreWorkspace}
+        onBeforeVersionOperation={flushPendingChapterChanges}
         onDismissError={state.clearWorkspaceError}
         onFlushAvailable={onFlushAvailable}
       />

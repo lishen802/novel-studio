@@ -227,7 +227,11 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 	defer tx.Rollback()
 
 	var currentRevision int64
-	err = tx.QueryRowContext(ctx, "SELECT revision FROM chapters WHERE id = ?", previous.ID).Scan(&currentRevision)
+	var currentSource, currentSummary string
+	err = tx.QueryRowContext(ctx, `
+		SELECT revision, revision_source, revision_summary
+		FROM chapters WHERE id = ?
+	`, previous.ID).Scan(&currentRevision, &currentSource, &currentSummary)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: %s", ErrChapterMissing, previous.ID)
 	}
@@ -239,13 +243,16 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO chapter_revisions (chapter_id, revision, title, body, created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO chapter_revisions (
+			chapter_id, revision, title, body, source, summary, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`,
 		previous.ID,
 		previous.Revision,
 		previous.Title,
 		previous.Body,
+		currentSource,
+		currentSummary,
 		formatTime(chapter.UpdatedAt),
 	)
 	if err != nil {
@@ -254,12 +261,14 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 
 	result, err := tx.ExecContext(ctx, `
 		UPDATE chapters
-		SET title = ?, body = ?, revision = ?, updated_at = ?
+		SET title = ?, body = ?, revision = ?, revision_source = ?, revision_summary = ?, updated_at = ?
 		WHERE id = ? AND revision = ?
 	`,
 		chapter.Title,
 		chapter.Body,
 		chapter.Revision,
+		"author",
+		"",
 		formatTime(chapter.UpdatedAt),
 		chapter.ID,
 		previous.Revision,

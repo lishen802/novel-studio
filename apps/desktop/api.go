@@ -20,6 +20,11 @@ type WorkspaceUseCases interface {
 	ProposeChapterChange(context.Context, workspace.ChapterChangeInput) (workspace.ChangeSetView, error)
 	ApplyChangeSet(context.Context, string) (workspace.ChapterView, error)
 	RejectChangeSet(context.Context, string) error
+	ChapterHistory(context.Context, string) ([]workspace.ChapterRevisionView, error)
+	RestoreChapterRevision(context.Context, string, int64, int64) (workspace.ChapterView, error)
+	Snapshots(context.Context) ([]workspace.SnapshotView, error)
+	CreateSnapshot(context.Context, string) (workspace.SnapshotView, error)
+	RestoreSnapshot(context.Context, string) (workspace.SnapshotRestoreView, error)
 	StoryStructure(context.Context) (workspace.StoryStructureView, error)
 	CreateOutlineNode(context.Context, workspace.CreateOutlineNodeInput) (workspace.OutlineNodeView, error)
 	CreateStoryLine(context.Context, workspace.CreateStoryLineInput) (workspace.StoryLineView, error)
@@ -177,6 +182,35 @@ func (a *DesktopAPI) ApplyChangeSet(id string) (workspace.ChapterView, error) {
 
 func (a *DesktopAPI) RejectChangeSet(id string) error {
 	return safeDesktopError(a.workspace.RejectChangeSet(a.ctx, id))
+}
+
+func (a *DesktopAPI) ChapterHistory(id string) ([]workspace.ChapterRevisionView, error) {
+	return safeResult(a.workspace.ChapterHistory(a.ctx, id))
+}
+
+func (a *DesktopAPI) RestoreChapterRevision(
+	id string,
+	targetRevision int64,
+	expectedRevision int64,
+) (workspace.ChapterView, error) {
+	return safeResult(a.workspace.RestoreChapterRevision(
+		a.ctx,
+		id,
+		targetRevision,
+		expectedRevision,
+	))
+}
+
+func (a *DesktopAPI) Snapshots() ([]workspace.SnapshotView, error) {
+	return safeResult(a.workspace.Snapshots(a.ctx))
+}
+
+func (a *DesktopAPI) CreateSnapshot(name string) (workspace.SnapshotView, error) {
+	return safeResult(a.workspace.CreateSnapshot(a.ctx, name))
+}
+
+func (a *DesktopAPI) RestoreSnapshot(id string) (workspace.SnapshotRestoreView, error) {
+	return safeResult(a.workspace.RestoreSnapshot(a.ctx, id))
 }
 
 func (a *DesktopAPI) StoryStructure() (workspace.StoryStructureView, error) {

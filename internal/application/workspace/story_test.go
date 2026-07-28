@@ -122,6 +122,7 @@ func openTestServiceWithLicense(t *testing.T, store *fakeStore, ids *sequenceIDs
 		licenses,
 		fixedClock{now: time.Unix(200, 0)},
 		ids,
+		&fakeSnapshotArchive{},
 	)
 	if _, err := service.OpenProject(context.Background(), "/books/project.zjproject"); err != nil {
 		t.Fatal(err)

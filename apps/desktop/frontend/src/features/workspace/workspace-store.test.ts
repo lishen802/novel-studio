@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
-import type { ChapterView } from "../../lib/studio-client";
+import type {
+  ChapterView,
+  SnapshotRestoreView,
+} from "../../lib/studio-client";
 import { createWorkspaceStore } from "./workspace-store";
 
 describe("workspace store", () => {
@@ -78,5 +81,36 @@ describe("workspace store", () => {
     const status = store.getState().status;
     expect(status.kind).toBe("ready");
     if (status.kind === "ready") expect(status.activeChapterId).toBe(second.id);
+  });
+
+  it("replaces the open workspace with the restored project snapshot", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    await store.getState().selectChapter(client.createChapterResult.id);
+    const restored: SnapshotRestoreView = {
+      snapshotId: "snapshot-1",
+      project: {
+        ...client.openProjectResult,
+        title: "恢复后的作品",
+      },
+      chapters: [
+        {
+          ...client.createChapterResult,
+          body: "快照中的正文",
+          revision: 2,
+        },
+      ],
+    };
+
+    store.getState().restoreWorkspace(restored);
+
+    expect(store.getState().status).toMatchObject({
+      kind: "ready",
+      project: { title: "恢复后的作品" },
+      chapters: [{ body: "快照中的正文", revision: 2 }],
+      activeChapterId: client.createChapterResult.id,
+    });
   });
 });

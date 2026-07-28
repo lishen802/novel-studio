@@ -121,6 +121,59 @@ func TestDesktopAPIForwardsReviewableChangeSetOperations(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIForwardsVersionHistoryAndSnapshotOperations(t *testing.T) {
+	history := []workspace.ChapterRevisionView{{
+		ChapterID: "chapter-1",
+		Revision:  2,
+		Body:      "当前正文",
+		IsCurrent: true,
+	}}
+	snapshot := workspace.SnapshotView{ID: "snapshot-1", Name: "第一幕定稿", Kind: "named"}
+	restore := workspace.SnapshotRestoreView{
+		SnapshotID: snapshot.ID,
+		Chapters:   []workspace.ChapterView{{ID: "chapter-1", Body: "快照正文", Revision: 2}},
+	}
+	workspaces := &fakeWorkspace{
+		chapterHistoryResult:  history,
+		snapshotsResult:       []workspace.SnapshotView{snapshot},
+		createSnapshotResult:  snapshot,
+		restoreSnapshotResult: restore,
+		restoreRevisionResult: workspace.ChapterView{
+			ID:       "chapter-1",
+			Body:     "历史正文",
+			Revision: 3,
+		},
+	}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	gotHistory, err := api.ChapterHistory("chapter-1")
+	if err != nil || !reflect.DeepEqual(gotHistory, history) {
+		t.Fatalf("ChapterHistory = (%#v, %v)", gotHistory, err)
+	}
+	restoredChapter, err := api.RestoreChapterRevision("chapter-1", 1, 2)
+	if err != nil || restoredChapter != workspaces.restoreRevisionResult {
+		t.Fatalf("RestoreChapterRevision = (%#v, %v)", restoredChapter, err)
+	}
+	if workspaces.restoreRevisionArgs != [2]int64{1, 2} ||
+		workspaces.restoreRevisionChapterID != "chapter-1" {
+		t.Fatalf("restore revision args = (%q, %#v)", workspaces.restoreRevisionChapterID, workspaces.restoreRevisionArgs)
+	}
+	gotSnapshots, err := api.Snapshots()
+	if err != nil || !reflect.DeepEqual(gotSnapshots, []workspace.SnapshotView{snapshot}) {
+		t.Fatalf("Snapshots = (%#v, %v)", gotSnapshots, err)
+	}
+	created, err := api.CreateSnapshot("第一幕定稿")
+	if err != nil || created != snapshot || workspaces.snapshotName != "第一幕定稿" {
+		t.Fatalf("CreateSnapshot = (%#v, %v), name = %q", created, err, workspaces.snapshotName)
+	}
+	restored, err := api.RestoreSnapshot(snapshot.ID)
+	if err != nil || !reflect.DeepEqual(restored, restore) ||
+		workspaces.restoreSnapshotID != snapshot.ID {
+		t.Fatalf("RestoreSnapshot = (%#v, %v), id = %q", restored, err, workspaces.restoreSnapshotID)
+	}
+}
+
 func TestDesktopAPIForwardsStoryStructureOperations(t *testing.T) {
 	structure := workspace.StoryStructureView{OutlineNodes: []workspace.OutlineNodeView{{ID: "book", Title: "全书大纲"}}}
 	workspaces := &fakeWorkspace{storyStructureResult: structure}
@@ -510,91 +563,100 @@ type draftCall struct {
 }
 
 type fakeWorkspace struct {
-	createInput            CreateProjectInput
-	createResult           workspace.ProjectView
-	createErr              error
-	openResult             workspace.ProjectView
-	openErr                error
-	listResult             []workspace.ChapterView
-	listErr                error
-	createChapterResult    workspace.ChapterView
-	createChapterErr       error
-	createdChapterTitle    string
-	openChapterResult      workspace.ChapterView
-	openChapterErr         error
-	openedChapterID        string
-	savedDraft             draftCall
-	discardedDraftID       string
-	discardedDraftRevision int64
-	saveDraftErr           error
-	commitResult           workspace.ChapterView
-	commitErr              error
-	committed              draftCall
-	changeSetsResult       []workspace.ChangeSetView
-	chapterChangeInput     workspace.ChapterChangeInput
-	applyChangeResult      workspace.ChapterView
-	appliedChangeSetID     string
-	rejectedChangeSetID    string
-	closeCalls             int
-	storyStructureResult   workspace.StoryStructureView
-	outlineInput           workspace.CreateOutlineNodeInput
-	storyLineInput         workspace.CreateStoryLineInput
-	storyLinkInput         workspace.LinkStoryLineInput
-	sceneCardInput         workspace.CreateSceneCardInput
-	archivedOutlineID      string
-	movedOutlineID         string
-	moveDirection          string
-	storyWorldResult       workspace.StoryWorldView
-	characterInput         workspace.CharacterInput
-	updatedCharacterID     string
-	archivedCharacterID    string
-	factionInput           workspace.FactionInput
-	updatedFactionID       string
-	archivedFactionID      string
-	membershipInput        workspace.MembershipInput
-	deletedMembership      string
-	relationshipInput      workspace.RelationshipInput
-	archivedRelationshipID string
-	chapterAppearanceInput workspace.AppearanceInput
-	sceneAppearanceInput   workspace.AppearanceInput
-	unlinkedChapter        string
-	unlinkedScene          string
-	worldAssetsResult      workspace.WorldAssetsView
-	worldRegionInput       workspace.WorldRegionInput
-	updatedWorldRegionID   string
-	archivedWorldRegionID  string
-	locationInput          workspace.LocationInput
-	updatedLocationID      string
-	archivedLocationID     string
-	locationLinkInput      workspace.LocationLinkInput
-	unlinkedLocation       string
-	itemInput              workspace.ItemInput
-	updatedItemID          string
-	itemTransferInput      workspace.ItemTransferInput
-	archivedItemID         string
-	worldRuleInput         workspace.WorldRuleInput
-	updatedWorldRuleID     string
-	archivedWorldRuleID    string
-	hookInput              workspace.ForeshadowingHookInput
-	updatedHookID          string
-	archivedHookID         string
-	continuityResult       workspace.ContinuityView
-	storyEventInput        workspace.StoryEventInput
-	updatedStoryEventID    string
-	archivedStoryEventID   string
-	storyEventLinkInput    workspace.StoryEventLinkInput
-	unlinkedStoryEvent     string
-	factInput              workspace.FactInput
-	updatedFactID          string
-	confirmedFactID        string
-	archivedFactID         string
-	factEvidenceInput      workspace.FactEvidenceInput
-	removedFactEvidenceID  string
-	factScopeInput         workspace.FactScopeInput
-	removedFactScopeID     string
-	factConflictInput      workspace.FactConflictInput
-	resolvedFactConflictID string
-	deletedFactConflictID  string
+	createInput              CreateProjectInput
+	createResult             workspace.ProjectView
+	createErr                error
+	openResult               workspace.ProjectView
+	openErr                  error
+	listResult               []workspace.ChapterView
+	listErr                  error
+	createChapterResult      workspace.ChapterView
+	createChapterErr         error
+	createdChapterTitle      string
+	openChapterResult        workspace.ChapterView
+	openChapterErr           error
+	openedChapterID          string
+	savedDraft               draftCall
+	discardedDraftID         string
+	discardedDraftRevision   int64
+	saveDraftErr             error
+	commitResult             workspace.ChapterView
+	commitErr                error
+	committed                draftCall
+	changeSetsResult         []workspace.ChangeSetView
+	chapterChangeInput       workspace.ChapterChangeInput
+	applyChangeResult        workspace.ChapterView
+	appliedChangeSetID       string
+	rejectedChangeSetID      string
+	chapterHistoryResult     []workspace.ChapterRevisionView
+	restoreRevisionResult    workspace.ChapterView
+	restoreRevisionChapterID string
+	restoreRevisionArgs      [2]int64
+	snapshotsResult          []workspace.SnapshotView
+	createSnapshotResult     workspace.SnapshotView
+	snapshotName             string
+	restoreSnapshotResult    workspace.SnapshotRestoreView
+	restoreSnapshotID        string
+	closeCalls               int
+	storyStructureResult     workspace.StoryStructureView
+	outlineInput             workspace.CreateOutlineNodeInput
+	storyLineInput           workspace.CreateStoryLineInput
+	storyLinkInput           workspace.LinkStoryLineInput
+	sceneCardInput           workspace.CreateSceneCardInput
+	archivedOutlineID        string
+	movedOutlineID           string
+	moveDirection            string
+	storyWorldResult         workspace.StoryWorldView
+	characterInput           workspace.CharacterInput
+	updatedCharacterID       string
+	archivedCharacterID      string
+	factionInput             workspace.FactionInput
+	updatedFactionID         string
+	archivedFactionID        string
+	membershipInput          workspace.MembershipInput
+	deletedMembership        string
+	relationshipInput        workspace.RelationshipInput
+	archivedRelationshipID   string
+	chapterAppearanceInput   workspace.AppearanceInput
+	sceneAppearanceInput     workspace.AppearanceInput
+	unlinkedChapter          string
+	unlinkedScene            string
+	worldAssetsResult        workspace.WorldAssetsView
+	worldRegionInput         workspace.WorldRegionInput
+	updatedWorldRegionID     string
+	archivedWorldRegionID    string
+	locationInput            workspace.LocationInput
+	updatedLocationID        string
+	archivedLocationID       string
+	locationLinkInput        workspace.LocationLinkInput
+	unlinkedLocation         string
+	itemInput                workspace.ItemInput
+	updatedItemID            string
+	itemTransferInput        workspace.ItemTransferInput
+	archivedItemID           string
+	worldRuleInput           workspace.WorldRuleInput
+	updatedWorldRuleID       string
+	archivedWorldRuleID      string
+	hookInput                workspace.ForeshadowingHookInput
+	updatedHookID            string
+	archivedHookID           string
+	continuityResult         workspace.ContinuityView
+	storyEventInput          workspace.StoryEventInput
+	updatedStoryEventID      string
+	archivedStoryEventID     string
+	storyEventLinkInput      workspace.StoryEventLinkInput
+	unlinkedStoryEvent       string
+	factInput                workspace.FactInput
+	updatedFactID            string
+	confirmedFactID          string
+	archivedFactID           string
+	factEvidenceInput        workspace.FactEvidenceInput
+	removedFactEvidenceID    string
+	factScopeInput           workspace.FactScopeInput
+	removedFactScopeID       string
+	factConflictInput        workspace.FactConflictInput
+	resolvedFactConflictID   string
+	deletedFactConflictID    string
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -665,6 +727,31 @@ func (f *fakeWorkspace) ApplyChangeSet(_ context.Context, id string) (workspace.
 func (f *fakeWorkspace) RejectChangeSet(_ context.Context, id string) error {
 	f.rejectedChangeSetID = id
 	return nil
+}
+
+func (f *fakeWorkspace) ChapterHistory(_ context.Context, chapterID string) ([]workspace.ChapterRevisionView, error) {
+	f.restoreRevisionChapterID = chapterID
+	return f.chapterHistoryResult, nil
+}
+
+func (f *fakeWorkspace) RestoreChapterRevision(_ context.Context, chapterID string, targetRevision, expectedRevision int64) (workspace.ChapterView, error) {
+	f.restoreRevisionChapterID = chapterID
+	f.restoreRevisionArgs = [2]int64{targetRevision, expectedRevision}
+	return f.restoreRevisionResult, nil
+}
+
+func (f *fakeWorkspace) Snapshots(context.Context) ([]workspace.SnapshotView, error) {
+	return f.snapshotsResult, nil
+}
+
+func (f *fakeWorkspace) CreateSnapshot(_ context.Context, name string) (workspace.SnapshotView, error) {
+	f.snapshotName = name
+	return f.createSnapshotResult, nil
+}
+
+func (f *fakeWorkspace) RestoreSnapshot(_ context.Context, id string) (workspace.SnapshotRestoreView, error) {
+	f.restoreSnapshotID = id
+	return f.restoreSnapshotResult, nil
 }
 
 func (f *fakeWorkspace) Close() error {

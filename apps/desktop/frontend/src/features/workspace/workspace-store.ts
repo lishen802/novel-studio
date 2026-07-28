@@ -3,6 +3,7 @@ import type {
   ChapterView,
   CreateProjectInput,
   ProjectView,
+  SnapshotRestoreView,
   StudioClient,
 } from "../../lib/studio-client";
 
@@ -29,6 +30,7 @@ export type WorkspaceState = {
   createChapter(title: string): Promise<boolean>;
   selectChapter(id: string): Promise<void>;
   updateChapter(chapter: ChapterView): void;
+  restoreWorkspace(result: SnapshotRestoreView): void;
   clearWorkspaceError(): void;
 };
 
@@ -198,6 +200,31 @@ export function createWorkspaceStore(
               item.id === chapter.id ? chapter : item,
             ),
           },
+        };
+      });
+    },
+
+    restoreWorkspace(result) {
+      selectionRequest++;
+      set((latest) => {
+        const previousChapterID =
+          latest.status.kind === "ready"
+            ? latest.status.activeChapterId
+            : null;
+        const activeChapterId =
+          result.chapters.some(
+            (chapter) => chapter.id === previousChapterID,
+          )
+            ? previousChapterID
+            : (result.chapters[0]?.id ?? null);
+        return {
+          status: {
+            kind: "ready",
+            project: result.project,
+            chapters: result.chapters,
+            activeChapterId,
+          },
+          workspaceError: null,
         };
       });
     },

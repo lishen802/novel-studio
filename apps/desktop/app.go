@@ -9,6 +9,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/ids"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
+	"github.com/lishen802/novel-studio/internal/platform/snapshotfs"
 	"github.com/lishen802/novel-studio/internal/platform/timeutil"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -29,6 +30,7 @@ func newApp() *App {
 		license.NoopService{},
 		timeutil.SystemClock{},
 		ids.UUIDGenerator{},
+		snapshotfs.Archive{},
 	)
 	app := &App{
 		api: newDesktopAPI(workspaceService, wailsDirectoryPicker{}),

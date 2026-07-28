@@ -43,6 +43,29 @@ export type ChangeSetView = {
   createdAt: string;
   updatedAt: string;
 };
+export type RevisionSource = "initial" | "author" | "agent" | "restore";
+export type ChapterRevisionView = {
+  chapterId: string;
+  revision: number;
+  title: string;
+  body: string;
+  source: RevisionSource;
+  summary: string;
+  createdAt: string;
+  isCurrent: boolean;
+};
+export type SnapshotKind = "named" | "recovery";
+export type SnapshotView = {
+  id: string;
+  name: string;
+  kind: SnapshotKind;
+  createdAt: string;
+};
+export type SnapshotRestoreView = {
+  snapshotId: string;
+  project: ProjectView;
+  chapters: ChapterView[];
+};
 export type ChapterChangeInput = {
   chapterId: string;
   title: string;
@@ -433,6 +456,15 @@ export interface StudioClient {
   proposeChapterChange(input: ChapterChangeInput): Promise<ChangeSetView>;
   applyChangeSet(id: string): Promise<ChapterView>;
   rejectChangeSet(id: string): Promise<void>;
+  chapterHistory(chapterId: string): Promise<ChapterRevisionView[]>;
+  restoreChapterRevision(
+    chapterId: string,
+    targetRevision: number,
+    expectedRevision: number,
+  ): Promise<ChapterView>;
+  snapshots(): Promise<SnapshotView[]>;
+  createSnapshot(name: string): Promise<SnapshotView>;
+  restoreSnapshot(id: string): Promise<SnapshotRestoreView>;
   storyStructure(): Promise<StoryStructureView>;
   createOutlineNode(input: CreateOutlineNodeInput): Promise<OutlineNodeView>;
   createStoryLine(input: CreateStoryLineInput): Promise<StoryLineView>;

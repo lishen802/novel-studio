@@ -175,7 +175,7 @@ func TestContinuityPreservesWhitespaceInExactEvidenceAnchor(t *testing.T) {
 
 func TestContinuityUsesLicenseGate(t *testing.T) {
 	denied := errors.New("license denied")
-	service := NewService(&fakePackageManager{}, &fakeStoreFactory{}, &fakeLicense{err: denied}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{})
+	service := NewService(&fakePackageManager{}, &fakeStoreFactory{}, &fakeLicense{err: denied}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{}, &fakeSnapshotArchive{})
 	if _, err := service.CreateStoryEvent(context.Background(), StoryEventInput{}); !errors.Is(err, denied) {
 		t.Fatalf("error = %v", err)
 	}

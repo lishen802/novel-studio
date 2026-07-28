@@ -4,6 +4,7 @@ import {
   StudioClientError,
   type ChapterView,
   type ChapterChangeInput,
+  type ChapterRevisionView,
   type ChangeSetView,
   type AppearanceInput,
   type CharacterInput,
@@ -29,6 +30,8 @@ import {
   type RegionAdjacencyInput,
   type RegionAdjacencyView,
   type SceneCardView,
+  type SnapshotRestoreView,
+  type SnapshotView,
   type StoryLineLinkView,
   type StoryLineView,
   type StoryStructureView,
@@ -108,6 +111,33 @@ const changeSetSchema = z.object({
   operations: z.array(changeOperationSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+const revisionSourceSchema = z.enum([
+  "initial",
+  "author",
+  "agent",
+  "restore",
+]);
+const chapterRevisionSchema = z.object({
+  chapterId: z.string(),
+  revision: z.number(),
+  title: z.string(),
+  body: z.string(),
+  source: revisionSourceSchema,
+  summary: z.string(),
+  createdAt: z.string(),
+  isCurrent: z.boolean(),
+});
+const snapshotSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(["named", "recovery"]),
+  createdAt: z.string(),
+});
+const snapshotRestoreSchema = z.object({
+  snapshotId: z.string(),
+  project: projectSchema,
+  chapters: z.array(chapterSchema),
 });
 
 const outlineNodeSchema = z.object({
@@ -439,6 +469,15 @@ type NativeDesktopAPI = {
   ProposeChapterChange(input: ChapterChangeInput): Promise<unknown>;
   ApplyChangeSet(id: string): Promise<unknown>;
   RejectChangeSet(id: string): Promise<void>;
+  ChapterHistory(id: string): Promise<unknown>;
+  RestoreChapterRevision(
+    id: string,
+    targetRevision: number,
+    expectedRevision: number,
+  ): Promise<unknown>;
+  Snapshots(): Promise<unknown>;
+  CreateSnapshot(name: string): Promise<unknown>;
+  RestoreSnapshot(id: string): Promise<unknown>;
   StoryStructure(): Promise<unknown>;
   CreateOutlineNode(input: CreateOutlineNodeInput): Promise<unknown>;
   CreateStoryLine(input: CreateStoryLineInput): Promise<unknown>;
@@ -559,6 +598,14 @@ const changeSetView = (value: unknown): ChangeSetView =>
   changeSetSchema.parse(value);
 const changeSetViews = (value: unknown): ChangeSetView[] =>
   z.array(changeSetSchema).parse(value);
+const chapterRevisionViews = (value: unknown): ChapterRevisionView[] =>
+  z.array(chapterRevisionSchema).parse(value);
+const snapshotView = (value: unknown): SnapshotView =>
+  snapshotSchema.parse(value);
+const snapshotViews = (value: unknown): SnapshotView[] =>
+  z.array(snapshotSchema).parse(value);
+const snapshotRestoreView = (value: unknown): SnapshotRestoreView =>
+  snapshotRestoreSchema.parse(value);
 
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
@@ -674,6 +721,39 @@ export const wailsStudioClient: StudioClient = {
   },
   async rejectChangeSet(id) {
     await safeCall(() => nativeAPI().RejectChangeSet(id));
+  },
+  async chapterHistory(chapterId) {
+    return chapterRevisionViews(
+      await safeCall(() => nativeAPI().ChapterHistory(chapterId)),
+    );
+  },
+  async restoreChapterRevision(
+    chapterId,
+    targetRevision,
+    expectedRevision,
+  ) {
+    return chapterView(
+      await safeCall(() =>
+        nativeAPI().RestoreChapterRevision(
+          chapterId,
+          targetRevision,
+          expectedRevision,
+        ),
+      ),
+    );
+  },
+  async snapshots() {
+    return snapshotViews(await safeCall(() => nativeAPI().Snapshots()));
+  },
+  async createSnapshot(name) {
+    return snapshotView(
+      await safeCall(() => nativeAPI().CreateSnapshot(name)),
+    );
+  },
+  async restoreSnapshot(id) {
+    return snapshotRestoreView(
+      await safeCall(() => nativeAPI().RestoreSnapshot(id)),
+    );
   },
   async storyStructure() {
     return storyStructureView(

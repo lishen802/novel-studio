@@ -27,6 +27,7 @@ func TestCreateProjectChecksLicenseBeforeCreatingPackage(t *testing.T) {
 		&fakeLicense{events: &events, err: denied},
 		fixedClock{now: time.Unix(100, 0)},
 		&sequenceIDs{ids: []string{"project-1"}},
+		&fakeSnapshotArchive{},
 	)
 
 	_, err := service.CreateProject(context.Background(), "/books", "长夜织境", "奇幻", "简介")
@@ -46,6 +47,7 @@ func TestCreateProjectLeavesNoActiveWorkspaceWhenFactoryFails(t *testing.T) {
 		&fakeLicense{},
 		fixedClock{now: time.Unix(100, 0)},
 		&sequenceIDs{ids: []string{"project-1"}},
+		&fakeSnapshotArchive{},
 	)
 
 	_, err := service.CreateProject(context.Background(), "/books", "长夜织境", "奇幻", "简介")
@@ -82,6 +84,7 @@ func TestOpenProjectClosesPreviousStoreAfterNewStoreIsReady(t *testing.T) {
 		&fakeLicense{},
 		fixedClock{now: time.Unix(100, 0)},
 		&sequenceIDs{ids: []string{"project-1"}},
+		&fakeSnapshotArchive{},
 	)
 	if _, err := service.CreateProject(context.Background(), "/books", "第一本书", "", ""); err != nil {
 		t.Fatal(err)
@@ -117,6 +120,7 @@ func TestOpenProjectFailureKeepsCurrentWorkspaceActive(t *testing.T) {
 		&fakeLicense{},
 		fixedClock{now: time.Unix(100, 0)},
 		&sequenceIDs{ids: []string{"project-1"}},
+		&fakeSnapshotArchive{},
 	)
 	if _, err := service.CreateProject(context.Background(), "/books", "第一本书", "", ""); err != nil {
 		t.Fatal(err)
@@ -241,6 +245,7 @@ func openTestService(t *testing.T, store *fakeStore, ids *sequenceIDs) *Service 
 		&fakeLicense{},
 		fixedClock{now: time.Unix(200, 0)},
 		ids,
+		&fakeSnapshotArchive{},
 	)
 	if _, err := service.OpenProject(context.Background(), "/books/project.zjproject"); err != nil {
 		t.Fatal(err)
@@ -329,6 +334,7 @@ type fakeStoreFactory struct {
 	createStore ports.ProjectStore
 	createErr   error
 	openStore   ports.ProjectStore
+	openStores  []ports.ProjectStore
 	openErr     error
 	events      *[]string
 }
@@ -340,6 +346,11 @@ func (f *fakeStoreFactory) Create(context.Context, string, projectdomain.Project
 
 func (f *fakeStoreFactory) Open(context.Context, string) (ports.ProjectStore, error) {
 	appendEvent(f.events, "open-store")
+	if len(f.openStores) > 0 {
+		store := f.openStores[0]
+		f.openStores = f.openStores[1:]
+		return store, f.openErr
+	}
 	return f.openStore, f.openErr
 }
 
@@ -386,6 +397,9 @@ type fakeStore struct {
 	factConflicts       map[string]canondomain.Conflict
 	characterKnowledge  map[string]canondomain.CharacterKnowledge
 	changeSets          map[string]revisiondomain.ChangeSet
+	chapterRevisions    map[string][]revisiondomain.ChapterRevision
+	backupPath          string
+	closeCalls          int
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -416,6 +430,7 @@ func newFakeStore(project projectdomain.Project) *fakeStore {
 		factConflicts:      make(map[string]canondomain.Conflict),
 		characterKnowledge: make(map[string]canondomain.CharacterKnowledge),
 		changeSets:         make(map[string]revisiondomain.ChangeSet),
+		chapterRevisions:   make(map[string][]revisiondomain.ChapterRevision),
 	}
 }
 
@@ -466,6 +481,37 @@ func (f *fakeStore) DeleteDraft(_ context.Context, chapterID string, baseRevisio
 func (f *fakeStore) CommitChapter(_ context.Context, chapter, _ projectdomain.Chapter) error {
 	f.commitCalls++
 	f.chapters[chapter.ID] = chapter
+	return nil
+}
+
+func (f *fakeStore) ListChapterRevisions(_ context.Context, chapterID string) ([]revisiondomain.ChapterRevision, error) {
+	return append([]revisiondomain.ChapterRevision(nil), f.chapterRevisions[chapterID]...), nil
+}
+
+func (f *fakeStore) RestoreChapterRevision(_ context.Context, chapterID string, targetRevision, expectedRevision int64, restoredAt time.Time) (projectdomain.Chapter, error) {
+	current, ok := f.chapters[chapterID]
+	if !ok {
+		return projectdomain.Chapter{}, errors.New("chapter missing")
+	}
+	if current.Revision != expectedRevision {
+		return projectdomain.Chapter{}, projectdomain.ErrRevisionConflict
+	}
+	for _, item := range f.chapterRevisions[chapterID] {
+		if item.Revision != targetRevision {
+			continue
+		}
+		current.Title = item.Title
+		current.Body = item.Body
+		current.Revision++
+		current.UpdatedAt = restoredAt.UTC()
+		f.chapters[chapterID] = current
+		return current, nil
+	}
+	return projectdomain.Chapter{}, errors.New("revision missing")
+}
+
+func (f *fakeStore) Backup(_ context.Context, targetPath string) error {
+	f.backupPath = targetPath
 	return nil
 }
 
@@ -1091,6 +1137,7 @@ func (f *fakeStore) DeleteFactConflict(_ context.Context, id string) error {
 }
 
 func (f *fakeStore) Close() error {
+	f.closeCalls++
 	appendEvent(f.events, f.closeEvent)
 	return nil
 }

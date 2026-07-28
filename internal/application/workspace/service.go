@@ -12,11 +12,12 @@ import (
 )
 
 type Service struct {
-	packages ports.ProjectPackageManager
-	stores   ports.ProjectStoreFactory
-	license  license.Service
-	clock    ports.Clock
-	ids      ports.IDGenerator
+	packages  ports.ProjectPackageManager
+	stores    ports.ProjectStoreFactory
+	license   license.Service
+	clock     ports.Clock
+	ids       ports.IDGenerator
+	snapshots ports.SnapshotArchive
 
 	mu     sync.RWMutex
 	active *activeWorkspace
@@ -33,13 +34,15 @@ func NewService(
 	licenseService license.Service,
 	clock ports.Clock,
 	ids ports.IDGenerator,
+	snapshots ports.SnapshotArchive,
 ) *Service {
 	return &Service{
-		packages: packages,
-		stores:   stores,
-		license:  licenseService,
-		clock:    clock,
-		ids:      ids,
+		packages:  packages,
+		stores:    stores,
+		license:   licenseService,
+		clock:     clock,
+		ids:       ids,
+		snapshots: snapshots,
 	}
 }
 
@@ -72,6 +75,9 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 	packageInfo, err := s.packages.Open(packagePath)
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("open project package: %w", err)
+	}
+	if err := s.snapshots.RecoverInterruptedRestore(packageInfo.Database); err != nil {
+		return ProjectView{}, fmt.Errorf("recover interrupted project restore: %w", err)
 	}
 	store, err := s.stores.Open(ctx, packageInfo.Database)
 	if err != nil {

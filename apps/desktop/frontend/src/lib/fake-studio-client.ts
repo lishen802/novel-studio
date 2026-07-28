@@ -1,7 +1,9 @@
+import { RevisionConflictError } from "./studio-client";
 import type {
   AppearanceInput,
   ChapterView,
   ChapterChangeInput,
+  ChapterRevisionView,
   ChangeSetView,
   CharacterInput,
   CharacterView,
@@ -32,6 +34,8 @@ import type {
   RegionAdjacencyInput,
   RegionAdjacencyView,
   SceneCardView,
+  SnapshotRestoreView,
+  SnapshotView,
   StoryLineLinkView,
   StoryLineView,
   StoryStructureView,
@@ -94,6 +98,13 @@ export class FakeStudioClient implements StudioClient {
     revision: 2,
   };
   changeSetsResult: ChangeSetView[] = [];
+  chapterHistoryResult: ChapterRevisionView[] = [];
+  snapshotsResult: SnapshotView[] = [];
+  snapshotRestoreResult: SnapshotRestoreView = {
+    snapshotId: "snapshot-1",
+    project: this.createProjectResult,
+    chapters: [],
+  };
   storyStructureResult: StoryStructureView = {
     outlineNodes: [],
     storyLines: [],
@@ -152,6 +163,13 @@ export class FakeStudioClient implements StudioClient {
   proposeChapterChangeCalls: ChapterChangeInput[] = [];
   applyChangeSetCalls: string[] = [];
   rejectChangeSetCalls: string[] = [];
+  restoreChapterRevisionCalls: Array<{
+    chapterId: string;
+    targetRevision: number;
+    expectedRevision: number;
+  }> = [];
+  createSnapshotCalls: string[] = [];
+  restoreSnapshotCalls: string[] = [];
   createOutlineNodeCalls: CreateOutlineNodeInput[] = [];
   createStoryLineCalls: CreateStoryLineInput[] = [];
   linkStoryLineCalls: LinkStoryLineInput[] = [];
@@ -369,6 +387,75 @@ export class FakeStudioClient implements StudioClient {
           }
         : item,
     );
+  }
+
+  async chapterHistory(chapterId: string): Promise<ChapterRevisionView[]> {
+    return this.chapterHistoryResult.filter(
+      (item) => item.chapterId === chapterId,
+    );
+  }
+
+  async restoreChapterRevision(
+    chapterId: string,
+    targetRevision: number,
+    expectedRevision: number,
+  ): Promise<ChapterView> {
+    this.restoreChapterRevisionCalls.push({
+      chapterId,
+      targetRevision,
+      expectedRevision,
+    });
+    const target = this.chapterHistoryResult.find(
+      (item) =>
+        item.chapterId === chapterId && item.revision === targetRevision,
+    );
+    if (!target) throw new Error("历史版本不存在");
+    const current =
+      this.chaptersResult.find((item) => item.id === chapterId) ??
+      this.openChapterResult;
+    if (current.revision !== expectedRevision) {
+      throw new RevisionConflictError();
+    }
+    const updated: ChapterView = {
+      ...current,
+      title: target.title,
+      body: target.body,
+      revision: current.revision + 1,
+    };
+    this.openChapterResult = updated;
+    this.chaptersResult = this.chaptersResult.map((item) =>
+      item.id === chapterId ? updated : item,
+    );
+    this.chapterHistoryResult = this.chapterHistoryResult.map((item) => ({
+      ...item,
+      isCurrent: false,
+    }));
+    return updated;
+  }
+
+  async snapshots(): Promise<SnapshotView[]> {
+    return this.snapshotsResult;
+  }
+
+  async createSnapshot(name: string): Promise<SnapshotView> {
+    this.createSnapshotCalls.push(name);
+    const snapshot: SnapshotView = {
+      id: `snapshot-${this.snapshotsResult.length + 1}`,
+      name,
+      kind: "named",
+      createdAt: "2026-07-28T05:10:00Z",
+    };
+    this.snapshotsResult = [snapshot, ...this.snapshotsResult];
+    return snapshot;
+  }
+
+  async restoreSnapshot(id: string): Promise<SnapshotRestoreView> {
+    this.restoreSnapshotCalls.push(id);
+    this.openProjectResult = this.snapshotRestoreResult.project;
+    this.chaptersResult = this.snapshotRestoreResult.chapters;
+    this.openChapterResult =
+      this.snapshotRestoreResult.chapters[0] ?? this.openChapterResult;
+    return { ...this.snapshotRestoreResult, snapshotId: id };
   }
 
   async storyStructure(): Promise<StoryStructureView> {

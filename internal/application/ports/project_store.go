@@ -21,6 +21,9 @@ type ProjectStore interface {
 	Draft(ctx context.Context, chapterID string) (body string, baseRevision int64, updatedAt time.Time, found bool, err error)
 	DeleteDraft(ctx context.Context, chapterID string, baseRevision int64) error
 	CommitChapter(ctx context.Context, chapter projectdomain.Chapter, previous projectdomain.Chapter) error
+	ListChapterRevisions(ctx context.Context, chapterID string) ([]revisiondomain.ChapterRevision, error)
+	RestoreChapterRevision(ctx context.Context, chapterID string, targetRevision, expectedRevision int64, restoredAt time.Time) (projectdomain.Chapter, error)
+	Backup(ctx context.Context, targetPath string) error
 	CreateChangeSet(ctx context.Context, changeSet revisiondomain.ChangeSet) error
 	ListChangeSets(ctx context.Context) ([]revisiondomain.ChangeSet, error)
 	ChangeSet(ctx context.Context, id string) (revisiondomain.ChangeSet, error)
