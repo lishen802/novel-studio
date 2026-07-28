@@ -87,6 +87,56 @@ func TestStoreBlocksArchivingReferencedTimelineAndCanonRecords(t *testing.T) {
 	}
 }
 
+func TestStorePersistsCharacterKnowledgeAndProtectsItsReferences(t *testing.T) {
+	store, project := createTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Unix(100, 0)
+	character := mustCharacter(t, "character-1", project.ID, "林默", worlddomain.RoleProtagonist)
+	chapter, _ := projectdomain.NewChapter("chapter-1", project.ID, "第一章", 1, now)
+	fact, _ := canondomain.NewFact("fact-1", project.ID, "导师已经离城", "plot", canondomain.OriginAuthor, canondomain.StatusAuthorConfirmed, 1, "", "", now)
+	if err := store.CreateCharacter(ctx, character); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateChapter(ctx, chapter); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateFact(ctx, fact); err != nil {
+		t.Fatal(err)
+	}
+	known, _ := canondomain.NewCharacterKnowledge("knowledge-1", project.ID, character.ID, fact.ID, canondomain.KnowledgeKnown, "", chapter.ID, "亲眼看见", now)
+	misinformed, _ := canondomain.NewCharacterKnowledge("knowledge-2", project.ID, character.ID, "", canondomain.KnowledgeMisinformed, "导师仍在城中", "", "敌人伪造信件", now)
+	if err := store.CreateCharacterKnowledge(ctx, known); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateCharacterKnowledge(ctx, misinformed); err != nil {
+		t.Fatal(err)
+	}
+
+	knowledge, err := store.ListCharacterKnowledge(ctx)
+	if err != nil || len(knowledge) != 2 || knowledge[0].ID != known.ID || knowledge[1].BeliefText != misinformed.BeliefText {
+		t.Fatalf("knowledge = %#v, error = %v", knowledge, err)
+	}
+	if err := store.ArchiveFact(ctx, fact.ID, now); !errors.Is(err, canondomain.ErrReferenced) {
+		t.Fatalf("archive fact error = %v", err)
+	}
+	if err := store.ArchiveCharacter(ctx, character.ID, now); !errors.Is(err, worlddomain.ErrReferenced) {
+		t.Fatalf("archive character error = %v", err)
+	}
+	if err := store.ArchiveCharacterKnowledge(ctx, known.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ArchiveCharacterKnowledge(ctx, misinformed.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ArchiveFact(ctx, fact.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ArchiveCharacter(ctx, character.ID, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoreBlocksArchivingPolymorphicContinuityTargets(t *testing.T) {
 	store, project := createTestStore(t)
 	defer store.Close()

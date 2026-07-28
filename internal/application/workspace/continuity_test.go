@@ -56,6 +56,48 @@ func TestContinuityLifecycleLinksEventsFactsAndEvidence(t *testing.T) {
 	}
 }
 
+func TestCharacterKnowledgeSeparatesConfirmedFactsFromMisinformation(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeStore(project)
+	service := openTestService(t, store, &sequenceIDs{ids: []string{"chapter-1", "character-1", "fact-1", "knowledge-1", "knowledge-2", "fact-2", "knowledge-3"}})
+	ctx := context.Background()
+	chapter, err := service.CreateChapter(ctx, "第一章")
+	if err != nil {
+		t.Fatal(err)
+	}
+	character, err := service.CreateCharacter(ctx, CharacterInput{Name: "林默", Role: "protagonist", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := service.CreateFact(ctx, FactInput{Text: "导师已经离城", Category: "plot", Origin: "author", Status: "author_confirmed", Confidence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	known, err := service.CreateCharacterKnowledge(ctx, CharacterKnowledgeInput{CharacterID: character.ID, FactID: fact.ID, State: "known", AvailableFromChapterID: chapter.ID, Notes: "亲眼看见"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	misinformed, err := service.CreateCharacterKnowledge(ctx, CharacterKnowledgeInput{CharacterID: character.ID, State: "misinformed", BeliefText: "导师仍在城中", Notes: "敌人伪造信件"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	knowledge, err := service.CharacterKnowledge(ctx)
+	if err != nil || len(knowledge) != 2 {
+		t.Fatalf("knowledge = %#v, error = %v", knowledge, err)
+	}
+	if knowledge[0].ID != known.ID || knowledge[0].AvailableFromChapterID != chapter.ID || knowledge[1].ID != misinformed.ID || knowledge[1].BeliefText != "导师仍在城中" {
+		t.Fatalf("knowledge = %#v", knowledge)
+	}
+
+	inferred, err := service.CreateFact(ctx, FactInput{Text: "模型猜测", Category: "plot", Origin: "model", Status: "ai_inferred", Confidence: .7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateCharacterKnowledge(ctx, CharacterKnowledgeInput{CharacterID: character.ID, FactID: inferred.ID, State: "known"}); !errors.Is(err, canondomain.ErrInvalidReference) {
+		t.Fatalf("unconfirmed fact knowledge error = %v", err)
+	}
+}
+
 func TestContinuityRejectsInvalidModelPromotionAndEvidenceAnchor(t *testing.T) {
 	project := mustProject(t, "project-1", "长夜织境")
 	store := newFakeStore(project)

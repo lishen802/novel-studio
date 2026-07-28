@@ -190,7 +190,7 @@ func (s *Store) UpdateFact(ctx context.Context, fact canondomain.Fact) error {
 
 func (s *Store) ArchiveFact(ctx context.Context, id string, archivedAt time.Time) error {
 	var references int
-	err := s.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM fact_evidence WHERE fact_id = ?) + (SELECT COUNT(*) FROM fact_scopes WHERE fact_id = ?) + (SELECT COUNT(*) FROM fact_conflicts WHERE fact_id = ? OR other_fact_id = ?)`, id, id, id, id).Scan(&references)
+	err := s.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM fact_evidence WHERE fact_id = ?) + (SELECT COUNT(*) FROM fact_scopes WHERE fact_id = ?) + (SELECT COUNT(*) FROM fact_conflicts WHERE fact_id = ? OR other_fact_id = ?) + (SELECT COUNT(*) FROM character_knowledge WHERE fact_id = ? AND deleted_at IS NULL)`, id, id, id, id, id).Scan(&references)
 	if err != nil {
 		return databaseOperationError("check canon fact references", err)
 	}
@@ -202,6 +202,48 @@ func (s *Store) ArchiveFact(ctx context.Context, id string, archivedAt time.Time
 		return databaseOperationError("archive canon fact", err)
 	}
 	return requireOneRow(result, "canon fact", id)
+}
+
+func (s *Store) CreateCharacterKnowledge(ctx context.Context, knowledge canondomain.CharacterKnowledge) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO character_knowledge(id, project_id, character_id, fact_id, state, belief_text, available_from_chapter_id, notes, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, knowledge.ID, knowledge.ProjectID, knowledge.CharacterID, nullString(knowledge.FactID), knowledge.State, knowledge.BeliefText, nullString(knowledge.AvailableFromChapterID), knowledge.Notes, formatTime(knowledge.CreatedAt), formatTime(knowledge.UpdatedAt))
+	if err != nil {
+		return databaseOperationError("create character knowledge", err)
+	}
+	return nil
+}
+
+func (s *Store) ListCharacterKnowledge(ctx context.Context) ([]canondomain.CharacterKnowledge, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, project_id, character_id, fact_id, state, belief_text, available_from_chapter_id, notes, created_at, updated_at
+		FROM character_knowledge WHERE deleted_at IS NULL ORDER BY created_at, id
+	`)
+	if err != nil {
+		return nil, databaseOperationError("list character knowledge", err)
+	}
+	defer rows.Close()
+	result := make([]canondomain.CharacterKnowledge, 0)
+	for rows.Next() {
+		knowledge, err := scanCharacterKnowledge(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, knowledge)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseOperationError("iterate character knowledge", err)
+	}
+	return result, nil
+}
+
+func (s *Store) ArchiveCharacterKnowledge(ctx context.Context, id string, archivedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE character_knowledge SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, formatTime(archivedAt), formatTime(archivedAt), id)
+	if err != nil {
+		return databaseOperationError("archive character knowledge", err)
+	}
+	return requireOneRow(result, "character knowledge", id)
 }
 
 func scanFact(scanner interface{ Scan(...any) error }) (canondomain.Fact, error) {
@@ -219,6 +261,23 @@ func scanFact(scanner interface{ Scan(...any) error }) (canondomain.Fact, error)
 	}
 	fact.UpdatedAt, err = parseTime(updatedAt)
 	return fact, err
+}
+
+func scanCharacterKnowledge(scanner interface{ Scan(...any) error }) (canondomain.CharacterKnowledge, error) {
+	var knowledge canondomain.CharacterKnowledge
+	var factID, availableFromChapterID sql.NullString
+	var createdAt, updatedAt string
+	if err := scanner.Scan(&knowledge.ID, &knowledge.ProjectID, &knowledge.CharacterID, &factID, &knowledge.State, &knowledge.BeliefText, &availableFromChapterID, &knowledge.Notes, &createdAt, &updatedAt); err != nil {
+		return canondomain.CharacterKnowledge{}, databaseOperationError("scan character knowledge", err)
+	}
+	knowledge.FactID, knowledge.AvailableFromChapterID = factID.String, availableFromChapterID.String
+	var err error
+	knowledge.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return canondomain.CharacterKnowledge{}, err
+	}
+	knowledge.UpdatedAt, err = parseTime(updatedAt)
+	return knowledge, err
 }
 
 func (s *Store) CreateFactEvidence(ctx context.Context, evidence canondomain.Evidence) error {

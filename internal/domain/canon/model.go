@@ -220,3 +220,57 @@ func (c Conflict) Resolve(now time.Time) (Conflict, error) {
 	c.Status, c.ResolvedAt = ConflictResolved, &resolved
 	return c, nil
 }
+
+// KnowledgeState describes how a character relates to a piece of information.
+// Misinformation deliberately stays separate from canonical facts so an
+// author's true story state is never overwritten by a character's false belief.
+type KnowledgeState string
+
+const (
+	KnowledgeKnown       KnowledgeState = "known"
+	KnowledgeBelieved    KnowledgeState = "believed"
+	KnowledgeMisinformed KnowledgeState = "misinformed"
+)
+
+type CharacterKnowledge struct {
+	ID                     string
+	ProjectID              string
+	CharacterID            string
+	FactID                 string
+	State                  KnowledgeState
+	BeliefText             string
+	AvailableFromChapterID string
+	Notes                  string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	DeletedAt              *time.Time
+}
+
+func NewCharacterKnowledge(id, projectID, characterID, factID string, state KnowledgeState, beliefText, availableFromChapterID, notes string, now time.Time) (CharacterKnowledge, error) {
+	id, projectID, characterID, factID = strings.TrimSpace(id), strings.TrimSpace(projectID), strings.TrimSpace(characterID), strings.TrimSpace(factID)
+	beliefText, availableFromChapterID, notes = strings.TrimSpace(beliefText), strings.TrimSpace(availableFromChapterID), strings.TrimSpace(notes)
+	if id == "" || projectID == "" || characterID == "" {
+		return CharacterKnowledge{}, ErrBlankValue
+	}
+	if !validKnowledgeState(state) {
+		return CharacterKnowledge{}, ErrInvalidStatus
+	}
+	if state == KnowledgeMisinformed {
+		if beliefText == "" {
+			return CharacterKnowledge{}, ErrBlankValue
+		}
+	} else if factID == "" {
+		return CharacterKnowledge{}, ErrInvalidReference
+	}
+	now = now.UTC()
+	return CharacterKnowledge{ID: id, ProjectID: projectID, CharacterID: characterID, FactID: factID, State: state, BeliefText: beliefText, AvailableFromChapterID: availableFromChapterID, Notes: notes, CreatedAt: now, UpdatedAt: now}, nil
+}
+
+func validKnowledgeState(state KnowledgeState) bool {
+	switch state {
+	case KnowledgeKnown, KnowledgeBelieved, KnowledgeMisinformed:
+		return true
+	default:
+		return false
+	}
+}

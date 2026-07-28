@@ -17,8 +17,12 @@ import {
 import type {
   AppearanceRole,
   ChapterView,
+  CharacterKnowledgeInput,
+  CharacterKnowledgeState,
+  CharacterKnowledgeView,
   CharacterInput,
   CharacterView,
+  ContinuityView,
   FactionInput,
   FactionView,
   MembershipStatus,
@@ -53,6 +57,15 @@ const emptyStructure: StoryStructureView = {
   storyLineLinks: [],
   sceneCards: [],
 };
+const emptyContinuity: ContinuityView = {
+  events: [],
+  eventLinks: [],
+  facts: [],
+  evidence: [],
+  scopes: [],
+  conflicts: [],
+  consistencyIssues: [],
+};
 const emptyCharacter: CharacterInput = {
   name: "",
   aliases: [],
@@ -78,6 +91,14 @@ const emptyRelationship: RelationshipInput = {
   strength: 50,
   publicState: "",
   trueState: "",
+};
+const emptyCharacterKnowledge: CharacterKnowledgeInput = {
+  characterId: "",
+  factId: "",
+  state: "known",
+  beliefText: "",
+  availableFromChapterId: "",
+  notes: "",
 };
 
 const roleNames: Record<CharacterView["role"], string> = {
@@ -109,6 +130,11 @@ const appearanceNames: Record<AppearanceRole, string> = {
   pov: "视角",
   present: "出场",
   mentioned: "提及",
+};
+const knowledgeStateNames: Record<CharacterKnowledgeState, string> = {
+  known: "已知事实",
+  believed: "相信事实",
+  misinformed: "误信",
 };
 
 function messageOf(cause: unknown, fallback: string) {
@@ -157,6 +183,10 @@ function RelationshipTopology({
 export function StoryWorldWorkbench({ client, chapters }: Props) {
   const [world, setWorld] = useState(emptyWorld);
   const [structure, setStructure] = useState(emptyStructure);
+  const [continuity, setContinuity] = useState(emptyContinuity);
+  const [characterKnowledge, setCharacterKnowledge] = useState<
+    CharacterKnowledgeView[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
@@ -175,15 +205,23 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
   const [chapterRole, setChapterRole] = useState<AppearanceRole>("present");
   const [sceneId, setSceneId] = useState("");
   const [sceneRole, setSceneRole] = useState<AppearanceRole>("present");
+  const [knowledgeInput, setKnowledgeInput] = useState(
+    emptyCharacterKnowledge,
+  );
 
   const load = useCallback(async () => {
     try {
-      const [nextWorld, nextStructure] = await Promise.all([
+      const [nextWorld, nextStructure, nextContinuity, nextKnowledge] =
+        await Promise.all([
         client.storyWorld(),
         client.storyStructure(),
+        client.continuity(),
+        client.characterKnowledge(),
       ]);
       setWorld(nextWorld);
       setStructure(nextStructure);
+      setContinuity(nextContinuity);
+      setCharacterKnowledge(nextKnowledge);
       setSelectedCharacterId((current) =>
         nextWorld.characters.some((item) => item.id === current)
           ? current
@@ -219,6 +257,18 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
   const sceneById = useMemo(
     () => new Map(structure.sceneCards.map((item) => [item.id, item])),
     [structure.sceneCards],
+  );
+  const factById = useMemo(
+    () => new Map(continuity.facts.map((item) => [item.id, item])),
+    [continuity.facts],
+  );
+  const selectableKnowledgeFacts = useMemo(
+    () =>
+      continuity.facts.filter(
+        (item) =>
+          item.status === "author_confirmed" || item.status === "text_evidenced",
+      ),
+    [continuity.facts],
   );
 
   const closeDialog = () => {
@@ -380,6 +430,28 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
       "无法关联场景",
     );
     if (saved) setSceneId("");
+  };
+  const saveCharacterKnowledge = async () => {
+    if (!selectedCharacter) return;
+    const isMisinformed = knowledgeInput.state === "misinformed";
+    if (
+      (isMisinformed && !knowledgeInput.beliefText.trim()) ||
+      (!isMisinformed && !knowledgeInput.factId)
+    ) {
+      return;
+    }
+    const saved = await mutate(
+      () =>
+        client.createCharacterKnowledge({
+          ...knowledgeInput,
+          characterId: selectedCharacter.id,
+          factId: isMisinformed ? "" : knowledgeInput.factId,
+          beliefText: isMisinformed ? knowledgeInput.beliefText.trim() : "",
+          notes: knowledgeInput.notes.trim(),
+        }),
+      "无法记录角色知识",
+    );
+    if (saved) setKnowledgeInput(emptyCharacterKnowledge);
   };
 
   return (
@@ -766,6 +838,158 @@ export function StoryWorldWorkbench({ client, chapters }: Props) {
                         onClick={() => void linkScene()}
                       >
                         添加场景关联
+                      </button>
+                    </div>
+                  </section>
+                  <section className="world-subsection character-knowledge">
+                    <h4>知识边界</h4>
+                    <p className="world-muted">
+                      角色的认知与正式事实分开管理；误信不会改写故事事实。
+                    </p>
+                    <div className="character-knowledge-list">
+                      {characterKnowledge
+                        .filter(
+                          (item) => item.characterId === selectedCharacter.id,
+                        )
+                        .map((item) => {
+                          const text =
+                            item.state === "misinformed"
+                              ? item.beliefText
+                              : (factById.get(item.factId)?.text ?? "已删除的事实");
+                          const chapter = item.availableFromChapterId
+                            ? chapterById.get(item.availableFromChapterId)?.title ??
+                              "已删除的章节"
+                            : "未设起始章节";
+                          return (
+                            <article key={item.id} className="character-knowledge-card">
+                              <div>
+                                <span className={`knowledge-state knowledge-state--${item.state}`}>
+                                  {knowledgeStateNames[item.state]}
+                                </span>
+                                <strong>{text}</strong>
+                              </div>
+                              <small>从 {chapter} 起知晓</small>
+                              {item.notes && <p>{item.notes}</p>}
+                              <button
+                                type="button"
+                                aria-label={`移除知识：${text}`}
+                                onClick={() =>
+                                  void mutate(
+                                    () => client.archiveCharacterKnowledge(item.id),
+                                    "无法移除角色知识",
+                                  )
+                                }
+                              >
+                                移除
+                              </button>
+                            </article>
+                          );
+                        })}
+                    </div>
+                    <div className="world-link-form character-knowledge-form">
+                      <label>
+                        知识状态
+                        <select
+                          aria-label="知识状态"
+                          value={knowledgeInput.state}
+                          onChange={(event) => {
+                            const state = event.target.value as CharacterKnowledgeState;
+                            setKnowledgeInput((current) => ({
+                              ...current,
+                              state,
+                              factId: state === "misinformed" ? "" : current.factId,
+                              beliefText: state === "misinformed" ? current.beliefText : "",
+                            }));
+                          }}
+                        >
+                          {Object.entries(knowledgeStateNames).map(([value, name]) => (
+                            <option key={value} value={value}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {knowledgeInput.state === "misinformed" ? (
+                        <label>
+                          误信内容
+                          <input
+                            required
+                            aria-label="误信内容"
+                            value={knowledgeInput.beliefText}
+                            onChange={(event) =>
+                              setKnowledgeInput((current) => ({
+                                ...current,
+                                beliefText: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ) : (
+                        <label>
+                          知识事实
+                          <select
+                            required
+                            aria-label="知识事实"
+                            value={knowledgeInput.factId}
+                            onChange={(event) =>
+                              setKnowledgeInput((current) => ({
+                                ...current,
+                                factId: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">选择已确认或文本佐证的事实</option>
+                            {selectableKnowledgeFacts.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.text}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <label>
+                        开始知晓章节
+                        <select
+                          aria-label="开始知晓章节"
+                          value={knowledgeInput.availableFromChapterId}
+                          onChange={(event) =>
+                            setKnowledgeInput((current) => ({
+                              ...current,
+                              availableFromChapterId: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">不限定</option>
+                          {chapters.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        备注
+                        <input
+                          aria-label="知识备注"
+                          value={knowledgeInput.notes}
+                          onChange={(event) =>
+                            setKnowledgeInput((current) => ({
+                              ...current,
+                              notes: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={
+                          knowledgeInput.state === "misinformed"
+                            ? !knowledgeInput.beliefText.trim()
+                            : !knowledgeInput.factId
+                        }
+                        onClick={() => void saveCharacterKnowledge()}
+                      >
+                        记录知识
                       </button>
                     </div>
                   </section>

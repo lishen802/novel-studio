@@ -61,6 +61,15 @@ type FactConflictInput struct {
 	Reason      string `json:"reason"`
 }
 
+type CharacterKnowledgeInput struct {
+	CharacterID            string `json:"characterId"`
+	FactID                 string `json:"factId"`
+	State                  string `json:"state"`
+	BeliefText             string `json:"beliefText"`
+	AvailableFromChapterID string `json:"availableFromChapterId"`
+	Notes                  string `json:"notes"`
+}
+
 type StoryEventView struct {
 	ID             string `json:"id"`
 	Title          string `json:"title"`
@@ -116,6 +125,16 @@ type FactConflictView struct {
 	OtherFactID string `json:"otherFactId"`
 	Reason      string `json:"reason"`
 	Status      string `json:"status"`
+}
+
+type CharacterKnowledgeView struct {
+	ID                     string `json:"id"`
+	CharacterID            string `json:"characterId"`
+	FactID                 string `json:"factId"`
+	State                  string `json:"state"`
+	BeliefText             string `json:"beliefText"`
+	AvailableFromChapterID string `json:"availableFromChapterId"`
+	Notes                  string `json:"notes"`
 }
 
 type ContinuityView struct {
@@ -327,6 +346,72 @@ func (s *Service) ConfirmFact(ctx context.Context, id string) (FactView, error) 
 
 func (s *Service) ArchiveFact(ctx context.Context, id string) error {
 	return s.withStoryWrite(ctx, func() error { return s.active.store.ArchiveFact(ctx, strings.TrimSpace(id), s.clock.Now()) })
+}
+
+func (s *Service) CharacterKnowledge(ctx context.Context) ([]CharacterKnowledgeView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return nil, ErrNoActiveProject
+	}
+	knowledge, err := s.active.store.ListCharacterKnowledge(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list character knowledge: %w", err)
+	}
+	views := make([]CharacterKnowledgeView, 0, len(knowledge))
+	for _, value := range knowledge {
+		views = append(views, characterKnowledgeView(value))
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].ID < views[j].ID })
+	return views, nil
+}
+
+func (s *Service) CreateCharacterKnowledge(ctx context.Context, input CharacterKnowledgeInput) (CharacterKnowledgeView, error) {
+	if err := s.license.Require(ctx, license.EditStory); err != nil {
+		return CharacterKnowledgeView{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	project, err := s.activeProjectLocked(ctx)
+	if err != nil {
+		return CharacterKnowledgeView{}, err
+	}
+	character, err := s.active.store.Character(ctx, strings.TrimSpace(input.CharacterID))
+	if err != nil || character.ProjectID != project.ID {
+		return CharacterKnowledgeView{}, canondomain.ErrInvalidReference
+	}
+	state := canondomain.KnowledgeState(input.State)
+	factID := strings.TrimSpace(input.FactID)
+	if factID != "" {
+		fact, err := s.active.store.Fact(ctx, factID)
+		if err != nil || fact.ProjectID != project.ID {
+			return CharacterKnowledgeView{}, canondomain.ErrInvalidReference
+		}
+		if state != canondomain.KnowledgeMisinformed && fact.Status != canondomain.StatusAuthorConfirmed && fact.Status != canondomain.StatusTextEvidenced {
+			return CharacterKnowledgeView{}, canondomain.ErrInvalidReference
+		}
+	}
+	chapterID := strings.TrimSpace(input.AvailableFromChapterID)
+	if chapterID != "" {
+		chapter, err := s.active.store.Chapter(ctx, chapterID)
+		if err != nil || chapter.ProjectID != project.ID {
+			return CharacterKnowledgeView{}, canondomain.ErrInvalidReference
+		}
+	}
+	knowledge, err := canondomain.NewCharacterKnowledge(s.ids.NewID(), project.ID, character.ID, factID, state, input.BeliefText, chapterID, input.Notes, s.clock.Now())
+	if err != nil {
+		return CharacterKnowledgeView{}, err
+	}
+	if err := s.active.store.CreateCharacterKnowledge(ctx, knowledge); err != nil {
+		return CharacterKnowledgeView{}, fmt.Errorf("create character knowledge: %w", err)
+	}
+	return characterKnowledgeView(knowledge), nil
+}
+
+func (s *Service) ArchiveCharacterKnowledge(ctx context.Context, id string) error {
+	return s.withStoryWrite(ctx, func() error {
+		return s.active.store.ArchiveCharacterKnowledge(ctx, strings.TrimSpace(id), s.clock.Now())
+	})
 }
 
 func (s *Service) AddFactEvidence(ctx context.Context, input FactEvidenceInput) (FactEvidenceView, error) {
@@ -620,4 +705,7 @@ func factScopeView(value canondomain.Scope) FactScopeView {
 }
 func factConflictView(value canondomain.Conflict) FactConflictView {
 	return FactConflictView{ID: value.ID, FactID: value.FactID, OtherFactID: value.OtherFactID, Reason: value.Reason, Status: string(value.Status)}
+}
+func characterKnowledgeView(value canondomain.CharacterKnowledge) CharacterKnowledgeView {
+	return CharacterKnowledgeView{ID: value.ID, CharacterID: value.CharacterID, FactID: value.FactID, State: string(value.State), BeliefText: value.BeliefText, AvailableFromChapterID: value.AvailableFromChapterID, Notes: value.Notes}
 }

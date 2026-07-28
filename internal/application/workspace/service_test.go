@@ -383,6 +383,7 @@ type fakeStore struct {
 	factEvidence        map[string]canondomain.Evidence
 	factScopes          map[string]canondomain.Scope
 	factConflicts       map[string]canondomain.Conflict
+	characterKnowledge  map[string]canondomain.CharacterKnowledge
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -411,6 +412,7 @@ func newFakeStore(project projectdomain.Project) *fakeStore {
 		factEvidence:       make(map[string]canondomain.Evidence),
 		factScopes:         make(map[string]canondomain.Scope),
 		factConflicts:      make(map[string]canondomain.Conflict),
+		characterKnowledge: make(map[string]canondomain.CharacterKnowledge),
 	}
 }
 
@@ -954,6 +956,28 @@ func (f *fakeStore) ArchiveFact(_ context.Context, id string, at time.Time) erro
 	}
 	value.DeletedAt = &at
 	f.facts[id] = value
+	return nil
+}
+func (f *fakeStore) CreateCharacterKnowledge(_ context.Context, value canondomain.CharacterKnowledge) error {
+	f.characterKnowledge[value.ID] = value
+	return nil
+}
+func (f *fakeStore) ListCharacterKnowledge(context.Context) ([]canondomain.CharacterKnowledge, error) {
+	result := make([]canondomain.CharacterKnowledge, 0, len(f.characterKnowledge))
+	for _, value := range f.characterKnowledge {
+		if value.DeletedAt == nil {
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+func (f *fakeStore) ArchiveCharacterKnowledge(_ context.Context, id string, at time.Time) error {
+	value, ok := f.characterKnowledge[id]
+	if !ok {
+		return errors.New("character knowledge missing")
+	}
+	value.DeletedAt = &at
+	f.characterKnowledge[id] = value
 	return nil
 }
 func (f *fakeStore) CreateFactEvidence(_ context.Context, value canondomain.Evidence) error {

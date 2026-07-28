@@ -356,6 +356,17 @@ export type FactConflictInput = Pick<
   FactConflictView,
   "factId" | "otherFactId" | "reason"
 >;
+export type CharacterKnowledgeState = "known" | "believed" | "misinformed";
+export type CharacterKnowledgeView = {
+  id: string;
+  characterId: string;
+  factId: string;
+  state: CharacterKnowledgeState;
+  beliefText: string;
+  availableFromChapterId: string;
+  notes: string;
+};
+export type CharacterKnowledgeInput = Omit<CharacterKnowledgeView, "id">;
 export type ContinuityView = {
   events: StoryEventView[];
   eventLinks: StoryEventLinkView[];
@@ -462,6 +473,11 @@ export interface StudioClient {
   updateFact(id: string, input: FactInput): Promise<FactView>;
   confirmFact(id: string): Promise<FactView>;
   archiveFact(id: string): Promise<void>;
+  characterKnowledge(): Promise<CharacterKnowledgeView[]>;
+  createCharacterKnowledge(
+    input: CharacterKnowledgeInput,
+  ): Promise<CharacterKnowledgeView>;
+  archiveCharacterKnowledge(id: string): Promise<void>;
   addFactEvidence(input: FactEvidenceInput): Promise<FactEvidenceView>;
   removeFactEvidence(id: string): Promise<void>;
   addFactScope(input: FactScopeInput): Promise<FactScopeView>;

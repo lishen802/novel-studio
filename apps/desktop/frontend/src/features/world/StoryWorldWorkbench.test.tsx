@@ -457,4 +457,74 @@ describe("StoryWorldWorkbench", () => {
       { characterId: linMo.id, sceneCardId: "scene-card" },
     ]);
   });
+
+  it("records confirmed knowledge and misinformation without changing facts", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.storyWorldResult = {
+      characters: [linMo],
+      factions: [],
+      memberships: [],
+      relationships: [],
+      chapterAppearances: [],
+      sceneAppearances: [],
+      consistencyIssues: [],
+    };
+    client.continuityResult = {
+      events: [],
+      eventLinks: [],
+      facts: [
+        {
+          id: "fact-1",
+          text: "导师已经离开港城",
+          category: "人物",
+          origin: "author",
+          status: "author_confirmed",
+          confidence: 1,
+          validFromEventId: "",
+          validUntilEventId: "",
+          createdBy: "author",
+          confirmedBy: "author",
+        },
+      ],
+      evidence: [],
+      scopes: [],
+      conflicts: [],
+      consistencyIssues: [],
+    };
+    const user = userEvent.setup();
+    render(<StoryWorldWorkbench client={client} chapters={[]} />);
+
+    await user.selectOptions(await screen.findByLabelText("知识事实"), "fact-1");
+    await user.click(screen.getByRole("button", { name: "记录知识" }));
+    expect(client.createCharacterKnowledgeCalls).toEqual([
+      {
+        characterId: linMo.id,
+        factId: "fact-1",
+        state: "known",
+        beliefText: "",
+        availableFromChapterId: "",
+        notes: "",
+      },
+    ]);
+
+    await user.selectOptions(screen.getByLabelText("知识状态"), "misinformed");
+    await user.type(screen.getByLabelText("误信内容"), "导师仍在港城");
+    await user.click(screen.getByRole("button", { name: "记录知识" }));
+    expect(client.createCharacterKnowledgeCalls[1]).toEqual({
+      characterId: linMo.id,
+      factId: "",
+      state: "misinformed",
+      beliefText: "导师仍在港城",
+      availableFromChapterId: "",
+      notes: "",
+    });
+    expect(client.continuityResult.facts).toHaveLength(1);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "移除知识：导师已经离开港城",
+      }),
+    );
+    expect(client.archiveCharacterKnowledgeCalls).toEqual(["knowledge-1"]);
+  });
 });

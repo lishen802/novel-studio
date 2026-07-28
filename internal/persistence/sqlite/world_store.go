@@ -92,8 +92,9 @@ func (s *Store) ArchiveCharacter(ctx context.Context, id string, archivedAt time
 			(SELECT COUNT(*) FROM faction_memberships WHERE character_id = ?) +
 			(SELECT COUNT(*) FROM character_relationships WHERE (source_character_id = ? OR target_character_id = ?) AND deleted_at IS NULL) +
 			(SELECT COUNT(*) FROM chapter_characters WHERE character_id = ?) +
-			(SELECT COUNT(*) FROM scene_card_characters WHERE character_id = ?)
-	`, id, id, id, id, id).Scan(&references)
+			(SELECT COUNT(*) FROM scene_card_characters WHERE character_id = ?) +
+			(SELECT COUNT(*) FROM character_knowledge WHERE character_id = ? AND deleted_at IS NULL)
+	`, id, id, id, id, id, id).Scan(&references)
 	if err != nil {
 		return databaseOperationError("count character references", err)
 	}

@@ -829,6 +829,15 @@ func (f *fakeWorkspace) ArchiveFact(_ context.Context, id string) error {
 	f.archivedFactID = id
 	return nil
 }
+func (f *fakeWorkspace) CharacterKnowledge(context.Context) ([]workspace.CharacterKnowledgeView, error) {
+	return nil, nil
+}
+func (f *fakeWorkspace) CreateCharacterKnowledge(_ context.Context, input workspace.CharacterKnowledgeInput) (workspace.CharacterKnowledgeView, error) {
+	return workspace.CharacterKnowledgeView{CharacterID: input.CharacterID, FactID: input.FactID, State: input.State, BeliefText: input.BeliefText, AvailableFromChapterID: input.AvailableFromChapterID, Notes: input.Notes}, nil
+}
+func (f *fakeWorkspace) ArchiveCharacterKnowledge(_ context.Context, id string) error {
+	return nil
+}
 func (f *fakeWorkspace) AddFactEvidence(_ context.Context, input workspace.FactEvidenceInput) (workspace.FactEvidenceView, error) {
 	f.factEvidenceInput = input
 	return workspace.FactEvidenceView{}, nil

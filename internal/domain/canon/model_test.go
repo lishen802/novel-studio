@@ -85,6 +85,32 @@ func TestFactScopeAndConflictRequireValidReferences(t *testing.T) {
 	}
 }
 
+func TestCharacterKnowledgeSeparatesKnownFactsFromMisinformation(t *testing.T) {
+	now := time.Date(2026, time.July, 28, 10, 0, 0, 0, time.UTC)
+	known, err := NewCharacterKnowledge("knowledge-1", "project-1", "character-1", "fact-1", KnowledgeKnown, "", "chapter-1", "在现场听闻", now)
+	if err != nil {
+		t.Fatalf("NewCharacterKnowledge() error = %v", err)
+	}
+	if known.FactID != "fact-1" || known.AvailableFromChapterID != "chapter-1" || known.BeliefText != "" {
+		t.Fatalf("knowledge = %#v", known)
+	}
+
+	misinformed, err := NewCharacterKnowledge("knowledge-2", "project-1", "character-1", "", KnowledgeMisinformed, "父亲仍然活着", "", "被敌人误导", now)
+	if err != nil {
+		t.Fatalf("NewCharacterKnowledge(misinformed) error = %v", err)
+	}
+	if misinformed.FactID != "" || misinformed.BeliefText != "父亲仍然活着" {
+		t.Fatalf("misinformed = %#v", misinformed)
+	}
+
+	if _, err := NewCharacterKnowledge("knowledge-3", "project-1", "character-1", "", KnowledgeKnown, "", "", "", now); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("known fact without fact error = %v, want ErrInvalidReference", err)
+	}
+	if _, err := NewCharacterKnowledge("knowledge-4", "project-1", "character-1", "", KnowledgeMisinformed, "", "", "", now); !errors.Is(err, ErrBlankValue) {
+		t.Fatalf("misinformation without belief error = %v, want ErrBlankValue", err)
+	}
+}
+
 func TestConflictCanonicalizesTheSymmetricFactPair(t *testing.T) {
 	conflict, err := NewConflict("conflict-1", "project-1", "fact-z", "fact-a", "互斥", time.Unix(100, 0))
 	if err != nil {

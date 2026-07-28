@@ -98,6 +98,9 @@ type ProjectStore interface {
 	ListFacts(ctx context.Context) ([]canondomain.Fact, error)
 	Fact(ctx context.Context, id string) (canondomain.Fact, error)
 	ArchiveFact(ctx context.Context, id string, archivedAt time.Time) error
+	CreateCharacterKnowledge(ctx context.Context, knowledge canondomain.CharacterKnowledge) error
+	ListCharacterKnowledge(ctx context.Context) ([]canondomain.CharacterKnowledge, error)
+	ArchiveCharacterKnowledge(ctx context.Context, id string, archivedAt time.Time) error
 	CreateFactEvidence(ctx context.Context, evidence canondomain.Evidence) error
 	ListFactEvidence(ctx context.Context) ([]canondomain.Evidence, error)
 	DeleteFactEvidence(ctx context.Context, id string) error

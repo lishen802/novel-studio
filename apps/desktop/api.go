@@ -69,6 +69,9 @@ type WorkspaceUseCases interface {
 	UpdateFact(context.Context, string, workspace.FactInput) (workspace.FactView, error)
 	ConfirmFact(context.Context, string) (workspace.FactView, error)
 	ArchiveFact(context.Context, string) error
+	CharacterKnowledge(context.Context) ([]workspace.CharacterKnowledgeView, error)
+	CreateCharacterKnowledge(context.Context, workspace.CharacterKnowledgeInput) (workspace.CharacterKnowledgeView, error)
+	ArchiveCharacterKnowledge(context.Context, string) error
 	AddFactEvidence(context.Context, workspace.FactEvidenceInput) (workspace.FactEvidenceView, error)
 	RemoveFactEvidence(context.Context, string) error
 	AddFactScope(context.Context, workspace.FactScopeInput) (workspace.FactScopeView, error)
@@ -366,6 +369,18 @@ func (a *DesktopAPI) ConfirmFact(id string) (workspace.FactView, error) {
 
 func (a *DesktopAPI) ArchiveFact(id string) error {
 	return safeDesktopError(a.workspace.ArchiveFact(a.ctx, id))
+}
+
+func (a *DesktopAPI) CharacterKnowledge() ([]workspace.CharacterKnowledgeView, error) {
+	return safeResult(a.workspace.CharacterKnowledge(a.ctx))
+}
+
+func (a *DesktopAPI) CreateCharacterKnowledge(input workspace.CharacterKnowledgeInput) (workspace.CharacterKnowledgeView, error) {
+	return safeResult(a.workspace.CreateCharacterKnowledge(a.ctx, input))
+}
+
+func (a *DesktopAPI) ArchiveCharacterKnowledge(id string) error {
+	return safeDesktopError(a.workspace.ArchiveCharacterKnowledge(a.ctx, id))
 }
 
 func (a *DesktopAPI) AddFactEvidence(input workspace.FactEvidenceInput) (workspace.FactEvidenceView, error) {

@@ -57,6 +57,8 @@ import {
   type FactScopeView,
   type FactConflictInput,
   type FactConflictView,
+  type CharacterKnowledgeInput,
+  type CharacterKnowledgeView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -375,6 +377,15 @@ const factConflictSchema = z.object({
   reason: z.string(),
   status: z.enum(["open", "resolved"]),
 });
+const characterKnowledgeSchema = z.object({
+  id: z.string(),
+  characterId: z.string(),
+  factId: z.string(),
+  state: z.enum(["known", "believed", "misinformed"]),
+  beliefText: z.string(),
+  availableFromChapterId: z.string(),
+  notes: z.string(),
+});
 const continuitySchema = z.object({
   events: z.array(storyEventSchema),
   eventLinks: z.array(storyEventLinkSchema),
@@ -466,6 +477,9 @@ type NativeDesktopAPI = {
   UpdateFact(id: string, input: FactInput): Promise<unknown>;
   ConfirmFact(id: string): Promise<unknown>;
   ArchiveFact(id: string): Promise<void>;
+  CharacterKnowledge(): Promise<unknown>;
+  CreateCharacterKnowledge(input: CharacterKnowledgeInput): Promise<unknown>;
+  ArchiveCharacterKnowledge(id: string): Promise<void>;
   AddFactEvidence(input: FactEvidenceInput): Promise<unknown>;
   RemoveFactEvidence(id: string): Promise<void>;
   AddFactScope(input: FactScopeInput): Promise<unknown>;
@@ -558,6 +572,10 @@ const factScopeView = (value: unknown): FactScopeView =>
   factScopeSchema.parse(value);
 const factConflictView = (value: unknown): FactConflictView =>
   factConflictSchema.parse(value);
+const characterKnowledgeView = (value: unknown): CharacterKnowledgeView =>
+  characterKnowledgeSchema.parse(value);
+const characterKnowledgeViews = (value: unknown): CharacterKnowledgeView[] =>
+  z.array(characterKnowledgeSchema).parse(value);
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
@@ -822,6 +840,19 @@ export const wailsStudioClient: StudioClient = {
   },
   async archiveFact(id) {
     await safeCall(() => nativeAPI().ArchiveFact(id));
+  },
+  async characterKnowledge() {
+    return characterKnowledgeViews(
+      await safeCall(() => nativeAPI().CharacterKnowledge()),
+    );
+  },
+  async createCharacterKnowledge(input) {
+    return characterKnowledgeView(
+      await safeCall(() => nativeAPI().CreateCharacterKnowledge(input)),
+    );
+  },
+  async archiveCharacterKnowledge(id) {
+    await safeCall(() => nativeAPI().ArchiveCharacterKnowledge(id));
   },
   async addFactEvidence(input) {
     return factEvidenceView(

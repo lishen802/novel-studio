@@ -54,6 +54,8 @@ import type {
   FactScopeView,
   FactConflictInput,
   FactConflictView,
+  CharacterKnowledgeInput,
+  CharacterKnowledgeView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -124,6 +126,7 @@ export class FakeStudioClient implements StudioClient {
     conflicts: [],
     consistencyIssues: [],
   };
+  characterKnowledgeResult: CharacterKnowledgeView[] = [];
 
   createProjectError: Error | null = null;
   openProjectError: Error | null = null;
@@ -203,6 +206,8 @@ export class FakeStudioClient implements StudioClient {
   updateFactCalls: Array<{ id: string; input: FactInput }> = [];
   confirmFactCalls: string[] = [];
   archiveFactCalls: string[] = [];
+  createCharacterKnowledgeCalls: CharacterKnowledgeInput[] = [];
+  archiveCharacterKnowledgeCalls: string[] = [];
   addFactEvidenceCalls: FactEvidenceInput[] = [];
   removeFactEvidenceCalls: string[] = [];
   addFactScopeCalls: FactScopeInput[] = [];
@@ -1015,6 +1020,26 @@ export class FakeStudioClient implements StudioClient {
       ...this.continuityResult,
       facts: this.continuityResult.facts.filter((item) => item.id !== id),
     };
+  }
+  async characterKnowledge(): Promise<CharacterKnowledgeView[]> {
+    return this.characterKnowledgeResult;
+  }
+  async createCharacterKnowledge(
+    input: CharacterKnowledgeInput,
+  ): Promise<CharacterKnowledgeView> {
+    this.createCharacterKnowledgeCalls.push(input);
+    const value: CharacterKnowledgeView = {
+      ...input,
+      id: `knowledge-${this.characterKnowledgeResult.length + 1}`,
+    };
+    this.characterKnowledgeResult = [...this.characterKnowledgeResult, value];
+    return value;
+  }
+  async archiveCharacterKnowledge(id: string): Promise<void> {
+    this.archiveCharacterKnowledgeCalls.push(id);
+    this.characterKnowledgeResult = this.characterKnowledgeResult.filter(
+      (item) => item.id !== id,
+    );
   }
   async addFactEvidence(input: FactEvidenceInput): Promise<FactEvidenceView> {
     this.addFactEvidenceCalls.push(input);
