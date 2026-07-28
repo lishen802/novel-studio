@@ -1,6 +1,8 @@
 import type {
   AppearanceInput,
   ChapterView,
+  ChapterChangeInput,
+  ChangeSetView,
   CharacterInput,
   CharacterView,
   CreateProjectInput,
@@ -91,6 +93,7 @@ export class FakeStudioClient implements StudioClient {
     ...this.createChapterResult,
     revision: 2,
   };
+  changeSetsResult: ChangeSetView[] = [];
   storyStructureResult: StoryStructureView = {
     outlineNodes: [],
     storyLines: [],
@@ -146,6 +149,9 @@ export class FakeStudioClient implements StudioClient {
   saveDraftCalls: ChapterWriteCall[] = [];
   discardDraftCalls: Array<{ chapterId: string; baseRevision: number }> = [];
   commitChapterCalls: ChapterWriteCall[] = [];
+  proposeChapterChangeCalls: ChapterChangeInput[] = [];
+  applyChangeSetCalls: string[] = [];
+  rejectChangeSetCalls: string[] = [];
   createOutlineNodeCalls: CreateOutlineNodeInput[] = [];
   createStoryLineCalls: CreateStoryLineInput[] = [];
   linkStoryLineCalls: LinkStoryLineInput[] = [];
@@ -288,6 +294,81 @@ export class FakeStudioClient implements StudioClient {
     this.commitChapterCalls.push({ chapterId, body, baseRevision });
     if (this.commitChapterError) throw this.commitChapterError;
     return { ...this.commitChapterResult, id: chapterId, body };
+  }
+
+  async changeSets(): Promise<ChangeSetView[]> {
+    return this.changeSetsResult;
+  }
+
+  async proposeChapterChange(
+    input: ChapterChangeInput,
+  ): Promise<ChangeSetView> {
+    this.proposeChapterChangeCalls.push(input);
+    const value: ChangeSetView = {
+      id: `change-set-${this.changeSetsResult.length + 1}`,
+      title: input.title,
+      summary: input.summary,
+      createdBy: input.createdBy,
+      status: "pending",
+      operations: [
+        {
+          id: `operation-${this.changeSetsResult.length + 1}`,
+          kind: "replace_chapter_body",
+          targetId: input.chapterId,
+          baseRevision: this.openChapterResult.revision,
+          beforeValue: this.openChapterResult.body,
+          afterValue: input.proposedBody,
+          reason: input.reason,
+          status: "pending",
+        },
+      ],
+      createdAt: "2026-07-28T04:00:00Z",
+      updatedAt: "2026-07-28T04:00:00Z",
+    };
+    this.changeSetsResult = [value, ...this.changeSetsResult];
+    return value;
+  }
+
+  async applyChangeSet(id: string): Promise<ChapterView> {
+    this.applyChangeSetCalls.push(id);
+    const changeSet = this.changeSetsResult.find((item) => item.id === id);
+    if (!changeSet) throw new Error("变更集不存在");
+    const operation = changeSet.operations[0];
+    const updated = {
+      ...this.openChapterResult,
+      body: operation.afterValue,
+      revision: this.openChapterResult.revision + 1,
+    };
+    this.openChapterResult = updated;
+    this.changeSetsResult = this.changeSetsResult.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            status: "applied",
+            operations: item.operations.map((candidate) => ({
+              ...candidate,
+              status: "applied",
+            })),
+          }
+        : item,
+    );
+    return updated;
+  }
+
+  async rejectChangeSet(id: string): Promise<void> {
+    this.rejectChangeSetCalls.push(id);
+    this.changeSetsResult = this.changeSetsResult.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            status: "rejected",
+            operations: item.operations.map((candidate) => ({
+              ...candidate,
+              status: "rejected",
+            })),
+          }
+        : item,
+    );
   }
 
   async storyStructure(): Promise<StoryStructureView> {

@@ -3,6 +3,8 @@ import {
   RevisionConflictError,
   StudioClientError,
   type ChapterView,
+  type ChapterChangeInput,
+  type ChangeSetView,
   type AppearanceInput,
   type CharacterInput,
   type CharacterView,
@@ -80,6 +82,32 @@ const chapterSchema = z.object({
   recoveryBody: z.string().optional(),
   recoveryUpdatedAt: z.string().optional(),
   hasRecoveryDraft: z.boolean(),
+});
+const changeSetStatusSchema = z.enum([
+  "pending",
+  "applied",
+  "rejected",
+  "conflicted",
+]);
+const changeOperationSchema = z.object({
+  id: z.string(),
+  kind: z.literal("replace_chapter_body"),
+  targetId: z.string(),
+  baseRevision: z.number(),
+  beforeValue: z.string(),
+  afterValue: z.string(),
+  reason: z.string(),
+  status: changeSetStatusSchema,
+});
+const changeSetSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  createdBy: z.string(),
+  status: changeSetStatusSchema,
+  operations: z.array(changeOperationSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 const outlineNodeSchema = z.object({
@@ -407,6 +435,10 @@ type NativeDesktopAPI = {
   SaveDraft(id: string, body: string, revision: number): Promise<void>;
   DiscardDraft(id: string, revision: number): Promise<void>;
   CommitChapter(id: string, body: string, revision: number): Promise<unknown>;
+  ChangeSets(): Promise<unknown>;
+  ProposeChapterChange(input: ChapterChangeInput): Promise<unknown>;
+  ApplyChangeSet(id: string): Promise<unknown>;
+  RejectChangeSet(id: string): Promise<void>;
   StoryStructure(): Promise<unknown>;
   CreateOutlineNode(input: CreateOutlineNodeInput): Promise<unknown>;
   CreateStoryLine(input: CreateStoryLineInput): Promise<unknown>;
@@ -523,6 +555,11 @@ function chapterViews(value: unknown): ChapterView[] {
   return z.array(chapterSchema).parse(value);
 }
 
+const changeSetView = (value: unknown): ChangeSetView =>
+  changeSetSchema.parse(value);
+const changeSetViews = (value: unknown): ChangeSetView[] =>
+  z.array(changeSetSchema).parse(value);
+
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
 const outlineNodeView = (value: unknown): OutlineNodeView =>
@@ -623,6 +660,20 @@ export const wailsStudioClient: StudioClient = {
     return chapterView(
       await safeCall(() => nativeAPI().CommitChapter(id, body, revision)),
     );
+  },
+  async changeSets() {
+    return changeSetViews(await safeCall(() => nativeAPI().ChangeSets()));
+  },
+  async proposeChapterChange(input) {
+    return changeSetView(
+      await safeCall(() => nativeAPI().ProposeChapterChange(input)),
+    );
+  },
+  async applyChangeSet(id) {
+    return chapterView(await safeCall(() => nativeAPI().ApplyChangeSet(id)));
+  },
+  async rejectChangeSet(id) {
+    await safeCall(() => nativeAPI().RejectChangeSet(id));
   },
   async storyStructure() {
     return storyStructureView(

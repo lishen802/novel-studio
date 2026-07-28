@@ -63,6 +63,7 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 		"world_rules", "foreshadowing_hooks", "region_adjacencies",
 		"story_events", "story_event_links", "canon_facts", "fact_evidence",
 		"fact_scopes", "fact_conflicts", "character_knowledge",
+		"change_sets", "change_operations",
 	} {
 		assertSchemaObjectExists(t, db, "table", name)
 	}

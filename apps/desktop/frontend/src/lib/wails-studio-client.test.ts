@@ -32,6 +32,10 @@ function installNative(overrides: Record<string, unknown> = {}) {
     SaveDraft: vi.fn(async () => undefined),
     DiscardDraft: vi.fn(async () => undefined),
     CommitChapter: vi.fn(),
+    ChangeSets: vi.fn(async () => []),
+    ProposeChapterChange: vi.fn(),
+    ApplyChangeSet: vi.fn(),
+    RejectChangeSet: vi.fn(async () => undefined),
     StoryStructure: vi.fn(async () => ({
       outlineNodes: [],
       storyLines: [],
@@ -475,6 +479,53 @@ describe("wailsStudioClient", () => {
 
     expect(api.CreateStoryEvent).toHaveBeenCalledWith(eventInput);
     expect(api.ConfirmFact).toHaveBeenCalledWith("fact-1");
+  });
+
+  it("validates reviewable change sets and forwards author decisions", async () => {
+    const changeSet = {
+      id: "change-set-1",
+      title: "重写开场",
+      summary: "加强冲突",
+      createdBy: "agent:writer",
+      status: "pending",
+      operations: [
+        {
+          id: "operation-1",
+          kind: "replace_chapter_body",
+          targetId: "chapter-1",
+          baseRevision: 1,
+          beforeValue: "旧正文",
+          afterValue: "新正文",
+          reason: "更早引出危机",
+          status: "pending",
+        },
+      ],
+      createdAt: "2026-07-28T04:00:00Z",
+      updatedAt: "2026-07-28T04:00:00Z",
+    };
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章",
+      position: 1,
+      body: "新正文",
+      revision: 2,
+      updatedAt: "2026-07-28T04:01:00Z",
+      hasRecoveryDraft: false,
+    };
+    const api = installNative({
+      ChangeSets: vi.fn(async () => [changeSet]),
+      ApplyChangeSet: vi.fn(async () => chapter),
+    });
+
+    await expect(wailsStudioClient.changeSets()).resolves.toEqual([changeSet]);
+    await expect(wailsStudioClient.applyChangeSet(changeSet.id)).resolves.toEqual(
+      chapter,
+    );
+    await wailsStudioClient.rejectChangeSet(changeSet.id);
+
+    expect(api.ApplyChangeSet).toHaveBeenCalledWith(changeSet.id);
+    expect(api.RejectChangeSet).toHaveBeenCalledWith(changeSet.id);
   });
 
   it("registers the native close event and completes the close handshake", async () => {

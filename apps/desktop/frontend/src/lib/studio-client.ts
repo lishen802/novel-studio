@@ -18,6 +18,39 @@ export type ChapterView = {
   recoveryUpdatedAt?: string;
   hasRecoveryDraft: boolean;
 };
+export type ChangeSetStatus =
+  | "pending"
+  | "applied"
+  | "rejected"
+  | "conflicted";
+export type ChangeOperationView = {
+  id: string;
+  kind: "replace_chapter_body";
+  targetId: string;
+  baseRevision: number;
+  beforeValue: string;
+  afterValue: string;
+  reason: string;
+  status: ChangeSetStatus;
+};
+export type ChangeSetView = {
+  id: string;
+  title: string;
+  summary: string;
+  createdBy: string;
+  status: ChangeSetStatus;
+  operations: ChangeOperationView[];
+  createdAt: string;
+  updatedAt: string;
+};
+export type ChapterChangeInput = {
+  chapterId: string;
+  title: string;
+  summary: string;
+  proposedBody: string;
+  reason: string;
+  createdBy: string;
+};
 
 export type CreateProjectInput = {
   parentDirectory: string;
@@ -396,6 +429,10 @@ export interface StudioClient {
     body: string,
     baseRevision: number,
   ): Promise<ChapterView>;
+  changeSets(): Promise<ChangeSetView[]>;
+  proposeChapterChange(input: ChapterChangeInput): Promise<ChangeSetView>;
+  applyChangeSet(id: string): Promise<ChapterView>;
+  rejectChangeSet(id: string): Promise<void>;
   storyStructure(): Promise<StoryStructureView>;
   createOutlineNode(input: CreateOutlineNodeInput): Promise<OutlineNodeView>;
   createStoryLine(input: CreateStoryLineInput): Promise<StoryLineView>;

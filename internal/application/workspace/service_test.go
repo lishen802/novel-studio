@@ -11,6 +11,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
@@ -384,6 +385,7 @@ type fakeStore struct {
 	factScopes          map[string]canondomain.Scope
 	factConflicts       map[string]canondomain.Conflict
 	characterKnowledge  map[string]canondomain.CharacterKnowledge
+	changeSets          map[string]revisiondomain.ChangeSet
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -413,6 +415,7 @@ func newFakeStore(project projectdomain.Project) *fakeStore {
 		factScopes:         make(map[string]canondomain.Scope),
 		factConflicts:      make(map[string]canondomain.Conflict),
 		characterKnowledge: make(map[string]canondomain.CharacterKnowledge),
+		changeSets:         make(map[string]revisiondomain.ChangeSet),
 	}
 }
 
@@ -463,6 +466,63 @@ func (f *fakeStore) DeleteDraft(_ context.Context, chapterID string, baseRevisio
 func (f *fakeStore) CommitChapter(_ context.Context, chapter, _ projectdomain.Chapter) error {
 	f.commitCalls++
 	f.chapters[chapter.ID] = chapter
+	return nil
+}
+
+func (f *fakeStore) CreateChangeSet(_ context.Context, changeSet revisiondomain.ChangeSet) error {
+	f.changeSets[changeSet.ID] = changeSet
+	return nil
+}
+
+func (f *fakeStore) ListChangeSets(context.Context) ([]revisiondomain.ChangeSet, error) {
+	result := make([]revisiondomain.ChangeSet, 0, len(f.changeSets))
+	for _, changeSet := range f.changeSets {
+		result = append(result, changeSet)
+	}
+	return result, nil
+}
+
+func (f *fakeStore) ChangeSet(_ context.Context, id string) (revisiondomain.ChangeSet, error) {
+	changeSet, ok := f.changeSets[id]
+	if !ok {
+		return revisiondomain.ChangeSet{}, errors.New("change set missing")
+	}
+	return changeSet, nil
+}
+
+func (f *fakeStore) ApplyChangeSet(_ context.Context, id string, appliedAt time.Time) (projectdomain.Chapter, error) {
+	changeSet, ok := f.changeSets[id]
+	if !ok {
+		return projectdomain.Chapter{}, errors.New("change set missing")
+	}
+	if changeSet.Status == revisiondomain.ChangeSetApplied {
+		return f.chapters[changeSet.Operations[0].TargetID], nil
+	}
+	applied, err := changeSet.Apply(appliedAt)
+	if err != nil {
+		return projectdomain.Chapter{}, err
+	}
+	operation := applied.Operations[0]
+	current := f.chapters[operation.TargetID]
+	updated, err := current.Commit(operation.AfterValue, operation.BaseRevision, appliedAt)
+	if err != nil {
+		return projectdomain.Chapter{}, err
+	}
+	f.chapters[updated.ID] = updated
+	f.changeSets[id] = applied
+	return updated, nil
+}
+
+func (f *fakeStore) RejectChangeSet(_ context.Context, id string, rejectedAt time.Time) error {
+	changeSet, ok := f.changeSets[id]
+	if !ok {
+		return errors.New("change set missing")
+	}
+	rejected, err := changeSet.Reject(rejectedAt)
+	if err != nil {
+		return err
+	}
+	f.changeSets[id] = rejected
 	return nil
 }
 

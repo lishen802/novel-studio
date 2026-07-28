@@ -89,6 +89,38 @@ func TestDesktopAPIForwardsChapterOperations(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIForwardsReviewableChangeSetOperations(t *testing.T) {
+	changeSet := workspace.ChangeSetView{ID: "change-set-1", Title: "重写开场", Status: "pending"}
+	chapter := workspace.ChapterView{ID: "chapter-1", Body: "新正文", Revision: 2}
+	workspaces := &fakeWorkspace{
+		changeSetsResult:  []workspace.ChangeSetView{changeSet},
+		applyChangeResult: chapter,
+	}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+	input := workspace.ChapterChangeInput{
+		ChapterID:    chapter.ID,
+		Title:        changeSet.Title,
+		ProposedBody: chapter.Body,
+		CreatedBy:    "agent:writer",
+	}
+
+	listed, err := api.ChangeSets()
+	if err != nil || !reflect.DeepEqual(listed, []workspace.ChangeSetView{changeSet}) {
+		t.Fatalf("ChangeSets = (%#v, %v)", listed, err)
+	}
+	if _, err := api.ProposeChapterChange(input); err != nil || workspaces.chapterChangeInput != input {
+		t.Fatalf("ProposeChapterChange input = %#v, error = %v", workspaces.chapterChangeInput, err)
+	}
+	applied, err := api.ApplyChangeSet(changeSet.ID)
+	if err != nil || applied != chapter || workspaces.appliedChangeSetID != changeSet.ID {
+		t.Fatalf("ApplyChangeSet = (%#v, %v), id = %q", applied, err, workspaces.appliedChangeSetID)
+	}
+	if err := api.RejectChangeSet(changeSet.ID); err != nil || workspaces.rejectedChangeSetID != changeSet.ID {
+		t.Fatalf("RejectChangeSet id = %q, error = %v", workspaces.rejectedChangeSetID, err)
+	}
+}
+
 func TestDesktopAPIForwardsStoryStructureOperations(t *testing.T) {
 	structure := workspace.StoryStructureView{OutlineNodes: []workspace.OutlineNodeView{{ID: "book", Title: "全书大纲"}}}
 	workspaces := &fakeWorkspace{storyStructureResult: structure}
@@ -498,6 +530,11 @@ type fakeWorkspace struct {
 	commitResult           workspace.ChapterView
 	commitErr              error
 	committed              draftCall
+	changeSetsResult       []workspace.ChangeSetView
+	chapterChangeInput     workspace.ChapterChangeInput
+	applyChangeResult      workspace.ChapterView
+	appliedChangeSetID     string
+	rejectedChangeSetID    string
 	closeCalls             int
 	storyStructureResult   workspace.StoryStructureView
 	outlineInput           workspace.CreateOutlineNodeInput
@@ -609,6 +646,25 @@ func (f *fakeWorkspace) CommitChapter(
 ) (workspace.ChapterView, error) {
 	f.committed = draftCall{id: id, body: body, revision: revision}
 	return f.commitResult, f.commitErr
+}
+
+func (f *fakeWorkspace) ChangeSets(context.Context) ([]workspace.ChangeSetView, error) {
+	return f.changeSetsResult, nil
+}
+
+func (f *fakeWorkspace) ProposeChapterChange(_ context.Context, input workspace.ChapterChangeInput) (workspace.ChangeSetView, error) {
+	f.chapterChangeInput = input
+	return workspace.ChangeSetView{}, nil
+}
+
+func (f *fakeWorkspace) ApplyChangeSet(_ context.Context, id string) (workspace.ChapterView, error) {
+	f.appliedChangeSetID = id
+	return f.applyChangeResult, nil
+}
+
+func (f *fakeWorkspace) RejectChangeSet(_ context.Context, id string) error {
+	f.rejectedChangeSetID = id
+	return nil
 }
 
 func (f *fakeWorkspace) Close() error {

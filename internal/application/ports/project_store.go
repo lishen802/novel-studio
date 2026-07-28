@@ -6,6 +6,7 @@ import (
 
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
@@ -20,6 +21,11 @@ type ProjectStore interface {
 	Draft(ctx context.Context, chapterID string) (body string, baseRevision int64, updatedAt time.Time, found bool, err error)
 	DeleteDraft(ctx context.Context, chapterID string, baseRevision int64) error
 	CommitChapter(ctx context.Context, chapter projectdomain.Chapter, previous projectdomain.Chapter) error
+	CreateChangeSet(ctx context.Context, changeSet revisiondomain.ChangeSet) error
+	ListChangeSets(ctx context.Context) ([]revisiondomain.ChangeSet, error)
+	ChangeSet(ctx context.Context, id string) (revisiondomain.ChangeSet, error)
+	ApplyChangeSet(ctx context.Context, id string, appliedAt time.Time) (projectdomain.Chapter, error)
+	RejectChangeSet(ctx context.Context, id string, rejectedAt time.Time) error
 	CreateOutlineNode(ctx context.Context, node storydomain.OutlineNode) error
 	ListOutlineNodes(ctx context.Context) ([]storydomain.OutlineNode, error)
 	ArchiveOutlineNode(ctx context.Context, id string, archivedAt time.Time) error

@@ -3,6 +3,7 @@ import {
   Clock3,
   FilePlus2,
   Feather,
+  GitCompareArrows,
   Globe2,
   LibraryBig,
   Network,
@@ -13,6 +14,7 @@ import type { ChapterView, StudioClient } from "../../lib/studio-client";
 import { ChapterEditor } from "../editor/ChapterEditor";
 import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
 import { ContinuityWorkbench } from "../continuity/ContinuityWorkbench";
+import { ChangeReviewWorkbench } from "../revisions/ChangeReviewWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import type { WorkspaceStatus } from "./workspace-store";
@@ -44,7 +46,7 @@ export function Workspace({
   const [chapterTitle, setChapterTitle] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
   const [activeView, setActiveView] = useState<
-    "manuscript" | "story" | "world" | "assets" | "continuity"
+    "manuscript" | "story" | "world" | "assets" | "continuity" | "changes"
   >("manuscript");
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
@@ -128,6 +130,14 @@ export function Workspace({
             <Clock3 size={17} />
             时间线与事实
           </button>
+          <button
+            type="button"
+            className={activeView === "changes" ? "is-active" : ""}
+            onClick={() => setActiveView("changes")}
+          >
+            <GitCompareArrows size={17} />
+            候选变更
+          </button>
         </nav>
 
         {activeView === "manuscript" && (
@@ -198,6 +208,12 @@ export function Workspace({
           <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
         ) : activeView === "continuity" ? (
           <ContinuityWorkbench client={client} chapters={workspace.chapters} />
+        ) : activeView === "changes" ? (
+          <ChangeReviewWorkbench
+            client={client}
+            chapters={workspace.chapters}
+            onChapterUpdated={onChapterUpdated}
+          />
         ) : activeChapter ? (
           <ChapterEditor
             key={activeChapter.id}

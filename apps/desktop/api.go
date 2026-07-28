@@ -16,6 +16,10 @@ type WorkspaceUseCases interface {
 	SaveDraft(context.Context, string, string, int64) error
 	DiscardDraft(context.Context, string, int64) error
 	CommitChapter(context.Context, string, string, int64) (workspace.ChapterView, error)
+	ChangeSets(context.Context) ([]workspace.ChangeSetView, error)
+	ProposeChapterChange(context.Context, workspace.ChapterChangeInput) (workspace.ChangeSetView, error)
+	ApplyChangeSet(context.Context, string) (workspace.ChapterView, error)
+	RejectChangeSet(context.Context, string) error
 	StoryStructure(context.Context) (workspace.StoryStructureView, error)
 	CreateOutlineNode(context.Context, workspace.CreateOutlineNodeInput) (workspace.OutlineNodeView, error)
 	CreateStoryLine(context.Context, workspace.CreateStoryLineInput) (workspace.StoryLineView, error)
@@ -157,6 +161,22 @@ func (a *DesktopAPI) DiscardDraft(id string, revision int64) error {
 
 func (a *DesktopAPI) CommitChapter(id, body string, revision int64) (workspace.ChapterView, error) {
 	return safeResult(a.workspace.CommitChapter(a.ctx, id, body, revision))
+}
+
+func (a *DesktopAPI) ChangeSets() ([]workspace.ChangeSetView, error) {
+	return safeResult(a.workspace.ChangeSets(a.ctx))
+}
+
+func (a *DesktopAPI) ProposeChapterChange(input workspace.ChapterChangeInput) (workspace.ChangeSetView, error) {
+	return safeResult(a.workspace.ProposeChapterChange(a.ctx, input))
+}
+
+func (a *DesktopAPI) ApplyChangeSet(id string) (workspace.ChapterView, error) {
+	return safeResult(a.workspace.ApplyChangeSet(a.ctx, id))
+}
+
+func (a *DesktopAPI) RejectChangeSet(id string) error {
+	return safeDesktopError(a.workspace.RejectChangeSet(a.ctx, id))
 }
 
 func (a *DesktopAPI) StoryStructure() (workspace.StoryStructureView, error) {
