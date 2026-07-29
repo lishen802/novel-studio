@@ -1,5 +1,6 @@
 import {
   BookOpenText,
+  Bot,
   Clock3,
   FilePlus2,
   Feather,
@@ -17,6 +18,7 @@ import type {
   StudioClient,
 } from "../../lib/studio-client";
 import { ChapterEditor } from "../editor/ChapterEditor";
+import { AgentWorkbench } from "../agents/AgentWorkbench";
 import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
 import { ContinuityWorkbench } from "../continuity/ContinuityWorkbench";
 import { ChangeReviewWorkbench } from "../revisions/ChangeReviewWorkbench";
@@ -63,6 +65,7 @@ export function Workspace({
     | "assets"
     | "continuity"
     | "changes"
+    | "agents"
     | "versions"
   >("manuscript");
   const activeChapter = workspace.chapters.find(
@@ -107,6 +110,14 @@ export function Workspace({
         </section>
 
         <nav className="workspace-sections" aria-label="作品功能">
+          <button
+            type="button"
+            className={activeView === "agents" ? "is-active" : ""}
+            onClick={() => setActiveView("agents")}
+          >
+            <Bot size={17} />
+            智能创作
+          </button>
           <button
             type="button"
             className={activeView === "manuscript" ? "is-active" : ""}
@@ -238,6 +249,12 @@ export function Workspace({
             client={client}
             chapters={workspace.chapters}
             onChapterUpdated={onChapterUpdated}
+          />
+        ) : activeView === "agents" ? (
+          <AgentWorkbench
+            client={client}
+            chapters={workspace.chapters}
+            onOpenChanges={() => setActiveView("changes")}
           />
         ) : activeView === "versions" ? (
           <VersionHistoryWorkbench

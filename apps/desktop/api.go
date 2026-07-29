@@ -99,6 +99,16 @@ type WorkspaceUseCases interface {
 	CreateFactConflict(context.Context, workspace.FactConflictInput) (workspace.FactConflictView, error)
 	ResolveFactConflict(context.Context, string) (workspace.FactConflictView, error)
 	DeleteFactConflict(context.Context, string) error
+	ProviderConnections(context.Context) ([]workspace.ProviderConnectionView, error)
+	SaveProviderConnection(context.Context, workspace.ProviderConnectionInput) (workspace.ProviderConnectionView, error)
+	DeleteProviderConnection(context.Context, string) error
+	TestProviderConnection(context.Context, string) error
+	AgentProfiles(context.Context) ([]workspace.AgentProfileView, error)
+	SaveAgentProfile(context.Context, workspace.AgentProfileInput) (workspace.AgentProfileView, error)
+	CreateChapterAgentRun(context.Context, string, string) (workspace.AgentRunView, error)
+	ExecuteAgentRun(context.Context, string) (workspace.AgentRunView, error)
+	AgentRuns(context.Context) ([]workspace.AgentRunView, error)
+	AgentRun(context.Context, string) (workspace.AgentRunView, error)
 	Close() error
 }
 
@@ -136,6 +146,46 @@ func newDesktopAPI(workspaceService WorkspaceUseCases, picker DirectoryPicker) *
 
 func (a *DesktopAPI) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+func (a *DesktopAPI) ProviderConnections() ([]workspace.ProviderConnectionView, error) {
+	return safeResult(a.workspace.ProviderConnections(a.ctx))
+}
+
+func (a *DesktopAPI) SaveProviderConnection(input workspace.ProviderConnectionInput) (workspace.ProviderConnectionView, error) {
+	return safeResult(a.workspace.SaveProviderConnection(a.ctx, input))
+}
+
+func (a *DesktopAPI) DeleteProviderConnection(id string) error {
+	return safeDesktopError(a.workspace.DeleteProviderConnection(a.ctx, id))
+}
+
+func (a *DesktopAPI) TestProviderConnection(id string) error {
+	return safeDesktopError(a.workspace.TestProviderConnection(a.ctx, id))
+}
+
+func (a *DesktopAPI) AgentProfiles() ([]workspace.AgentProfileView, error) {
+	return safeResult(a.workspace.AgentProfiles(a.ctx))
+}
+
+func (a *DesktopAPI) SaveAgentProfile(input workspace.AgentProfileInput) (workspace.AgentProfileView, error) {
+	return safeResult(a.workspace.SaveAgentProfile(a.ctx, input))
+}
+
+func (a *DesktopAPI) CreateChapterAgentRun(chapterID, prompt string) (workspace.AgentRunView, error) {
+	return safeResult(a.workspace.CreateChapterAgentRun(a.ctx, chapterID, prompt))
+}
+
+func (a *DesktopAPI) ExecuteAgentRun(id string) (workspace.AgentRunView, error) {
+	return safeResult(a.workspace.ExecuteAgentRun(a.ctx, id))
+}
+
+func (a *DesktopAPI) AgentRuns() ([]workspace.AgentRunView, error) {
+	return safeResult(a.workspace.AgentRuns(a.ctx))
+}
+
+func (a *DesktopAPI) AgentRun(id string) (workspace.AgentRunView, error) {
+	return safeResult(a.workspace.AgentRun(a.ctx, id))
 }
 
 func (a *DesktopAPI) ChooseProjectParent() (string, error) {

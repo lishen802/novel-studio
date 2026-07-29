@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-织境 Story Studio 已从网页原型阶段进入正式 Windows/macOS 产品研发。P0 桌面基础纵向切片已经实现本地项目、章节编辑、revision、恢复草稿、SQLite 完整性保护和 Wails v2.13.0 桌面壳；P1 已实现五级大纲、故事线、场景卡、人物与势力、角色知识边界、区域层级和相邻关系、层级地图、关系拓扑、地点关联、物品流转、分范围世界规则、伏笔追踪，以及双顺序时间线、事实/证据约束和基础一致性检查。P2 已实现正文、大纲节点、角色档案和故事事实的统一可审阅变更集，支持字段级对比、编辑后接受、逐项决策、整组原子应用、基线冲突保护和应用前恢复点；同时具备显式章节版本历史、命名项目快照、恢复前自动快照、可回滚的整项目恢复，以及隔离整部作品数据的真实剧情分支。分支支持旧项目懒初始化、新建、切换、完整数据域比较、严格快进合并、分叉冲突阻止和中断恢复。托管 Windows/macOS CI 与双平台人工验收仍以对应工作流结果和验收记录为准。
+织境 Story Studio 已从网页原型阶段进入正式 Windows/macOS 产品研发。P0 桌面基础纵向切片已经实现本地项目、章节编辑、revision、恢复草稿、SQLite 完整性保护和 Wails v2.13.0 桌面壳；P1 已实现五级大纲、故事线、场景卡、人物与势力、角色知识边界、区域层级和相邻关系、层级地图、关系拓扑、地点关联、物品流转、分范围世界规则、伏笔追踪，以及双顺序时间线、事实/证据约束和基础一致性检查。P2 已实现统一可审阅变更集、版本历史、项目快照和完整剧情分支。P3 首个真实创作纵向切片已经实现 OpenAI Responses 与 Anthropic Messages 流式 Provider、macOS Keychain/Windows Credential Manager 凭据隔离、规划/写作/连续性审阅三角色异构编排、上下文组装、持久化运行记录、中断恢复和章节候选变更输出。托管 Windows/macOS CI 与双平台人工验收仍以对应工作流结果和验收记录为准。
 
-当前下一组能力进入 Provider 与异构多智能体运行时，随后建设小说导入重建和完整创作闭环。分支字段级三方冲突解决属于后续增强，不应阻塞第一版严格快进分支。大功能按 `AGENTS.md` 在对话中给出实施计划并使用隔离工作树，不把原型状态或组件直接搬入正式架构。
+当前下一组能力应补强智能体运行控制、预算与更细的上下文检索，然后进入小说导入重建。分支字段级三方冲突解决属于后续增强，不应阻塞第一版严格快进分支。大功能按 `AGENTS.md` 在对话中给出实施计划并使用隔离工作树，不把原型状态或组件直接搬入正式架构。
 
 ## 必读顺序
 
@@ -18,8 +18,9 @@
 6. [ADR-0002：Go-first Wails 技术栈](../architecture/0002-go-first-wails-stack.md)
 7. [ADR-0003：Wails 工程布局](../architecture/0003-wails-project-layout.md)
 8. [V1 总体实施路线图](../superpowers/plans/2026-07-15-v1-implementation-roadmap.md)
-9. [P0 文件级实施计划](../superpowers/plans/2026-07-15-v1-foundation-vertical-slice.md)
-10. [`prototype/web/README.md`](../../prototype/web/README.md) 与当前原型，只作为 UX 参考
+9. [Provider 与智能体创作纵向切片规格](../superpowers/specs/2026-07-29-provider-agent-authoring-design.md)
+10. [P0 文件级实施计划](../superpowers/plans/2026-07-15-v1-foundation-vertical-slice.md)
+11. [`prototype/web/README.md`](../../prototype/web/README.md) 与当前原型，只作为 UX 参考
 
 涉及项目损坏、恢复或跨平台验收时，还要阅读[恢复说明](../operations/project-recovery.md)和[P0 基础验收清单](../testing/foundation-acceptance.md)。
 
@@ -35,7 +36,7 @@
 - V1 授权能力门禁默认放行，但接口必须允许未来加入 30 天试用、激活、月度续期和离线宽限。
 - 原型保持可运行，正式实现不反向依赖原型。
 
-## P2 后续切片门禁
+## P3 后续切片门禁
 
 1. 当前分支的 Ubuntu 自动测试与 macOS/Windows production build 工作流通过。
 2. [P0 基础验收清单](../testing/foundation-acceptance.md)在两个系统均有记录，失败项已关联缺陷。

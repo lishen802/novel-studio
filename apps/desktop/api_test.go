@@ -1153,3 +1153,33 @@ func (f *fakeWorkspace) DeleteFactConflict(_ context.Context, id string) error {
 	f.deletedFactConflictID = id
 	return nil
 }
+func (f *fakeWorkspace) ProviderConnections(context.Context) ([]workspace.ProviderConnectionView, error) {
+	return nil, nil
+}
+func (f *fakeWorkspace) SaveProviderConnection(_ context.Context, input workspace.ProviderConnectionInput) (workspace.ProviderConnectionView, error) {
+	return workspace.ProviderConnectionView{Name: input.Name, Kind: input.Kind, BaseURL: input.BaseURL}, nil
+}
+func (f *fakeWorkspace) DeleteProviderConnection(context.Context, string) error {
+	return nil
+}
+func (f *fakeWorkspace) TestProviderConnection(context.Context, string) error {
+	return nil
+}
+func (f *fakeWorkspace) AgentProfiles(context.Context) ([]workspace.AgentProfileView, error) {
+	return nil, nil
+}
+func (f *fakeWorkspace) SaveAgentProfile(_ context.Context, input workspace.AgentProfileInput) (workspace.AgentProfileView, error) {
+	return workspace.AgentProfileView{Role: input.Role, ConnectionID: input.ConnectionID, Model: input.Model}, nil
+}
+func (f *fakeWorkspace) CreateChapterAgentRun(_ context.Context, chapterID, prompt string) (workspace.AgentRunView, error) {
+	return workspace.AgentRunView{ChapterID: chapterID, Prompt: prompt, Status: "queued"}, nil
+}
+func (f *fakeWorkspace) ExecuteAgentRun(context.Context, string) (workspace.AgentRunView, error) {
+	return workspace.AgentRunView{Status: "completed"}, nil
+}
+func (f *fakeWorkspace) AgentRuns(context.Context) ([]workspace.AgentRunView, error) {
+	return nil, nil
+}
+func (f *fakeWorkspace) AgentRun(context.Context, string) (workspace.AgentRunView, error) {
+	return workspace.AgentRunView{}, nil
+}

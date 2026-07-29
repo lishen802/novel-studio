@@ -515,6 +515,65 @@ export type ContinuityView = {
   consistencyIssues: ConsistencyIssueView[];
 };
 
+export type ProviderKind = "openai" | "anthropic";
+export type ProviderConnectionInput = {
+  id?: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  apiKey: string;
+};
+export type ProviderConnectionView = {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  hasCredential: boolean;
+  updatedAt: string;
+};
+export type AgentRole = "planner" | "writer" | "continuity_reviewer";
+export type AgentProfileInput = {
+  role: AgentRole;
+  connectionId: string;
+  model: string;
+  maxOutputTokens: number;
+  temperature: number;
+  enabled: boolean;
+};
+export type AgentProfileView = AgentProfileInput & {
+  id: string;
+  updatedAt: string;
+};
+export type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "recoverable";
+export type AgentRunStepView = {
+  id: string;
+  role: AgentRole;
+  position: number;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  output: string;
+  errorCode: string;
+  errorMessage: string;
+};
+export type AgentRunView = {
+  id: string;
+  chapterId: string;
+  prompt: string;
+  status: AgentRunStatus;
+  errorCode: string;
+  errorMessage: string;
+  changeSetId: string;
+  retryOf: string;
+  steps: AgentRunStepView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface StudioClient {
   chooseProjectParent(): Promise<string | null>;
   chooseProjectToOpen(): Promise<string | null>;
@@ -656,6 +715,21 @@ export interface StudioClient {
   createFactConflict(input: FactConflictInput): Promise<FactConflictView>;
   resolveFactConflict(id: string): Promise<FactConflictView>;
   deleteFactConflict(id: string): Promise<void>;
+  providerConnections(): Promise<ProviderConnectionView[]>;
+  saveProviderConnection(
+    input: ProviderConnectionInput,
+  ): Promise<ProviderConnectionView>;
+  deleteProviderConnection(id: string): Promise<void>;
+  testProviderConnection(id: string): Promise<void>;
+  agentProfiles(): Promise<AgentProfileView[]>;
+  saveAgentProfile(input: AgentProfileInput): Promise<AgentProfileView>;
+  createChapterAgentRun(
+    chapterId: string,
+    prompt: string,
+  ): Promise<AgentRunView>;
+  executeAgentRun(id: string): Promise<AgentRunView>;
+  agentRuns(): Promise<AgentRunView[]>;
+  agentRun(id: string): Promise<AgentRunView>;
   onBeforeClose(handler: () => Promise<void>): () => void;
   completeClose(): Promise<void>;
 }

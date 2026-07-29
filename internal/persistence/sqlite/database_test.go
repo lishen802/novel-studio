@@ -68,6 +68,8 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 		"story_events", "story_event_links", "canon_facts", "fact_evidence",
 		"fact_scopes", "fact_conflicts", "character_knowledge",
 		"change_sets", "change_operations",
+		"provider_connections", "agent_profiles", "agent_runs",
+		"agent_run_steps", "agent_artifacts",
 	} {
 		assertSchemaObjectExists(t, db, "table", name)
 	}
@@ -79,6 +81,8 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "index", "idx_characters_name")
 	assertSchemaObjectExists(t, db, "index", "idx_relationships_source")
 	assertSchemaObjectExists(t, db, "index", "idx_chapter_characters_character")
+	assertSchemaObjectExists(t, db, "index", "idx_agent_runs_project_created")
+	assertSchemaObjectExists(t, db, "index", "idx_agent_run_steps_run_position")
 }
 
 func TestChangeSetSchemaSupportsStructuredPartialReview(t *testing.T) {

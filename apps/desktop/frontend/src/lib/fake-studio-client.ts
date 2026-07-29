@@ -72,6 +72,11 @@ import type {
   FactConflictView,
   CharacterKnowledgeInput,
   CharacterKnowledgeView,
+  ProviderConnectionInput,
+  ProviderConnectionView,
+  AgentProfileInput,
+  AgentProfileView,
+  AgentRunView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -180,6 +185,9 @@ export class FakeStudioClient implements StudioClient {
     consistencyIssues: [],
   };
   characterKnowledgeResult: CharacterKnowledgeView[] = [];
+  providerConnectionsResult: ProviderConnectionView[] = [];
+  agentProfilesResult: AgentProfileView[] = [];
+  agentRunsResult: AgentRunView[] = [];
 
   createProjectError: Error | null = null;
   openProjectError: Error | null = null;
@@ -292,6 +300,12 @@ export class FakeStudioClient implements StudioClient {
   createFactConflictCalls: FactConflictInput[] = [];
   resolveFactConflictCalls: string[] = [];
   deleteFactConflictCalls: string[] = [];
+  saveProviderConnectionCalls: ProviderConnectionInput[] = [];
+  deleteProviderConnectionCalls: string[] = [];
+  testProviderConnectionCalls: string[] = [];
+  saveAgentProfileCalls: AgentProfileInput[] = [];
+  createChapterAgentRunCalls: Array<{ chapterId: string; prompt: string }> = [];
+  executeAgentRunCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -1547,6 +1561,99 @@ export class FakeStudioClient implements StudioClient {
         (item) => item.id !== id,
       ),
     };
+  }
+
+  async providerConnections(): Promise<ProviderConnectionView[]> {
+    return this.providerConnectionsResult;
+  }
+  async saveProviderConnection(
+    input: ProviderConnectionInput,
+  ): Promise<ProviderConnectionView> {
+    this.saveProviderConnectionCalls.push(input);
+    const value: ProviderConnectionView = {
+      id: input.id ?? `provider-${this.providerConnectionsResult.length + 1}`,
+      name: input.name,
+      kind: input.kind,
+      baseUrl: input.baseUrl,
+      hasCredential: Boolean(input.apiKey),
+      updatedAt: "2026-07-29T10:00:00Z",
+    };
+    this.providerConnectionsResult = [
+      ...this.providerConnectionsResult.filter((item) => item.id !== value.id),
+      value,
+    ];
+    return value;
+  }
+  async deleteProviderConnection(id: string): Promise<void> {
+    this.deleteProviderConnectionCalls.push(id);
+    this.providerConnectionsResult = this.providerConnectionsResult.filter(
+      (item) => item.id !== id,
+    );
+  }
+  async testProviderConnection(id: string): Promise<void> {
+    this.testProviderConnectionCalls.push(id);
+  }
+  async agentProfiles(): Promise<AgentProfileView[]> {
+    return this.agentProfilesResult;
+  }
+  async saveAgentProfile(input: AgentProfileInput): Promise<AgentProfileView> {
+    this.saveAgentProfileCalls.push(input);
+    const existing = this.agentProfilesResult.find(
+      (item) => item.role === input.role,
+    );
+    const value: AgentProfileView = {
+      ...input,
+      id: existing?.id ?? `profile-${this.agentProfilesResult.length + 1}`,
+      updatedAt: "2026-07-29T10:00:00Z",
+    };
+    this.agentProfilesResult = [
+      ...this.agentProfilesResult.filter((item) => item.role !== input.role),
+      value,
+    ];
+    return value;
+  }
+  async createChapterAgentRun(
+    chapterId: string,
+    prompt: string,
+  ): Promise<AgentRunView> {
+    this.createChapterAgentRunCalls.push({ chapterId, prompt });
+    const value: AgentRunView = {
+      id: "run-1",
+      chapterId,
+      prompt,
+      status: "queued",
+      errorCode: "",
+      errorMessage: "",
+      changeSetId: "",
+      retryOf: "",
+      steps: [],
+      createdAt: "2026-07-29T10:00:00Z",
+      updatedAt: "2026-07-29T10:00:00Z",
+    };
+    this.agentRunsResult = [value, ...this.agentRunsResult];
+    return value;
+  }
+  async executeAgentRun(id: string): Promise<AgentRunView> {
+    this.executeAgentRunCalls.push(id);
+    const existing = this.agentRunsResult.find((item) => item.id === id);
+    if (!existing) throw new Error("运行不存在");
+    const value: AgentRunView = {
+      ...existing,
+      status: "completed",
+      changeSetId: "change-set-1",
+    };
+    this.agentRunsResult = this.agentRunsResult.map((item) =>
+      item.id === id ? value : item,
+    );
+    return value;
+  }
+  async agentRuns(): Promise<AgentRunView[]> {
+    return this.agentRunsResult;
+  }
+  async agentRun(id: string): Promise<AgentRunView> {
+    const value = this.agentRunsResult.find((item) => item.id === id);
+    if (!value) throw new Error("运行不存在");
+    return value;
   }
 
   onBeforeClose(handler: () => Promise<void>): () => void {

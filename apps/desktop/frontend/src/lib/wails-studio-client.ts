@@ -72,6 +72,11 @@ import {
   type FactConflictView,
   type CharacterKnowledgeInput,
   type CharacterKnowledgeView,
+  type ProviderConnectionInput,
+  type ProviderConnectionView,
+  type AgentProfileInput,
+  type AgentProfileView,
+  type AgentRunView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -202,6 +207,47 @@ const branchMergePreviewSchema = z.object({
   sourceId: z.string(),
   targetId: z.string(),
   comparison: branchComparisonSchema,
+});
+
+const providerConnectionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(["openai", "anthropic"]),
+  baseUrl: z.string(),
+  hasCredential: z.boolean(),
+  updatedAt: z.string(),
+});
+const agentProfileSchema = z.object({
+  id: z.string(),
+  role: z.enum(["planner", "writer", "continuity_reviewer"]),
+  connectionId: z.string(),
+  model: z.string(),
+  maxOutputTokens: z.number(),
+  temperature: z.number(),
+  enabled: z.boolean(),
+  updatedAt: z.string(),
+});
+const agentRunStepSchema = z.object({
+  id: z.string(),
+  role: z.enum(["planner", "writer", "continuity_reviewer"]),
+  position: z.number(),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
+  output: z.string(),
+  errorCode: z.string(),
+  errorMessage: z.string(),
+});
+const agentRunSchema = z.object({
+  id: z.string(),
+  chapterId: z.string(),
+  prompt: z.string(),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled", "recoverable"]),
+  errorCode: z.string(),
+  errorMessage: z.string(),
+  changeSetId: z.string(),
+  retryOf: z.string(),
+  steps: z.array(agentRunStepSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 const outlineNodeSchema = z.object({
@@ -639,6 +685,16 @@ type NativeDesktopAPI = {
   CreateFactConflict(input: FactConflictInput): Promise<unknown>;
   ResolveFactConflict(id: string): Promise<unknown>;
   DeleteFactConflict(id: string): Promise<void>;
+  ProviderConnections(): Promise<unknown>;
+  SaveProviderConnection(input: ProviderConnectionInput): Promise<unknown>;
+  DeleteProviderConnection(id: string): Promise<void>;
+  TestProviderConnection(id: string): Promise<void>;
+  AgentProfiles(): Promise<unknown>;
+  SaveAgentProfile(input: AgentProfileInput): Promise<unknown>;
+  CreateChapterAgentRun(chapterId: string, prompt: string): Promise<unknown>;
+  ExecuteAgentRun(id: string): Promise<unknown>;
+  AgentRuns(): Promise<unknown>;
+  AgentRun(id: string): Promise<unknown>;
   CompleteClose(): Promise<void>;
 };
 
@@ -698,6 +754,18 @@ const branchComparisonView = (value: unknown): BranchComparisonView =>
   branchComparisonSchema.parse(value);
 const branchMergePreviewView = (value: unknown): BranchMergePreviewView =>
   branchMergePreviewSchema.parse(value);
+const providerConnectionView = (value: unknown): ProviderConnectionView =>
+  providerConnectionSchema.parse(value);
+const providerConnectionViews = (value: unknown): ProviderConnectionView[] =>
+  z.array(providerConnectionSchema).parse(value);
+const agentProfileView = (value: unknown): AgentProfileView =>
+  agentProfileSchema.parse(value);
+const agentProfileViews = (value: unknown): AgentProfileView[] =>
+  z.array(agentProfileSchema).parse(value);
+const agentRunView = (value: unknown): AgentRunView =>
+  agentRunSchema.parse(value);
+const agentRunViews = (value: unknown): AgentRunView[] =>
+  z.array(agentRunSchema).parse(value);
 
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
@@ -1156,6 +1224,44 @@ export const wailsStudioClient: StudioClient = {
   },
   async deleteFactConflict(id) {
     await safeCall(() => nativeAPI().DeleteFactConflict(id));
+  },
+  async providerConnections() {
+    return providerConnectionViews(
+      await safeCall(() => nativeAPI().ProviderConnections()),
+    );
+  },
+  async saveProviderConnection(input) {
+    return providerConnectionView(
+      await safeCall(() => nativeAPI().SaveProviderConnection(input)),
+    );
+  },
+  async deleteProviderConnection(id) {
+    await safeCall(() => nativeAPI().DeleteProviderConnection(id));
+  },
+  async testProviderConnection(id) {
+    await safeCall(() => nativeAPI().TestProviderConnection(id));
+  },
+  async agentProfiles() {
+    return agentProfileViews(await safeCall(() => nativeAPI().AgentProfiles()));
+  },
+  async saveAgentProfile(input) {
+    return agentProfileView(
+      await safeCall(() => nativeAPI().SaveAgentProfile(input)),
+    );
+  },
+  async createChapterAgentRun(chapterId, prompt) {
+    return agentRunView(
+      await safeCall(() => nativeAPI().CreateChapterAgentRun(chapterId, prompt)),
+    );
+  },
+  async executeAgentRun(id) {
+    return agentRunView(await safeCall(() => nativeAPI().ExecuteAgentRun(id)));
+  },
+  async agentRuns() {
+    return agentRunViews(await safeCall(() => nativeAPI().AgentRuns()));
+  },
+  async agentRun(id) {
+    return agentRunView(await safeCall(() => nativeAPI().AgentRun(id)));
   },
   onBeforeClose(handler) {
     if (!window.runtime) return () => undefined;

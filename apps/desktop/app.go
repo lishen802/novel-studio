@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"sync/atomic"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
+	"github.com/lishen802/novel-studio/internal/platform/credentials"
 	"github.com/lishen802/novel-studio/internal/platform/ids"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 	"github.com/lishen802/novel-studio/internal/platform/snapshotfs"
 	"github.com/lishen802/novel-studio/internal/platform/timeutil"
+	"github.com/lishen802/novel-studio/internal/providers"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -33,6 +36,10 @@ func newApp() *App {
 		ids.UUIDGenerator{},
 		snapshotfs.Archive{},
 		branchfs.Archive{},
+	)
+	workspaceService.ConfigureAgentRuntime(
+		credentials.NewStore(),
+		providers.NewFactory(http.DefaultClient),
 	)
 	app := &App{
 		api: newDesktopAPI(workspaceService, wailsDirectoryPicker{}),

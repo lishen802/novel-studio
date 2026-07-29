@@ -12,13 +12,15 @@ import (
 )
 
 type Service struct {
-	packages  ports.ProjectPackageManager
-	stores    ports.ProjectStoreFactory
-	license   license.Service
-	clock     ports.Clock
-	ids       ports.IDGenerator
-	snapshots ports.SnapshotArchive
-	branches  ports.BranchArchive
+	packages    ports.ProjectPackageManager
+	stores      ports.ProjectStoreFactory
+	license     license.Service
+	clock       ports.Clock
+	ids         ports.IDGenerator
+	snapshots   ports.SnapshotArchive
+	branches    ports.BranchArchive
+	credentials ports.CredentialStore
+	providers   ports.ModelProviderFactory
 
 	mu                  sync.RWMutex
 	active              *activeWorkspace
@@ -54,6 +56,16 @@ func NewService(
 	return service
 }
 
+func (s *Service) ConfigureAgentRuntime(
+	credentials ports.CredentialStore,
+	providers ports.ModelProviderFactory,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.credentials = credentials
+	s.providers = providers
+}
+
 func (s *Service) CreateProject(
 	ctx context.Context,
 	parentDirectory, title, genre, summary string,
@@ -76,6 +88,12 @@ func (s *Service) CreateProject(
 	}
 
 	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
+	if agentStore, ok := store.(ports.AgentStore); ok {
+		if _, err := agentStore.RecoverInterruptedAgentRuns(ctx, s.clock.Now()); err != nil {
+			_ = store.Close()
+			return ProjectView{}, fmt.Errorf("recover interrupted agent runs: %w", err)
+		}
+	}
 	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
 		_ = store.Close()
 		return ProjectView{}, err
@@ -108,6 +126,12 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 	}
 
 	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
+	if agentStore, ok := store.(ports.AgentStore); ok {
+		if _, err := agentStore.RecoverInterruptedAgentRuns(ctx, s.clock.Now()); err != nil {
+			_ = store.Close()
+			return ProjectView{}, fmt.Errorf("recover interrupted agent runs: %w", err)
+		}
+	}
 	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
 		_ = store.Close()
 		return ProjectView{}, err
