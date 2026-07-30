@@ -28,6 +28,7 @@ type Layout struct {
 	Database    string
 	Attachments string
 	Exports     string
+	Imports     string
 	Snapshots   string
 	Branches    string
 }
@@ -50,7 +51,7 @@ func (l Layout) Create() error {
 		return fmt.Errorf("create project package: %w", err)
 	}
 
-	for _, directory := range []string{l.Attachments, l.Exports, l.Snapshots, l.Branches} {
+	for _, directory := range []string{l.Attachments, l.Exports, l.Imports, l.Snapshots, l.Branches} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return fmt.Errorf("create project directory: %w", err)
 		}
@@ -75,7 +76,11 @@ func OpenLayout(packagePath string) (Layout, error) {
 		return Layout{}, fmt.Errorf("%w: package is not a directory", ErrInvalidPackage)
 	}
 
-	return layoutForRoot(packagePath), nil
+	layout := layoutForRoot(packagePath)
+	if err := os.MkdirAll(layout.Imports, 0o755); err != nil {
+		return Layout{}, fmt.Errorf("create imports directory: %w", err)
+	}
+	return layout, nil
 }
 
 func layoutForRoot(root string) Layout {
@@ -84,6 +89,7 @@ func layoutForRoot(root string) Layout {
 		Database:    filepath.Join(root, "project.db"),
 		Attachments: filepath.Join(root, "attachments"),
 		Exports:     filepath.Join(root, "exports"),
+		Imports:     filepath.Join(root, "imports"),
 		Snapshots:   filepath.Join(root, "snapshots"),
 		Branches:    filepath.Join(root, "branches"),
 	}

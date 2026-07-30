@@ -29,6 +29,9 @@ func TestNewLayoutSanitizesCrossPlatformName(t *testing.T) {
 	if layout.Exports != filepath.Join(wantRoot, "exports") {
 		t.Fatalf("Exports = %q", layout.Exports)
 	}
+	if layout.Imports != filepath.Join(wantRoot, "imports") {
+		t.Fatalf("Imports = %q", layout.Imports)
+	}
 	if layout.Snapshots != filepath.Join(wantRoot, "snapshots") {
 		t.Fatalf("Snapshots = %q", layout.Snapshots)
 	}
@@ -62,6 +65,7 @@ func TestLayoutCreateCreatesRequiredDirectories(t *testing.T) {
 		layout.Root,
 		layout.Attachments,
 		layout.Exports,
+		layout.Imports,
 		layout.Snapshots,
 		layout.Branches,
 	} {
@@ -117,5 +121,31 @@ func TestOpenLayoutReturnsPathsForExistingPackage(t *testing.T) {
 	}
 	if opened.Root == "" || opened != layout {
 		t.Fatalf("opened = %#v, want %#v", opened, layout)
+	}
+}
+
+func TestOpenLayoutCreatesImportsDirectoryForLegacyPackage(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "旧作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(layout.Imports); err != nil {
+		t.Fatal(err)
+	}
+
+	opened, err := OpenLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(opened.Imports)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", opened.Imports, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%q is not a directory", opened.Imports)
 	}
 }

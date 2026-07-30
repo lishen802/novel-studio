@@ -29,6 +29,7 @@ func packageFromLayout(layout Layout) ports.ProjectPackage {
 		Database:    layout.Database,
 		Attachments: layout.Attachments,
 		Exports:     layout.Exports,
+		Imports:     layout.Imports,
 		Snapshots:   layout.Snapshots,
 		Branches:    layout.Branches,
 	}

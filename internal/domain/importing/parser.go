@@ -10,7 +10,7 @@ import (
 	"unicode"
 )
 
-const MaxManuscriptLineBytes = 20 * 1024 * 1024
+const MaxManuscriptBytes = 20 * 1024 * 1024
 
 var (
 	ErrEmptyManuscript       = errors.New("manuscript contains no importable text")
@@ -108,7 +108,7 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(text))
-	scanner.Buffer(make([]byte, 64*1024), MaxManuscriptLineBytes+64*1024)
+	scanner.Buffer(make([]byte, 64*1024), MaxManuscriptBytes+64*1024)
 	scanner.Split(splitUniversalLines)
 
 	lineNumber := 0
@@ -118,7 +118,7 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 		if lineNumber == 1 {
 			rawLine = strings.TrimPrefix(rawLine, "\ufeff")
 		}
-		if len(rawLine) > MaxManuscriptLineBytes {
+		if len(rawLine) > MaxManuscriptBytes {
 			return nil, ErrManuscriptLineTooLong
 		}
 

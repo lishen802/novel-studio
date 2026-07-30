@@ -5,6 +5,7 @@ type ProjectPackage struct {
 	Database    string
 	Attachments string
 	Exports     string
+	Imports     string
 	Snapshots   string
 	Branches    string
 }
