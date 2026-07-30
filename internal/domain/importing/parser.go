@@ -30,6 +30,7 @@ type ParsedChapter struct {
 type chapterBoundary struct {
 	volumeTitle string
 	title       string
+	headingLine int
 	bodyStart   int
 }
 
@@ -51,17 +52,20 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 			return
 		}
 		body, startLine, endLine, ok := trimmedBody(lines, current.bodyStart, bodyEnd)
-		if ok {
-			chapters = append(chapters, ParsedChapter{
-				VolumeTitle:     current.volumeTitle,
-				Title:           current.title,
-				Body:            body,
-				Position:        len(chapters) + 1,
-				SourceStartLine: startLine,
-				SourceEndLine:   endLine,
-				ContentHash:     hashContent(body),
-			})
+		if !ok {
+			body = ""
+			startLine = current.headingLine + 1
+			endLine = startLine
 		}
+		chapters = append(chapters, ParsedChapter{
+			VolumeTitle:     current.volumeTitle,
+			Title:           current.title,
+			Body:            body,
+			Position:        len(chapters) + 1,
+			SourceStartLine: startLine,
+			SourceEndLine:   endLine,
+			ContentHash:     hashContent(body),
+		})
 		current = nil
 	}
 
@@ -85,6 +89,7 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 		current = &chapterBoundary{
 			volumeTitle: currentVolume,
 			title:       heading,
+			headingLine: lineIndex,
 			bodyStart:   lineIndex + 1,
 		}
 	}

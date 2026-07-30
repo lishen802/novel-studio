@@ -118,6 +118,56 @@ func TestParseChaptersKeepsDuplicateHeadingsSeparate(t *testing.T) {
 	}
 }
 
+func TestParseChaptersKeepsAdjacentHeadingsAsSeparateChapters(t *testing.T) {
+	chapters, err := ParseChapters("第一章 重逢\n第一章 重逢\n正文")
+	if err != nil {
+		t.Fatalf("ParseChapters returned error: %v", err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("len(chapters) = %d, want 2: %#v", len(chapters), chapters)
+	}
+
+	first := chapters[0]
+	if first.Title != "第一章 重逢" || first.Body != "" {
+		t.Fatalf("first chapter = %#v, want empty chapter with recognized title", first)
+	}
+	if first.Position != 1 || first.SourceStartLine != 1 || first.SourceEndLine != 1 {
+		t.Fatalf("first chapter source metadata = %#v, want title-line anchor 1-1", first)
+	}
+	if first.ContentHash != contentHash("") {
+		t.Fatalf("first ContentHash = %q, want SHA-256 of empty body", first.ContentHash)
+	}
+
+	second := chapters[1]
+	if second.Title != "第一章 重逢" || second.Body != "正文" {
+		t.Fatalf("second chapter = %#v, want chapter with body", second)
+	}
+	if second.Position != 2 || second.SourceStartLine != 3 || second.SourceEndLine != 3 {
+		t.Fatalf("second chapter source metadata = %#v, want body lines 3-3", second)
+	}
+}
+
+func TestParseChaptersKeepsRecognizedHeadingWithoutBody(t *testing.T) {
+	chapters, err := ParseChapters("第一章 重逢")
+	if err != nil {
+		t.Fatalf("ParseChapters returned error: %v", err)
+	}
+	if len(chapters) != 1 {
+		t.Fatalf("len(chapters) = %d, want 1: %#v", len(chapters), chapters)
+	}
+
+	chapter := chapters[0]
+	if chapter.Title != "第一章 重逢" || chapter.Body != "" || chapter.Position != 1 {
+		t.Fatalf("chapter = %#v, want one empty recognized chapter", chapter)
+	}
+	if chapter.SourceStartLine != 1 || chapter.SourceEndLine != 1 {
+		t.Fatalf("chapter source lines = %d-%d, want title-line anchor 1-1", chapter.SourceStartLine, chapter.SourceEndLine)
+	}
+	if chapter.ContentHash != contentHash("") {
+		t.Fatalf("ContentHash = %q, want SHA-256 of empty body", chapter.ContentHash)
+	}
+}
+
 func TestParseChaptersFallsBackForUntitledText(t *testing.T) {
 	chapters, err := ParseChapters("\n  序言\n\n正文  \n")
 	if err != nil {
