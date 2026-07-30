@@ -13,7 +13,6 @@ var (
 	ErrInvalidSourceHash    = errors.New("invalid SHA-256 hash")
 	ErrInvalidSourceBytes   = errors.New("import source bytes must be positive")
 	ErrInvalidChapterCount  = errors.New("invalid import chapter count")
-	ErrInvalidJobStatus     = errors.New("invalid import job status")
 	ErrInvalidJobTransition = errors.New("invalid import job status transition")
 	ErrInvalidImportChapter = errors.New("invalid import chapter")
 )
@@ -61,7 +60,6 @@ type ImportJobParams struct {
 	SourceHash           string
 	SourceBytes          int64
 	ArchivedRelativePath string
-	Status               JobStatus
 	ChapterCount         int
 }
 
@@ -88,9 +86,6 @@ func NewImportJob(params ImportJobParams, now time.Time) (ImportJob, error) {
 	}
 	if params.ChapterCount < 1 {
 		return ImportJob{}, ErrInvalidChapterCount
-	}
-	if params.Status != JobStatusPrepared {
-		return ImportJob{}, ErrInvalidJobStatus
 	}
 
 	now = now.UTC()
@@ -169,7 +164,6 @@ type ImportChapterParams struct {
 	Position         int
 	SourceStartLine  int
 	SourceEndLine    int
-	ContentHash      string
 	Selected         bool
 	CreatedChapterID string
 }
@@ -179,7 +173,6 @@ func NewImportChapter(params ImportChapterParams) (ImportChapter, error) {
 	params.JobID = strings.TrimSpace(params.JobID)
 	params.VolumeTitle = strings.TrimSpace(params.VolumeTitle)
 	params.Title = strings.TrimSpace(params.Title)
-	params.ContentHash = strings.ToLower(strings.TrimSpace(params.ContentHash))
 	params.CreatedChapterID = strings.TrimSpace(params.CreatedChapterID)
 
 	if params.ID == "" || params.JobID == "" || params.Title == "" {
@@ -187,9 +180,6 @@ func NewImportChapter(params ImportChapterParams) (ImportChapter, error) {
 	}
 	if params.Position < 1 || params.SourceStartLine < 1 || params.SourceEndLine < params.SourceStartLine {
 		return ImportChapter{}, ErrInvalidImportChapter
-	}
-	if !validSHA256(params.ContentHash) {
-		return ImportChapter{}, ErrInvalidSourceHash
 	}
 
 	return ImportChapter{
@@ -201,7 +191,7 @@ func NewImportChapter(params ImportChapterParams) (ImportChapter, error) {
 		Position:         params.Position,
 		SourceStartLine:  params.SourceStartLine,
 		SourceEndLine:    params.SourceEndLine,
-		ContentHash:      params.ContentHash,
+		ContentHash:      hashContent(params.Body),
 		Selected:         params.Selected,
 		CreatedChapterID: params.CreatedChapterID,
 	}, nil

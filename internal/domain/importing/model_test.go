@@ -2,10 +2,17 @@ package importing
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestImportJobParamsDoesNotExposeStatus(t *testing.T) {
+	if _, exists := reflect.TypeOf(ImportJobParams{}).FieldByName("Status"); exists {
+		t.Fatal("ImportJobParams exposes Status; NewImportJob must always create a prepared job")
+	}
+}
 
 func TestNewImportJobCreatesPreparedJob(t *testing.T) {
 	now := time.Date(2026, time.July, 30, 8, 9, 10, 0, time.FixedZone("CST", 8*60*60))
@@ -20,7 +27,6 @@ func TestNewImportJobCreatesPreparedJob(t *testing.T) {
 		SourceHash:           hash,
 		SourceBytes:          2048,
 		ArchivedRelativePath: "imports/job-1.txt",
-		Status:               JobStatusPrepared,
 		ChapterCount:         3,
 	}, now)
 	if err != nil {
@@ -58,7 +64,6 @@ func TestNewImportJobRejectsInvalidValues(t *testing.T) {
 		SourceHash:           strings.Repeat("ab", 32),
 		SourceBytes:          20,
 		ArchivedRelativePath: "imports/job-1.md",
-		Status:               JobStatusPrepared,
 		ChapterCount:         2,
 	}
 
@@ -77,8 +82,6 @@ func TestNewImportJobRejectsInvalidValues(t *testing.T) {
 		{name: "negative bytes", change: func(p *ImportJobParams) { p.SourceBytes = -1 }, want: ErrInvalidSourceBytes},
 		{name: "zero chapter count", change: func(p *ImportJobParams) { p.ChapterCount = 0 }, want: ErrInvalidChapterCount},
 		{name: "negative chapter count", change: func(p *ImportJobParams) { p.ChapterCount = -1 }, want: ErrInvalidChapterCount},
-		{name: "invalid status", change: func(p *ImportJobParams) { p.Status = "running" }, want: ErrInvalidJobStatus},
-		{name: "terminal status", change: func(p *ImportJobParams) { p.Status = JobStatusApplied }, want: ErrInvalidJobStatus},
 	}
 
 	for _, test := range tests {
@@ -167,7 +170,6 @@ func TestImportJobRejectsInvalidTransitionData(t *testing.T) {
 }
 
 func TestNewImportChapterCapturesReviewAndSourceMetadata(t *testing.T) {
-	hash := strings.Repeat("cd", 32)
 	chapter, err := NewImportChapter(ImportChapterParams{
 		ID:               " import-chapter-1 ",
 		JobID:            " job-1 ",
@@ -177,7 +179,6 @@ func TestNewImportChapterCapturesReviewAndSourceMetadata(t *testing.T) {
 		Position:         1,
 		SourceStartLine:  3,
 		SourceEndLine:    8,
-		ContentHash:      hash,
 		Selected:         true,
 		CreatedChapterID: " chapter-9 ",
 	})
@@ -193,11 +194,35 @@ func TestNewImportChapterCapturesReviewAndSourceMetadata(t *testing.T) {
 	if chapter.Body != "正文" || chapter.Position != 1 {
 		t.Fatalf("chapter content mismatch: %#v", chapter)
 	}
-	if chapter.SourceStartLine != 3 || chapter.SourceEndLine != 8 || chapter.ContentHash != hash {
+	if chapter.SourceStartLine != 3 || chapter.SourceEndLine != 8 || chapter.ContentHash != contentHash(chapter.Body) {
 		t.Fatalf("chapter source metadata mismatch: %#v", chapter)
 	}
 	if !chapter.Selected || chapter.CreatedChapterID != "chapter-9" {
 		t.Fatalf("chapter review metadata mismatch: %#v", chapter)
+	}
+}
+
+func TestImportChapterParamsDoesNotExposeContentHash(t *testing.T) {
+	if _, exists := reflect.TypeOf(ImportChapterParams{}).FieldByName("ContentHash"); exists {
+		t.Fatal("ImportChapterParams exposes ContentHash; NewImportChapter must derive it from Body")
+	}
+}
+
+func TestNewImportChapterDerivesContentHashFromBody(t *testing.T) {
+	chapter, err := NewImportChapter(ImportChapterParams{
+		ID:              "import-chapter-1",
+		JobID:           "job-1",
+		Title:           "第一章",
+		Body:            "不可伪造的正文",
+		Position:        1,
+		SourceStartLine: 2,
+		SourceEndLine:   2,
+	})
+	if err != nil {
+		t.Fatalf("NewImportChapter returned error: %v", err)
+	}
+	if chapter.ContentHash != contentHash(chapter.Body) {
+		t.Fatalf("ContentHash = %q, want SHA-256 derived from Body", chapter.ContentHash)
 	}
 }
 
@@ -210,7 +235,6 @@ func TestNewImportChapterRejectsInvalidValues(t *testing.T) {
 		Position:        1,
 		SourceStartLine: 2,
 		SourceEndLine:   2,
-		ContentHash:     strings.Repeat("ef", 32),
 	}
 	tests := []struct {
 		name   string
@@ -223,7 +247,6 @@ func TestNewImportChapterRejectsInvalidValues(t *testing.T) {
 		{name: "zero position", change: func(p *ImportChapterParams) { p.Position = 0 }, want: ErrInvalidImportChapter},
 		{name: "zero start line", change: func(p *ImportChapterParams) { p.SourceStartLine = 0 }, want: ErrInvalidImportChapter},
 		{name: "end before start", change: func(p *ImportChapterParams) { p.SourceEndLine = 1 }, want: ErrInvalidImportChapter},
-		{name: "invalid hash", change: func(p *ImportChapterParams) { p.ContentHash = "not-a-hash" }, want: ErrInvalidSourceHash},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -249,7 +272,6 @@ func newValidImportJob(t *testing.T) ImportJob {
 		SourceHash:           strings.Repeat("ab", 32),
 		SourceBytes:          1024,
 		ArchivedRelativePath: "imports/job-1.txt",
-		Status:               JobStatusPrepared,
 		ChapterCount:         3,
 	}, now)
 	if err != nil {

@@ -1,14 +1,21 @@
 package importing
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
-var ErrEmptyManuscript = errors.New("manuscript contains no importable text")
+const MaxManuscriptLineBytes = 4 * 1024 * 1024
+
+var (
+	ErrEmptyManuscript       = errors.New("manuscript contains no importable text")
+	ErrManuscriptLineTooLong = errors.New("manuscript line exceeds maximum length")
+)
 
 var (
 	chineseChapterPattern = regexp.MustCompile(`^第[[:space:]]*[0-9０-９零〇一二三四五六七八九十百千万两]+[[:space:]]*(章|回)(?:[[:space:]]+.*|[[:space:]]*[:：\-—][[:space:]]*.*)?$`)
@@ -27,35 +34,67 @@ type ParsedChapter struct {
 	ContentHash     string
 }
 
-type chapterBoundary struct {
-	volumeTitle string
-	title       string
-	headingLine int
-	bodyStart   int
+type chapterCandidate struct {
+	volumeTitle     string
+	title           string
+	anchorLine      int
+	explicitChapter bool
+	keepEmptyAtEOF  bool
+	body            chapterBody
+}
+
+type chapterBody struct {
+	text              strings.Builder
+	startLine         int
+	endLine           int
+	pendingBlankLines int
+}
+
+func (body *chapterBody) add(line string, lineNumber int) {
+	if strings.TrimSpace(line) == "" {
+		if body.startLine != 0 {
+			body.pendingBlankLines++
+		}
+		return
+	}
+
+	if body.startLine == 0 {
+		body.startLine = lineNumber
+	} else {
+		body.text.WriteByte('\n')
+		for range body.pendingBlankLines {
+			body.text.WriteByte('\n')
+		}
+	}
+	body.text.WriteString(line)
+	body.endLine = lineNumber
+	body.pendingBlankLines = 0
+}
+
+func (body *chapterBody) value() (string, int, int, bool) {
+	if body.startLine == 0 {
+		return "", 0, 0, false
+	}
+	return strings.TrimSpace(body.text.String()), body.startLine, body.endLine, true
 }
 
 func ParseChapters(text string) ([]ParsedChapter, error) {
-	normalized := normalizeText(text)
-	if strings.TrimSpace(normalized) == "" {
-		return nil, ErrEmptyManuscript
-	}
-
-	lines := strings.Split(normalized, "\n")
 	chapters := make([]ParsedChapter, 0)
 	currentVolume := ""
-	var current *chapterBoundary
-	sawChapterHeading := false
-	lastVolumeLine := -1
+	var current *chapterCandidate
 
-	appendCurrent := func(bodyEnd int) {
+	appendCurrent := func(atEOF bool) {
 		if current == nil {
 			return
 		}
-		body, startLine, endLine, ok := trimmedBody(lines, current.bodyStart, bodyEnd)
+		body, startLine, endLine, ok := current.body.value()
 		if !ok {
-			body = ""
-			startLine = current.headingLine + 1
-			endLine = startLine
+			if !current.explicitChapter && !(atEOF && current.keepEmptyAtEOF) {
+				current = nil
+				return
+			}
+			startLine = current.anchorLine
+			endLine = current.anchorLine
 		}
 		chapters = append(chapters, ParsedChapter{
 			VolumeTitle:     current.volumeTitle,
@@ -69,64 +108,87 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 		current = nil
 	}
 
-	for lineIndex, rawLine := range lines {
+	scanner := bufio.NewScanner(strings.NewReader(text))
+	scanner.Buffer(make([]byte, 64*1024), MaxManuscriptLineBytes+64*1024)
+	scanner.Split(splitUniversalLines)
+
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		rawLine := scanner.Text()
+		if lineNumber == 1 {
+			rawLine = strings.TrimPrefix(rawLine, "\ufeff")
+		}
+		if len(rawLine) > MaxManuscriptLineBytes {
+			return nil, ErrManuscriptLineTooLong
+		}
+
 		heading := unwrapMarkdownHeading(rawLine)
-		if heading == "" {
-			continue
-		}
-		if isVolumeHeading(heading) {
-			appendCurrent(lineIndex - 1)
+		if heading != "" && isVolumeHeading(heading) {
+			appendCurrent(false)
 			currentVolume = heading
-			lastVolumeLine = lineIndex
+			current = &chapterCandidate{
+				volumeTitle:    currentVolume,
+				title:          "导入正文",
+				anchorLine:     lineNumber,
+				keepEmptyAtEOF: true,
+			}
 			continue
 		}
-		if !isChapterHeading(heading) {
+		if heading != "" && isChapterHeading(heading) {
+			appendCurrent(false)
+			current = &chapterCandidate{
+				volumeTitle:     currentVolume,
+				title:           heading,
+				anchorLine:      lineNumber,
+				explicitChapter: true,
+			}
 			continue
 		}
 
-		sawChapterHeading = true
-		appendCurrent(lineIndex - 1)
-		current = &chapterBoundary{
-			volumeTitle: currentVolume,
-			title:       heading,
-			headingLine: lineIndex,
-			bodyStart:   lineIndex + 1,
+		if current == nil {
+			if strings.TrimSpace(rawLine) == "" {
+				continue
+			}
+			current = &chapterCandidate{
+				volumeTitle: currentVolume,
+				title:       "导入正文",
+				anchorLine:  lineNumber,
+			}
 		}
+		current.body.add(rawLine, lineNumber)
 	}
-	appendCurrent(len(lines) - 1)
+	if scanner.Err() != nil {
+		return nil, ErrManuscriptLineTooLong
+	}
+	appendCurrent(true)
 
-	if len(chapters) > 0 {
-		return chapters, nil
-	}
-	if sawChapterHeading {
+	if len(chapters) == 0 {
 		return nil, ErrEmptyManuscript
 	}
-
-	fallbackStart := 0
-	volumeTitle := ""
-	if lastVolumeLine >= 0 {
-		fallbackStart = lastVolumeLine + 1
-		volumeTitle = currentVolume
-	}
-	body, startLine, endLine, ok := trimmedBody(lines, fallbackStart, len(lines)-1)
-	if !ok {
-		return nil, ErrEmptyManuscript
-	}
-	return []ParsedChapter{{
-		VolumeTitle:     volumeTitle,
-		Title:           "导入正文",
-		Body:            body,
-		Position:        1,
-		SourceStartLine: startLine,
-		SourceEndLine:   endLine,
-		ContentHash:     hashContent(body),
-	}}, nil
+	return chapters, nil
 }
 
-func normalizeText(text string) string {
-	text = strings.TrimPrefix(text, "\ufeff")
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	return strings.ReplaceAll(text, "\r", "\n")
+func splitUniversalLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for index, value := range data {
+		switch value {
+		case '\n':
+			return index + 1, data[:index], nil
+		case '\r':
+			if index+1 == len(data) && !atEOF {
+				return 0, nil, nil
+			}
+			advance = index + 1
+			if index+1 < len(data) && data[index+1] == '\n' {
+				advance++
+			}
+			return advance, data[:index], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 func unwrapMarkdownHeading(line string) string {
@@ -138,35 +200,21 @@ func unwrapMarkdownHeading(line string) string {
 }
 
 func isChapterHeading(line string) bool {
-	return chineseChapterPattern.MatchString(line) || englishChapterPattern.MatchString(line)
+	normalized := normalizeHeadingWhitespace(line)
+	return chineseChapterPattern.MatchString(normalized) || englishChapterPattern.MatchString(normalized)
 }
 
 func isVolumeHeading(line string) bool {
-	return volumePattern.MatchString(line)
+	return volumePattern.MatchString(normalizeHeadingWhitespace(line))
 }
 
-func trimmedBody(lines []string, start, end int) (string, int, int, bool) {
-	if start < 0 {
-		start = 0
-	}
-	if end >= len(lines) {
-		end = len(lines) - 1
-	}
-	for start <= end && strings.TrimSpace(lines[start]) == "" {
-		start++
-	}
-	for end >= start && strings.TrimSpace(lines[end]) == "" {
-		end--
-	}
-	if start > end {
-		return "", 0, 0, false
-	}
-
-	body := strings.TrimSpace(strings.Join(lines[start:end+1], "\n"))
-	if body == "" {
-		return "", 0, 0, false
-	}
-	return body, start + 1, end + 1, true
+func normalizeHeadingWhitespace(line string) string {
+	return strings.Map(func(value rune) rune {
+		if unicode.IsSpace(value) {
+			return ' '
+		}
+		return value
+	}, line)
 }
 
 func hashContent(body string) string {

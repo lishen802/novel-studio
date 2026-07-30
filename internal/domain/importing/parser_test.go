@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -86,6 +87,115 @@ func TestParseChaptersNormalizesNewlinesAndPreservesInternalBlankLines(t *testin
 	}
 	if chapter.SourceStartLine != 2 || chapter.SourceEndLine != 4 {
 		t.Fatalf("source lines = %d-%d, want 2-4", chapter.SourceStartLine, chapter.SourceEndLine)
+	}
+}
+
+func TestParseChaptersPreservesPrefaceBeforeFirstChapter(t *testing.T) {
+	chapters, err := ParseChapters("序言一\n\n序言二\n第一章 开始\n正文")
+	if err != nil {
+		t.Fatalf("ParseChapters returned error: %v", err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("len(chapters) = %d, want 2: %#v", len(chapters), chapters)
+	}
+
+	preface := chapters[0]
+	if preface.Title != "导入正文" || preface.VolumeTitle != "" || preface.Body != "序言一\n\n序言二" {
+		t.Fatalf("preface = %#v, want independent imported-body candidate", preface)
+	}
+	if preface.Position != 1 || preface.SourceStartLine != 1 || preface.SourceEndLine != 3 {
+		t.Fatalf("preface source metadata = %#v, want lines 1-3 at position 1", preface)
+	}
+
+	chapter := chapters[1]
+	if chapter.Title != "第一章 开始" || chapter.Body != "正文" || chapter.Position != 2 {
+		t.Fatalf("chapter = %#v, want recognized chapter after preface", chapter)
+	}
+}
+
+func TestParseChaptersPreservesBodyForEachVolumeWithoutChapters(t *testing.T) {
+	text := "第一卷 起点\n卷一正文\n第二卷 转折\n卷二正文\n第三卷 尾声"
+	chapters, err := ParseChapters(text)
+	if err != nil {
+		t.Fatalf("ParseChapters returned error: %v", err)
+	}
+	if len(chapters) != 3 {
+		t.Fatalf("len(chapters) = %d, want 3: %#v", len(chapters), chapters)
+	}
+
+	want := []ParsedChapter{
+		{
+			VolumeTitle:     "第一卷 起点",
+			Title:           "导入正文",
+			Body:            "卷一正文",
+			Position:        1,
+			SourceStartLine: 2,
+			SourceEndLine:   2,
+		},
+		{
+			VolumeTitle:     "第二卷 转折",
+			Title:           "导入正文",
+			Body:            "卷二正文",
+			Position:        2,
+			SourceStartLine: 4,
+			SourceEndLine:   4,
+		},
+		{
+			VolumeTitle:     "第三卷 尾声",
+			Title:           "导入正文",
+			Body:            "",
+			Position:        3,
+			SourceStartLine: 5,
+			SourceEndLine:   5,
+		},
+	}
+	for i := range want {
+		want[i].ContentHash = contentHash(want[i].Body)
+		if !reflect.DeepEqual(chapters[i], want[i]) {
+			t.Errorf("chapter %d = %#v, want %#v", i, chapters[i], want[i])
+		}
+	}
+}
+
+func TestParseChaptersRecognizesUnicodeWhitespaceInChineseHeadings(t *testing.T) {
+	tests := []string{
+		"第\u3000十二章\u3000开始",
+		"第\u00a0十二章\u00a0开始",
+	}
+	for _, title := range tests {
+		t.Run(title, func(t *testing.T) {
+			chapters, err := ParseChapters(title + "\n正文")
+			if err != nil {
+				t.Fatalf("ParseChapters returned error: %v", err)
+			}
+			if len(chapters) != 1 {
+				t.Fatalf("len(chapters) = %d, want 1: %#v", len(chapters), chapters)
+			}
+			if chapters[0].Title != title || chapters[0].Body != "正文" {
+				t.Fatalf("chapter = %#v, want title display preserved", chapters[0])
+			}
+		})
+	}
+}
+
+func TestParseChaptersAllowsLongSingleLineWithinLimit(t *testing.T) {
+	body := strings.Repeat("a", 128*1024)
+	chapters, err := ParseChapters(body)
+	if err != nil {
+		t.Fatalf("ParseChapters returned error for long supported line: %v", err)
+	}
+	if len(chapters) != 1 || chapters[0].Body != body {
+		t.Fatalf("long line was not preserved")
+	}
+}
+
+func TestParseChaptersRejectsLineBeyondStableLimit(t *testing.T) {
+	const expectedError = "manuscript line exceeds maximum length"
+	text := strings.Repeat("a", MaxManuscriptLineBytes+1)
+
+	_, err := ParseChapters(text)
+	if !errors.Is(err, ErrManuscriptLineTooLong) || err.Error() != expectedError {
+		t.Fatalf("ParseChapters error = %v, want stable error %q", err, expectedError)
 	}
 }
 
