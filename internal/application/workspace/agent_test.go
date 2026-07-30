@@ -232,6 +232,35 @@ func TestCancelAgentRunPropagatesToProviderAndPersistsCancelledState(t *testing.
 	}
 }
 
+func TestExecuteAgentRunPersistsCancellationBeforeStartup(t *testing.T) {
+	providerFactory := &usageModelProviderFactory{}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := service.ExecuteAgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ExecuteAgentRun() error = %v", err)
+	}
+	if got.Status != "cancelled" || got.ErrorCode != "cancelled" {
+		t.Fatalf("unexpected cancelled run: %#v", got)
+	}
+	if providerFactory.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", providerFactory.calls)
+	}
+	persisted, err := service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != "cancelled" {
+		t.Fatalf("persisted status = %s, want cancelled", persisted.Status)
+	}
+}
+
 func TestRetryAgentRunCreatesNewQueuedAuditRecord(t *testing.T) {
 	service, chapter := configuredAgentService(t, failingModelProviderFactory{})
 	defer service.Close()
@@ -273,10 +302,67 @@ func TestVersionOperationIsRejectedWhileAgentRunIsActive(t *testing.T) {
 	if _, err := service.SwitchBranch(context.Background(), "main"); !errors.Is(err, ErrAgentRunActive) {
 		t.Fatalf("SwitchBranch() error = %v, want ErrAgentRunActive", err)
 	}
+	if _, err := service.ConfirmBranchMerge(context.Background(), "preview-token"); !errors.Is(err, ErrAgentRunActive) {
+		t.Fatalf("ConfirmBranchMerge() error = %v, want ErrAgentRunActive", err)
+	}
+	if _, err := service.RestoreSnapshot(context.Background(), "snapshot-1"); !errors.Is(err, ErrAgentRunActive) {
+		t.Fatalf("RestoreSnapshot() error = %v, want ErrAgentRunActive", err)
+	}
 	if err := service.CancelAgentRun(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	<-done
+}
+
+func TestCreateProjectCancelsActiveAgentRunBeforeReplacingWorkspace(t *testing.T) {
+	providerFactory := &blockingModelProviderFactory{started: make(chan struct{})}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeDone := make(chan AgentRunView, 1)
+	go func() {
+		got, _ := service.ExecuteAgentRun(context.Background(), run.ID)
+		executeDone <- got
+	}()
+	select {
+	case <-providerFactory.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider did not start")
+	}
+
+	replaceDone := make(chan error, 1)
+	parentDirectory := t.TempDir()
+	go func() {
+		_, createErr := service.CreateProject(
+			context.Background(),
+			parentDirectory,
+			"新项目",
+			"奇幻",
+			"简介",
+		)
+		replaceDone <- createErr
+	}()
+	select {
+	case err := <-replaceDone:
+		if err != nil {
+			t.Fatalf("CreateProject() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		_ = service.CancelAgentRun(context.Background(), run.ID)
+		<-replaceDone
+		t.Fatal("CreateProject blocked instead of cancelling the active agent run")
+	}
+	select {
+	case got := <-executeDone:
+		if got.Status != "cancelled" {
+			t.Fatalf("run status = %s, want cancelled", got.Status)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("active agent run did not stop")
+	}
 }
 
 func configuredAgentService(

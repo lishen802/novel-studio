@@ -152,6 +152,11 @@
   font-size: 12px;
 }
 
+.agent-runs .agent-run-error {
+  color: #a0483f;
+  font-weight: 650;
+}
+
 .agent-list article > button {
   display: grid;
   place-items: center;

@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/lishen802/novel-studio/internal/application/workspace"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -20,17 +22,20 @@ import (
 type desktopErrorCode string
 
 const (
-	errorProjectNotFound   desktopErrorCode = "PROJECT_NOT_FOUND"
-	errorPermissionDenied  desktopErrorCode = "PERMISSION_DENIED"
-	errorProjectCorrupt    desktopErrorCode = "PROJECT_CORRUPT"
-	errorProjectTooNew     desktopErrorCode = "PROJECT_TOO_NEW"
-	errorRevisionConflict  desktopErrorCode = "REVISION_CONFLICT"
-	errorWriteFailed       desktopErrorCode = "WRITE_FAILED"
-	errorDatabaseBusy      desktopErrorCode = "DATABASE_BUSY"
-	errorReferenceConflict desktopErrorCode = "REFERENCE_CONFLICT"
-	errorBranchConflict    desktopErrorCode = "BRANCH_CONFLICT"
-	errorValidationFailed  desktopErrorCode = "VALIDATION_FAILED"
-	errorOperationFailed   desktopErrorCode = "OPERATION_FAILED"
+	errorProjectNotFound      desktopErrorCode = "PROJECT_NOT_FOUND"
+	errorPermissionDenied     desktopErrorCode = "PERMISSION_DENIED"
+	errorProjectCorrupt       desktopErrorCode = "PROJECT_CORRUPT"
+	errorProjectTooNew        desktopErrorCode = "PROJECT_TOO_NEW"
+	errorRevisionConflict     desktopErrorCode = "REVISION_CONFLICT"
+	errorWriteFailed          desktopErrorCode = "WRITE_FAILED"
+	errorDatabaseBusy         desktopErrorCode = "DATABASE_BUSY"
+	errorReferenceConflict    desktopErrorCode = "REFERENCE_CONFLICT"
+	errorBranchConflict       desktopErrorCode = "BRANCH_CONFLICT"
+	errorAgentBudgetExceeded  desktopErrorCode = "AGENT_BUDGET_EXCEEDED"
+	errorAgentContextExceeded desktopErrorCode = "AGENT_CONTEXT_EXCEEDED"
+	errorAgentRunActive       desktopErrorCode = "AGENT_RUN_ACTIVE"
+	errorValidationFailed     desktopErrorCode = "VALIDATION_FAILED"
+	errorOperationFailed      desktopErrorCode = "OPERATION_FAILED"
 )
 
 type desktopError struct {
@@ -51,6 +56,14 @@ func safeDesktopError(err error) error {
 	message := "操作失败，请重试。"
 	lowerMessage := strings.ToLower(err.Error())
 	switch {
+	case errors.Is(err, workspace.ErrTokenBudgetExceeded):
+		code, message = errorAgentBudgetExceeded, "智能创作令牌预算不足，请提高预算或降低角色输出上限。"
+	case errors.Is(err, workspace.ErrContextBudgetExceeded):
+		code, message = errorAgentContextExceeded, "必要的故事上下文超过预算，请提高上下文字符预算。"
+	case errors.Is(err, workspace.ErrAgentRunActive):
+		code, message = errorAgentRunActive, "智能创作任务正在运行，请先等待完成或取消任务。"
+	case errors.Is(err, agentdomain.ErrInvalidBudget):
+		code, message = errorValidationFailed, "运行预算必须是大于零的整数。"
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, sqlite.ErrDatabaseMissing):
 		code, message = errorProjectNotFound, "项目不存在或已被移动。"
 	case errors.Is(err, fs.ErrPermission), errors.Is(err, sqlite.ErrDatabasePermission):

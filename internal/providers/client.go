@@ -117,7 +117,7 @@ func (client *OpenAIClient) Generate(
 		return nil
 	})
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("%w: %v", ErrInvalidStream, err)
+		return GenerateResult{}, fmt.Errorf("%w: %w", ErrInvalidStream, err)
 	}
 	return result, nil
 }
@@ -139,7 +139,7 @@ func (client *OpenAIClient) post(
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProvider, err)
+		return nil, fmt.Errorf("%w: %w", ErrProvider, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		defer response.Body.Close()
@@ -196,7 +196,7 @@ func (client *AnthropicClient) Generate(
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := client.httpClient.Do(httpRequest)
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("%w: %v", ErrProvider, err)
+		return GenerateResult{}, fmt.Errorf("%w: %w", ErrProvider, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		defer response.Body.Close()
@@ -246,7 +246,7 @@ func (client *AnthropicClient) Generate(
 		return nil
 	})
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("%w: %v", ErrInvalidStream, err)
+		return GenerateResult{}, fmt.Errorf("%w: %w", ErrInvalidStream, err)
 	}
 	return result, nil
 }

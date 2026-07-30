@@ -37,6 +37,21 @@ const roles: Array<{ role: AgentRole; label: string; detail: string }> = [
   },
 ];
 
+function agentRunErrorText(run: AgentRunView): string {
+  switch (run.errorCode) {
+    case "token_budget_exceeded":
+      return "任务已达到令牌预算，请提高预算或降低角色输出上限。";
+    case "context_budget_exceeded":
+      return "必要的故事上下文超过预算，请提高上下文字符预算。";
+    case "cancelled":
+      return "任务已由作者取消。";
+    case "provider_error":
+      return "模型调用失败，请检查连接配置后重试。";
+    default:
+      return run.errorMessage;
+  }
+}
+
 export function AgentWorkbench({
   client,
   chapters,
@@ -354,6 +369,9 @@ export function AgentWorkbench({
                   {" · "}上下文 {run.contextChars}/{run.contextCharBudget}
                   {run.contextTruncated && " · 上下文已裁剪"}
                 </span>
+                {agentRunErrorText(run) && (
+                  <span className="agent-run-error">{agentRunErrorText(run)}</span>
+                )}
               </div>
               <div className="agent-run-actions">
                 {(run.status === "queued" || run.status === "running") && (

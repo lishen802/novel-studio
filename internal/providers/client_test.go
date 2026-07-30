@@ -3,11 +3,14 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 )
 
@@ -85,6 +88,111 @@ func TestAnthropicMessagesStreamsTextAndUsage(t *testing.T) {
 	if received["stream"] != true {
 		t.Fatalf("unexpected request: %#v", received)
 	}
+}
+
+func TestProviderClientsPreserveRequestCancellation(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		generate func(context.Context) error
+	}{
+		{
+			name: "OpenAI",
+			generate: func(ctx context.Context) error {
+				client := NewOpenAIClient(cancelledHTTPClient(), "https://api.example.test/v1")
+				_, err := client.Generate(ctx, "secret", GenerateRequest{
+					Model: "model", Input: "input", MaxOutputTokens: 10,
+				}, nil)
+				return err
+			},
+		},
+		{
+			name: "Anthropic",
+			generate: func(ctx context.Context) error {
+				client := NewAnthropicClient(cancelledHTTPClient(), "https://api.example.test")
+				_, err := client.Generate(ctx, "secret", GenerateRequest{
+					Model: "model", Input: "input", MaxOutputTokens: 10,
+				}, nil)
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if err := test.generate(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("Generate() error = %v, want context.Canceled", err)
+			}
+		})
+	}
+}
+
+func TestProviderClientsPreserveStreamCancellation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		client func(*http.Client) ports.ModelProvider
+	}{
+		{
+			name: "OpenAI",
+			client: func(httpClient *http.Client) ports.ModelProvider {
+				return NewOpenAIClient(httpClient, "https://api.example.test/v1")
+			},
+		},
+		{
+			name: "Anthropic",
+			client: func(httpClient *http.Client) ports.ModelProvider {
+				return NewAnthropicClient(httpClient, "https://api.example.test")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			started := make(chan struct{})
+			httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body: &cancelledStreamBody{
+						ctx: request.Context(), started: started,
+					},
+				}, nil
+			})}
+			ctx, cancel := context.WithCancel(context.Background())
+			result := make(chan error, 1)
+			go func() {
+				_, err := test.client(httpClient).Generate(ctx, "secret", GenerateRequest{
+					Model: "model", Input: "input", MaxOutputTokens: 10,
+				}, nil)
+				result <- err
+			}()
+			<-started
+			cancel()
+			if err := <-result; !errors.Is(err, context.Canceled) {
+				t.Fatalf("Generate() error = %v, want context.Canceled", err)
+			}
+		})
+	}
+}
+
+func cancelledHTTPClient() *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})}
+}
+
+type cancelledStreamBody struct {
+	ctx     context.Context
+	started chan struct{}
+	once    sync.Once
+}
+
+func (body *cancelledStreamBody) Read([]byte) (int, error) {
+	body.once.Do(func() { close(body.started) })
+	<-body.ctx.Done()
+	return 0, body.ctx.Err()
+}
+
+func (*cancelledStreamBody) Close() error {
+	return nil
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

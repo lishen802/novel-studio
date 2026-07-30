@@ -91,6 +91,7 @@ test("updates runtime budgets and exposes cancel and retry controls", async () =
       id: "run-failed",
       status: "failed",
       errorCode: "provider_error",
+      errorMessage: "模型连接超时",
       retryOf: "",
     },
   ];
@@ -135,4 +136,7 @@ test("updates runtime budgets and exposes cancel and retry controls", async () =
   fireEvent.click(screen.getAllByRole("button", { name: "重试任务" })[1]);
   await waitFor(() => expect(client.retryAgentRunCalls).toEqual(["run-failed"]));
   expect(screen.getAllByText(/上下文已裁剪/)).not.toHaveLength(0);
+  expect(
+    screen.getByText("模型调用失败，请检查连接配置后重试。"),
+  ).toBeInTheDocument();
 });

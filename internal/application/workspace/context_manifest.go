@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -153,9 +152,6 @@ func rawContextItems[T any](values []T) ([]json.RawMessage, error) {
 		}
 		result = append(result, encoded)
 	}
-	sort.Slice(result, func(first, second int) bool {
-		return bytes.Compare(result[first], result[second]) < 0
-	})
 	return result, nil
 }
 
@@ -173,9 +169,6 @@ func newContextDomain(
 	if err := json.Unmarshal(encoded, &items); err != nil {
 		return contextDomainInput{}, err
 	}
-	sort.Slice(items, func(first, second int) bool {
-		return bytes.Compare(items[first], items[second]) < 0
-	})
 	return contextDomainInput{
 		Name: name, Priority: priority, Required: required, Items: items,
 	}, nil

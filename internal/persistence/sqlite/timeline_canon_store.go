@@ -26,7 +26,7 @@ func (s *Store) StoryEvent(ctx context.Context, id string) (timelinedomain.Story
 }
 
 func (s *Store) ListStoryEvents(ctx context.Context) ([]timelinedomain.StoryEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, title, summary, cause, result, story_time, story_order, narrative_order, status, created_at, updated_at FROM story_events WHERE deleted_at IS NULL ORDER BY story_order, narrative_order, created_at`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, title, summary, cause, result, story_time, story_order, narrative_order, status, created_at, updated_at FROM story_events WHERE deleted_at IS NULL ORDER BY story_order, narrative_order, created_at, id`)
 	if err != nil {
 		return nil, databaseOperationError("list story events", err)
 	}
@@ -164,7 +164,7 @@ func (s *Store) Fact(ctx context.Context, id string) (canondomain.Fact, error) {
 }
 
 func (s *Store) ListFacts(ctx context.Context) ([]canondomain.Fact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, fact_text, category, origin, status, confidence, valid_from_event_id, valid_until_event_id, created_by, confirmed_by, created_at, updated_at FROM canon_facts WHERE deleted_at IS NULL ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, fact_text, category, origin, status, confidence, valid_from_event_id, valid_until_event_id, created_by, confirmed_by, created_at, updated_at FROM canon_facts WHERE deleted_at IS NULL ORDER BY updated_at DESC, id`)
 	if err != nil {
 		return nil, databaseOperationError("list canon facts", err)
 	}

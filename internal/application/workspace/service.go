@@ -302,6 +302,7 @@ func (s *Service) Close() error {
 }
 
 func (s *Service) replaceActive(next activeWorkspace) {
+	s.cancelAllAgentJobs()
 	s.mu.Lock()
 	previous := s.active
 	s.active = &next

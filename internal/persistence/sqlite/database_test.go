@@ -184,6 +184,75 @@ func TestStructuredChangeSetMigrationPreservesVersionNineCandidates(t *testing.T
 	}
 }
 
+func TestAgentRuntimeControlsMigrationPreservesVersionElevenRuns(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 11); err != nil {
+		t.Fatalf("migrate to version eleven: %v", err)
+	}
+	now := formatTime(time.Unix(100, 0))
+	statements := []string{
+		`INSERT INTO projects(id, title, created_at, updated_at) VALUES ('project-1', '旧项目', ?, ?)`,
+		`INSERT INTO chapters(id, project_id, title, position, revision, created_at, updated_at) VALUES ('chapter-1', 'project-1', '第一章', 1, 1, ?, ?)`,
+		`INSERT INTO provider_connections(id, project_id, name, kind, base_url, credential_ref, created_at, updated_at) VALUES ('provider-1', 'project-1', 'OpenAI', 'openai', 'https://example.test/v1', 'provider:1', ?, ?)`,
+		`INSERT INTO agent_profiles(id, project_id, role, connection_id, model, max_output_tokens, temperature, enabled, created_at, updated_at) VALUES ('profile-1', 'project-1', 'planner', 'provider-1', 'model', 1000, 0.2, 1, ?, ?)`,
+		`INSERT INTO agent_runs(id, project_id, chapter_id, chapter_base_revision, prompt, status, created_at, updated_at) VALUES ('run-1', 'project-1', 'chapter-1', 1, '续写', 'failed', ?, ?)`,
+		`INSERT INTO agent_run_steps(id, run_id, role, profile_id, position, status, output, created_at, updated_at) VALUES ('step-1', 'run-1', 'planner', 'profile-1', 1, 'completed', '旧规划', ?, ?)`,
+		`INSERT INTO agent_artifacts(id, run_id, step_id, kind, content, sha256, created_at) VALUES ('artifact-1', 'run-1', 'step-1', 'plan', '旧规划', 'hash', ?)`,
+	}
+	for index, statement := range statements {
+		args := []any{now, now}
+		if index == len(statements)-1 {
+			args = []any{now}
+		}
+		if _, err := db.ExecContext(ctx, statement, args...); err != nil {
+			t.Fatalf("seed version eleven statement %d: %v", index, err)
+		}
+	}
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("migrate agent runtime controls: %v", err)
+	}
+	var tokenBudget, contextBudget, inputTokens, outputTokens int
+	if err := db.QueryRowContext(ctx, `
+		SELECT token_budget, context_char_budget, input_tokens, output_tokens
+		FROM agent_runs WHERE id = 'run-1'
+	`).Scan(&tokenBudget, &contextBudget, &inputTokens, &outputTokens); err != nil {
+		t.Fatal(err)
+	}
+	if tokenBudget != 30000 || contextBudget != 120000 ||
+		inputTokens != 0 || outputTokens != 0 {
+		t.Fatalf(
+			"migrated budgets = (%d, %d, %d, %d)",
+			tokenBudget,
+			contextBudget,
+			inputTokens,
+			outputTokens,
+		)
+	}
+	var output, artifact string
+	if err := db.QueryRowContext(ctx, "SELECT output FROM agent_run_steps WHERE id = 'step-1'").Scan(&output); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT content FROM agent_artifacts WHERE id = 'artifact-1'").Scan(&artifact); err != nil {
+		t.Fatal(err)
+	}
+	if output != "旧规划" || artifact != "旧规划" {
+		t.Fatalf("legacy records changed: output=%q artifact=%q", output, artifact)
+	}
+}
+
 func TestOpenDatabaseClassifiesCorruptFileWithoutOverwritingIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "project.db")
 	want := []byte("this is not a sqlite database")

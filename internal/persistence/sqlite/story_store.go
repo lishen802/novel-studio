@@ -34,7 +34,7 @@ func (s *Store) ListOutlineNodes(ctx context.Context) ([]storydomain.OutlineNode
 		WHERE deleted_at IS NULL
 		ORDER BY CASE level
 			WHEN 'book' THEN 0 WHEN 'volume' THEN 1 WHEN 'arc' THEN 2
-			WHEN 'chapter' THEN 3 ELSE 4 END, position, created_at
+			WHEN 'chapter' THEN 3 ELSE 4 END, position, created_at, id
 	`)
 	if err != nil {
 		return nil, databaseOperationError("list outline nodes", err)
@@ -239,7 +239,7 @@ func (s *Store) ListSceneCards(ctx context.Context, chapterID string) ([]storydo
 			goal, conflict, outcome, position, status, created_at, updated_at
 		FROM scene_cards
 		WHERE chapter_id = ? AND deleted_at IS NULL
-		ORDER BY position
+		ORDER BY position, id
 	`, chapterID)
 	if err != nil {
 		return nil, databaseOperationError("list scene cards", err)

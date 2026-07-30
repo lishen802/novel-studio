@@ -27,7 +27,7 @@ func (s *Store) ListWorldRegions(ctx context.Context) ([]worlddomain.WorldRegion
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, parent_id, kind, name, direction, summary, terrain, climate, created_at, updated_at
 		FROM world_regions WHERE deleted_at IS NULL
-		ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, name
+		ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, name, id
 	`)
 	if err != nil {
 		return nil, databaseOperationError("list world regions", err)
@@ -170,7 +170,7 @@ func (s *Store) CreateLocation(ctx context.Context, location worlddomain.Locatio
 func (s *Store) ListLocations(ctx context.Context) ([]worlddomain.Location, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, region_id, kind, name, summary, status, created_at, updated_at
-		FROM locations WHERE deleted_at IS NULL ORDER BY name
+		FROM locations WHERE deleted_at IS NULL ORDER BY name, id
 	`)
 	if err != nil {
 		return nil, databaseOperationError("list locations", err)
@@ -427,7 +427,7 @@ func (s *Store) CreateWorldRule(ctx context.Context, rule worlddomain.WorldRule)
 }
 
 func (s *Store) ListWorldRules(ctx context.Context) ([]worlddomain.WorldRule, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, name, description, scope_type, scope_id, status, created_at, updated_at FROM world_rules WHERE deleted_at IS NULL ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, name, description, scope_type, scope_id, status, created_at, updated_at FROM world_rules WHERE deleted_at IS NULL ORDER BY name, id`)
 	if err != nil {
 		return nil, databaseOperationError("list world rules", err)
 	}
@@ -493,7 +493,7 @@ func (s *Store) CreateForeshadowingHook(ctx context.Context, hook worlddomain.Fo
 }
 
 func (s *Store) ListForeshadowingHooks(ctx context.Context) ([]worlddomain.ForeshadowingHook, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, title, setup, planted_chapter_id, due_chapter_id, resolved_chapter_id, status, notes, created_at, updated_at FROM foreshadowing_hooks WHERE deleted_at IS NULL ORDER BY created_at`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, project_id, title, setup, planted_chapter_id, due_chapter_id, resolved_chapter_id, status, notes, created_at, updated_at FROM foreshadowing_hooks WHERE deleted_at IS NULL ORDER BY created_at, id`)
 	if err != nil {
 		return nil, databaseOperationError("list foreshadowing hooks", err)
 	}

@@ -14,6 +14,7 @@ import (
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
 type ProviderConnectionInput struct {
@@ -445,8 +446,14 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if s.credentials == nil || s.providers == nil {
 		return AgentRunView{}, ErrAgentRuntimeUnavailable
 	}
+	if ctx.Err() != nil {
+		return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+	}
 	run, err := store.AgentRun(ctx, runID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+		}
 		return AgentRunView{}, err
 	}
 	if run.Status != agentdomain.RunQueued {
@@ -454,19 +461,28 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	}
 	run, _ = run.Transition(agentdomain.RunRunning, "", s.clock.Now())
 	if err := store.UpdateAgentRun(ctx, run); err != nil {
+		if ctx.Err() != nil {
+			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+		}
 		return AgentRunView{}, err
 	}
 	failed := func(cause error) (AgentRunView, error) {
 		if errors.Is(cause, context.Canceled) {
-			if cancelErr := s.persistCancelledRun(context.WithoutCancel(ctx), store, run); cancelErr != nil {
+			persistCtx := context.WithoutCancel(ctx)
+			if cancelErr := s.persistCancelledRun(persistCtx, store, run); cancelErr != nil {
 				return AgentRunView{}, cancelErr
 			}
-			run, _ = store.AgentRun(context.WithoutCancel(ctx), run.ID)
+			run, err = store.AgentRun(persistCtx, run.ID)
+			if err != nil {
+				return AgentRunView{}, err
+			}
 			return agentRunView(run), nil
 		}
 		run.ErrorCode = agentRunErrorCode(cause)
 		run, _ = run.Transition(agentdomain.RunFailed, cause.Error(), s.clock.Now())
-		_ = store.UpdateAgentRun(ctx, run)
+		if updateErr := store.UpdateAgentRun(context.WithoutCancel(ctx), run); updateErr != nil {
+			return AgentRunView{}, updateErr
+		}
 		return agentRunView(run), cause
 	}
 
@@ -539,7 +555,12 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			completedAt := s.clock.Now().UTC()
 			step.CompletedAt = &completedAt
 			step.UpdatedAt = completedAt
-			_ = store.UpdateAgentRunStep(ctx, step)
+			if updateErr := store.UpdateAgentRunStep(
+				context.WithoutCancel(ctx),
+				step,
+			); updateErr != nil {
+				return AgentRunView{}, updateErr
+			}
 			run.Steps[index] = step
 			return failed(err)
 		}
@@ -555,7 +576,12 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			completedAt := s.clock.Now().UTC()
 			step.CompletedAt = &completedAt
 			step.UpdatedAt = completedAt
-			_ = store.UpdateAgentRunStep(ctx, step)
+			if updateErr := store.UpdateAgentRunStep(
+				context.WithoutCancel(ctx),
+				step,
+			); updateErr != nil {
+				return AgentRunView{}, updateErr
+			}
 			run.Steps[index] = step
 			return failed(err)
 		}
@@ -650,6 +676,28 @@ func (s *Service) persistCancelledRun(
 		return err
 	}
 	return store.UpdateAgentRun(ctx, cancelled)
+}
+
+func (s *Service) persistCancelledRunByID(
+	ctx context.Context,
+	store ports.AgentStore,
+	runID string,
+) (AgentRunView, error) {
+	run, err := store.AgentRun(ctx, runID)
+	if err != nil {
+		return AgentRunView{}, err
+	}
+	if run.Status == agentdomain.RunCancelled {
+		return agentRunView(run), nil
+	}
+	if err := s.persistCancelledRun(ctx, store, run); err != nil {
+		return AgentRunView{}, err
+	}
+	run, err = store.AgentRun(ctx, runID)
+	if err != nil {
+		return AgentRunView{}, err
+	}
+	return agentRunView(run), nil
 }
 
 func (s *Service) AgentRuns(ctx context.Context) ([]AgentRunView, error) {
@@ -854,7 +902,7 @@ func (s *Service) assembleAuthoringContext(
 		{"relevantRelationships", 1, false, relevantRelationships},
 		{"relevantKnowledge", 1, false, relevantKnowledge},
 		{"worldRules", 2, false, rules},
-		{"foreshadowingHooks", 2, false, hooks},
+		{"foreshadowingHooks", 2, false, unrecoveredForeshadowingHooks(hooks)},
 		{"storyEvents", 2, false, events},
 		{"candidateFacts", 3, false, candidateFacts},
 		{"otherCharacters", 3, false, otherCharacters},
@@ -895,6 +943,19 @@ func (s *Service) assembleAuthoringContext(
 		},
 		Domains: domains,
 	}, charBudget)
+}
+
+func unrecoveredForeshadowingHooks(
+	hooks []worlddomain.ForeshadowingHook,
+) []worlddomain.ForeshadowingHook {
+	result := make([]worlddomain.ForeshadowingHook, 0, len(hooks))
+	for _, hook := range hooks {
+		if hook.Status == worlddomain.HookPlanted ||
+			hook.Status == worlddomain.HookProgressing {
+			result = append(result, hook)
+		}
+	}
+	return result
 }
 
 func agentRequest(

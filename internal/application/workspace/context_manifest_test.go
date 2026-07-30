@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
 func TestBuildContextManifestIsDeterministicAndTracksTrimming(t *testing.T) {
@@ -72,6 +74,41 @@ func TestBuildContextManifestRejectsRequiredContentOverBudget(t *testing.T) {
 	}, 20)
 	if !errors.Is(err, ErrContextBudgetExceeded) {
 		t.Fatalf("expected ErrContextBudgetExceeded, got %v", err)
+	}
+}
+
+func TestContextDomainPreservesSemanticInputOrder(t *testing.T) {
+	values := []struct {
+		ID       string `json:"id"`
+		Position int    `json:"position"`
+	}{
+		{ID: "scene-z", Position: 1},
+		{ID: "scene-a", Position: 2},
+	}
+	domain, err := newContextDomain("scenes", 0, true, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(domain.Items[0], &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != "scene-z" {
+		t.Fatalf("first item = %q, want semantic position order", first.ID)
+	}
+}
+
+func TestUnrecoveredForeshadowingHooksExcludesResolvedAndAbandoned(t *testing.T) {
+	hooks := unrecoveredForeshadowingHooks([]worlddomain.ForeshadowingHook{
+		{ID: "planted", Status: worlddomain.HookPlanted},
+		{ID: "progressing", Status: worlddomain.HookProgressing},
+		{ID: "resolved", Status: worlddomain.HookResolved},
+		{ID: "abandoned", Status: worlddomain.HookAbandoned},
+	})
+	if len(hooks) != 2 || hooks[0].ID != "planted" || hooks[1].ID != "progressing" {
+		t.Fatalf("unexpected active hooks: %#v", hooks)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/application/workspace"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -567,6 +568,28 @@ func TestSafeDesktopErrorExplainsInvalidContinuityData(t *testing.T) {
 		}
 		if safe.Message != "时间线或事实资料包含无效顺序、状态、证据或关联，请检查后重试。" {
 			t.Fatalf("message = %q", safe.Message)
+		}
+	}
+}
+
+func TestSafeDesktopErrorExplainsAgentRuntimeFailures(t *testing.T) {
+	tests := []struct {
+		err     error
+		code    desktopErrorCode
+		message string
+	}{
+		{workspace.ErrTokenBudgetExceeded, errorAgentBudgetExceeded, "智能创作令牌预算不足，请提高预算或降低角色输出上限。"},
+		{workspace.ErrContextBudgetExceeded, errorAgentContextExceeded, "必要的故事上下文超过预算，请提高上下文字符预算。"},
+		{workspace.ErrAgentRunActive, errorAgentRunActive, "智能创作任务正在运行，请先等待完成或取消任务。"},
+		{agentdomain.ErrInvalidBudget, errorValidationFailed, "运行预算必须是大于零的整数。"},
+	}
+	for _, test := range tests {
+		var safe *desktopError
+		if err := safeDesktopError(test.err); !errors.As(err, &safe) {
+			t.Fatalf("safeDesktopError(%v) = %#v", test.err, err)
+		}
+		if safe.Code != test.code || safe.Message != test.message {
+			t.Fatalf("safe error = %#v", safe)
 		}
 	}
 }
