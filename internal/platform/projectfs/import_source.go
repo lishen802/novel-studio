@@ -39,8 +39,11 @@ var (
 	ErrUnsupportedImportEncoding = ports.ErrUnsupportedImportEncoding
 	ErrUnsafeImportSource        = ports.ErrUnsafeImportSource
 	ErrImportArchiveExists       = ports.ErrImportArchiveExists
+	ErrImportArchiveUnsupported  = ports.ErrImportArchiveUnsupported
 	ErrInvalidImportArchivePath  = ports.ErrInvalidImportArchivePath
 )
+
+var errImportArchivePublicationUnsupported = errors.New("atomic import archive publication is unsupported")
 
 type ImportSourceArchive struct{}
 
@@ -416,6 +419,29 @@ func archiveImportSource(
 	archiveName string,
 	raw []byte,
 ) error {
+	return archiveImportSourceWithPublisher(
+		ctx,
+		importsDirectory,
+		archiveName,
+		raw,
+		commitImportArchive,
+	)
+}
+
+type importArchivePublisher func(
+	importsDirectory *importArchiveDirectory,
+	temporary *os.File,
+	temporaryName string,
+	archiveName string,
+) error
+
+func archiveImportSourceWithPublisher(
+	ctx context.Context,
+	importsDirectory *importArchiveDirectory,
+	archiveName string,
+	raw []byte,
+	publish importArchivePublisher,
+) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -443,7 +469,7 @@ func archiveImportSource(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := commitImportArchive(
+	if err := publish(
 		importsDirectory,
 		temporary,
 		temporaryName,
@@ -451,6 +477,9 @@ func archiveImportSource(
 	); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return ErrImportArchiveExists
+		}
+		if errors.Is(err, errImportArchivePublicationUnsupported) {
+			return ErrImportArchiveUnsupported
 		}
 		return importArchiveFilesystemError("commit import archive", err)
 	}
@@ -463,46 +492,12 @@ func commitImportArchive(
 	temporaryName string,
 	archiveName string,
 ) error {
-	err := commitOpenImportArchiveNoReplace(
+	return commitOpenImportArchiveNoReplace(
 		importsDirectory.handle,
 		temporary,
 		temporaryName,
 		archiveName,
 	)
-	if err == nil || errors.Is(err, fs.ErrExist) {
-		return err
-	}
-	return copyOpenImportArchiveNoReplace(importsDirectory, temporary, archiveName)
-}
-
-func copyOpenImportArchiveNoReplace(
-	importsDirectory *importArchiveDirectory,
-	temporary *os.File,
-	archiveName string,
-) error {
-	target, err := openImportArchiveTemporary(importsDirectory, archiveName)
-	if err != nil {
-		return err
-	}
-	removeTarget := true
-	defer func() {
-		if removeTarget {
-			_ = removeImportTemporaryNameIfSame(importsDirectory, target, archiveName)
-		}
-		_ = target.Close()
-	}()
-
-	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	if _, err := io.Copy(target, temporary); err != nil {
-		return err
-	}
-	if err := target.Sync(); err != nil {
-		return err
-	}
-	removeTarget = false
-	return nil
 }
 
 func createImportArchiveTemporary(importsDirectory *importArchiveDirectory) (*os.File, string, error) {
@@ -569,7 +564,7 @@ func cleanupOrphanImportTemporaryFiles(importsDirectory *importArchiveDirectory)
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("%w: inspect orphan import archive: %v", ErrInvalidImportArchivePath, err)
+			continue
 		}
 		if info.IsDir() {
 			continue
@@ -579,7 +574,7 @@ func cleanupOrphanImportTemporaryFiles(importsDirectory *importArchiveDirectory)
 		}
 		if err := importsDirectory.root.Remove(entry.Name()); err != nil &&
 			!errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("%w: remove orphan import archive: %v", ErrInvalidImportArchivePath, err)
+			continue
 		}
 	}
 	return nil

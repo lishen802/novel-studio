@@ -14,6 +14,7 @@ var (
 	ErrUnsupportedImportEncoding = errors.New("unsupported import source encoding")
 	ErrUnsafeImportSource        = errors.New("unsafe import source")
 	ErrImportArchiveExists       = errors.New("import source archive already exists")
+	ErrImportArchiveUnsupported  = errors.New("atomic import source publication is unsupported")
 	ErrInvalidImportArchivePath  = errors.New("invalid import archive path")
 )
 

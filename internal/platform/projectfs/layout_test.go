@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -209,5 +210,60 @@ func TestOpenLayoutLeavesRecentOwnedImportTemporaryFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(layout.Imports, recentName)); err != nil {
 		t.Fatalf("recent import temporary was removed: %v", err)
+	}
+}
+
+func TestOpenLayoutIgnoresFailureToRemoveOneOldImportTemporary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory mode bits do not reliably deny deletion on Windows")
+	}
+	layout, err := NewLayout(t.TempDir(), "只读旧项目")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	orphanName := ".import-source-" + strings.Repeat("d", 32)
+	orphanPath := filepath.Join(layout.Imports, orphanName)
+	if err := os.WriteFile(orphanPath, []byte("orphan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-importTemporaryOrphanAge - time.Hour)
+	if err := os.Chtimes(orphanPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(layout.Imports, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(layout.Imports, 0o700)
+	})
+
+	if _, err := OpenLayout(layout.Root); err != nil {
+		t.Fatalf("OpenLayout failed because one orphan could not be removed: %v", err)
+	}
+	if _, err := os.Stat(orphanPath); err != nil {
+		t.Fatalf("unremovable orphan should remain for a later cleanup: %v", err)
+	}
+}
+
+func TestOpenLayoutStillRejectsUnusableImportsDirectory(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "损坏的旧项目")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(layout.Imports); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.Imports, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := OpenLayout(layout.Root); err == nil {
+		t.Fatal("OpenLayout accepted a non-directory imports path")
 	}
 }

@@ -3,6 +3,7 @@
 package projectfs
 
 import (
+	"errors"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -21,10 +22,14 @@ func commitOpenImportArchiveNoReplace(
 	_ string,
 	targetName string,
 ) error {
-	return unix.Fclonefileat(
+	err := unix.Fclonefileat(
 		int(temporary.Fd()),
 		int(directory.Fd()),
 		targetName,
 		0,
 	)
+	if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EXDEV) {
+		return errImportArchivePublicationUnsupported
+	}
+	return err
 }

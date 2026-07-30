@@ -117,6 +117,7 @@ func TestImportSourceErrorsAreStablePortContracts(t *testing.T) {
 		{adapter: ErrUnsupportedImportEncoding, port: ports.ErrUnsupportedImportEncoding},
 		{adapter: ErrUnsafeImportSource, port: ports.ErrUnsafeImportSource},
 		{adapter: ErrImportArchiveExists, port: ports.ErrImportArchiveExists},
+		{adapter: ErrImportArchiveUnsupported, port: ports.ErrImportArchiveUnsupported},
 		{adapter: ErrInvalidImportArchivePath, port: ports.ErrInvalidImportArchivePath},
 	}
 	for _, pair := range pairs {
@@ -564,42 +565,48 @@ func TestCommitImportArchiveUsesTheStillOpenTemporaryObject(t *testing.T) {
 	}
 }
 
-func TestCopyImportArchiveFallbackUsesTheStillOpenTemporaryObject(t *testing.T) {
+func TestUnsupportedAtomicImportPublicationLeavesNoFinalArchiveOrCollision(t *testing.T) {
 	projectPackage := createTestPackage(t)
 	importsDirectory, err := openImportsDirectory(projectPackage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer importsDirectory.Close()
-	temporary, temporaryName, err := createImportArchiveTemporary(importsDirectory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer temporary.Close()
-	if _, err := temporary.Write([]byte("verified-open-object")); err != nil {
-		t.Fatal(err)
-	}
-	if err := temporary.Sync(); err != nil {
-		t.Fatal(err)
+	unsupportedPublisher := func(
+		*importArchiveDirectory,
+		*os.File,
+		string,
+		string,
+	) error {
+		return errImportArchivePublicationUnsupported
 	}
 
-	if err := os.Rename(
-		filepath.Join(projectPackage.Imports, temporaryName),
-		filepath.Join(projectPackage.Imports, ".detached-copy-source"),
-	); err != nil {
-		t.Fatal(err)
-	}
-	writeTestFile(t, filepath.Join(projectPackage.Imports, temporaryName), []byte("replacement"))
-
-	if err := copyOpenImportArchiveNoReplace(importsDirectory, temporary, "job.txt"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(filepath.Join(projectPackage.Imports, "job.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "verified-open-object" {
-		t.Fatalf("archive contents = %q, want still-open temporary object", got)
+	for attempt := 1; attempt <= 2; attempt++ {
+		err := archiveImportSourceWithPublisher(
+			context.Background(),
+			importsDirectory,
+			"job.txt",
+			[]byte("verified-open-object"),
+			unsupportedPublisher,
+		)
+		if !errors.Is(err, ports.ErrImportArchiveUnsupported) {
+			t.Fatalf("attempt %d error = %v, want ports.ErrImportArchiveUnsupported", attempt, err)
+		}
+		if errors.Is(err, ports.ErrImportArchiveExists) {
+			t.Fatalf("attempt %d was incorrectly blocked by a collision", attempt)
+		}
+		if _, err := os.Stat(filepath.Join(projectPackage.Imports, "job.txt")); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("attempt %d left final archive: %v", attempt, err)
+		}
+		entries, err := os.ReadDir(projectPackage.Imports)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if isOwnedImportTemporaryName(entry.Name()) {
+				t.Fatalf("attempt %d left active temporary %q", attempt, entry.Name())
+			}
+		}
 	}
 }
 

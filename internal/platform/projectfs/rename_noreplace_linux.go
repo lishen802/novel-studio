@@ -31,14 +31,26 @@ func commitOpenImportArchiveNoReplace(
 		unix.AT_EMPTY_PATH,
 	)
 	if err == nil || !errors.Is(err, unix.ENOENT) {
-		return err
+		return normalizeLinuxImportPublicationError(err)
 	}
 
-	return unix.Linkat(
+	err = unix.Linkat(
 		unix.AT_FDCWD,
 		fmt.Sprintf("/proc/self/fd/%d", temporary.Fd()),
 		int(directory.Fd()),
 		targetName,
 		unix.AT_SYMLINK_FOLLOW,
 	)
+	return normalizeLinuxImportPublicationError(err)
+}
+
+func normalizeLinuxImportPublicationError(err error) error {
+	if errors.Is(err, unix.EPERM) ||
+		errors.Is(err, unix.EOPNOTSUPP) ||
+		errors.Is(err, unix.EXDEV) ||
+		errors.Is(err, unix.ENOSYS) ||
+		errors.Is(err, unix.ENOENT) {
+		return errImportArchivePublicationUnsupported
+	}
+	return err
 }

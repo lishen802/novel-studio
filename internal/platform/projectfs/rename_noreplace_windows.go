@@ -121,5 +121,9 @@ func normalizeWindowsRenameError(err error) error {
 		errors.Is(err, syscall.ERROR_FILE_EXISTS) {
 		return fs.ErrExist
 	}
+	if errors.Is(err, windows.ERROR_NOT_SUPPORTED) ||
+		errors.Is(err, windows.ERROR_INVALID_FUNCTION) {
+		return errImportArchivePublicationUnsupported
+	}
 	return err
 }
