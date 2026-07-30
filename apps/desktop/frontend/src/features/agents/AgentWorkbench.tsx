@@ -1,4 +1,14 @@
-import { Bot, CheckCircle2, KeyRound, Play, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Bot,
+  CheckCircle2,
+  Gauge,
+  KeyRound,
+  Play,
+  RotateCcw,
+  ShieldCheck,
+  StopCircle,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import type {
   AgentProfileInput,
@@ -35,6 +45,8 @@ export function AgentWorkbench({
   const [connections, setConnections] = useState<ProviderConnectionView[]>([]);
   const [profiles, setProfiles] = useState<AgentProfileView[]>([]);
   const [runs, setRuns] = useState<AgentRunView[]>([]);
+  const [maxRunTokens, setMaxRunTokens] = useState(30000);
+  const [maxContextChars, setMaxContextChars] = useState(120000);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ProviderKind>("openai");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
@@ -46,13 +58,16 @@ export function AgentWorkbench({
   const [error, setError] = useState("");
 
   const reload = async () => {
-    const [nextConnections, nextProfiles, nextRuns] = await Promise.all([
+    const [nextConnections, nextProfiles, nextSettings, nextRuns] = await Promise.all([
       client.providerConnections(),
       client.agentProfiles(),
+      client.agentRuntimeSettings(),
       client.agentRuns(),
     ]);
     setConnections(nextConnections);
     setProfiles(nextProfiles);
+    setMaxRunTokens(nextSettings.maxRunTokens);
+    setMaxContextChars(nextSettings.maxContextChars);
     setRuns(nextRuns);
   };
 
@@ -115,6 +130,10 @@ export function AgentWorkbench({
     setNotice("正在执行规划、写作与连续性审阅…");
     try {
       const queued = await client.createChapterAgentRun(chapterId, prompt.trim());
+      setRuns((current) => [
+        queued,
+        ...current.filter((item) => item.id !== queued.id),
+      ]);
       const completed = await client.executeAgentRun(queued.id);
       setRuns((current) => [
         completed,
@@ -127,6 +146,64 @@ export function AgentWorkbench({
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "智能创作执行失败");
+      await reload().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveRuntimeSettings = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await client.saveAgentRuntimeSettings({
+        maxRunTokens,
+        maxContextChars,
+      });
+      setMaxRunTokens(saved.maxRunTokens);
+      setMaxContextChars(saved.maxContextChars);
+      setNotice("运行预算已保存，新任务将使用此配置");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "保存运行预算失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelRun = async (run: AgentRunView) => {
+    setError("");
+    try {
+      await client.cancelAgentRun(run.id);
+      setNotice("已请求取消智能创作任务");
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "取消任务失败");
+    }
+  };
+
+  const retryRun = async (run: AgentRunView) => {
+    setBusy(true);
+    setError("");
+    setNotice("正在重新执行智能创作任务…");
+    try {
+      const queued = await client.retryAgentRun(run.id);
+      setRuns((current) => [
+        queued,
+        ...current.filter((item) => item.id !== queued.id),
+      ]);
+      const completed = await client.executeAgentRun(queued.id);
+      setRuns((current) => [
+        completed,
+        ...current.filter((item) => item.id !== completed.id),
+      ]);
+      setNotice(
+        completed.changeSetId
+          ? "草稿已进入候选变更"
+          : `任务状态：${completed.status}`,
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "重试任务失败");
       await reload().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -220,6 +297,34 @@ export function AgentWorkbench({
         </div>
       </section>
 
+      <section className="agent-panel agent-budget-panel">
+        <h3><Gauge size={18} />运行预算</h3>
+        <form className="agent-budget-form" onSubmit={saveRuntimeSettings}>
+          <label>
+            单次任务令牌预算
+            <input
+              type="number"
+              min={1}
+              value={maxRunTokens}
+              onChange={(event) => setMaxRunTokens(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            上下文字符预算
+            <input
+              type="number"
+              min={1}
+              value={maxContextChars}
+              onChange={(event) => setMaxContextChars(Number(event.target.value))}
+            />
+          </label>
+          <button className="primary-action" disabled={busy || maxRunTokens < 1 || maxContextChars < 1}>
+            保存运行预算
+          </button>
+        </form>
+        <p className="agent-hint">预算会固化到新任务中；执行时优先保留已确认事实、目标章节大纲与场景。</p>
+      </section>
+
       <section className="agent-panel agent-run-panel">
         <h3><Play size={18} />章节智能创作</h3>
         <div className="agent-run-form">
@@ -241,8 +346,30 @@ export function AgentWorkbench({
           {runs.map((run) => (
             <article key={run.id}>
               <CheckCircle2 size={18} />
-              <div><strong>{chapters.find((chapter) => chapter.id === run.chapterId)?.title ?? "章节任务"}</strong><span>{run.status} · {run.steps.map((step) => `${step.role}:${step.status}`).join(" / ")}</span></div>
-              {run.changeSetId && <button type="button" onClick={onOpenChanges}>审阅变更</button>}
+              <div>
+                <strong>{chapters.find((chapter) => chapter.id === run.chapterId)?.title ?? "章节任务"}</strong>
+                <span>{run.status} · {run.steps.map((step) => `${step.role}:${step.status}`).join(" / ")}</span>
+                <span>
+                  令牌 {run.inputTokens + run.outputTokens}/{run.tokenBudget}
+                  {" · "}上下文 {run.contextChars}/{run.contextCharBudget}
+                  {run.contextTruncated && " · 上下文已裁剪"}
+                </span>
+              </div>
+              <div className="agent-run-actions">
+                {(run.status === "queued" || run.status === "running") && (
+                  <button type="button" onClick={() => void cancelRun(run)}>
+                    <StopCircle size={15} />取消任务
+                  </button>
+                )}
+                {(["failed", "cancelled", "recoverable"] as const).includes(
+                  run.status as "failed" | "cancelled" | "recoverable",
+                ) && (
+                  <button type="button" disabled={busy} onClick={() => void retryRun(run)}>
+                    <RotateCcw size={15} />重试任务
+                  </button>
+                )}
+                {run.changeSetId && <button type="button" onClick={onOpenChanges}>审阅变更</button>}
+              </div>
             </article>
           ))}
         </div>

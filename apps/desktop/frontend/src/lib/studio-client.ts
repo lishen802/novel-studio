@@ -544,6 +544,13 @@ export type AgentProfileView = AgentProfileInput & {
   id: string;
   updatedAt: string;
 };
+export type AgentRuntimeSettingsInput = {
+  maxRunTokens: number;
+  maxContextChars: number;
+};
+export type AgentRuntimeSettingsView = AgentRuntimeSettingsInput & {
+  updatedAt: string;
+};
 export type AgentRunStatus =
   | "queued"
   | "running"
@@ -559,6 +566,9 @@ export type AgentRunStepView = {
   output: string;
   errorCode: string;
   errorMessage: string;
+  providerRequestId: string;
+  inputTokens: number;
+  outputTokens: number;
 };
 export type AgentRunView = {
   id: string;
@@ -569,6 +579,12 @@ export type AgentRunView = {
   errorMessage: string;
   changeSetId: string;
   retryOf: string;
+  tokenBudget: number;
+  contextCharBudget: number;
+  inputTokens: number;
+  outputTokens: number;
+  contextChars: number;
+  contextTruncated: boolean;
   steps: AgentRunStepView[];
   createdAt: string;
   updatedAt: string;
@@ -723,11 +739,17 @@ export interface StudioClient {
   testProviderConnection(id: string): Promise<void>;
   agentProfiles(): Promise<AgentProfileView[]>;
   saveAgentProfile(input: AgentProfileInput): Promise<AgentProfileView>;
+  agentRuntimeSettings(): Promise<AgentRuntimeSettingsView>;
+  saveAgentRuntimeSettings(
+    input: AgentRuntimeSettingsInput,
+  ): Promise<AgentRuntimeSettingsView>;
   createChapterAgentRun(
     chapterId: string,
     prompt: string,
   ): Promise<AgentRunView>;
   executeAgentRun(id: string): Promise<AgentRunView>;
+  cancelAgentRun(id: string): Promise<void>;
+  retryAgentRun(id: string): Promise<AgentRunView>;
   agentRuns(): Promise<AgentRunView[]>;
   agentRun(id: string): Promise<AgentRunView>;
   onBeforeClose(handler: () => Promise<void>): () => void;

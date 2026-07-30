@@ -76,6 +76,8 @@ import {
   type ProviderConnectionView,
   type AgentProfileInput,
   type AgentProfileView,
+  type AgentRuntimeSettingsInput,
+  type AgentRuntimeSettingsView,
   type AgentRunView,
 } from "./studio-client";
 
@@ -227,6 +229,11 @@ const agentProfileSchema = z.object({
   enabled: z.boolean(),
   updatedAt: z.string(),
 });
+const agentRuntimeSettingsSchema = z.object({
+  maxRunTokens: z.number(),
+  maxContextChars: z.number(),
+  updatedAt: z.string(),
+});
 const agentRunStepSchema = z.object({
   id: z.string(),
   role: z.enum(["planner", "writer", "continuity_reviewer"]),
@@ -235,6 +242,9 @@ const agentRunStepSchema = z.object({
   output: z.string(),
   errorCode: z.string(),
   errorMessage: z.string(),
+  providerRequestId: z.string(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
 });
 const agentRunSchema = z.object({
   id: z.string(),
@@ -245,6 +255,12 @@ const agentRunSchema = z.object({
   errorMessage: z.string(),
   changeSetId: z.string(),
   retryOf: z.string(),
+  tokenBudget: z.number(),
+  contextCharBudget: z.number(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  contextChars: z.number(),
+  contextTruncated: z.boolean(),
   steps: z.array(agentRunStepSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -691,8 +707,12 @@ type NativeDesktopAPI = {
   TestProviderConnection(id: string): Promise<void>;
   AgentProfiles(): Promise<unknown>;
   SaveAgentProfile(input: AgentProfileInput): Promise<unknown>;
+  AgentRuntimeSettings(): Promise<unknown>;
+  SaveAgentRuntimeSettings(input: AgentRuntimeSettingsInput): Promise<unknown>;
   CreateChapterAgentRun(chapterId: string, prompt: string): Promise<unknown>;
   ExecuteAgentRun(id: string): Promise<unknown>;
+  CancelAgentRun(id: string): Promise<void>;
+  RetryAgentRun(id: string): Promise<unknown>;
   AgentRuns(): Promise<unknown>;
   AgentRun(id: string): Promise<unknown>;
   CompleteClose(): Promise<void>;
@@ -762,6 +782,8 @@ const agentProfileView = (value: unknown): AgentProfileView =>
   agentProfileSchema.parse(value);
 const agentProfileViews = (value: unknown): AgentProfileView[] =>
   z.array(agentProfileSchema).parse(value);
+const agentRuntimeSettingsView = (value: unknown): AgentRuntimeSettingsView =>
+  agentRuntimeSettingsSchema.parse(value);
 const agentRunView = (value: unknown): AgentRunView =>
   agentRunSchema.parse(value);
 const agentRunViews = (value: unknown): AgentRunView[] =>
@@ -1249,6 +1271,16 @@ export const wailsStudioClient: StudioClient = {
       await safeCall(() => nativeAPI().SaveAgentProfile(input)),
     );
   },
+  async agentRuntimeSettings() {
+    return agentRuntimeSettingsView(
+      await safeCall(() => nativeAPI().AgentRuntimeSettings()),
+    );
+  },
+  async saveAgentRuntimeSettings(input) {
+    return agentRuntimeSettingsView(
+      await safeCall(() => nativeAPI().SaveAgentRuntimeSettings(input)),
+    );
+  },
   async createChapterAgentRun(chapterId, prompt) {
     return agentRunView(
       await safeCall(() => nativeAPI().CreateChapterAgentRun(chapterId, prompt)),
@@ -1256,6 +1288,12 @@ export const wailsStudioClient: StudioClient = {
   },
   async executeAgentRun(id) {
     return agentRunView(await safeCall(() => nativeAPI().ExecuteAgentRun(id)));
+  },
+  async cancelAgentRun(id) {
+    await safeCall(() => nativeAPI().CancelAgentRun(id));
+  },
+  async retryAgentRun(id) {
+    return agentRunView(await safeCall(() => nativeAPI().RetryAgentRun(id)));
   },
   async agentRuns() {
     return agentRunViews(await safeCall(() => nativeAPI().AgentRuns()));

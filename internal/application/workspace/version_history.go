@@ -131,6 +131,10 @@ func (s *Service) RestoreSnapshot(
 	ctx context.Context,
 	id string,
 ) (SnapshotRestoreView, error) {
+	if err := s.beginVersionOperation(); err != nil {
+		return SnapshotRestoreView{}, err
+	}
+	defer s.endVersionOperation()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil {

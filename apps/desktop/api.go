@@ -105,8 +105,12 @@ type WorkspaceUseCases interface {
 	TestProviderConnection(context.Context, string) error
 	AgentProfiles(context.Context) ([]workspace.AgentProfileView, error)
 	SaveAgentProfile(context.Context, workspace.AgentProfileInput) (workspace.AgentProfileView, error)
+	AgentRuntimeSettings(context.Context) (workspace.AgentRuntimeSettingsView, error)
+	SaveAgentRuntimeSettings(context.Context, workspace.AgentRuntimeSettingsInput) (workspace.AgentRuntimeSettingsView, error)
 	CreateChapterAgentRun(context.Context, string, string) (workspace.AgentRunView, error)
 	ExecuteAgentRun(context.Context, string) (workspace.AgentRunView, error)
+	CancelAgentRun(context.Context, string) error
+	RetryAgentRun(context.Context, string) (workspace.AgentRunView, error)
 	AgentRuns(context.Context) ([]workspace.AgentRunView, error)
 	AgentRun(context.Context, string) (workspace.AgentRunView, error)
 	Close() error
@@ -172,12 +176,28 @@ func (a *DesktopAPI) SaveAgentProfile(input workspace.AgentProfileInput) (worksp
 	return safeResult(a.workspace.SaveAgentProfile(a.ctx, input))
 }
 
+func (a *DesktopAPI) AgentRuntimeSettings() (workspace.AgentRuntimeSettingsView, error) {
+	return safeResult(a.workspace.AgentRuntimeSettings(a.ctx))
+}
+
+func (a *DesktopAPI) SaveAgentRuntimeSettings(input workspace.AgentRuntimeSettingsInput) (workspace.AgentRuntimeSettingsView, error) {
+	return safeResult(a.workspace.SaveAgentRuntimeSettings(a.ctx, input))
+}
+
 func (a *DesktopAPI) CreateChapterAgentRun(chapterID, prompt string) (workspace.AgentRunView, error) {
 	return safeResult(a.workspace.CreateChapterAgentRun(a.ctx, chapterID, prompt))
 }
 
 func (a *DesktopAPI) ExecuteAgentRun(id string) (workspace.AgentRunView, error) {
 	return safeResult(a.workspace.ExecuteAgentRun(a.ctx, id))
+}
+
+func (a *DesktopAPI) CancelAgentRun(id string) error {
+	return safeDesktopError(a.workspace.CancelAgentRun(a.ctx, id))
+}
+
+func (a *DesktopAPI) RetryAgentRun(id string) (workspace.AgentRunView, error) {
+	return safeResult(a.workspace.RetryAgentRun(a.ctx, id))
 }
 
 func (a *DesktopAPI) AgentRuns() ([]workspace.AgentRunView, error) {

@@ -16,9 +16,42 @@ var (
 	ErrInvalidRole            = errors.New("invalid agent role")
 	ErrInvalidProfile         = errors.New("invalid agent profile")
 	ErrInvalidRun             = errors.New("invalid agent run")
+	ErrInvalidBudget          = errors.New("invalid agent runtime budget")
 	ErrInvalidTransition      = errors.New("invalid agent run status transition")
 	ErrReviewerNotIndependent = errors.New("continuity reviewer must use a different provider connection or model from the writer")
 )
+
+const (
+	DefaultMaxRunTokens    = 30000
+	DefaultMaxContextChars = 120000
+)
+
+type RuntimeSettings struct {
+	ProjectID       string
+	MaxRunTokens    int
+	MaxContextChars int
+	UpdatedAt       time.Time
+}
+
+func NewRuntimeSettings(
+	projectID string,
+	maxRunTokens, maxContextChars int,
+	now time.Time,
+) (RuntimeSettings, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return RuntimeSettings{}, ErrBlankValue
+	}
+	if maxRunTokens < 1 || maxContextChars < 1 {
+		return RuntimeSettings{}, ErrInvalidBudget
+	}
+	return RuntimeSettings{
+		ProjectID:       projectID,
+		MaxRunTokens:    maxRunTokens,
+		MaxContextChars: maxContextChars,
+		UpdatedAt:       now.UTC(),
+	}, nil
+}
 
 type ProviderKind string
 
@@ -198,19 +231,22 @@ type RunStepSpec struct {
 }
 
 type AgentRunStep struct {
-	ID           string
-	RunID        string
-	Role         AgentRole
-	ProfileID    string
-	Position     int
-	Status       StepStatus
-	Output       string
-	ErrorCode    string
-	ErrorMessage string
-	StartedAt    *time.Time
-	CompletedAt  *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                string
+	RunID             string
+	Role              AgentRole
+	ProfileID         string
+	Position          int
+	Status            StepStatus
+	Output            string
+	ErrorCode         string
+	ErrorMessage      string
+	ProviderRequestID string
+	InputTokens       int
+	OutputTokens      int
+	StartedAt         *time.Time
+	CompletedAt       *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type AgentRun struct {
@@ -224,6 +260,12 @@ type AgentRun struct {
 	ErrorMessage        string
 	ChangeSetID         string
 	RetryOf             string
+	TokenBudget         int
+	ContextCharBudget   int
+	InputTokens         int
+	OutputTokens        int
+	ContextChars        int
+	ContextTruncated    bool
 	Steps               []AgentRunStep
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -273,10 +315,39 @@ func NewChapterDraftRun(
 		ChapterBaseRevision: chapterBaseRevision,
 		Prompt:              prompt,
 		Status:              RunQueued,
+		TokenBudget:         DefaultMaxRunTokens,
+		ContextCharBudget:   DefaultMaxContextChars,
 		Steps:               steps,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}, nil
+}
+
+func (run AgentRun) WithBudgets(tokenBudget, contextCharBudget int) (AgentRun, error) {
+	if tokenBudget < 1 || contextCharBudget < 1 {
+		return AgentRun{}, ErrInvalidBudget
+	}
+	run.TokenBudget = tokenBudget
+	run.ContextCharBudget = contextCharBudget
+	return run, nil
+}
+
+func (run AgentRun) RecordUsage(inputTokens, outputTokens int) AgentRun {
+	if inputTokens > 0 {
+		run.InputTokens += inputTokens
+	}
+	if outputTokens > 0 {
+		run.OutputTokens += outputTokens
+	}
+	return run
+}
+
+func (run AgentRun) RemainingTokens() int {
+	remaining := run.TokenBudget - run.InputTokens - run.OutputTokens
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func (run AgentRun) Transition(status RunStatus, message string, now time.Time) (AgentRun, error) {

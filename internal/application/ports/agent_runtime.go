@@ -45,6 +45,8 @@ type ModelProviderFactory interface {
 }
 
 type AgentStore interface {
+	SaveAgentRuntimeSettings(ctx context.Context, settings agentdomain.RuntimeSettings) error
+	AgentRuntimeSettings(ctx context.Context, projectID string) (agentdomain.RuntimeSettings, error)
 	UpsertProviderConnection(ctx context.Context, connection agentdomain.ProviderConnection) error
 	ListProviderConnections(ctx context.Context) ([]agentdomain.ProviderConnection, error)
 	ProviderConnection(ctx context.Context, id string) (agentdomain.ProviderConnection, error)

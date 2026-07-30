@@ -141,6 +141,10 @@ func (s *Service) SwitchBranch(
 	if err := s.license.Require(ctx, license.EditManuscript); err != nil {
 		return BranchSwitchView{}, err
 	}
+	if err := s.beginVersionOperation(); err != nil {
+		return BranchSwitchView{}, err
+	}
+	defer s.endVersionOperation()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil {
@@ -275,6 +279,10 @@ func (s *Service) ConfirmBranchMerge(
 	if err := s.license.Require(ctx, license.EditManuscript); err != nil {
 		return BranchSwitchView{}, err
 	}
+	if err := s.beginVersionOperation(); err != nil {
+		return BranchSwitchView{}, err
+	}
+	defer s.endVersionOperation()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil {

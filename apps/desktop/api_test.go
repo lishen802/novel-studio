@@ -1171,11 +1171,23 @@ func (f *fakeWorkspace) AgentProfiles(context.Context) ([]workspace.AgentProfile
 func (f *fakeWorkspace) SaveAgentProfile(_ context.Context, input workspace.AgentProfileInput) (workspace.AgentProfileView, error) {
 	return workspace.AgentProfileView{Role: input.Role, ConnectionID: input.ConnectionID, Model: input.Model}, nil
 }
+func (f *fakeWorkspace) AgentRuntimeSettings(context.Context) (workspace.AgentRuntimeSettingsView, error) {
+	return workspace.AgentRuntimeSettingsView{MaxRunTokens: 30000, MaxContextChars: 120000}, nil
+}
+func (f *fakeWorkspace) SaveAgentRuntimeSettings(_ context.Context, input workspace.AgentRuntimeSettingsInput) (workspace.AgentRuntimeSettingsView, error) {
+	return workspace.AgentRuntimeSettingsView{MaxRunTokens: input.MaxRunTokens, MaxContextChars: input.MaxContextChars}, nil
+}
 func (f *fakeWorkspace) CreateChapterAgentRun(_ context.Context, chapterID, prompt string) (workspace.AgentRunView, error) {
 	return workspace.AgentRunView{ChapterID: chapterID, Prompt: prompt, Status: "queued"}, nil
 }
 func (f *fakeWorkspace) ExecuteAgentRun(context.Context, string) (workspace.AgentRunView, error) {
 	return workspace.AgentRunView{Status: "completed"}, nil
+}
+func (f *fakeWorkspace) CancelAgentRun(context.Context, string) error {
+	return nil
+}
+func (f *fakeWorkspace) RetryAgentRun(context.Context, string) (workspace.AgentRunView, error) {
+	return workspace.AgentRunView{Status: "queued"}, nil
 }
 func (f *fakeWorkspace) AgentRuns(context.Context) ([]workspace.AgentRunView, error) {
 	return nil, nil

@@ -145,3 +145,49 @@ func TestValidateHeterogeneousReviewer(t *testing.T) {
 		t.Fatalf("different model should satisfy heterogeneous review: %v", err)
 	}
 }
+
+func TestNewRuntimeSettingsValidatesBudgets(t *testing.T) {
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	settings, err := NewRuntimeSettings("project-1", 30000, 120000, now)
+	if err != nil {
+		t.Fatalf("NewRuntimeSettings() error = %v", err)
+	}
+	if settings.MaxRunTokens != 30000 || settings.MaxContextChars != 120000 {
+		t.Fatalf("unexpected settings: %#v", settings)
+	}
+	if _, err := NewRuntimeSettings("project-1", 0, 120000, now); !errors.Is(err, ErrInvalidBudget) {
+		t.Fatalf("expected ErrInvalidBudget, got %v", err)
+	}
+}
+
+func TestRunRecordsUsageAndBudgetSnapshot(t *testing.T) {
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	run, err := NewChapterDraftRun(
+		"run-1",
+		"project-1",
+		"chapter-1",
+		1,
+		"prompt",
+		[]RunStepSpec{
+			{ID: "step-1", Role: RolePlanner, ProfileID: "planner"},
+			{ID: "step-2", Role: RoleWriter, ProfileID: "writer"},
+			{ID: "step-3", Role: RoleContinuityReviewer, ProfileID: "reviewer"},
+		},
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = run.WithBudgets(8000, 64000)
+	if err != nil {
+		t.Fatalf("WithBudgets() error = %v", err)
+	}
+	run = run.RecordUsage(1200, 800)
+	if run.TokenBudget != 8000 || run.ContextCharBudget != 64000 ||
+		run.InputTokens != 1200 || run.OutputTokens != 800 {
+		t.Fatalf("unexpected run usage: %#v", run)
+	}
+	if run.RemainingTokens() != 6000 {
+		t.Fatalf("RemainingTokens() = %d", run.RemainingTokens())
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 )
 
@@ -52,28 +53,95 @@ type AgentProfileView struct {
 	UpdatedAt       string  `json:"updatedAt"`
 }
 
+type AgentRuntimeSettingsInput struct {
+	MaxRunTokens    int `json:"maxRunTokens"`
+	MaxContextChars int `json:"maxContextChars"`
+}
+
+type AgentRuntimeSettingsView struct {
+	MaxRunTokens    int    `json:"maxRunTokens"`
+	MaxContextChars int    `json:"maxContextChars"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
 type AgentRunStepView struct {
-	ID           string `json:"id"`
-	Role         string `json:"role"`
-	Position     int    `json:"position"`
-	Status       string `json:"status"`
-	Output       string `json:"output"`
-	ErrorCode    string `json:"errorCode"`
-	ErrorMessage string `json:"errorMessage"`
+	ID                string `json:"id"`
+	Role              string `json:"role"`
+	Position          int    `json:"position"`
+	Status            string `json:"status"`
+	Output            string `json:"output"`
+	ErrorCode         string `json:"errorCode"`
+	ErrorMessage      string `json:"errorMessage"`
+	ProviderRequestID string `json:"providerRequestId"`
+	InputTokens       int    `json:"inputTokens"`
+	OutputTokens      int    `json:"outputTokens"`
 }
 
 type AgentRunView struct {
-	ID           string             `json:"id"`
-	ChapterID    string             `json:"chapterId"`
-	Prompt       string             `json:"prompt"`
-	Status       string             `json:"status"`
-	ErrorCode    string             `json:"errorCode"`
-	ErrorMessage string             `json:"errorMessage"`
-	ChangeSetID  string             `json:"changeSetId"`
-	RetryOf      string             `json:"retryOf"`
-	Steps        []AgentRunStepView `json:"steps"`
-	CreatedAt    string             `json:"createdAt"`
-	UpdatedAt    string             `json:"updatedAt"`
+	ID                string             `json:"id"`
+	ChapterID         string             `json:"chapterId"`
+	Prompt            string             `json:"prompt"`
+	Status            string             `json:"status"`
+	ErrorCode         string             `json:"errorCode"`
+	ErrorMessage      string             `json:"errorMessage"`
+	ChangeSetID       string             `json:"changeSetId"`
+	RetryOf           string             `json:"retryOf"`
+	TokenBudget       int                `json:"tokenBudget"`
+	ContextCharBudget int                `json:"contextCharBudget"`
+	InputTokens       int                `json:"inputTokens"`
+	OutputTokens      int                `json:"outputTokens"`
+	ContextChars      int                `json:"contextChars"`
+	ContextTruncated  bool               `json:"contextTruncated"`
+	Steps             []AgentRunStepView `json:"steps"`
+	CreatedAt         string             `json:"createdAt"`
+	UpdatedAt         string             `json:"updatedAt"`
+}
+
+func (s *Service) AgentRuntimeSettings(ctx context.Context) (AgentRuntimeSettingsView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	store, err := s.agentStoreLocked()
+	if err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	project, err := s.active.store.Project(ctx)
+	if err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	settings, err := store.AgentRuntimeSettings(ctx, project.ID)
+	if err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	return agentRuntimeSettingsView(settings), nil
+}
+
+func (s *Service) SaveAgentRuntimeSettings(
+	ctx context.Context,
+	input AgentRuntimeSettingsInput,
+) (AgentRuntimeSettingsView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	store, err := s.agentStoreLocked()
+	if err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	project, err := s.active.store.Project(ctx)
+	if err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	settings, err := agentdomain.NewRuntimeSettings(
+		project.ID,
+		input.MaxRunTokens,
+		input.MaxContextChars,
+		s.clock.Now(),
+	)
+	if err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	if err := store.SaveAgentRuntimeSettings(ctx, settings); err != nil {
+		return AgentRuntimeSettingsView{}, err
+	}
+	return agentRuntimeSettingsView(settings), nil
 }
 
 func (s *Service) SaveProviderConnection(
@@ -285,6 +353,13 @@ func (s *Service) CreateChapterAgentRun(
 ) (AgentRunView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createChapterAgentRunLocked(ctx, chapterID, prompt, "")
+}
+
+func (s *Service) createChapterAgentRunLocked(
+	ctx context.Context,
+	chapterID, prompt, retryOf string,
+) (AgentRunView, error) {
 	store, err := s.agentStoreLocked()
 	if err != nil {
 		return AgentRunView{}, err
@@ -303,9 +378,17 @@ func (s *Service) CreateChapterAgentRun(
 	if err := agentdomain.ValidateAuthoringProfiles(profiles); err != nil {
 		return AgentRunView{}, err
 	}
+	settings, err := store.AgentRuntimeSettings(ctx, chapter.ProjectID)
+	if err != nil {
+		return AgentRunView{}, err
+	}
 	byRole := make(map[agentdomain.AgentRole]agentdomain.AgentProfile, len(profiles))
+	maxOutputTokens := 0
 	for _, profile := range profiles {
 		byRole[profile.Role] = profile
+		if profile.Enabled {
+			maxOutputTokens += profile.MaxOutputTokens
+		}
 		connection, err := store.ProviderConnection(ctx, profile.ConnectionID)
 		if err != nil {
 			return AgentRunView{}, err
@@ -326,6 +409,19 @@ func (s *Service) CreateChapterAgentRun(
 	if err != nil {
 		return AgentRunView{}, err
 	}
+	if maxOutputTokens > settings.MaxRunTokens {
+		return AgentRunView{}, fmt.Errorf(
+			"%w: role output limits total %d, budget %d",
+			ErrTokenBudgetExceeded,
+			maxOutputTokens,
+			settings.MaxRunTokens,
+		)
+	}
+	run, err = run.WithBudgets(settings.MaxRunTokens, settings.MaxContextChars)
+	if err != nil {
+		return AgentRunView{}, err
+	}
+	run.RetryOf = strings.TrimSpace(retryOf)
 	if err := store.CreateAgentRun(ctx, run); err != nil {
 		return AgentRunView{}, err
 	}
@@ -333,6 +429,13 @@ func (s *Service) CreateChapterAgentRun(
 }
 
 func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView, error) {
+	runID := strings.TrimSpace(id)
+	executionCtx, err := s.beginAgentJob(ctx, runID)
+	if err != nil {
+		return AgentRunView{}, err
+	}
+	defer s.endAgentJob(runID)
+	ctx = executionCtx
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	store, err := s.agentStoreLocked()
@@ -342,7 +445,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if s.credentials == nil || s.providers == nil {
 		return AgentRunView{}, ErrAgentRuntimeUnavailable
 	}
-	run, err := store.AgentRun(ctx, strings.TrimSpace(id))
+	run, err := store.AgentRun(ctx, runID)
 	if err != nil {
 		return AgentRunView{}, err
 	}
@@ -354,7 +457,14 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		return AgentRunView{}, err
 	}
 	failed := func(cause error) (AgentRunView, error) {
-		run.ErrorCode = "provider_error"
+		if errors.Is(cause, context.Canceled) {
+			if cancelErr := s.persistCancelledRun(context.WithoutCancel(ctx), store, run); cancelErr != nil {
+				return AgentRunView{}, cancelErr
+			}
+			run, _ = store.AgentRun(context.WithoutCancel(ctx), run.ID)
+			return agentRunView(run), nil
+		}
+		run.ErrorCode = agentRunErrorCode(cause)
 		run, _ = run.Transition(agentdomain.RunFailed, cause.Error(), s.clock.Now())
 		_ = store.UpdateAgentRun(ctx, run)
 		return agentRunView(run), cause
@@ -364,8 +474,17 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if err != nil {
 		return failed(err)
 	}
-	contextJSON, err := s.assembleAuthoringContext(ctx, chapter.ID)
+	contextJSON, contextStats, err := s.assembleAuthoringContext(
+		ctx,
+		chapter.ID,
+		run.ContextCharBudget,
+	)
 	if err != nil {
+		return failed(err)
+	}
+	run.ContextChars = contextStats.CharCount
+	run.ContextTruncated = contextStats.Truncated
+	if err := store.UpdateAgentRun(ctx, run); err != nil {
 		return failed(err)
 	}
 	if err := store.CreateAgentArtifact(ctx, newArtifact(
@@ -410,6 +529,10 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			step.Output += delta
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				run.Steps[index] = step
+				return failed(err)
+			}
 			step.Status = agentdomain.StepFailed
 			step.ErrorCode = "provider_error"
 			step.ErrorMessage = err.Error()
@@ -421,6 +544,10 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			return failed(err)
 		}
 		step.Output = generated.Text
+		step.ProviderRequestID = generated.ProviderRequestID
+		step.InputTokens = generated.InputTokens
+		step.OutputTokens = generated.OutputTokens
+		run = run.RecordUsage(generated.InputTokens, generated.OutputTokens)
 		if err := validateStructuredOutput(step.Role, generated.Text); err != nil {
 			step.Status = agentdomain.StepFailed
 			step.ErrorCode = "invalid_structured_output"
@@ -440,6 +567,9 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			return failed(err)
 		}
 		run.Steps[index] = step
+		if err := store.UpdateAgentRun(ctx, run); err != nil {
+			return AgentRunView{}, err
+		}
 		kind := agentdomain.ArtifactPlan
 		switch step.Role {
 		case agentdomain.RolePlanner:
@@ -455,6 +585,9 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			s.ids.NewID(), run.ID, step.ID, kind, generated.Text, s.clock.Now(),
 		)); err != nil {
 			return failed(err)
+		}
+		if index < len(run.Steps)-1 && run.RemainingTokens() == 0 {
+			return failed(ErrTokenBudgetExceeded)
 		}
 	}
 
@@ -486,6 +619,37 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		return AgentRunView{}, err
 	}
 	return agentRunView(run), nil
+}
+
+func (s *Service) persistCancelledRun(
+	ctx context.Context,
+	store ports.AgentStore,
+	run agentdomain.AgentRun,
+) error {
+	now := s.clock.Now().UTC()
+	for index := range run.Steps {
+		step := run.Steps[index]
+		if step.Status == agentdomain.StepCompleted ||
+			step.Status == agentdomain.StepFailed ||
+			step.Status == agentdomain.StepCancelled {
+			continue
+		}
+		step.Status = agentdomain.StepCancelled
+		step.ErrorCode = "cancelled"
+		step.ErrorMessage = "作者已取消智能创作任务。"
+		step.CompletedAt = &now
+		step.UpdatedAt = now
+		if err := store.UpdateAgentRunStep(ctx, step); err != nil {
+			return err
+		}
+		run.Steps[index] = step
+	}
+	run.ErrorCode = "cancelled"
+	cancelled, err := run.Transition(agentdomain.RunCancelled, "作者已取消智能创作任务。", now)
+	if err != nil {
+		return err
+	}
+	return store.UpdateAgentRun(ctx, cancelled)
 }
 
 func (s *Service) AgentRuns(ctx context.Context) ([]AgentRunView, error) {
@@ -531,85 +695,206 @@ func (s *Service) agentStoreLocked() (ports.AgentStore, error) {
 	return store, nil
 }
 
-func (s *Service) assembleAuthoringContext(ctx context.Context, chapterID string) (string, error) {
+func (s *Service) assembleAuthoringContext(
+	ctx context.Context,
+	chapterID string,
+	charBudget int,
+) (string, contextManifestStats, error) {
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	chapter, err := s.active.store.Chapter(ctx, chapterID)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	chapters, err := s.active.store.ListChapters(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	outline, err := s.active.store.ListOutlineNodes(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	scenes, err := s.active.store.ListSceneCards(ctx, chapterID)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	characters, err := s.active.store.ListCharacters(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	factions, err := s.active.store.ListFactions(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	relationships, err := s.active.store.ListRelationships(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
+	}
+	memberships, err := s.active.store.ListMemberships(ctx)
+	if err != nil {
+		return "", contextManifestStats{}, err
+	}
+	appearances, err := s.active.store.ListChapterAppearances(ctx)
+	if err != nil {
+		return "", contextManifestStats{}, err
 	}
 	regions, err := s.active.store.ListWorldRegions(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	locations, err := s.active.store.ListLocations(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	rules, err := s.active.store.ListWorldRules(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	hooks, err := s.active.store.ListForeshadowingHooks(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	events, err := s.active.store.ListStoryEvents(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	facts, err := s.active.store.ListFacts(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
 	knowledge, err := s.active.store.ListCharacterKnowledge(ctx)
 	if err != nil {
-		return "", err
+		return "", contextManifestStats{}, err
 	}
-	payload := map[string]any{
-		"contract": map[string]any{
-			"confirmedFactsAreHardConstraints": true,
-			"candidateFactsRequireCaution":     true,
-			"chapterBodyIsReferenceOnly":       true,
+
+	relevantCharacterIDs := map[string]bool{}
+	var chapterAppearances = appearances[:0:0]
+	for _, appearance := range appearances {
+		if appearance.ChapterID == chapterID {
+			chapterAppearances = append(chapterAppearances, appearance)
+			relevantCharacterIDs[appearance.CharacterID] = true
+		}
+	}
+	var associatedOutline = outline[:0:0]
+	for _, node := range outline {
+		if node.ChapterID == chapterID {
+			associatedOutline = append(associatedOutline, node)
+		}
+	}
+	var confirmedFacts, candidateFacts = facts[:0:0], facts[:0:0]
+	for _, fact := range facts {
+		switch fact.Status {
+		case canondomain.StatusAuthorConfirmed, canondomain.StatusTextEvidenced:
+			confirmedFacts = append(confirmedFacts, fact)
+		case canondomain.StatusRejected:
+			continue
+		default:
+			candidateFacts = append(candidateFacts, fact)
+		}
+	}
+	var relevantCharacters, otherCharacters = characters[:0:0], characters[:0:0]
+	for _, character := range characters {
+		if relevantCharacterIDs[character.ID] {
+			relevantCharacters = append(relevantCharacters, character)
+		} else {
+			otherCharacters = append(otherCharacters, character)
+		}
+	}
+	var relevantMemberships, otherMemberships = memberships[:0:0], memberships[:0:0]
+	relevantFactionIDs := map[string]bool{}
+	for _, membership := range memberships {
+		if relevantCharacterIDs[membership.CharacterID] {
+			relevantMemberships = append(relevantMemberships, membership)
+			relevantFactionIDs[membership.FactionID] = true
+		} else {
+			otherMemberships = append(otherMemberships, membership)
+		}
+	}
+	var relevantFactions, otherFactions = factions[:0:0], factions[:0:0]
+	for _, faction := range factions {
+		if relevantFactionIDs[faction.ID] {
+			relevantFactions = append(relevantFactions, faction)
+		} else {
+			otherFactions = append(otherFactions, faction)
+		}
+	}
+	var relevantRelationships, otherRelationships = relationships[:0:0], relationships[:0:0]
+	for _, relationship := range relationships {
+		if relevantCharacterIDs[relationship.SourceCharacterID] ||
+			relevantCharacterIDs[relationship.TargetCharacterID] {
+			relevantRelationships = append(relevantRelationships, relationship)
+		} else {
+			otherRelationships = append(otherRelationships, relationship)
+		}
+	}
+	var relevantKnowledge, otherKnowledge = knowledge[:0:0], knowledge[:0:0]
+	for _, item := range knowledge {
+		if relevantCharacterIDs[item.CharacterID] {
+			relevantKnowledge = append(relevantKnowledge, item)
+		} else {
+			otherKnowledge = append(otherKnowledge, item)
+		}
+	}
+
+	specs := []struct {
+		name     string
+		priority int
+		required bool
+		values   any
+	}{
+		{"confirmedFacts", 0, true, confirmedFacts},
+		{"associatedOutline", 0, true, associatedOutline},
+		{"sceneCards", 0, true, scenes},
+		{"chapterAppearances", 1, false, chapterAppearances},
+		{"relevantCharacters", 1, false, relevantCharacters},
+		{"relevantFactions", 1, false, relevantFactions},
+		{"relevantMemberships", 1, false, relevantMemberships},
+		{"relevantRelationships", 1, false, relevantRelationships},
+		{"relevantKnowledge", 1, false, relevantKnowledge},
+		{"worldRules", 2, false, rules},
+		{"foreshadowingHooks", 2, false, hooks},
+		{"storyEvents", 2, false, events},
+		{"candidateFacts", 3, false, candidateFacts},
+		{"otherCharacters", 3, false, otherCharacters},
+		{"otherFactions", 3, false, otherFactions},
+		{"otherMemberships", 3, false, otherMemberships},
+		{"otherRelationships", 3, false, otherRelationships},
+		{"otherKnowledge", 3, false, otherKnowledge},
+		{"chapters", 3, false, chapters},
+		{"regions", 3, false, regions},
+		{"locations", 3, false, locations},
+	}
+	domains := make([]contextDomainInput, 0, len(specs))
+	for _, spec := range specs {
+		domain, err := newContextDomain(
+			spec.name,
+			spec.priority,
+			spec.required,
+			spec.values,
+		)
+		if err != nil {
+			return "", contextManifestStats{}, fmt.Errorf(
+				"encode agent context domain %s: %w",
+				spec.name,
+				err,
+			)
+		}
+		domains = append(domains, domain)
+	}
+	return buildContextManifest(contextManifestInput{
+		Header: map[string]any{
+			"contract": map[string]any{
+				"confirmedFactsAreHardConstraints": true,
+				"candidateFactsRequireCaution":     true,
+				"chapterBodyIsReferenceOnly":       true,
+			},
+			"project":       project,
+			"targetChapter": chapter,
 		},
-		"project": project, "targetChapter": chapter, "chapters": chapters,
-		"outline": outline, "sceneCards": scenes,
-		"characters": characters, "factions": factions, "relationships": relationships,
-		"regions": regions, "locations": locations, "worldRules": rules,
-		"foreshadowingHooks": hooks, "storyEvents": events,
-		"canonFacts": facts, "characterKnowledge": knowledge,
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("encode agent context: %w", err)
-	}
-	return string(encoded), nil
+		Domains: domains,
+	}, charBudget)
 }
 
 func agentRequest(
@@ -697,6 +982,14 @@ func agentProfileView(profile agentdomain.AgentProfile) AgentProfileView {
 	}
 }
 
+func agentRuntimeSettingsView(settings agentdomain.RuntimeSettings) AgentRuntimeSettingsView {
+	return AgentRuntimeSettingsView{
+		MaxRunTokens:    settings.MaxRunTokens,
+		MaxContextChars: settings.MaxContextChars,
+		UpdatedAt:       settings.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
 func agentRunView(run agentdomain.AgentRun) AgentRunView {
 	steps := make([]AgentRunStepView, 0, len(run.Steps))
 	for _, step := range run.Steps {
@@ -704,14 +997,30 @@ func agentRunView(run agentdomain.AgentRun) AgentRunView {
 			ID: step.ID, Role: string(step.Role), Position: step.Position,
 			Status: string(step.Status), Output: step.Output,
 			ErrorCode: step.ErrorCode, ErrorMessage: step.ErrorMessage,
+			ProviderRequestID: step.ProviderRequestID,
+			InputTokens:       step.InputTokens, OutputTokens: step.OutputTokens,
 		})
 	}
 	return AgentRunView{
 		ID: run.ID, ChapterID: run.ChapterID, Prompt: run.Prompt,
 		Status: string(run.Status), ErrorCode: run.ErrorCode, ErrorMessage: run.ErrorMessage,
 		ChangeSetID: run.ChangeSetID, RetryOf: run.RetryOf, Steps: steps,
+		TokenBudget: run.TokenBudget, ContextCharBudget: run.ContextCharBudget,
+		InputTokens: run.InputTokens, OutputTokens: run.OutputTokens,
+		ContextChars: run.ContextChars, ContextTruncated: run.ContextTruncated,
 		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt: run.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func agentRunErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrTokenBudgetExceeded):
+		return "token_budget_exceeded"
+	case errors.Is(err, ErrContextBudgetExceeded):
+		return "context_budget_exceeded"
+	default:
+		return "provider_error"
 	}
 }
 

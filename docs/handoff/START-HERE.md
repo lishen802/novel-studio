@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-织境 Story Studio 已从网页原型阶段进入正式 Windows/macOS 产品研发。P0 桌面基础纵向切片已经实现本地项目、章节编辑、revision、恢复草稿、SQLite 完整性保护和 Wails v2.13.0 桌面壳；P1 已实现五级大纲、故事线、场景卡、人物与势力、角色知识边界、区域层级和相邻关系、层级地图、关系拓扑、地点关联、物品流转、分范围世界规则、伏笔追踪，以及双顺序时间线、事实/证据约束和基础一致性检查。P2 已实现统一可审阅变更集、版本历史、项目快照和完整剧情分支。P3 首个真实创作纵向切片已经实现 OpenAI Responses 与 Anthropic Messages 流式 Provider、macOS Keychain/Windows Credential Manager 凭据隔离、规划/写作/连续性审阅三角色异构编排、上下文组装、持久化运行记录、中断恢复和章节候选变更输出。托管 Windows/macOS CI 与双平台人工验收仍以对应工作流结果和验收记录为准。
+织境 Story Studio 已从网页原型阶段进入正式 Windows/macOS 产品研发。P0 桌面基础纵向切片已经实现本地项目、章节编辑、revision、恢复草稿、SQLite 完整性保护和 Wails v2.13.0 桌面壳；P1 已实现五级大纲、故事线、场景卡、人物与势力、角色知识边界、区域层级和相邻关系、层级地图、关系拓扑、地点关联、物品流转、分范围世界规则、伏笔追踪，以及双顺序时间线、事实/证据约束和基础一致性检查。P2 已实现统一可审阅变更集、版本历史、项目快照和完整剧情分支。P3 已实现 OpenAI Responses 与 Anthropic Messages 流式 Provider、macOS Keychain/Windows Credential Manager 凭据隔离、规划/写作/连续性审阅三角色异构编排、持久化运行记录、中断恢复和章节候选变更输出；运行时现已支持持久化令牌/上下文预算、实际用量记录、取消与独立重试、版本操作互斥，以及确定性的 `context-v2` 优先级裁剪清单。托管 Windows/macOS CI 与双平台人工验收仍以对应工作流结果和验收记录为准。
 
-当前下一组能力应补强智能体运行控制、预算与更细的上下文检索，然后进入小说导入重建。分支字段级三方冲突解决属于后续增强，不应阻塞第一版严格快进分支。大功能按 `AGENTS.md` 在对话中给出实施计划并使用隔离工作树，不把原型状态或组件直接搬入正式架构。
+当前下一组产品能力应进入小说导入重建：导入长篇文本、识别章节边界、分阶段抽取故事线、人物关系、大纲和世界设定，并让作者逐项确认后再进入正式项目数据。向量检索、并行任务队列和动态价格目录仍是后续运行时增强，不应抢先扩大当前模块边界。分支字段级三方冲突解决属于后续增强，不应阻塞第一版严格快进分支。大功能按 `AGENTS.md` 在对话中给出实施计划并使用隔离工作树，不把原型状态或组件直接搬入正式架构。
 
 ## 必读顺序
 
@@ -19,8 +19,9 @@
 7. [ADR-0003：Wails 工程布局](../architecture/0003-wails-project-layout.md)
 8. [V1 总体实施路线图](../superpowers/plans/2026-07-15-v1-implementation-roadmap.md)
 9. [Provider 与智能体创作纵向切片规格](../superpowers/specs/2026-07-29-provider-agent-authoring-design.md)
-10. [P0 文件级实施计划](../superpowers/plans/2026-07-15-v1-foundation-vertical-slice.md)
-11. [`prototype/web/README.md`](../../prototype/web/README.md) 与当前原型，只作为 UX 参考
+10. [智能体运行控制与上下文预算设计](../superpowers/specs/2026-07-30-agent-runtime-controls-design.md)
+11. [P0 文件级实施计划](../superpowers/plans/2026-07-15-v1-foundation-vertical-slice.md)
+12. [`prototype/web/README.md`](../../prototype/web/README.md) 与当前原型，只作为 UX 参考
 
 涉及项目损坏、恢复或跨平台验收时，还要阅读[恢复说明](../operations/project-recovery.md)和[P0 基础验收清单](../testing/foundation-acceptance.md)。
 

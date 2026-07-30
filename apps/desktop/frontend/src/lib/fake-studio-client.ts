@@ -76,6 +76,8 @@ import type {
   ProviderConnectionView,
   AgentProfileInput,
   AgentProfileView,
+  AgentRuntimeSettingsInput,
+  AgentRuntimeSettingsView,
   AgentRunView,
 } from "./studio-client";
 
@@ -187,6 +189,11 @@ export class FakeStudioClient implements StudioClient {
   characterKnowledgeResult: CharacterKnowledgeView[] = [];
   providerConnectionsResult: ProviderConnectionView[] = [];
   agentProfilesResult: AgentProfileView[] = [];
+  agentRuntimeSettingsResult: AgentRuntimeSettingsView = {
+    maxRunTokens: 30000,
+    maxContextChars: 120000,
+    updatedAt: "2026-07-30T10:00:00Z",
+  };
   agentRunsResult: AgentRunView[] = [];
 
   createProjectError: Error | null = null;
@@ -304,8 +311,11 @@ export class FakeStudioClient implements StudioClient {
   deleteProviderConnectionCalls: string[] = [];
   testProviderConnectionCalls: string[] = [];
   saveAgentProfileCalls: AgentProfileInput[] = [];
+  saveAgentRuntimeSettingsCalls: AgentRuntimeSettingsInput[] = [];
   createChapterAgentRunCalls: Array<{ chapterId: string; prompt: string }> = [];
   executeAgentRunCalls: string[] = [];
+  cancelAgentRunCalls: string[] = [];
+  retryAgentRunCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -1612,6 +1622,19 @@ export class FakeStudioClient implements StudioClient {
     ];
     return value;
   }
+  async agentRuntimeSettings(): Promise<AgentRuntimeSettingsView> {
+    return this.agentRuntimeSettingsResult;
+  }
+  async saveAgentRuntimeSettings(
+    input: AgentRuntimeSettingsInput,
+  ): Promise<AgentRuntimeSettingsView> {
+    this.saveAgentRuntimeSettingsCalls.push(input);
+    this.agentRuntimeSettingsResult = {
+      ...input,
+      updatedAt: "2026-07-30T10:00:00Z",
+    };
+    return this.agentRuntimeSettingsResult;
+  }
   async createChapterAgentRun(
     chapterId: string,
     prompt: string,
@@ -1626,6 +1649,12 @@ export class FakeStudioClient implements StudioClient {
       errorMessage: "",
       changeSetId: "",
       retryOf: "",
+      tokenBudget: this.agentRuntimeSettingsResult.maxRunTokens,
+      contextCharBudget: this.agentRuntimeSettingsResult.maxContextChars,
+      inputTokens: 0,
+      outputTokens: 0,
+      contextChars: 0,
+      contextTruncated: false,
       steps: [],
       createdAt: "2026-07-29T10:00:00Z",
       updatedAt: "2026-07-29T10:00:00Z",
@@ -1645,6 +1674,42 @@ export class FakeStudioClient implements StudioClient {
     this.agentRunsResult = this.agentRunsResult.map((item) =>
       item.id === id ? value : item,
     );
+    return value;
+  }
+  async cancelAgentRun(id: string): Promise<void> {
+    this.cancelAgentRunCalls.push(id);
+    this.agentRunsResult = this.agentRunsResult.map((item) =>
+      item.id === id ? { ...item, status: "cancelled" } : item,
+    );
+  }
+  async retryAgentRun(id: string): Promise<AgentRunView> {
+    this.retryAgentRunCalls.push(id);
+    const original = this.agentRunsResult.find((item) => item.id === id);
+    if (!original) throw new Error("运行不存在");
+    const value: AgentRunView = {
+      ...original,
+      id: `run-${this.agentRunsResult.length + 1}`,
+      status: "queued",
+      retryOf: original.id,
+      errorCode: "",
+      errorMessage: "",
+      changeSetId: "",
+      inputTokens: 0,
+      outputTokens: 0,
+      contextChars: 0,
+      contextTruncated: false,
+      steps: original.steps.map((step) => ({
+        ...step,
+        status: "queued",
+        output: "",
+        errorCode: "",
+        errorMessage: "",
+        providerRequestId: "",
+        inputTokens: 0,
+        outputTokens: 0,
+      })),
+    };
+    this.agentRunsResult = [value, ...this.agentRunsResult];
     return value;
   }
   async agentRuns(): Promise<AgentRunView[]> {

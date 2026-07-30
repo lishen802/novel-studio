@@ -12,6 +12,52 @@ import (
 
 var ErrAgentRecordMissing = errors.New("agent record does not exist")
 
+func (s *Store) SaveAgentRuntimeSettings(ctx context.Context, settings agentdomain.RuntimeSettings) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO agent_runtime_settings(project_id, max_run_tokens, max_context_chars, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(project_id) DO UPDATE SET
+			max_run_tokens = excluded.max_run_tokens,
+			max_context_chars = excluded.max_context_chars,
+			updated_at = excluded.updated_at
+	`, settings.ProjectID, settings.MaxRunTokens, settings.MaxContextChars, formatTime(settings.UpdatedAt))
+	if err != nil {
+		return databaseOperationError("save agent runtime settings", err)
+	}
+	return nil
+}
+
+func (s *Store) AgentRuntimeSettings(ctx context.Context, projectID string) (agentdomain.RuntimeSettings, error) {
+	var settings agentdomain.RuntimeSettings
+	var updatedAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT project_id, max_run_tokens, max_context_chars, updated_at
+		FROM agent_runtime_settings WHERE project_id = ?
+	`, projectID).Scan(
+		&settings.ProjectID,
+		&settings.MaxRunTokens,
+		&settings.MaxContextChars,
+		&updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		project, projectErr := s.Project(ctx)
+		if projectErr != nil {
+			return agentdomain.RuntimeSettings{}, projectErr
+		}
+		return agentdomain.NewRuntimeSettings(
+			project.ID,
+			agentdomain.DefaultMaxRunTokens,
+			agentdomain.DefaultMaxContextChars,
+			project.UpdatedAt,
+		)
+	}
+	if err != nil {
+		return agentdomain.RuntimeSettings{}, databaseOperationError("read agent runtime settings", err)
+	}
+	settings.UpdatedAt, err = parseTime(updatedAt)
+	return settings, err
+}
+
 func (s *Store) UpsertProviderConnection(ctx context.Context, connection agentdomain.ProviderConnection) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO provider_connections(
@@ -149,12 +195,18 @@ func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 		INSERT INTO agent_runs(
 			id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, change_set_id, retry_of, created_at, updated_at,
-			started_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?)
+			started_at, completed_at, token_budget, context_char_budget,
+			input_tokens, output_tokens, context_chars, context_truncated
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?
+		)
 	`,
 		run.ID, run.ProjectID, run.ChapterID, run.ChapterBaseRevision, run.Prompt, run.Status,
 		run.ErrorCode, run.ErrorMessage, run.ChangeSetID, run.RetryOf,
 		formatTime(run.CreatedAt), formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
+		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
+		run.ContextChars, run.ContextTruncated,
 	)
 	if err != nil {
 		return databaseOperationError("create agent run", err)
@@ -175,11 +227,16 @@ func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 		UPDATE agent_runs SET
 			status = ?, error_code = ?, error_message = ?,
 			change_set_id = NULLIF(?, ''), retry_of = NULLIF(?, ''),
-			updated_at = ?, started_at = ?, completed_at = ?
+			updated_at = ?, started_at = ?, completed_at = ?,
+			token_budget = ?, context_char_budget = ?,
+			input_tokens = ?, output_tokens = ?,
+			context_chars = ?, context_truncated = ?
 		WHERE id = ?
 	`,
 		run.Status, run.ErrorCode, run.ErrorMessage, run.ChangeSetID, run.RetryOf,
-		formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt), run.ID,
+		formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
+		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
+		run.ContextChars, run.ContextTruncated, run.ID,
 	)
 	if err != nil {
 		return databaseOperationError("update agent run", err)
@@ -191,7 +248,9 @@ func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, 
 	run, err := scanAgentRun(s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
-			created_at, updated_at, started_at, completed_at
+			created_at, updated_at, started_at, completed_at,
+			token_budget, context_char_budget, input_tokens, output_tokens,
+			context_chars, context_truncated
 		FROM agent_runs WHERE id = ?
 	`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -211,7 +270,9 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Age
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
-			created_at, updated_at, started_at, completed_at
+			created_at, updated_at, started_at, completed_at,
+			token_budget, context_char_budget, input_tokens, output_tokens,
+			context_chars, context_truncated
 		FROM agent_runs ORDER BY created_at DESC LIMIT ?
 	`, limit)
 	if err != nil {
@@ -242,11 +303,13 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE agent_run_steps SET
 			status = ?, output = ?, error_code = ?, error_message = ?,
-			started_at = ?, completed_at = ?, updated_at = ?
+			started_at = ?, completed_at = ?, updated_at = ?,
+			provider_request_id = ?, input_tokens = ?, output_tokens = ?
 		WHERE id = ?
 	`,
 		step.Status, step.Output, step.ErrorCode, step.ErrorMessage,
-		nullableTime(step.StartedAt), nullableTime(step.CompletedAt), formatTime(step.UpdatedAt), step.ID,
+		nullableTime(step.StartedAt), nullableTime(step.CompletedAt), formatTime(step.UpdatedAt),
+		step.ProviderRequestID, step.InputTokens, step.OutputTokens, step.ID,
 	)
 	if err != nil {
 		return databaseOperationError("update agent run step", err)
@@ -378,6 +441,8 @@ func scanAgentRun(scanner rowScanner) (agentdomain.AgentRun, error) {
 		&run.ID, &run.ProjectID, &run.ChapterID, &run.ChapterBaseRevision, &run.Prompt,
 		&run.Status, &run.ErrorCode, &run.ErrorMessage, &run.ChangeSetID, &run.RetryOf,
 		&createdAt, &updatedAt, &startedAt, &completedAt,
+		&run.TokenBudget, &run.ContextCharBudget, &run.InputTokens, &run.OutputTokens,
+		&run.ContextChars, &run.ContextTruncated,
 	)
 	if err != nil {
 		return run, err
@@ -398,7 +463,8 @@ func scanAgentRun(scanner rowScanner) (agentdomain.AgentRun, error) {
 func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdomain.AgentRunStep, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, run_id, role, profile_id, position, status, output,
-			error_code, error_message, started_at, completed_at, created_at, updated_at
+			error_code, error_message, started_at, completed_at, created_at, updated_at,
+			provider_request_id, input_tokens, output_tokens
 		FROM agent_run_steps WHERE run_id = ? ORDER BY position
 	`, runID)
 	if err != nil {
@@ -414,6 +480,7 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			&step.ID, &step.RunID, &step.Role, &step.ProfileID, &step.Position,
 			&step.Status, &step.Output, &step.ErrorCode, &step.ErrorMessage,
 			&startedAt, &completedAt, &createdAt, &updatedAt,
+			&step.ProviderRequestID, &step.InputTokens, &step.OutputTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -439,13 +506,15 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.AgentR
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_run_steps(
 			id, run_id, role, profile_id, position, status, output,
-			error_code, error_message, started_at, completed_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			error_code, error_message, started_at, completed_at, created_at, updated_at,
+			provider_request_id, input_tokens, output_tokens
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		step.ID, step.RunID, step.Role, step.ProfileID, step.Position, step.Status,
 		step.Output, step.ErrorCode, step.ErrorMessage,
 		nullableTime(step.StartedAt), nullableTime(step.CompletedAt),
 		formatTime(step.CreatedAt), formatTime(step.UpdatedAt),
+		step.ProviderRequestID, step.InputTokens, step.OutputTokens,
 	)
 	if err != nil {
 		return databaseOperationError("create agent run step", err)

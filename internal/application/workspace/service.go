@@ -25,6 +25,10 @@ type Service struct {
 	mu                  sync.RWMutex
 	active              *activeWorkspace
 	branchMergePreviews map[string]branchMergePreview
+
+	agentJobsMu      sync.Mutex
+	agentJobs        map[string]context.CancelFunc
+	versionOperation bool
 }
 
 type activeWorkspace struct {
@@ -49,6 +53,7 @@ func NewService(
 		ids:                 ids,
 		snapshots:           snapshots,
 		branchMergePreviews: make(map[string]branchMergePreview),
+		agentJobs:           make(map[string]context.CancelFunc),
 	}
 	if len(branchArchives) > 0 {
 		service.branches = branchArchives[0]
@@ -284,6 +289,7 @@ func (s *Service) CommitChapter(
 }
 
 func (s *Service) Close() error {
+	s.cancelAllAgentJobs()
 	s.mu.Lock()
 	active := s.active
 	s.active = nil
