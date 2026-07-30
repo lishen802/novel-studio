@@ -589,11 +589,12 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		completedAt := s.clock.Now().UTC()
 		step.CompletedAt = &completedAt
 		step.UpdatedAt = completedAt
-		if err := store.UpdateAgentRunStep(ctx, step); err != nil {
-			return failed(err)
-		}
 		run.Steps[index] = step
-		if err := store.UpdateAgentRun(ctx, run); err != nil {
+		persistCtx := context.WithoutCancel(ctx)
+		if err := store.UpdateAgentRunStep(persistCtx, step); err != nil {
+			return AgentRunView{}, err
+		}
+		if err := store.UpdateAgentRun(persistCtx, run); err != nil {
 			return AgentRunView{}, err
 		}
 		kind := agentdomain.ArtifactPlan
@@ -607,9 +608,12 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			review = generated.Text
 			kind = agentdomain.ArtifactReview
 		}
-		if err := store.CreateAgentArtifact(ctx, newArtifact(
+		if err := store.CreateAgentArtifact(persistCtx, newArtifact(
 			s.ids.NewID(), run.ID, step.ID, kind, generated.Text, s.clock.Now(),
 		)); err != nil {
+			return AgentRunView{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return failed(err)
 		}
 		if index < len(run.Steps)-1 && run.RemainingTokens() == 0 {
@@ -641,7 +645,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if err != nil {
 		return failed(err)
 	}
-	if err := store.UpdateAgentRun(ctx, run); err != nil {
+	if err := store.UpdateAgentRun(context.WithoutCancel(ctx), run); err != nil {
 		return AgentRunView{}, err
 	}
 	return agentRunView(run), nil

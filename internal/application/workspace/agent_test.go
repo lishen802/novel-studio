@@ -261,6 +261,45 @@ func TestExecuteAgentRunPersistsCancellationBeforeStartup(t *testing.T) {
 	}
 }
 
+func TestAgentRunPreservesCompletedStepArtifactWhenCancelledAfterProviderSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	providerFactory := &cancelAfterGenerateProviderFactory{cancel: cancel}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := service.ExecuteAgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ExecuteAgentRun() error = %v", err)
+	}
+	if got.Status != "cancelled" ||
+		got.Steps[0].Status != "completed" ||
+		got.Steps[1].Status != "cancelled" {
+		t.Fatalf("unexpected cancelled run: %#v", got)
+	}
+	service.mu.RLock()
+	store, err := service.agentStoreLocked()
+	service.mu.RUnlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := store.ListAgentArtifacts(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactKinds := make(map[agentdomain.ArtifactKind]bool, len(artifacts))
+	for _, artifact := range artifacts {
+		artifactKinds[artifact.Kind] = true
+	}
+	if len(artifacts) != 2 ||
+		!artifactKinds[agentdomain.ArtifactContext] ||
+		!artifactKinds[agentdomain.ArtifactPlan] {
+		t.Fatalf("completed artifacts were not preserved: %#v", artifacts)
+	}
+}
+
 func TestRetryAgentRunCreatesNewQueuedAuditRecord(t *testing.T) {
 	service, chapter := configuredAgentService(t, failingModelProviderFactory{})
 	defer service.Close()
@@ -525,6 +564,33 @@ func (factory *usageModelProviderFactory) New(agentdomain.ProviderConnection) (p
 
 type usageModelProvider struct {
 	factory *usageModelProviderFactory
+}
+
+type cancelAfterGenerateProviderFactory struct {
+	cancel context.CancelFunc
+}
+
+func (factory *cancelAfterGenerateProviderFactory) New(agentdomain.ProviderConnection) (ports.ModelProvider, error) {
+	return cancelAfterGenerateProvider{factory: factory}, nil
+}
+
+type cancelAfterGenerateProvider struct {
+	factory *cancelAfterGenerateProviderFactory
+}
+
+func (provider cancelAfterGenerateProvider) Generate(
+	_ context.Context,
+	_ string,
+	_ ports.ModelGenerateRequest,
+	_ func(string),
+) (ports.ModelGenerateResult, error) {
+	provider.factory.cancel()
+	return ports.ModelGenerateResult{
+		Text:              `{"summary":"计划","scenes":[{"title":"场景","goal":"目标","conflict":"冲突","outcome":"结果"}]}`,
+		ProviderRequestID: "request-cancel-after-success",
+		InputTokens:       10,
+		OutputTokens:      5,
+	}, nil
 }
 
 func (provider usageModelProvider) Generate(
