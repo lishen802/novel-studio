@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/domain/importing"
@@ -102,6 +103,82 @@ func TestImportSourceArchivePreparesSupportedEncodings(t *testing.T) {
 				t.Fatalf("archive mode = %o, want 600", got)
 			}
 		})
+	}
+}
+
+func TestImportSourceErrorsAreStablePortContracts(t *testing.T) {
+	pairs := []struct {
+		adapter error
+		port    error
+	}{
+		{adapter: ErrUnsupportedImportFormat, port: ports.ErrUnsupportedImportFormat},
+		{adapter: ErrEmptyImportSource, port: ports.ErrEmptyImportSource},
+		{adapter: ErrImportSourceTooLarge, port: ports.ErrImportSourceTooLarge},
+		{adapter: ErrUnsupportedImportEncoding, port: ports.ErrUnsupportedImportEncoding},
+		{adapter: ErrUnsafeImportSource, port: ports.ErrUnsafeImportSource},
+		{adapter: ErrImportArchiveExists, port: ports.ErrImportArchiveExists},
+		{adapter: ErrInvalidImportArchivePath, port: ports.ErrInvalidImportArchivePath},
+	}
+	for _, pair := range pairs {
+		if pair.adapter != pair.port {
+			t.Fatalf("adapter error %q is not the stable port sentinel %q", pair.adapter, pair.port)
+		}
+	}
+}
+
+func TestImportSourceArchiveWrapsPackageFilesystemFailuresInStablePortContract(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "novel.txt")
+	writeTestFile(t, sourcePath, []byte("正文"))
+	missingRoot := filepath.Join(t.TempDir(), "missing.zjproject")
+
+	tests := []struct {
+		name           string
+		projectPackage ports.ProjectPackage
+	}{
+		{
+			name: "missing project package",
+			projectPackage: ports.ProjectPackage{
+				Root:    missingRoot,
+				Imports: filepath.Join(missingRoot, "imports"),
+			},
+		},
+		{
+			name:           "imports path is a file",
+			projectPackage: packageWithImportsFile(t),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := (ImportSourceArchive{}).Prepare(
+				context.Background(),
+				test.projectPackage,
+				"job",
+				sourcePath,
+			)
+			if !errors.Is(err, ports.ErrInvalidImportArchivePath) {
+				t.Fatalf("error = %v, want ports.ErrInvalidImportArchivePath", err)
+			}
+		})
+	}
+}
+
+func TestImportSourceArchiveAcceptsGB18030EuroCompatibilityByte(t *testing.T) {
+	projectPackage := createTestPackage(t)
+	sourcePath := filepath.Join(t.TempDir(), "euro.txt")
+	writeTestFile(t, sourcePath, []byte{0x80})
+
+	prepared, err := (ImportSourceArchive{}).Prepare(
+		context.Background(),
+		projectPackage,
+		"euro",
+		sourcePath,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Encoding != "gb18030" || prepared.Text != "€" {
+		t.Fatalf("prepared = %#v, want GB18030 euro", prepared)
 	}
 }
 
@@ -197,6 +274,71 @@ func TestImportSourceArchiveAcceptsMaximumSize(t *testing.T) {
 	}
 }
 
+func TestMaximumUTF16SourceCanBeParsedAfterDecodedExpansion(t *testing.T) {
+	projectPackage := createTestPackage(t)
+	sourcePath := filepath.Join(t.TempDir(), "maximum-utf16.txt")
+	raw := make([]byte, importing.MaxManuscriptBytes)
+	raw[0], raw[1] = 0xff, 0xfe
+	for index := 2; index < len(raw); index += 2 {
+		raw[index], raw[index+1] = 0x4c, 0x75
+	}
+	writeTestFile(t, sourcePath, raw)
+
+	prepared, err := (ImportSourceArchive{}).Prepare(
+		context.Background(),
+		projectPackage,
+		"maximum-utf16",
+		sourcePath,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared.Text) <= importing.MaxManuscriptBytes {
+		t.Fatalf("decoded bytes = %d, want expansion beyond source limit", len(prepared.Text))
+	}
+	chapters, err := importing.ParseChapters(prepared.Text)
+	if err != nil {
+		t.Fatalf("ParseChapters rejected maximum UTF-16 source: %v", err)
+	}
+	if len(chapters) != 1 || chapters[0].Body != prepared.Text {
+		t.Fatalf("parsed chapters did not preserve expanded source")
+	}
+}
+
+func TestImportSourceArchiveCleansOwnedOrphanTemporaryFilesBeforePrepare(t *testing.T) {
+	projectPackage := createTestPackage(t)
+	orphanName := ".import-source-" + strings.Repeat("a", 32)
+	otherHiddenName := ".import-source-keep"
+	writeTestFile(t, filepath.Join(projectPackage.Imports, orphanName), []byte("orphan"))
+	old := time.Now().Add(-importTemporaryOrphanAge - time.Hour)
+	if err := os.Chtimes(filepath.Join(projectPackage.Imports, orphanName), old, old); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(projectPackage.Imports, otherHiddenName), []byte("keep"))
+	sourcePath := filepath.Join(t.TempDir(), "novel.txt")
+	writeTestFile(t, sourcePath, []byte("正文"))
+
+	if _, err := (ImportSourceArchive{}).Prepare(
+		context.Background(),
+		projectPackage,
+		"job",
+		sourcePath,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(projectPackage.Imports, orphanName)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("owned orphan was not removed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(projectPackage.Imports, otherHiddenName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "keep" {
+		t.Fatalf("other hidden file = %q", got)
+	}
+}
+
 func TestImportSourceArchiveRejectsUnsafeSources(t *testing.T) {
 	projectPackage := createTestPackage(t)
 	root := t.TempDir()
@@ -211,6 +353,8 @@ func TestImportSourceArchiveRejectsUnsafeSources(t *testing.T) {
 	writeTestFile(t, unsupportedPath, []byte("正文"))
 	invalidEncodingPath := filepath.Join(root, "invalid.txt")
 	writeTestFile(t, invalidEncodingPath, []byte{0xff, 0xff, 0xff})
+	invalidGB18030Path := filepath.Join(root, "invalid-gb18030.txt")
+	writeTestFile(t, invalidGB18030Path, []byte{0xfe, 0x39, 0xfe, 0x39})
 	invalidUTF16Path := filepath.Join(root, "invalid-utf16.txt")
 	writeTestFile(t, invalidUTF16Path, []byte{0xff, 0xfe, 0x00, 0xd8})
 	bomlessUTF16Path := filepath.Join(root, "bomless-utf16.txt")
@@ -238,6 +382,7 @@ func TestImportSourceArchiveRejectsUnsafeSources(t *testing.T) {
 		{name: "empty", sourcePath: emptyPath, want: ErrEmptyImportSource},
 		{name: "too large", sourcePath: tooLargePath, want: ErrImportSourceTooLarge},
 		{name: "unsupported encoding", sourcePath: invalidEncodingPath, want: ErrUnsupportedImportEncoding},
+		{name: "invalid GB18030 replacement output", sourcePath: invalidGB18030Path, want: ErrUnsupportedImportEncoding},
 		{name: "invalid UTF-16", sourcePath: invalidUTF16Path, want: ErrUnsupportedImportEncoding},
 		{name: "BOM-less UTF-16", sourcePath: bomlessUTF16Path, want: ErrUnsupportedImportEncoding},
 		{name: "BOM only", sourcePath: bomOnlyPath, want: ErrEmptyImportSource},
@@ -331,19 +476,28 @@ func TestImportSourceArchiveDoesNotOverwriteCollision(t *testing.T) {
 	}
 }
 
-func TestRenameImportArchiveNoReplaceRejectsExistingTarget(t *testing.T) {
+func TestCommitImportArchiveNoReplaceRejectsExistingTarget(t *testing.T) {
 	projectPackage := createTestPackage(t)
-	sourceName := ".import-source-test"
 	targetName := "job.txt"
-	writeTestFile(t, filepath.Join(projectPackage.Imports, sourceName), []byte("replacement"))
 	writeTestFile(t, filepath.Join(projectPackage.Imports, targetName), []byte("original"))
-	directory, err := os.Open(projectPackage.Imports)
+	directory, err := openImportsDirectory(projectPackage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer directory.Close()
+	temporary, temporaryName, err := createImportArchiveTemporary(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer temporary.Close()
+	if _, err := temporary.Write([]byte("replacement")); err != nil {
+		t.Fatal(err)
+	}
+	if err := temporary.Sync(); err != nil {
+		t.Fatal(err)
+	}
 
-	err = renameImportArchiveNoReplace(directory, sourceName, targetName)
+	err = commitImportArchive(directory, temporary, temporaryName, targetName)
 
 	if !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("error = %v, want fs.ErrExist", err)
@@ -355,12 +509,129 @@ func TestRenameImportArchiveNoReplaceRejectsExistingTarget(t *testing.T) {
 	if string(got) != "original" {
 		t.Fatalf("target contents = %q", got)
 	}
-	got, err = os.ReadFile(filepath.Join(projectPackage.Imports, sourceName))
+	got, err = os.ReadFile(filepath.Join(projectPackage.Imports, temporaryName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "replacement" {
 		t.Fatalf("source contents = %q", got)
+	}
+}
+
+func TestCommitImportArchiveUsesTheStillOpenTemporaryObject(t *testing.T) {
+	projectPackage := createTestPackage(t)
+	importsDirectory, err := openImportsDirectory(projectPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer importsDirectory.Close()
+	temporary, temporaryName, err := createImportArchiveTemporary(importsDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer temporary.Close()
+	if _, err := temporary.Write([]byte("verified-open-object")); err != nil {
+		t.Fatal(err)
+	}
+	if err := temporary.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	detachedName := ".detached-import-source"
+	if err := os.Rename(
+		filepath.Join(projectPackage.Imports, temporaryName),
+		filepath.Join(projectPackage.Imports, detachedName),
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(projectPackage.Imports, temporaryName), []byte("replacement"))
+
+	if err := commitImportArchive(
+		importsDirectory,
+		temporary,
+		temporaryName,
+		"job.txt",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(projectPackage.Imports, "job.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "verified-open-object" {
+		t.Fatalf("archive contents = %q, want still-open temporary object", got)
+	}
+}
+
+func TestCopyImportArchiveFallbackUsesTheStillOpenTemporaryObject(t *testing.T) {
+	projectPackage := createTestPackage(t)
+	importsDirectory, err := openImportsDirectory(projectPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer importsDirectory.Close()
+	temporary, temporaryName, err := createImportArchiveTemporary(importsDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer temporary.Close()
+	if _, err := temporary.Write([]byte("verified-open-object")); err != nil {
+		t.Fatal(err)
+	}
+	if err := temporary.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Rename(
+		filepath.Join(projectPackage.Imports, temporaryName),
+		filepath.Join(projectPackage.Imports, ".detached-copy-source"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(projectPackage.Imports, temporaryName), []byte("replacement"))
+
+	if err := copyOpenImportArchiveNoReplace(importsDirectory, temporary, "job.txt"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(projectPackage.Imports, "job.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "verified-open-object" {
+		t.Fatalf("archive contents = %q, want still-open temporary object", got)
+	}
+}
+
+func TestImportTemporaryCleanupLeavesReplacementLeaf(t *testing.T) {
+	projectPackage := createTestPackage(t)
+	importsDirectory, err := openImportsDirectory(projectPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer importsDirectory.Close()
+	temporary, temporaryName, err := createImportArchiveTemporary(importsDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer temporary.Close()
+	if err := os.Rename(
+		filepath.Join(projectPackage.Imports, temporaryName),
+		filepath.Join(projectPackage.Imports, ".detached-cleanup-source"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(projectPackage.Imports, temporaryName), []byte("replacement"))
+
+	if err := removeImportTemporaryNameIfSame(importsDirectory, temporary, temporaryName); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(projectPackage.Imports, temporaryName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "replacement" {
+		t.Fatalf("replacement leaf contents = %q", got)
 	}
 }
 
@@ -493,6 +764,17 @@ func createTestPackage(t *testing.T) ports.ProjectPackage {
 		t.Fatal(err)
 	}
 	return projectPackage
+}
+
+func packageWithImportsFile(t *testing.T) ports.ProjectPackage {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "project.zjproject")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	imports := filepath.Join(root, "imports")
+	writeTestFile(t, imports, []byte("not a directory"))
+	return ports.ProjectPackage{Root: root, Imports: imports}
 }
 
 func writeTestFile(t *testing.T, path string, body []byte) {

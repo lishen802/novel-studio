@@ -5,7 +5,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewLayoutSanitizesCrossPlatformName(t *testing.T) {
@@ -147,5 +149,65 @@ func TestOpenLayoutCreatesImportsDirectoryForLegacyPackage(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("%q is not a directory", opened.Imports)
+	}
+}
+
+func TestOpenLayoutCleansOnlyOwnedOrphanImportTemporaryFiles(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "旧作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	orphanName := ".import-source-" + strings.Repeat("a", 32)
+	otherHiddenName := ".import-source-keep"
+	directoryName := ".import-source-" + strings.Repeat("b", 32)
+	if err := os.WriteFile(filepath.Join(layout.Imports, orphanName), []byte("orphan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-importTemporaryOrphanAge - time.Hour)
+	if err := os.Chtimes(filepath.Join(layout.Imports, orphanName), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.Imports, otherHiddenName), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(layout.Imports, directoryName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := OpenLayout(layout.Root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(layout.Imports, orphanName)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("owned orphan was not removed: %v", err)
+	}
+	for _, name := range []string{otherHiddenName, directoryName} {
+		if _, err := os.Stat(filepath.Join(layout.Imports, name)); err != nil {
+			t.Fatalf("unrelated hidden entry %q was removed: %v", name, err)
+		}
+	}
+}
+
+func TestOpenLayoutLeavesRecentOwnedImportTemporaryFile(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "进行中的作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	recentName := ".import-source-" + strings.Repeat("c", 32)
+	if err := os.WriteFile(filepath.Join(layout.Imports, recentName), []byte("active"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := OpenLayout(layout.Root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(layout.Imports, recentName)); err != nil {
+		t.Fatalf("recent import temporary was removed: %v", err)
 	}
 }

@@ -19,18 +19,69 @@ type fileRenameInformation struct {
 	FileName        [1]uint16
 }
 
-func renameImportArchiveNoReplace(
+func openImportArchiveTemporary(
+	importsDirectory *importArchiveDirectory,
+	name string,
+) (*os.File, error) {
+	nameUTF16, err := windows.NewNTUnicodeString(name)
+	if err != nil {
+		return nil, err
+	}
+	attributes := &windows.OBJECT_ATTRIBUTES{
+		Length:        uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})),
+		RootDirectory: windows.Handle(importsDirectory.handle.Fd()),
+		ObjectName:    nameUTF16,
+		Attributes:    windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE,
+	}
+	var (
+		handle     windows.Handle
+		status     windows.IO_STATUS_BLOCK
+		allocation int64
+	)
+	err = windows.NtCreateFile(
+		&handle,
+		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE|windows.SYNCHRONIZE,
+		attributes,
+		&status,
+		&allocation,
+		0,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.FILE_CREATE,
+		windows.FILE_NON_DIRECTORY_FILE|
+			windows.FILE_SYNCHRONOUS_IO_NONALERT|
+			windows.FILE_OPEN_REPARSE_POINT,
+		0,
+		0,
+	)
+	if err != nil {
+		return nil, normalizeWindowsRenameError(err)
+	}
+	file := os.NewFile(uintptr(handle), name)
+	if file == nil {
+		_ = windows.CloseHandle(handle)
+		return nil, errors.New("create import archive file handle")
+	}
+	return file, nil
+}
+
+func commitOpenImportArchiveNoReplace(
 	directory *os.File,
-	sourceName string,
+	temporary *os.File,
+	_ string,
 	targetName string,
 ) error {
-	directoryHandle := windows.Handle(directory.Fd())
-	sourceHandle, err := openImportArchiveForRename(directoryHandle, sourceName)
-	if err != nil {
-		return err
-	}
-	defer windows.CloseHandle(sourceHandle)
+	return renameOpenImportArchiveNoReplace(
+		windows.Handle(directory.Fd()),
+		windows.Handle(temporary.Fd()),
+		targetName,
+	)
+}
 
+func renameOpenImportArchiveNoReplace(
+	directoryHandle windows.Handle,
+	sourceHandle windows.Handle,
+	targetName string,
+) error {
 	targetUTF16, err := windows.UTF16FromString(targetName)
 	if err != nil {
 		return err
@@ -56,44 +107,6 @@ func renameImportArchiveNoReplace(
 		windows.FileRenameInformation,
 	)
 	return normalizeWindowsRenameError(err)
-}
-
-func openImportArchiveForRename(
-	directory windows.Handle,
-	sourceName string,
-) (windows.Handle, error) {
-	name, err := windows.NewNTUnicodeString(sourceName)
-	if err != nil {
-		return 0, err
-	}
-	attributes := &windows.OBJECT_ATTRIBUTES{
-		Length:        uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})),
-		RootDirectory: directory,
-		ObjectName:    name,
-		Attributes:    windows.OBJ_CASE_INSENSITIVE,
-	}
-	var (
-		handle     windows.Handle
-		status     windows.IO_STATUS_BLOCK
-		allocation int64
-	)
-	err = windows.NtCreateFile(
-		&handle,
-		windows.DELETE|windows.SYNCHRONIZE,
-		attributes,
-		&status,
-		&allocation,
-		0,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		windows.FILE_OPEN,
-		windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT,
-		0,
-		0,
-	)
-	if err != nil {
-		return 0, normalizeWindowsRenameError(err)
-	}
-	return handle, nil
 }
 
 func normalizeWindowsRenameError(err error) error {

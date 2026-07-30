@@ -80,6 +80,9 @@ func OpenLayout(packagePath string) (Layout, error) {
 	if err := os.MkdirAll(layout.Imports, 0o755); err != nil {
 		return Layout{}, fmt.Errorf("create imports directory: %w", err)
 	}
+	if err := cleanupOrphanImportTemporaryFilesForLayout(layout); err != nil {
+		return Layout{}, err
+	}
 	return layout, nil
 }
 

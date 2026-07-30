@@ -8,17 +8,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func renameImportArchiveNoReplace(
+func openImportArchiveTemporary(
+	importsDirectory *importArchiveDirectory,
+	name string,
+) (*os.File, error) {
+	return importsDirectory.root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+}
+
+func commitOpenImportArchiveNoReplace(
 	directory *os.File,
-	sourceName string,
+	temporary *os.File,
+	_ string,
 	targetName string,
 ) error {
-	directoryFD := int(directory.Fd())
-	return unix.RenameatxNp(
-		directoryFD,
-		sourceName,
-		directoryFD,
+	return unix.Fclonefileat(
+		int(temporary.Fd()),
+		int(directory.Fd()),
 		targetName,
-		unix.RENAME_EXCL,
+		0,
 	)
 }

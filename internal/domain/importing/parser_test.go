@@ -203,9 +203,8 @@ func TestParseChaptersAllowsTwentyMiBSingleLine(t *testing.T) {
 }
 
 func TestParseChaptersRejectsLineBeyondStableLimit(t *testing.T) {
-	const approvedImportBytes = 20 * 1024 * 1024
 	const expectedError = "manuscript line exceeds maximum length"
-	text := strings.Repeat("a", approvedImportBytes+1)
+	text := strings.Repeat("a", MaxDecodedManuscriptBytes+1)
 
 	_, err := ParseChapters(text)
 	if !errors.Is(err, ErrManuscriptLineTooLong) || err.Error() != expectedError {
