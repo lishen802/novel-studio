@@ -119,8 +119,8 @@ func TestParseChaptersPreservesBodyForEachVolumeWithoutChapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseChapters returned error: %v", err)
 	}
-	if len(chapters) != 3 {
-		t.Fatalf("len(chapters) = %d, want 3: %#v", len(chapters), chapters)
+	if len(chapters) != 2 {
+		t.Fatalf("len(chapters) = %d, want 2: %#v", len(chapters), chapters)
 	}
 
 	want := []ParsedChapter{
@@ -140,20 +140,32 @@ func TestParseChaptersPreservesBodyForEachVolumeWithoutChapters(t *testing.T) {
 			SourceStartLine: 4,
 			SourceEndLine:   4,
 		},
-		{
-			VolumeTitle:     "第三卷 尾声",
-			Title:           "导入正文",
-			Body:            "",
-			Position:        3,
-			SourceStartLine: 5,
-			SourceEndLine:   5,
-		},
 	}
 	for i := range want {
 		want[i].ContentHash = contentHash(want[i].Body)
 		if !reflect.DeepEqual(chapters[i], want[i]) {
 			t.Errorf("chapter %d = %#v, want %#v", i, chapters[i], want[i])
 		}
+	}
+}
+
+func TestParseChaptersRejectsVolumeHeadingWithoutBody(t *testing.T) {
+	_, err := ParseChapters("第一卷 起点")
+	if !errors.Is(err, ErrEmptyManuscript) {
+		t.Fatalf("ParseChapters error = %v, want %v", err, ErrEmptyManuscript)
+	}
+}
+
+func TestParseChaptersDropsTrailingEmptyVolumeWithoutLosingEarlierBody(t *testing.T) {
+	chapters, err := ParseChapters("卷前正文\n第二卷 尾声")
+	if err != nil {
+		t.Fatalf("ParseChapters returned error: %v", err)
+	}
+	if len(chapters) != 1 {
+		t.Fatalf("len(chapters) = %d, want 1: %#v", len(chapters), chapters)
+	}
+	if chapters[0].Title != "导入正文" || chapters[0].Body != "卷前正文" {
+		t.Fatalf("chapter = %#v, want preserved body without empty volume candidate", chapters[0])
 	}
 }
 
@@ -178,20 +190,22 @@ func TestParseChaptersRecognizesUnicodeWhitespaceInChineseHeadings(t *testing.T)
 	}
 }
 
-func TestParseChaptersAllowsLongSingleLineWithinLimit(t *testing.T) {
-	body := strings.Repeat("a", 128*1024)
+func TestParseChaptersAllowsTwentyMiBSingleLine(t *testing.T) {
+	const approvedImportBytes = 20 * 1024 * 1024
+	body := strings.Repeat("a", approvedImportBytes)
 	chapters, err := ParseChapters(body)
 	if err != nil {
-		t.Fatalf("ParseChapters returned error for long supported line: %v", err)
+		t.Fatalf("ParseChapters returned error for approved-size line: %v", err)
 	}
-	if len(chapters) != 1 || chapters[0].Body != body {
-		t.Fatalf("long line was not preserved")
+	if len(chapters) != 1 || len(chapters[0].Body) != approvedImportBytes {
+		t.Fatalf("approved-size line was not preserved")
 	}
 }
 
 func TestParseChaptersRejectsLineBeyondStableLimit(t *testing.T) {
+	const approvedImportBytes = 20 * 1024 * 1024
 	const expectedError = "manuscript line exceeds maximum length"
-	text := strings.Repeat("a", MaxManuscriptLineBytes+1)
+	text := strings.Repeat("a", approvedImportBytes+1)
 
 	_, err := ParseChapters(text)
 	if !errors.Is(err, ErrManuscriptLineTooLong) || err.Error() != expectedError {

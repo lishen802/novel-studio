@@ -10,7 +10,7 @@ import (
 	"unicode"
 )
 
-const MaxManuscriptLineBytes = 4 * 1024 * 1024
+const MaxManuscriptLineBytes = 20 * 1024 * 1024
 
 var (
 	ErrEmptyManuscript       = errors.New("manuscript contains no importable text")
@@ -39,7 +39,6 @@ type chapterCandidate struct {
 	title           string
 	anchorLine      int
 	explicitChapter bool
-	keepEmptyAtEOF  bool
 	body            chapterBody
 }
 
@@ -83,13 +82,13 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 	currentVolume := ""
 	var current *chapterCandidate
 
-	appendCurrent := func(atEOF bool) {
+	appendCurrent := func() {
 		if current == nil {
 			return
 		}
 		body, startLine, endLine, ok := current.body.value()
 		if !ok {
-			if !current.explicitChapter && !(atEOF && current.keepEmptyAtEOF) {
+			if !current.explicitChapter {
 				current = nil
 				return
 			}
@@ -125,18 +124,17 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 
 		heading := unwrapMarkdownHeading(rawLine)
 		if heading != "" && isVolumeHeading(heading) {
-			appendCurrent(false)
+			appendCurrent()
 			currentVolume = heading
 			current = &chapterCandidate{
-				volumeTitle:    currentVolume,
-				title:          "导入正文",
-				anchorLine:     lineNumber,
-				keepEmptyAtEOF: true,
+				volumeTitle: currentVolume,
+				title:       "导入正文",
+				anchorLine:  lineNumber,
 			}
 			continue
 		}
 		if heading != "" && isChapterHeading(heading) {
-			appendCurrent(false)
+			appendCurrent()
 			current = &chapterCandidate{
 				volumeTitle:     currentVolume,
 				title:           heading,
@@ -161,7 +159,7 @@ func ParseChapters(text string) ([]ParsedChapter, error) {
 	if scanner.Err() != nil {
 		return nil, ErrManuscriptLineTooLong
 	}
-	appendCurrent(true)
+	appendCurrent()
 
 	if len(chapters) == 0 {
 		return nil, ErrEmptyManuscript
