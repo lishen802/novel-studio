@@ -345,6 +345,9 @@ describe("ImportWorkbench", () => {
       screen.getByRole("button", { name: "导入所选章节" }),
     ).toBeDisabled();
     expect(screen.queryByRole("button", { name: "删除任务" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /长夜\.md 已导入/ }),
+    ).toHaveFocus();
   });
 
   it("shows safe failed-task details and lets the author delete non-applied jobs", async () => {
@@ -387,6 +390,47 @@ describe("ImportWorkbench", () => {
       expect(client.deleteImportJobCalls).toEqual(["import-1"]),
     );
     expect(screen.getByText("暂无导入任务")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "选择小说文件" }),
+    ).toHaveFocus();
+  });
+
+  it("focuses the next task after a successful delete", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const taskA = importJob({
+      id: "import-a",
+      sourceName: "任务A.md",
+      status: "failed",
+      chapterCount: 0,
+      chapters: [],
+      errorCode: "IMPORT_PARSE_EMPTY",
+      errorMessage: "No importable chapters were found.",
+    });
+    const taskB = importJob({
+      id: "import-b",
+      sourceName: "任务B.md",
+    });
+    client.importJobsResult = [taskA, taskB];
+    const user = userEvent.setup();
+    render(
+      <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "任务A.md" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "删除任务" }));
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "确认删除导入任务" }),
+      ).getByRole("button", { name: "确认删除" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /任务B\.md 待导入/ }),
+      ).toHaveFocus(),
+    );
   });
 
   it("does not render unsafe details stored on a failed import task", async () => {

@@ -105,6 +105,11 @@ export function ImportWorkbench({
   const dialogRef = useRef<HTMLElement | null>(null);
   const dialogTriggerRef = useRef<HTMLButtonElement | null>(null);
   const restoreDialogFocusRef = useRef(false);
+  const prepareButtonRef = useRef<HTMLButtonElement | null>(null);
+  const taskButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const mutationFocusRef = useRef<
+    { kind: "task"; id: string } | { kind: "prepare" } | null
+  >(null);
   selectedJobIDRef.current = selectedJobId;
   const detail = loadedDetail?.id === selectedJobId ? loadedDetail : null;
 
@@ -182,6 +187,19 @@ export function ImportWorkbench({
   }, [confirmation]);
 
   useEffect(() => {
+    if (confirmation !== null || busy !== null) return;
+    const target = mutationFocusRef.current;
+    if (!target) return;
+    const element =
+      target.kind === "task"
+        ? taskButtonRefs.current.get(target.id)
+        : prepareButtonRef.current;
+    if (!element?.isConnected || element.disabled) return;
+    mutationFocusRef.current = null;
+    element.focus();
+  }, [busy, confirmation, jobs, selectedJobId]);
+
+  useEffect(() => {
     if (!selectedJobId) return;
     let current = true;
     setDetailLoading(true);
@@ -256,6 +274,9 @@ export function ImportWorkbench({
     try {
       await client.deleteImportJob(targetID);
       const remaining = jobs.filter((job) => job.id !== targetID);
+      mutationFocusRef.current = remaining[0]
+        ? { kind: "task", id: remaining[0].id }
+        : { kind: "prepare" };
       setJobs(remaining);
       setSelectedJobId(remaining[0]?.id ?? null);
       if (remaining.length === 0) {
@@ -282,6 +303,7 @@ export function ImportWorkbench({
       const result = await client.applyImportJob(targetID, orderedSelection);
       onChaptersImported(result.chapters);
       if (selectedJobIDRef.current !== targetID) return;
+      mutationFocusRef.current = { kind: "task", id: targetID };
       setJobs((current) =>
         current.map((job) => (job.id === targetID ? result.job : job)),
       );
@@ -356,6 +378,7 @@ export function ImportWorkbench({
           <p>先预览章节边界，再由你决定哪些正文进入当前项目。</p>
         </div>
         <button
+          ref={prepareButtonRef}
           type="button"
           className="primary-action"
           disabled={busy !== null || confirmation !== null}
@@ -411,6 +434,10 @@ export function ImportWorkbench({
           <aside className="import-task-list" aria-label="导入任务">
             {jobs.map((job) => (
               <button
+                ref={(element) => {
+                  if (element) taskButtonRefs.current.set(job.id, element);
+                  else taskButtonRefs.current.delete(job.id);
+                }}
                 type="button"
                 key={job.id}
                 className={job.id === selectedJobId ? "is-active" : ""}
