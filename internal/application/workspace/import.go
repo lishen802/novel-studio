@@ -21,16 +21,16 @@ const (
 )
 
 type ImportChapterView struct {
-	ID               string `json:"id"`
-	VolumeTitle      string `json:"volumeTitle"`
-	Title            string `json:"title"`
-	Body             string `json:"body"`
-	Position         int    `json:"position"`
-	SourceStartLine  int    `json:"sourceStartLine"`
-	SourceEndLine    int    `json:"sourceEndLine"`
-	ContentHash      string `json:"contentHash"`
-	Selected         bool   `json:"selected"`
-	CreatedChapterID string `json:"createdChapterId,omitempty"`
+	ID                 string `json:"id"`
+	VolumeTitle        string `json:"volumeTitle"`
+	Title              string `json:"title"`
+	Body               string `json:"body"`
+	Position           int    `json:"position"`
+	SourceStartLine    int    `json:"sourceStartLine"`
+	SourceEndLine      int    `json:"sourceEndLine"`
+	ContentHashSummary string `json:"contentHashSummary"`
+	Selected           bool   `json:"selected"`
+	CreatedChapterID   string `json:"createdChapterId,omitempty"`
 }
 
 type ImportJobView struct {
@@ -68,6 +68,10 @@ func (s *Service) PrepareManuscriptImport(
 	if err := s.license.Require(ctx, license.ImportManuscript); err != nil {
 		return ImportPrepareResult{}, err
 	}
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ImportPrepareResult{}, err
+	}
+	defer s.endLifecycleOperation()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,19 +91,24 @@ func (s *Service) PrepareManuscriptImport(
 	if err != nil {
 		return ImportPrepareResult{}, stableImportArchiveError(err)
 	}
-	cleanup := func() {
-		s.cleanupImportArchive(s.active.packageInfo, prepared.ArchivedRelativePath)
+	cleanup := func(cause error) error {
+		cleanupErr := s.cleanupImportArchive(
+			s.active.packageInfo,
+			prepared.ArchivedRelativePath,
+		)
+		if cleanupErr != nil {
+			return errors.Join(cause, cleanupErr)
+		}
+		return cause
 	}
 	sourceName, archivedRelativePath, err := safePreparedImportMetadata(prepared)
 	if err != nil {
-		cleanup()
-		return ImportPrepareResult{}, err
+		return ImportPrepareResult{}, cleanup(err)
 	}
 	prepared.Name = sourceName
 	prepared.ArchivedRelativePath = archivedRelativePath
 	if err := ctx.Err(); err != nil {
-		cleanup()
-		return ImportPrepareResult{}, err
+		return ImportPrepareResult{}, cleanup(err)
 	}
 
 	parsed, parseErr := importing.ParseChapters(prepared.Text)
@@ -119,18 +128,15 @@ func (s *Service) PrepareManuscriptImport(
 			ErrorMessage:         message,
 		}, now)
 		if err != nil {
-			cleanup()
-			return ImportPrepareResult{}, stableImportConstructionError(err)
+			return ImportPrepareResult{}, cleanup(stableImportConstructionError(err))
 		}
 		if err := store.CreateFailedImportJob(ctx, failed); err != nil {
-			cleanup()
-			return ImportPrepareResult{}, stableImportStoreError(err)
+			return ImportPrepareResult{}, cleanup(stableImportStoreError(err))
 		}
 		return ImportPrepareResult{Job: importJobView(failed, []importing.ImportChapter{})}, nil
 	}
 	if err := ctx.Err(); err != nil {
-		cleanup()
-		return ImportPrepareResult{}, err
+		return ImportPrepareResult{}, cleanup(err)
 	}
 
 	chapters := make([]importing.ImportChapter, 0, len(parsed))
@@ -146,8 +152,7 @@ func (s *Service) PrepareManuscriptImport(
 			SourceEndLine:   candidate.SourceEndLine,
 		})
 		if err != nil {
-			cleanup()
-			return ImportPrepareResult{}, stableImportConstructionError(err)
+			return ImportPrepareResult{}, cleanup(stableImportConstructionError(err))
 		}
 		chapters = append(chapters, chapter)
 	}
@@ -163,17 +168,20 @@ func (s *Service) PrepareManuscriptImport(
 		ChapterCount:         len(chapters),
 	}, now)
 	if err != nil {
-		cleanup()
-		return ImportPrepareResult{}, stableImportConstructionError(err)
+		return ImportPrepareResult{}, cleanup(stableImportConstructionError(err))
 	}
 	if err := store.CreateImportJob(ctx, job, chapters); err != nil {
-		cleanup()
-		return ImportPrepareResult{}, stableImportStoreError(err)
+		return ImportPrepareResult{}, cleanup(stableImportStoreError(err))
 	}
 	return ImportPrepareResult{Job: importJobView(job, chapters)}, nil
 }
 
 func (s *Service) ImportJobs(ctx context.Context) ([]ImportJobView, error) {
+	if err := s.beginLifecycleOperation(); err != nil {
+		return nil, err
+	}
+	defer s.endLifecycleOperation()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.active == nil {
@@ -198,6 +206,11 @@ func (s *Service) ImportJobs(ctx context.Context) ([]ImportJobView, error) {
 }
 
 func (s *Service) ImportJob(ctx context.Context, id string) (ImportJobView, error) {
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ImportJobView{}, err
+	}
+	defer s.endLifecycleOperation()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.active == nil {
@@ -218,6 +231,11 @@ func (s *Service) ImportJob(ctx context.Context, id string) (ImportJobView, erro
 }
 
 func (s *Service) DeleteImportJob(ctx context.Context, id string) error {
+	if err := s.beginLifecycleOperation(); err != nil {
+		return err
+	}
+	defer s.endLifecycleOperation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil {
@@ -240,7 +258,10 @@ func (s *Service) DeleteImportJob(ctx context.Context, id string) error {
 	if err := store.DeleteImportJob(ctx, details.Job.ID); err != nil {
 		return stableImportStoreError(err)
 	}
-	s.cleanupImportArchive(s.active.packageInfo, details.Job.ArchivedRelativePath)
+	// The archived source is immutable project-level evidence. Snapshot and
+	// branch databases may still reference it after the current job row is
+	// deleted, so cross-version garbage collection must decide when it is safe
+	// to remove the archive.
 	return nil
 }
 
@@ -255,6 +276,10 @@ func (s *Service) ApplyImportJob(
 	if len(selectedIDs) == 0 {
 		return ImportApplyView{}, ports.ErrNoImportChaptersSelected
 	}
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ImportApplyView{}, err
+	}
+	defer s.endLifecycleOperation()
 	if err := s.beginImportOperation(); err != nil {
 		return ImportApplyView{}, err
 	}
@@ -377,13 +402,16 @@ func (s *Service) importStoreAndProjectLocked(
 func (s *Service) cleanupImportArchive(
 	projectPackage ports.ProjectPackage,
 	relativePath string,
-) {
+) error {
 	if s.imports == nil || strings.TrimSpace(relativePath) == "" {
-		return
+		return nil
 	}
 	cleanupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = s.imports.Delete(cleanupContext, projectPackage, relativePath)
+	if err := s.imports.Delete(cleanupContext, projectPackage, relativePath); err != nil {
+		return ErrImportArchiveCleanup
+	}
+	return nil
 }
 
 func safePreparedImportMetadata(
@@ -494,17 +522,21 @@ func importJobView(
 ) ImportJobView {
 	chapterViews := make([]ImportChapterView, 0, len(chapters))
 	for _, chapter := range chapters {
+		contentHashSummary := chapter.ContentHash
+		if len(contentHashSummary) > 12 {
+			contentHashSummary = contentHashSummary[:12]
+		}
 		chapterViews = append(chapterViews, ImportChapterView{
-			ID:               chapter.ID,
-			VolumeTitle:      chapter.VolumeTitle,
-			Title:            chapter.Title,
-			Body:             chapter.Body,
-			Position:         chapter.Position,
-			SourceStartLine:  chapter.SourceStartLine,
-			SourceEndLine:    chapter.SourceEndLine,
-			ContentHash:      chapter.ContentHash,
-			Selected:         chapter.Selected,
-			CreatedChapterID: chapter.CreatedChapterID,
+			ID:                 chapter.ID,
+			VolumeTitle:        chapter.VolumeTitle,
+			Title:              chapter.Title,
+			Body:               chapter.Body,
+			Position:           chapter.Position,
+			SourceStartLine:    chapter.SourceStartLine,
+			SourceEndLine:      chapter.SourceEndLine,
+			ContentHashSummary: contentHashSummary,
+			Selected:           chapter.Selected,
+			CreatedChapterID:   chapter.CreatedChapterID,
 		})
 	}
 	hashDigest := job.SourceHash

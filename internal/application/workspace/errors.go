@@ -15,4 +15,6 @@ var (
 	ErrImportOperationActive    = errors.New("a manuscript import operation is already active")
 	ErrImportWorkspaceRead      = errors.New("manuscript import workspace data could not be read")
 	ErrImportAppliedRefresh     = errors.New("manuscript import was applied but workspace refresh failed")
+	ErrImportArchiveCleanup     = errors.New("manuscript import archive cleanup failed")
+	ErrServiceClosed            = errors.New("workspace service is closed")
 )

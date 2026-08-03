@@ -194,6 +194,37 @@ func TestSafeImportStoreErrorPreservesContextCancellation(t *testing.T) {
 	}
 }
 
+func TestImmediateTransactionCommitIgnoresConnectionCloseFailureAfterCommit(t *testing.T) {
+	commitCalls := 0
+	closeCalls := 0
+	tx := &immediateTx{
+		commitFn: func(context.Context) error {
+			commitCalls++
+			return nil
+		},
+		closeFn: func() error {
+			closeCalls++
+			return errors.New("injected connection close failure")
+		},
+	}
+
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatalf("Commit() error = %v, want nil after successful COMMIT", err)
+	}
+	if !tx.completed || commitCalls != 1 || closeCalls != 1 {
+		t.Fatalf(
+			"transaction state = completed:%v commit:%d close:%d",
+			tx.completed,
+			commitCalls,
+			closeCalls,
+		)
+	}
+	tx.Rollback()
+	if commitCalls != 1 || closeCalls != 1 {
+		t.Fatalf("Rollback after commit touched connection: commit:%d close:%d", commitCalls, closeCalls)
+	}
+}
+
 func TestImportStoreRollsBackJobAndCandidatesWhenCandidateInsertFails(t *testing.T) {
 	ctx := context.Background()
 	store, project := createTestStore(t)

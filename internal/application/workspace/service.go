@@ -23,6 +23,9 @@ type Service struct {
 	credentials ports.CredentialStore
 	providers   ports.ModelProviderFactory
 
+	lifecycleMu sync.Mutex
+	closed      bool
+
 	mu                  sync.RWMutex
 	active              *activeWorkspace
 	branchMergePreviews map[string]branchMergePreview
@@ -89,6 +92,10 @@ func (s *Service) CreateProject(
 	if err := s.license.Require(ctx, license.CreateProject); err != nil {
 		return ProjectView{}, err
 	}
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ProjectView{}, err
+	}
+	defer s.endLifecycleOperation()
 
 	project, err := projectdomain.NewProject(s.ids.NewID(), title, genre, summary, s.clock.Now())
 	if err != nil {
@@ -119,6 +126,11 @@ func (s *Service) CreateProject(
 }
 
 func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectView, error) {
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ProjectView{}, err
+	}
+	defer s.endLifecycleOperation()
+
 	packageInfo, err := s.packages.Open(packagePath)
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("open project package: %w", err)
@@ -300,6 +312,13 @@ func (s *Service) CommitChapter(
 }
 
 func (s *Service) Close() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
 	s.cancelAllAgentJobs()
 	s.mu.Lock()
 	active := s.active
@@ -312,6 +331,20 @@ func (s *Service) Close() error {
 	return active.store.Close()
 }
 
+func (s *Service) beginLifecycleOperation() error {
+	s.lifecycleMu.Lock()
+	if s.closed {
+		s.lifecycleMu.Unlock()
+		return ErrServiceClosed
+	}
+	return nil
+}
+
+func (s *Service) endLifecycleOperation() {
+	s.lifecycleMu.Unlock()
+}
+
+// replaceActive must be called while lifecycleMu is held.
 func (s *Service) replaceActive(next activeWorkspace) {
 	s.cancelAllAgentJobs()
 	s.mu.Lock()

@@ -138,6 +138,68 @@ func TestOpenProjectFailureKeepsCurrentWorkspaceActive(t *testing.T) {
 	}
 }
 
+func TestClosePreventsConcurrentOpenFromInstallingWorkspaceAfterShutdown(t *testing.T) {
+	firstProject := mustProject(t, "project-1", "第一本书")
+	secondProject := mustProject(t, "project-2", "第二本书")
+	firstStore := newFakeStore(firstProject)
+	secondStore := newFakeStore(secondProject)
+	factory := &fakeStoreFactory{
+		openStores: []ports.ProjectStore{firstStore, secondStore},
+	}
+	service := NewService(
+		&fakePackageManager{openPackage: testPackage("/books/project.zjproject")},
+		factory,
+		&fakeLicense{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{},
+		&fakeSnapshotArchive{},
+	)
+	if _, err := service.OpenProject(context.Background(), "/books/first.zjproject"); err != nil {
+		t.Fatal(err)
+	}
+	firstStore.closeStarted = make(chan struct{})
+	firstStore.closeRelease = make(chan struct{})
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- service.Close() }()
+	<-firstStore.closeStarted
+	type openResult struct {
+		view ProjectView
+		err  error
+	}
+	openDone := make(chan openResult, 1)
+	go func() {
+		view, err := service.OpenProject(context.Background(), "/books/second.zjproject")
+		openDone <- openResult{view: view, err: err}
+	}()
+
+	var earlyOpen *openResult
+	select {
+	case result := <-openDone:
+		earlyOpen = &result
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(firstStore.closeRelease)
+	if err := <-closeDone; err != nil {
+		t.Fatal(err)
+	}
+	var result openResult
+	if earlyOpen != nil {
+		result = *earlyOpen
+	} else {
+		result = <-openDone
+	}
+	if !errors.Is(result.err, ErrServiceClosed) {
+		t.Fatalf("concurrent OpenProject() = (%#v, %v), want ErrServiceClosed", result.view, result.err)
+	}
+	if factory.openCalls != 1 {
+		t.Fatalf("store open calls = %d, want only initial open", factory.openCalls)
+	}
+	if _, err := service.ListChapters(context.Background()); !errors.Is(err, ErrNoActiveProject) {
+		t.Fatalf("ListChapters after Close error = %v, want ErrNoActiveProject", err)
+	}
+}
+
 func TestReplaceActiveWorkspaceInvalidatesBranchMergePreviews(t *testing.T) {
 	service := &Service{
 		branchMergePreviews: map[string]branchMergePreview{
@@ -331,6 +393,7 @@ type fakePackageManager struct {
 	createErr     error
 	openPackage   ports.ProjectPackage
 	openErr       error
+	openStarted   chan struct{}
 	events        *[]string
 }
 
@@ -341,6 +404,10 @@ func (f *fakePackageManager) Create(string, string) (ports.ProjectPackage, error
 
 func (f *fakePackageManager) Open(string) (ports.ProjectPackage, error) {
 	appendEvent(f.events, "open-package")
+	if f.openStarted != nil {
+		close(f.openStarted)
+		f.openStarted = nil
+	}
 	return f.openPackage, f.openErr
 }
 
@@ -350,6 +417,7 @@ type fakeStoreFactory struct {
 	openStore   ports.ProjectStore
 	openStores  []ports.ProjectStore
 	openErr     error
+	openCalls   int
 	events      *[]string
 }
 
@@ -360,6 +428,7 @@ func (f *fakeStoreFactory) Create(context.Context, string, projectdomain.Project
 
 func (f *fakeStoreFactory) Open(context.Context, string) (ports.ProjectStore, error) {
 	appendEvent(f.events, "open-store")
+	f.openCalls++
 	if len(f.openStores) > 0 {
 		store := f.openStores[0]
 		f.openStores = f.openStores[1:]
@@ -414,6 +483,8 @@ type fakeStore struct {
 	chapterRevisions    map[string][]revisiondomain.ChapterRevision
 	backupPath          string
 	closeCalls          int
+	closeStarted        chan struct{}
+	closeRelease        chan struct{}
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -1205,6 +1276,12 @@ func (f *fakeStore) DeleteFactConflict(_ context.Context, id string) error {
 func (f *fakeStore) Close() error {
 	f.closeCalls++
 	appendEvent(f.events, f.closeEvent)
+	if f.closeStarted != nil {
+		close(f.closeStarted)
+	}
+	if f.closeRelease != nil {
+		<-f.closeRelease
+	}
 	return nil
 }
 

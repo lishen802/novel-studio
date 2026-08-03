@@ -462,6 +462,8 @@ func (s *Store) ApplyImportJob(
 type immediateTx struct {
 	conn      *sql.Conn
 	completed bool
+	commitFn  func(context.Context) error
+	closeFn   func() error
 }
 
 var errImportWriteLockTimeout = errors.New("import write lock wait timed out")
@@ -550,11 +552,18 @@ func (tx *immediateTx) Commit(ctx context.Context) error {
 	if tx.completed {
 		return sql.ErrTxDone
 	}
-	if _, err := tx.conn.ExecContext(ctx, "COMMIT"); err != nil {
+	var err error
+	if tx.commitFn != nil {
+		err = tx.commitFn(ctx)
+	} else {
+		_, err = tx.conn.ExecContext(ctx, "COMMIT")
+	}
+	if err != nil {
 		return err
 	}
 	tx.completed = true
-	return tx.conn.Close()
+	_ = tx.closeConnection()
+	return nil
 }
 
 func (tx *immediateTx) Rollback() {
@@ -565,7 +574,14 @@ func (tx *immediateTx) Rollback() {
 	defer cancel()
 	_, _ = tx.conn.ExecContext(rollbackCtx, "ROLLBACK")
 	tx.completed = true
-	_ = tx.conn.Close()
+	_ = tx.closeConnection()
+}
+
+func (tx *immediateTx) closeConnection() error {
+	if tx.closeFn != nil {
+		return tx.closeFn()
+	}
+	return tx.conn.Close()
 }
 
 func restoreSQLiteBusyTimeout(conn *sql.Conn) error {

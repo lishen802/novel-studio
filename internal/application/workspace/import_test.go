@@ -69,7 +69,8 @@ func TestPrepareManuscriptImportPersistsTXTAndMarkdownMetadataAndCandidates(t *t
 				first.Position != 1 ||
 				first.SourceStartLine != 3 ||
 				first.SourceEndLine != 3 ||
-				first.ContentHash == "" ||
+				first.ContentHashSummary != store.jobs["job-1"].Chapters[0].ContentHash[:12] ||
+				len(first.ContentHashSummary) != 12 ||
 				first.Selected ||
 				first.CreatedChapterID != "" {
 				t.Fatalf("first candidate = %#v", first)
@@ -160,6 +161,40 @@ func TestPrepareManuscriptImportCleansArchiveAfterStoreOrDuplicateFailure(t *tes
 				t.Fatalf("error leaks source path: %v", err)
 			}
 		})
+	}
+}
+
+func TestPrepareManuscriptImportReportsArchiveCleanupFailureAlongsideStoreFailure(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeImportStore(project)
+	store.createErr = ports.ErrDuplicateImportSource
+	archive := validFakeImportArchive()
+	archive.deleteErr = errors.New("remove /private/secret/imports/job-1.txt")
+	service := openImportTestService(
+		t,
+		store,
+		archive,
+		&fakeLicense{},
+		&sequenceIDs{ids: []string{"job-1", "candidate-1"}},
+	)
+
+	_, err := service.PrepareManuscriptImport(
+		context.Background(),
+		"/private/secret/novel.txt",
+	)
+	if !errors.Is(err, ports.ErrDuplicateImportSource) ||
+		!errors.Is(err, ErrImportArchiveCleanup) {
+		t.Fatalf(
+			"error = %v, want duplicate source and ErrImportArchiveCleanup",
+			err,
+		)
+	}
+	if strings.Contains(err.Error(), "/private/secret") ||
+		strings.Contains(err.Error(), "remove ") {
+		t.Fatalf("cleanup error leaks adapter details: %v", err)
+	}
+	if len(archive.deleted) != 1 {
+		t.Fatalf("archive cleanup attempts = %d, want 1", len(archive.deleted))
 	}
 }
 
@@ -328,7 +363,7 @@ func TestImportJobQueriesAreProjectIsolated(t *testing.T) {
 	}
 }
 
-func TestDeleteImportJobDeletesPreparedAndFailedArchivesButRejectsApplied(t *testing.T) {
+func TestDeleteImportJobRetainsImmutableArchiveAndRejectsApplied(t *testing.T) {
 	for _, status := range []importing.JobStatus{
 		importing.JobStatusPrepared,
 		importing.JobStatusFailed,
@@ -358,8 +393,8 @@ func TestDeleteImportJobDeletesPreparedAndFailedArchivesButRejectsApplied(t *tes
 			if _, found := store.jobs[job.ID]; found {
 				t.Fatalf("job was not deleted")
 			}
-			if !reflect.DeepEqual(archive.deleted, []string{job.ArchivedRelativePath}) {
-				t.Fatalf("deleted archives = %#v", archive.deleted)
+			if len(archive.deleted) != 0 {
+				t.Fatalf("immutable archive was deleted: %#v", archive.deleted)
 			}
 		})
 	}
@@ -645,8 +680,9 @@ func TestProjectReplacementWaitsForPrepareAndClosesOnlyAfterOldStoreIsUnused(t *
 	archive := validFakeImportArchive()
 	archive.prepareStarted = make(chan struct{})
 	archive.prepareRelease = make(chan struct{})
+	packages := &fakePackageManager{openPackage: testPackage("/books/first.zjproject")}
 	service := NewService(
-		&fakePackageManager{openPackage: testPackage("/books/first.zjproject")},
+		packages,
 		&fakeStoreFactory{openStores: []ports.ProjectStore{firstStore, secondStore}},
 		&fakeLicense{},
 		fixedClock{now: time.Unix(200, 0)},
@@ -664,14 +700,17 @@ func TestProjectReplacementWaitsForPrepareAndClosesOnlyAfterOldStoreIsUnused(t *
 		prepareDone <- err
 	}()
 	<-archive.prepareStarted
+	openStarted := make(chan struct{})
+	packages.openStarted = openStarted
 	openDone := make(chan error, 1)
 	go func() {
 		_, err := service.OpenProject(context.Background(), "/books/second.zjproject")
 		openDone <- err
 	}()
+	touchedPackageDuringImport := false
 	select {
-	case err := <-openDone:
-		t.Fatalf("OpenProject returned while prepare was active: %v", err)
+	case <-openStarted:
+		touchedPackageDuringImport = true
 	case <-time.After(20 * time.Millisecond):
 	}
 
@@ -684,6 +723,9 @@ func TestProjectReplacementWaitsForPrepareAndClosesOnlyAfterOldStoreIsUnused(t *
 	}
 	if firstStore.closeCalls != 1 {
 		t.Fatalf("old store close calls = %d, want 1", firstStore.closeCalls)
+	}
+	if touchedPackageDuringImport {
+		t.Fatal("OpenProject touched the package while import prepare was active")
 	}
 }
 
