@@ -107,11 +107,18 @@ describe("ImportWorkbench", () => {
       "导入操作失败，请重试。",
     );
     expect(screen.queryByText(/SELECT|\/Users\/author/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     client.importJobsError = null;
     client.importJobsResult = [importJob()];
+    const failedState = screen.getByText(
+      "导入任务暂时无法读取。",
+    ).parentElement;
     await user.click(
-      screen.getByRole("button", { name: "刷新任务与详情" }),
+      within(failedState!).getByRole("button", {
+        name: "刷新任务与详情",
+      }),
     );
 
     expect(
@@ -210,7 +217,10 @@ describe("ImportWorkbench", () => {
     await user.click(
       within(first).getByRole("checkbox", { name: "选择 第一章 潮声" }),
     );
-    await user.click(screen.getByRole("button", { name: "导入所选章节" }));
+    const applyTrigger = screen.getByRole("button", {
+      name: "导入所选章节",
+    });
+    await user.click(applyTrigger);
 
     const dialog = screen.getByRole("dialog", { name: "确认导入章节" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
@@ -226,6 +236,7 @@ describe("ImportWorkbench", () => {
       screen.queryByRole("dialog", { name: "确认导入章节" }),
     ).not.toBeInTheDocument();
     expect(client.applyImportJobCalls).toHaveLength(0);
+    expect(applyTrigger).toHaveFocus();
   });
 
   it("moves focus into confirmation, traps Tab, and cancels with Escape", async () => {
@@ -263,6 +274,9 @@ describe("ImportWorkbench", () => {
       screen.queryByRole("dialog", { name: "确认导入章节" }),
     ).not.toBeInTheDocument();
     expect(client.applyImportJobCalls).toHaveLength(0);
+    expect(
+      screen.getByRole("button", { name: "导入所选章节" }),
+    ).toHaveFocus();
   });
 
   it("applies selected chapters once and refreshes the workspace with the complete chapter list", async () => {
@@ -352,7 +366,8 @@ describe("ImportWorkbench", () => {
     expect(
       await screen.findByText("没有识别到可导入章节。"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "删除任务" }));
+    const deleteTrigger = screen.getByRole("button", { name: "删除任务" });
+    await user.click(deleteTrigger);
     const dialog = screen.getByRole("dialog", {
       name: "确认删除导入任务",
     });
@@ -360,6 +375,7 @@ describe("ImportWorkbench", () => {
     expect(client.deleteImportJobCalls).toHaveLength(0);
     await user.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(client.deleteImportJobCalls).toHaveLength(0);
+    expect(deleteTrigger).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "删除任务" }));
     await user.click(
       within(
@@ -505,8 +521,15 @@ describe("ImportWorkbench", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "暂时无法读取导入任务",
     );
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const failedState = screen.getByText(
+      "任务详情暂时无法读取。",
+    ).parentElement;
     await user.click(
-      screen.getByRole("button", { name: "刷新任务与详情" }),
+      within(failedState!).getByRole("button", {
+        name: "刷新任务与详情",
+      }),
     );
 
     expect(

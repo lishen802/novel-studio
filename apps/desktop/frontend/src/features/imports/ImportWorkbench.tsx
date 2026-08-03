@@ -103,6 +103,8 @@ export function ImportWorkbench({
   const selectedJobIDRef = useRef(selectedJobId);
   const mountedRef = useRef(true);
   const dialogRef = useRef<HTMLElement | null>(null);
+  const dialogTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const restoreDialogFocusRef = useRef(false);
   selectedJobIDRef.current = selectedJobId;
   const detail = loadedDetail?.id === selectedJobId ? loadedDetail : null;
 
@@ -173,6 +175,13 @@ export function ImportWorkbench({
   }, [busy, confirmation]);
 
   useEffect(() => {
+    if (confirmation !== null || !restoreDialogFocusRef.current) return;
+    restoreDialogFocusRef.current = false;
+    const trigger = dialogTriggerRef.current;
+    if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+  }, [confirmation]);
+
+  useEffect(() => {
     if (!selectedJobId) return;
     let current = true;
     setDetailLoading(true);
@@ -205,6 +214,19 @@ export function ImportWorkbench({
   const allSelected =
     Boolean(detail?.chapters.length) &&
     detail!.chapters.every((chapter) => selectedChapterIds.has(chapter.id));
+
+  const openConfirmation = (
+    value: "apply" | "delete",
+    trigger: HTMLButtonElement,
+  ) => {
+    dialogTriggerRef.current = trigger;
+    setConfirmation(value);
+  };
+
+  const closeConfirmation = () => {
+    restoreDialogFocusRef.current = true;
+    setConfirmation(null);
+  };
 
   const prepare = async () => {
     setError(null);
@@ -243,7 +265,7 @@ export function ImportWorkbench({
     } catch (deleteError) {
       setError(errorMessage(deleteError));
     } finally {
-      setConfirmation(null);
+      closeConfirmation();
       setBusy(null);
     }
   };
@@ -268,7 +290,7 @@ export function ImportWorkbench({
       if (mountedRef.current) setError(errorMessage(applyError));
     } finally {
       if (mountedRef.current) {
-        setConfirmation(null);
+        closeConfirmation();
         setBusy(null);
       }
     }
@@ -278,7 +300,7 @@ export function ImportWorkbench({
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      if (busy === null) setConfirmation(null);
+      if (busy === null) closeConfirmation();
       return;
     }
     if (event.key !== "Tab") return;
@@ -369,6 +391,14 @@ export function ImportWorkbench({
         <div className="import-state" role="status" aria-live="polite">
           <FileSearch2 size={28} aria-hidden="true" />
           <p>导入任务暂时无法读取。</p>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={busy !== null || loading}
+            onClick={() => void refreshImports()}
+          >
+            刷新任务与详情
+          </button>
         </div>
       ) : jobs.length === 0 ? (
         <div className="import-state">
@@ -409,6 +439,14 @@ export function ImportWorkbench({
               <div className="import-state" role="status" aria-live="polite">
                 <FileSearch2 size={28} aria-hidden="true" />
                 <p>任务详情暂时无法读取。</p>
+                <button
+                  type="button"
+                  className="secondary-action"
+                  disabled={busy !== null || loading}
+                  onClick={() => void refreshImports()}
+                >
+                  刷新任务与详情
+                </button>
               </div>
             ) : detail ? (
               <>
@@ -535,7 +573,9 @@ export function ImportWorkbench({
                       type="button"
                       className="secondary-action import-delete"
                       disabled={busy !== null}
-                      onClick={() => setConfirmation("delete")}
+                      onClick={(event) =>
+                        openConfirmation("delete", event.currentTarget)
+                      }
                     >
                       <Trash2 size={16} aria-hidden="true" />
                       {busy === "delete" ? "正在删除…" : "删除任务"}
@@ -549,7 +589,9 @@ export function ImportWorkbench({
                       selectedChapterIds.size === 0 ||
                       busy !== null
                     }
-                    onClick={() => setConfirmation("apply")}
+                    onClick={(event) =>
+                      openConfirmation("apply", event.currentTarget)
+                    }
                   >
                     {busy === "apply" ? "正在导入…" : "导入所选章节"}
                   </button>
@@ -582,7 +624,7 @@ export function ImportWorkbench({
                 type="button"
                 className="secondary-action"
                 disabled={busy !== null}
-                onClick={() => setConfirmation(null)}
+                onClick={closeConfirmation}
               >
                 取消
               </button>
@@ -618,7 +660,7 @@ export function ImportWorkbench({
                 type="button"
                 className="secondary-action"
                 disabled={busy !== null}
-                onClick={() => setConfirmation(null)}
+                onClick={closeConfirmation}
               >
                 取消
               </button>
