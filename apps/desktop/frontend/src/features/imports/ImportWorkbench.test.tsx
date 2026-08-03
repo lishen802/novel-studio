@@ -57,6 +57,16 @@ function importJob(
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 describe("ImportWorkbench", () => {
   it("loads the initial task list and explains the empty state", async () => {
     const client = FakeStudioClient.withReadyProject();
@@ -69,6 +79,9 @@ describe("ImportWorkbench", () => {
       screen.getByRole("heading", { name: "导入分析" }),
     ).toBeInTheDocument();
     expect(await screen.findByText("暂无导入任务")).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "选择小说文件" }),
+    ).toHaveLength(1);
     expect(client.importJobsCalls).toBe(1);
   });
 
@@ -272,5 +285,92 @@ describe("ImportWorkbench", () => {
       await screen.findByText("导入操作失败，请重试。"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/SELECT|\/Users\/author/)).not.toBeInTheDocument();
+  });
+
+  it("hides task A details and actions while task B details are pending", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const taskA = importJob({
+      id: "import-a",
+      sourceName: "任务A.md",
+    });
+    const taskB = importJob({
+      id: "import-b",
+      sourceName: "任务B.md",
+    });
+    const taskBRequest = deferred<ImportJobView>();
+    client.importJobsResult = [taskA, taskB];
+    client.importJob = vi.fn((id: string) =>
+      id === taskA.id ? Promise.resolve(taskA) : taskBRequest.promise,
+    );
+    const user = userEvent.setup();
+
+    render(
+      <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "任务A.md" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /任务B\.md/ }));
+    await waitFor(() =>
+      expect(client.importJob).toHaveBeenCalledWith(taskB.id),
+    );
+
+    expect(
+      screen.getByText("正在读取章节预览…"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "任务A.md" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "删除任务" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "导入所选章节" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not restore task A details or actions when task B loading fails", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const taskA = importJob({
+      id: "import-a",
+      sourceName: "任务A.md",
+    });
+    const taskB = importJob({
+      id: "import-b",
+      sourceName: "任务B.md",
+    });
+    const taskBRequest = deferred<ImportJobView>();
+    client.importJobsResult = [taskA, taskB];
+    client.importJob = vi.fn((id: string) =>
+      id === taskA.id ? Promise.resolve(taskA) : taskBRequest.promise,
+    );
+    const user = userEvent.setup();
+
+    render(
+      <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "任务A.md" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /任务B\.md/ }));
+    await waitFor(() =>
+      expect(client.importJob).toHaveBeenCalledWith(taskB.id),
+    );
+    taskBRequest.reject(new Error("读取任务B失败"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "读取任务B失败",
+    );
+    expect(
+      screen.queryByRole("heading", { name: "任务A.md" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "删除任务" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "导入所选章节" }),
+    ).not.toBeInTheDocument();
   });
 });

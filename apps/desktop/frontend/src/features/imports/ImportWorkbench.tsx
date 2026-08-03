@@ -84,7 +84,7 @@ export function ImportWorkbench({
 }: ImportWorkbenchProps) {
   const [jobs, setJobs] = useState<ImportJobView[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<ImportJobView | null>(null);
+  const [loadedDetail, setLoadedDetail] = useState<ImportJobView | null>(null);
   const [selectedChapterIds, setSelectedChapterIds] = useState<Set<string>>(
     new Set(),
   );
@@ -92,9 +92,10 @@ export function ImportWorkbench({
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState<"prepare" | "apply" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const detail = loadedDetail?.id === selectedJobId ? loadedDetail : null;
 
   const selectDetail = (job: ImportJobView) => {
-    setDetail(job);
+    setLoadedDetail(job);
     setSelectedChapterIds(
       new Set(
         job.chapters
@@ -116,7 +117,7 @@ export function ImportWorkbench({
           : (loaded[0]?.id ?? null),
       );
       if (loaded.length === 0) {
-        setDetail(null);
+        setLoadedDetail(null);
         setSelectedChapterIds(new Set());
       }
     } catch (loadError) {
@@ -192,7 +193,7 @@ export function ImportWorkbench({
       setJobs(remaining);
       setSelectedJobId(remaining[0]?.id ?? null);
       if (remaining.length === 0) {
-        setDetail(null);
+        setLoadedDetail(null);
         setSelectedChapterIds(new Set());
       }
     } catch (deleteError) {
