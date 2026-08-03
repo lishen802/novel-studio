@@ -1156,8 +1156,51 @@ const importJobView = (value: unknown): ImportJobView =>
   importJobDetailSchema.parse(value);
 const importJobViews = (value: unknown): ImportJobView[] =>
   z.array(importJobSchema).parse(value);
-const importApplyView = (value: unknown): ImportApplyView =>
-  importApplySchema.parse(value);
+const importApplyView = (
+  value: unknown,
+  expectedJobID: string,
+  expectedSelectedChapterIDs: string[],
+): ImportApplyView => {
+  const result = importApplySchema.parse(value);
+  if (result.job.status !== "applied") {
+    throw new Error("invalid apply response status");
+  }
+  if (result.job.id !== expectedJobID) {
+    throw new Error("apply response job does not match request");
+  }
+
+  const expectedCandidates = new Set(expectedSelectedChapterIDs);
+  if (expectedCandidates.size !== expectedSelectedChapterIDs.length) {
+    throw new Error("apply request candidate IDs must be unique");
+  }
+  const selectedCandidates = result.job.chapters.filter(
+    (candidate) => candidate.selected,
+  );
+  if (
+    selectedCandidates.length !== expectedCandidates.size ||
+    selectedCandidates.some(
+      (candidate) => !expectedCandidates.has(candidate.id),
+    )
+  ) {
+    throw new Error("apply response candidates do not match request");
+  }
+
+  const workspaceChapterIDs = new Set(
+    result.chapters.map((chapter) => chapter.id),
+  );
+  const createdChapterIDs = new Set<string>();
+  for (const candidate of selectedCandidates) {
+    if (
+      !candidate.createdChapterId ||
+      createdChapterIDs.has(candidate.createdChapterId) ||
+      !workspaceChapterIDs.has(candidate.createdChapterId)
+    ) {
+      throw new Error("apply response chapter mapping is invalid");
+    }
+    createdChapterIDs.add(candidate.createdChapterId);
+  }
+  return result;
+};
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
@@ -1202,6 +1245,8 @@ export const wailsStudioClient: StudioClient = {
   async applyImportJob(id, selectedChapterIds) {
     return importApplyView(
       await safeCall(() => nativeAPI().ApplyImportJob(id, selectedChapterIds)),
+      id,
+      selectedChapterIds,
     );
   },
   async createProject(input) {

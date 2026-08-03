@@ -5,7 +5,13 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   ChapterView,
   ImportChapterView,
@@ -85,6 +91,7 @@ export function ImportWorkbench({
     new Set(),
   );
   const [loading, setLoading] = useState(true);
+  const [jobsLoadFailed, setJobsLoadFailed] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailLoadFailed, setDetailLoadFailed] = useState(false);
   const [detailLoadNonce, setDetailLoadNonce] = useState(0);
@@ -94,6 +101,8 @@ export function ImportWorkbench({
   >(null);
   const [error, setError] = useState<string | null>(null);
   const selectedJobIDRef = useRef(selectedJobId);
+  const mountedRef = useRef(true);
+  const dialogRef = useRef<HTMLElement | null>(null);
   selectedJobIDRef.current = selectedJobId;
   const detail = loadedDetail?.id === selectedJobId ? loadedDetail : null;
 
@@ -110,6 +119,7 @@ export function ImportWorkbench({
 
   const loadJobs = async () => {
     setLoading(true);
+    setJobsLoadFailed(false);
     setError(null);
     try {
       const loaded = await client.importJobs();
@@ -123,10 +133,19 @@ export function ImportWorkbench({
         setLoadedDetail(null);
         setSelectedChapterIds(new Set());
       }
+      return true;
     } catch (loadError) {
+      setJobsLoadFailed(true);
       setError(errorMessage(loadError));
+      return false;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshImports = async () => {
+    if (await loadJobs()) {
+      setDetailLoadNonce((current) => current + 1);
     }
   };
 
@@ -136,12 +155,22 @@ export function ImportWorkbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       selectedJobIDRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!confirmation) return;
+    const dialog = dialogRef.current;
+    const firstButton = dialog?.querySelector<HTMLButtonElement>(
+      "button:not([disabled])",
+    );
+    (firstButton ?? dialog)?.focus();
+  }, [busy, confirmation]);
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -229,17 +258,51 @@ export function ImportWorkbench({
         .filter((chapter) => selectedChapterIds.has(chapter.id))
         .map((chapter) => chapter.id);
       const result = await client.applyImportJob(targetID, orderedSelection);
+      onChaptersImported(result.chapters);
+      if (selectedJobIDRef.current !== targetID) return;
       setJobs((current) =>
         current.map((job) => (job.id === targetID ? result.job : job)),
       );
-      if (selectedJobIDRef.current !== targetID) return;
       selectDetail(result.job);
-      onChaptersImported(result.chapters);
     } catch (applyError) {
-      setError(errorMessage(applyError));
+      if (mountedRef.current) setError(errorMessage(applyError));
     } finally {
-      setConfirmation(null);
-      setBusy(null);
+      if (mountedRef.current) {
+        setConfirmation(null);
+        setBusy(null);
+      }
+    }
+  };
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (busy === null) setConfirmation(null);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = [
+      ...dialog.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      ),
+    ];
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (
+      (event.shiftKey && document.activeElement === first) ||
+      (!event.shiftKey && document.activeElement === last) ||
+      !dialog.contains(document.activeElement)
+    ) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
     }
   };
 
@@ -284,6 +347,13 @@ export function ImportWorkbench({
       {error && (
         <div className="import-alert" role="alert">
           <span>{error}</span>
+          <button
+            type="button"
+            disabled={busy !== null || loading}
+            onClick={() => void refreshImports()}
+          >
+            刷新任务与详情
+          </button>
           <button type="button" onClick={() => setError(null)}>
             关闭
           </button>
@@ -294,6 +364,11 @@ export function ImportWorkbench({
         <div className="import-state" role="status" aria-live="polite">
           <FileSearch2 size={28} aria-hidden="true" />
           <p>正在读取导入任务…</p>
+        </div>
+      ) : jobsLoadFailed ? (
+        <div className="import-state" role="status" aria-live="polite">
+          <FileSearch2 size={28} aria-hidden="true" />
+          <p>导入任务暂时无法读取。</p>
         </div>
       ) : jobs.length === 0 ? (
         <div className="import-state">
@@ -334,14 +409,6 @@ export function ImportWorkbench({
               <div className="import-state" role="status" aria-live="polite">
                 <FileSearch2 size={28} aria-hidden="true" />
                 <p>任务详情暂时无法读取。</p>
-                <button
-                  type="button"
-                  className="secondary-action"
-                  disabled={busy !== null}
-                  onClick={() => setDetailLoadNonce((current) => current + 1)}
-                >
-                  重试读取任务详情
-                </button>
               </div>
             ) : detail ? (
               <>
@@ -496,10 +563,13 @@ export function ImportWorkbench({
       {confirmation === "apply" && detail && (
         <div className="dialog-backdrop">
           <section
+            ref={dialogRef}
             className="confirm-dialog"
             role="dialog"
             aria-modal="true"
             aria-label="确认导入章节"
+            tabIndex={-1}
+            onKeyDown={handleDialogKeyDown}
           >
             <p className="eyebrow">正式写入确认</p>
             <h2>导入“{detail.sourceName}”？</h2>
@@ -532,10 +602,13 @@ export function ImportWorkbench({
       {confirmation === "delete" && detail && detail.status !== "applied" && (
         <div className="dialog-backdrop">
           <section
+            ref={dialogRef}
             className="confirm-dialog"
             role="dialog"
             aria-modal="true"
             aria-label="确认删除导入任务"
+            tabIndex={-1}
+            onKeyDown={handleDialogKeyDown}
           >
             <p className="eyebrow">删除任务确认</p>
             <h2>删除“{detail.sourceName}”的导入任务？</h2>

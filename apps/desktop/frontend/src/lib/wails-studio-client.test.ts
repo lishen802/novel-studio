@@ -485,6 +485,139 @@ describe("wailsStudioClient", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects a prepared job returned from apply", async () => {
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章",
+      position: 1,
+      body: "正文",
+      revision: 1,
+      updatedAt: "2026-08-03T08:01:00Z",
+      hasRecoveryDraft: false,
+    };
+    installNative({
+      ApplyImportJob: vi.fn(async () => ({
+        job: nativeImportJob(),
+        chapters: [chapter],
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.applyImportJob("import-1", ["candidate-1"]),
+    ).rejects.toThrow();
+  });
+
+  it("rejects an applied job whose ID does not match the request", async () => {
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章",
+      position: 1,
+      body: "正文",
+      revision: 1,
+      updatedAt: "2026-08-03T08:01:00Z",
+      hasRecoveryDraft: false,
+    };
+    const candidate = {
+      ...nativeImportJob().chapters[0],
+      selected: true,
+      createdChapterId: chapter.id,
+    };
+    installNative({
+      ApplyImportJob: vi.fn(async () => ({
+        job: nativeImportJob({
+          id: "import-other",
+          status: "applied",
+          selectedChapterCount: 1,
+          appliedAt: "2026-08-03T08:01:00Z",
+          chapters: [candidate],
+        }),
+        chapters: [chapter],
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.applyImportJob("import-1", ["candidate-1"]),
+    ).rejects.toThrow();
+  });
+
+  it("rejects duplicate created chapter mappings from apply", async () => {
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章",
+      position: 1,
+      body: "正文",
+      revision: 1,
+      updatedAt: "2026-08-03T08:01:00Z",
+      hasRecoveryDraft: false,
+    };
+    const first = {
+      ...nativeImportJob().chapters[0],
+      selected: true,
+      createdChapterId: chapter.id,
+    };
+    const second = {
+      ...first,
+      id: "candidate-2",
+      position: 2,
+    };
+    installNative({
+      ApplyImportJob: vi.fn(async () => ({
+        job: nativeImportJob({
+          status: "applied",
+          chapterCount: 2,
+          selectedChapterCount: 2,
+          appliedAt: "2026-08-03T08:01:00Z",
+          chapters: [first, second],
+        }),
+        chapters: [chapter],
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.applyImportJob(
+        "import-1",
+        ["candidate-1", "candidate-2"],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("rejects applied candidates that do not match the request", async () => {
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章",
+      position: 1,
+      body: "正文",
+      revision: 1,
+      updatedAt: "2026-08-03T08:01:00Z",
+      hasRecoveryDraft: false,
+    };
+    const candidate = {
+      ...nativeImportJob().chapters[0],
+      id: "candidate-other",
+      selected: true,
+      createdChapterId: chapter.id,
+    };
+    installNative({
+      ApplyImportJob: vi.fn(async () => ({
+        job: nativeImportJob({
+          status: "applied",
+          selectedChapterCount: 1,
+          appliedAt: "2026-08-03T08:01:00Z",
+          chapters: [candidate],
+        }),
+        chapters: [chapter],
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.applyImportJob("import-1", ["candidate-1"]),
+    ).rejects.toThrow();
+  });
+
   it("forwards create input and validates the returned project DTO", async () => {
     const api = installNative();
     const input = {

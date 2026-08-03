@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -496,6 +497,42 @@ func TestImportJobPreservesShortPreviewAndPrecomputesWordCount(t *testing.T) {
 	if strings.Contains(paragraphView.BodyPreview, "第四段") ||
 		paragraphView.BodyPreview == paragraphBody {
 		t.Fatalf("paragraph preview is not bounded: %q", paragraphView.BodyPreview)
+	}
+}
+
+func TestImportChapterSummaryStreamsMillionsOfShortParagraphs(t *testing.T) {
+	body := strings.Repeat("甲\n\n", 1_000_000)
+	var wordCount int
+	var preview string
+
+	allocations := testing.AllocsPerRun(2, func() {
+		wordCount, preview = importChapterSummary(body)
+	})
+
+	if wordCount != 1_000_000 {
+		t.Fatalf("WordCount = %d, want 1000000", wordCount)
+	}
+	if utf8.RuneCountInString(preview) > importChapterPreviewRunes {
+		t.Fatalf("preview rune count = %d", utf8.RuneCountInString(preview))
+	}
+	if preview != "甲\n\n甲\n\n甲…" {
+		t.Fatalf("preview = %q", preview)
+	}
+	if allocations > 16 {
+		t.Fatalf("allocations = %.1f, want at most 16", allocations)
+	}
+}
+
+func TestImportChapterSummaryPreservesUnicodeAndCountsOnlyNonWhitespace(t *testing.T) {
+	body := "你 好🙂\n\n第二段"
+
+	wordCount, preview := importChapterSummary(body)
+
+	if wordCount != 6 {
+		t.Fatalf("WordCount = %d, want 6", wordCount)
+	}
+	if preview != body {
+		t.Fatalf("preview = %q, want exact body", preview)
 	}
 }
 

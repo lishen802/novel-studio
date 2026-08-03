@@ -531,12 +531,13 @@ func importJobView(
 		if len(contentHashSummary) > 12 {
 			contentHashSummary = contentHashSummary[:12]
 		}
+		wordCount, bodyPreview := importChapterSummary(chapter.Body)
 		chapterViews = append(chapterViews, ImportChapterView{
 			ID:                 chapter.ID,
 			VolumeTitle:        chapter.VolumeTitle,
 			Title:              chapter.Title,
-			WordCount:          importChapterWordCount(chapter.Body),
-			BodyPreview:        importChapterBodyPreview(chapter.Body),
+			WordCount:          wordCount,
+			BodyPreview:        bodyPreview,
 			Position:           chapter.Position,
 			SourceStartLine:    chapter.SourceStartLine,
 			SourceEndLine:      chapter.SourceEndLine,
@@ -572,58 +573,52 @@ func importJobView(
 	return view
 }
 
-func importChapterWordCount(body string) int {
-	count := 0
-	for _, value := range body {
-		if !unicode.IsSpace(value) {
-			count++
-		}
-	}
-	return count
-}
-
-func importChapterBodyPreview(body string) string {
+func importChapterSummary(body string) (int, string) {
 	if body == "" {
-		return ""
-	}
-	paragraphs := importPreviewParagraphs(body)
-	if len([]rune(body)) <= importChapterPreviewRunes &&
-		len(paragraphs) <= importChapterPreviewParagraphs {
-		return body
+		return 0, ""
 	}
 
-	preview := body
-	if len(paragraphs) > 0 {
-		if len(paragraphs) > importChapterPreviewParagraphs {
-			paragraphs = paragraphs[:importChapterPreviewParagraphs]
-		}
-		preview = strings.Join(paragraphs, "\n\n")
+	var preview strings.Builder
+	previewCapacity := len(body)
+	if maximum := importChapterPreviewRunes * 4; previewCapacity > maximum {
+		previewCapacity = maximum
 	}
-	runes := []rune(preview)
-	if len(runes) >= importChapterPreviewRunes {
-		runes = runes[:importChapterPreviewRunes-1]
-	}
-	return string(runes) + "…"
-}
+	preview.Grow(previewCapacity)
 
-func importPreviewParagraphs(body string) []string {
-	lines := strings.Split(body, "\n")
-	paragraphs := make([]string, 0, importChapterPreviewParagraphs+1)
-	current := make([]string, 0, 1)
-	flush := func() {
-		if len(current) == 0 {
-			return
+	wordCount := 0
+	bodyRunes := 0
+	paragraphCount := 0
+	inParagraph := false
+	lineHasContent := false
+	truncated := false
+	for _, value := range body {
+		bodyRunes++
+		if !unicode.IsSpace(value) {
+			wordCount++
+			lineHasContent = true
+			if !inParagraph {
+				paragraphCount++
+				inParagraph = true
+				if paragraphCount > importChapterPreviewParagraphs {
+					truncated = true
+				}
+			}
 		}
-		paragraphs = append(paragraphs, strings.Join(current, "\n"))
-		current = current[:0]
-	}
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			flush()
-			continue
+		if bodyRunes > importChapterPreviewRunes {
+			truncated = true
 		}
-		current = append(current, line)
+		if !truncated && bodyRunes < importChapterPreviewRunes {
+			preview.WriteRune(value)
+		}
+		if value == '\n' {
+			if !lineHasContent {
+				inParagraph = false
+			}
+			lineHasContent = false
+		}
 	}
-	flush()
-	return paragraphs
+	if !truncated {
+		return wordCount, body
+	}
+	return wordCount, strings.TrimRightFunc(preview.String(), unicode.IsSpace) + "…"
 }
