@@ -233,7 +233,7 @@ func TestImportStoreRollsBackJobAndCandidatesWhenCandidateInsertFails(t *testing
 	}
 }
 
-func TestImportStoreReportsMissingJobsAndDeletesOnlyPreparedJobs(t *testing.T) {
+func TestImportStoreReportsMissingJobsDeletesPreparedAndRejectsAppliedJobs(t *testing.T) {
 	ctx := context.Background()
 	store, project := createTestStore(t)
 	defer store.Close()
@@ -241,7 +241,7 @@ func TestImportStoreReportsMissingJobsAndDeletesOnlyPreparedJobs(t *testing.T) {
 	if _, err := store.ImportJob(ctx, "missing"); !errors.Is(err, ports.ErrImportJobMissing) {
 		t.Fatalf("read missing error = %v", err)
 	}
-	if err := store.DeletePreparedImportJob(ctx, "missing"); !errors.Is(err, ports.ErrImportJobMissing) {
+	if err := store.DeleteImportJob(ctx, "missing"); !errors.Is(err, ports.ErrImportJobMissing) {
 		t.Fatalf("delete missing error = %v", err)
 	}
 	missingChapter := projectdomain.Chapter{
@@ -264,7 +264,7 @@ func TestImportStoreReportsMissingJobsAndDeletesOnlyPreparedJobs(t *testing.T) {
 	if err := store.CreateImportJob(ctx, prepared, candidates); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeletePreparedImportJob(ctx, prepared.ID); err != nil {
+	if err := store.DeleteImportJob(ctx, prepared.ID); err != nil {
 		t.Fatalf("delete prepared job: %v", err)
 	}
 	if _, err := store.ImportJob(ctx, prepared.ID); !errors.Is(err, ports.ErrImportJobMissing) {
@@ -296,12 +296,12 @@ func TestImportStoreReportsMissingJobsAndDeletesOnlyPreparedJobs(t *testing.T) {
 	); err != nil {
 		t.Fatalf("apply import job: %v", err)
 	}
-	if err := store.DeletePreparedImportJob(ctx, applied.ID); !errors.Is(err, ports.ErrImportJobAlreadyApplied) {
+	if err := store.DeleteImportJob(ctx, applied.ID); !errors.Is(err, ports.ErrImportJobAlreadyApplied) {
 		t.Fatalf("delete applied error = %v, want ErrImportJobAlreadyApplied", err)
 	}
 }
 
-func TestImportStorePersistsZeroChapterFailedJobAsReadOnlyHistory(t *testing.T) {
+func TestImportStorePersistsAndDeletesZeroChapterFailedJob(t *testing.T) {
 	ctx := context.Background()
 	store, project := createTestStore(t)
 	defer store.Close()
@@ -345,14 +345,17 @@ func TestImportStorePersistsZeroChapterFailedJobAsReadOnlyHistory(t *testing.T) 
 	); !errors.Is(err, ports.ErrImportJobNotPrepared) {
 		t.Fatalf("apply failed job error = %v, want ErrImportJobNotPrepared", err)
 	}
-	if err := store.DeletePreparedImportJob(ctx, failed.ID); !errors.Is(err, ports.ErrImportJobNotPrepared) {
-		t.Fatalf("delete failed job error = %v, want ErrImportJobNotPrepared", err)
+	if err := store.DeleteImportJob(ctx, failed.ID); err != nil {
+		t.Fatalf("delete failed job: %v", err)
+	}
+	if _, err := store.ImportJob(ctx, failed.ID); !errors.Is(err, ports.ErrImportJobMissing) {
+		t.Fatalf("read deleted failed job error = %v, want ErrImportJobMissing", err)
 	}
 
 	duplicate := failed
 	duplicate.ID = "job-failed-duplicate"
-	if err := store.CreateFailedImportJob(ctx, duplicate); !errors.Is(err, ports.ErrDuplicateImportSource) {
-		t.Fatalf("duplicate failed source error = %v, want ErrDuplicateImportSource", err)
+	if err := store.CreateFailedImportJob(ctx, duplicate); err != nil {
+		t.Fatalf("source hash should be reusable after failed job deletion: %v", err)
 	}
 }
 

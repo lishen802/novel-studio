@@ -19,6 +19,7 @@ type Service struct {
 	ids         ports.IDGenerator
 	snapshots   ports.SnapshotArchive
 	branches    ports.BranchArchive
+	imports     ports.ImportSourceArchive
 	credentials ports.CredentialStore
 	providers   ports.ModelProviderFactory
 
@@ -29,6 +30,7 @@ type Service struct {
 	agentJobsMu      sync.Mutex
 	agentJobs        map[string]context.CancelFunc
 	versionOperation bool
+	importOperation  bool
 }
 
 type activeWorkspace struct {
@@ -69,6 +71,15 @@ func (s *Service) ConfigureAgentRuntime(
 	defer s.mu.Unlock()
 	s.credentials = credentials
 	s.providers = providers
+}
+
+// ConfigureImportSourceArchive installs the platform adapter used to validate,
+// decode, and archive manuscript sources. It is separate from NewService so
+// existing non-import callers keep their construction contract.
+func (s *Service) ConfigureImportSourceArchive(archive ports.ImportSourceArchive) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.imports = archive
 }
 
 func (s *Service) CreateProject(

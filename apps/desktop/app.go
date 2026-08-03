@@ -41,6 +41,7 @@ func newApp() *App {
 		credentials.NewStore(),
 		providers.NewFactory(http.DefaultClient),
 	)
+	workspaceService.ConfigureImportSourceArchive(projectfs.ImportSourceArchive{})
 	app := &App{
 		api: newDesktopAPI(workspaceService, wailsDirectoryPicker{}),
 		emitBeforeClose: func(ctx context.Context) {

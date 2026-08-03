@@ -41,7 +41,9 @@ type ImportStore interface {
 	CreateFailedImportJob(ctx context.Context, job importing.ImportJob) error
 	ListImportJobs(ctx context.Context, projectID string) ([]importing.ImportJob, error)
 	ImportJob(ctx context.Context, id string) (ImportJobDetails, error)
-	DeletePreparedImportJob(ctx context.Context, id string) error
+	// DeleteImportJob deletes a prepared or failed job. Applied jobs are
+	// immutable history and must be rejected with ErrImportJobAlreadyApplied.
+	DeleteImportJob(ctx context.Context, id string) error
 	// ApplyImportJob maps selectedImportChapterIDs to chapters by slice index.
 	// The store validates the mapping, then creates chapters in import candidate
 	// order. A chapter Position may be zero; the store appends all created

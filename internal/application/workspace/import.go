@@ -1,0 +1,523 @@
+package workspace
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/lishen802/novel-studio/internal/application/license"
+	"github.com/lishen802/novel-studio/internal/application/ports"
+	"github.com/lishen802/novel-studio/internal/domain/importing"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+)
+
+const (
+	ImportErrorParseEmpty       = "IMPORT_PARSE_EMPTY"
+	ImportErrorLineTooLong      = "IMPORT_PARSE_LINE_TOO_LONG"
+	ImportErrorParseUnsupported = "IMPORT_PARSE_FAILED"
+)
+
+type ImportChapterView struct {
+	ID               string `json:"id"`
+	VolumeTitle      string `json:"volumeTitle"`
+	Title            string `json:"title"`
+	Body             string `json:"body"`
+	Position         int    `json:"position"`
+	SourceStartLine  int    `json:"sourceStartLine"`
+	SourceEndLine    int    `json:"sourceEndLine"`
+	ContentHash      string `json:"contentHash"`
+	Selected         bool   `json:"selected"`
+	CreatedChapterID string `json:"createdChapterId,omitempty"`
+}
+
+type ImportJobView struct {
+	ID                   string              `json:"id"`
+	Status               string              `json:"status"`
+	SourceName           string              `json:"sourceName"`
+	SourceFormat         string              `json:"sourceFormat"`
+	SourceEncoding       string              `json:"sourceEncoding"`
+	SourceHashDigest     string              `json:"sourceHashDigest"`
+	SourceBytes          int64               `json:"sourceBytes"`
+	ArchivedRelativePath string              `json:"archivedRelativePath"`
+	ChapterCount         int                 `json:"chapterCount"`
+	SelectedChapterCount int                 `json:"selectedChapterCount"`
+	ErrorCode            string              `json:"errorCode,omitempty"`
+	ErrorMessage         string              `json:"errorMessage,omitempty"`
+	CreatedAt            string              `json:"createdAt"`
+	UpdatedAt            string              `json:"updatedAt"`
+	AppliedAt            string              `json:"appliedAt,omitempty"`
+	Chapters             []ImportChapterView `json:"chapters"`
+}
+
+type ImportPrepareResult struct {
+	Job ImportJobView `json:"job"`
+}
+
+type ImportApplyView struct {
+	Job      ImportJobView `json:"job"`
+	Chapters []ChapterView `json:"chapters"`
+}
+
+func (s *Service) PrepareManuscriptImport(
+	ctx context.Context,
+	sourcePath string,
+) (ImportPrepareResult, error) {
+	if err := s.license.Require(ctx, license.ImportManuscript); err != nil {
+		return ImportPrepareResult{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active == nil {
+		return ImportPrepareResult{}, ErrNoActiveProject
+	}
+	if s.imports == nil {
+		return ImportPrepareResult{}, ErrImportSourceArchive
+	}
+	store, project, err := s.importStoreAndProjectLocked(ctx)
+	if err != nil {
+		return ImportPrepareResult{}, err
+	}
+
+	jobID := s.ids.NewID()
+	prepared, err := s.imports.Prepare(ctx, s.active.packageInfo, jobID, sourcePath)
+	if err != nil {
+		return ImportPrepareResult{}, stableImportArchiveError(err)
+	}
+	cleanup := func() {
+		s.cleanupImportArchive(s.active.packageInfo, prepared.ArchivedRelativePath)
+	}
+	sourceName, archivedRelativePath, err := safePreparedImportMetadata(prepared)
+	if err != nil {
+		cleanup()
+		return ImportPrepareResult{}, err
+	}
+	prepared.Name = sourceName
+	prepared.ArchivedRelativePath = archivedRelativePath
+	if err := ctx.Err(); err != nil {
+		cleanup()
+		return ImportPrepareResult{}, err
+	}
+
+	parsed, parseErr := importing.ParseChapters(prepared.Text)
+	now := s.clock.Now()
+	if parseErr != nil {
+		code, message := safeImportParseFailure(parseErr)
+		failed, err := importing.NewFailedImportJob(importing.FailedImportJobParams{
+			ID:                   jobID,
+			ProjectID:            project.ID,
+			SourceName:           prepared.Name,
+			SourceFormat:         prepared.Format,
+			SourceEncoding:       prepared.Encoding,
+			SourceHash:           prepared.SHA256,
+			SourceBytes:          prepared.Bytes,
+			ArchivedRelativePath: prepared.ArchivedRelativePath,
+			ErrorCode:            code,
+			ErrorMessage:         message,
+		}, now)
+		if err != nil {
+			cleanup()
+			return ImportPrepareResult{}, stableImportConstructionError(err)
+		}
+		if err := store.CreateFailedImportJob(ctx, failed); err != nil {
+			cleanup()
+			return ImportPrepareResult{}, stableImportStoreError(err)
+		}
+		return ImportPrepareResult{Job: importJobView(failed, []importing.ImportChapter{})}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		cleanup()
+		return ImportPrepareResult{}, err
+	}
+
+	chapters := make([]importing.ImportChapter, 0, len(parsed))
+	for _, candidate := range parsed {
+		chapter, err := importing.NewImportChapter(importing.ImportChapterParams{
+			ID:              s.ids.NewID(),
+			JobID:           jobID,
+			VolumeTitle:     candidate.VolumeTitle,
+			Title:           candidate.Title,
+			Body:            candidate.Body,
+			Position:        candidate.Position,
+			SourceStartLine: candidate.SourceStartLine,
+			SourceEndLine:   candidate.SourceEndLine,
+		})
+		if err != nil {
+			cleanup()
+			return ImportPrepareResult{}, stableImportConstructionError(err)
+		}
+		chapters = append(chapters, chapter)
+	}
+	job, err := importing.NewImportJob(importing.ImportJobParams{
+		ID:                   jobID,
+		ProjectID:            project.ID,
+		SourceName:           prepared.Name,
+		SourceFormat:         prepared.Format,
+		SourceEncoding:       prepared.Encoding,
+		SourceHash:           prepared.SHA256,
+		SourceBytes:          prepared.Bytes,
+		ArchivedRelativePath: prepared.ArchivedRelativePath,
+		ChapterCount:         len(chapters),
+	}, now)
+	if err != nil {
+		cleanup()
+		return ImportPrepareResult{}, stableImportConstructionError(err)
+	}
+	if err := store.CreateImportJob(ctx, job, chapters); err != nil {
+		cleanup()
+		return ImportPrepareResult{}, stableImportStoreError(err)
+	}
+	return ImportPrepareResult{Job: importJobView(job, chapters)}, nil
+}
+
+func (s *Service) ImportJobs(ctx context.Context) ([]ImportJobView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return nil, ErrNoActiveProject
+	}
+	store, project, err := s.importStoreAndProjectLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := store.ListImportJobs(ctx, project.ID)
+	if err != nil {
+		return nil, stableImportStoreError(err)
+	}
+	views := make([]ImportJobView, 0, len(jobs))
+	for _, job := range jobs {
+		if job.ProjectID != project.ID {
+			return nil, ErrImportJobProjectMismatch
+		}
+		views = append(views, importJobView(job, nil))
+	}
+	return views, nil
+}
+
+func (s *Service) ImportJob(ctx context.Context, id string) (ImportJobView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return ImportJobView{}, ErrNoActiveProject
+	}
+	store, project, err := s.importStoreAndProjectLocked(ctx)
+	if err != nil {
+		return ImportJobView{}, err
+	}
+	details, err := store.ImportJob(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return ImportJobView{}, stableImportStoreError(err)
+	}
+	if details.Job.ProjectID != project.ID {
+		return ImportJobView{}, ErrImportJobProjectMismatch
+	}
+	return importJobView(details.Job, details.Chapters), nil
+}
+
+func (s *Service) DeleteImportJob(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active == nil {
+		return ErrNoActiveProject
+	}
+	store, project, err := s.importStoreAndProjectLocked(ctx)
+	if err != nil {
+		return err
+	}
+	details, err := store.ImportJob(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return stableImportStoreError(err)
+	}
+	if details.Job.ProjectID != project.ID {
+		return ErrImportJobProjectMismatch
+	}
+	if details.Job.Status == importing.JobStatusApplied {
+		return ports.ErrImportJobAlreadyApplied
+	}
+	if err := store.DeleteImportJob(ctx, details.Job.ID); err != nil {
+		return stableImportStoreError(err)
+	}
+	s.cleanupImportArchive(s.active.packageInfo, details.Job.ArchivedRelativePath)
+	return nil
+}
+
+func (s *Service) ApplyImportJob(
+	ctx context.Context,
+	id string,
+	selectedIDs []string,
+) (ImportApplyView, error) {
+	if err := s.license.Require(ctx, license.ImportManuscript); err != nil {
+		return ImportApplyView{}, err
+	}
+	if len(selectedIDs) == 0 {
+		return ImportApplyView{}, ports.ErrNoImportChaptersSelected
+	}
+	if err := s.beginImportOperation(); err != nil {
+		return ImportApplyView{}, err
+	}
+	defer s.endImportOperation()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active == nil {
+		return ImportApplyView{}, ErrNoActiveProject
+	}
+	store, project, err := s.importStoreAndProjectLocked(ctx)
+	if err != nil {
+		return ImportApplyView{}, err
+	}
+	details, err := store.ImportJob(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return ImportApplyView{}, stableImportStoreError(err)
+	}
+	if details.Job.ProjectID != project.ID {
+		return ImportApplyView{}, ErrImportJobProjectMismatch
+	}
+	switch details.Job.Status {
+	case importing.JobStatusApplied:
+		return ImportApplyView{}, ports.ErrImportJobAlreadyApplied
+	case importing.JobStatusPrepared:
+	default:
+		return ImportApplyView{}, ports.ErrImportJobNotPrepared
+	}
+
+	selected := make(map[string]struct{}, len(selectedIDs))
+	for _, selectedID := range selectedIDs {
+		selectedID = strings.TrimSpace(selectedID)
+		if selectedID == "" {
+			return ImportApplyView{}, ports.ErrImportChapterMappingMismatch
+		}
+		if _, duplicate := selected[selectedID]; duplicate {
+			return ImportApplyView{}, ports.ErrImportChapterMappingMismatch
+		}
+		selected[selectedID] = struct{}{}
+	}
+	candidates := append([]importing.ImportChapter(nil), details.Chapters...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].Position < candidates[j].Position
+	})
+	now := s.clock.Now().UTC()
+	orderedIDs := make([]string, 0, len(selected))
+	requestedChapters := make([]projectdomain.Chapter, 0, len(selected))
+	for _, candidate := range candidates {
+		if _, ok := selected[candidate.ID]; !ok {
+			continue
+		}
+		orderedIDs = append(orderedIDs, candidate.ID)
+		requestedChapters = append(requestedChapters, projectdomain.Chapter{
+			ID:        s.ids.NewID(),
+			ProjectID: project.ID,
+			Title:     candidate.Title,
+			Position:  0,
+			Body:      candidate.Body,
+			Revision:  1,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+	if len(orderedIDs) != len(selected) {
+		return ImportApplyView{}, ports.ErrImportChapterMappingMismatch
+	}
+
+	applied, err := store.ApplyImportJob(ctx, details.Job.ID, orderedIDs, requestedChapters, now)
+	if err != nil {
+		return ImportApplyView{}, stableImportStoreError(err)
+	}
+	if applied.Job.ProjectID != project.ID ||
+		len(applied.Chapters) != len(orderedIDs) {
+		return ImportApplyView{}, ports.ErrImportChapterMappingMismatch
+	}
+	createdByCandidate := make(map[string]string, len(orderedIDs))
+	for index, candidateID := range orderedIDs {
+		createdByCandidate[candidateID] = applied.Chapters[index].ID
+	}
+	for index := range candidates {
+		if createdID, ok := createdByCandidate[candidates[index].ID]; ok {
+			candidates[index].Selected = true
+			candidates[index].CreatedChapterID = createdID
+		}
+	}
+	workspaceChapters, err := s.active.store.ListChapters(ctx)
+	if err != nil {
+		return ImportApplyView{}, fmt.Errorf("list chapters after manuscript import: %w", err)
+	}
+	sort.SliceStable(workspaceChapters, func(i, j int) bool {
+		return workspaceChapters[i].Position < workspaceChapters[j].Position
+	})
+	chapterViews := make([]ChapterView, 0, len(workspaceChapters))
+	for _, chapter := range workspaceChapters {
+		chapterViews = append(chapterViews, chapterView(chapter))
+	}
+	return ImportApplyView{
+		Job:      importJobView(applied.Job, candidates),
+		Chapters: chapterViews,
+	}, nil
+}
+
+func (s *Service) importStoreAndProjectLocked(
+	ctx context.Context,
+) (ports.ImportStore, projectdomain.Project, error) {
+	store, ok := s.active.store.(ports.ImportStore)
+	if !ok {
+		return nil, projectdomain.Project{}, ErrImportStoreUnavailable
+	}
+	project, err := s.active.store.Project(ctx)
+	if err != nil {
+		return nil, projectdomain.Project{}, fmt.Errorf("read active project for import: %w", err)
+	}
+	return store, project, nil
+}
+
+func (s *Service) cleanupImportArchive(
+	projectPackage ports.ProjectPackage,
+	relativePath string,
+) {
+	if s.imports == nil || strings.TrimSpace(relativePath) == "" {
+		return
+	}
+	cleanupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.imports.Delete(cleanupContext, projectPackage, relativePath)
+}
+
+func safePreparedImportMetadata(
+	prepared ports.PreparedImportSource,
+) (string, string, error) {
+	sourceName := path.Base(strings.ReplaceAll(strings.TrimSpace(prepared.Name), "\\", "/"))
+	if sourceName == "" || sourceName == "." || sourceName == ".." || sourceName == "/" {
+		return "", "", ErrImportSourceArchive
+	}
+	relativePath := strings.ReplaceAll(strings.TrimSpace(prepared.ArchivedRelativePath), "\\", "/")
+	cleaned := path.Clean(relativePath)
+	if cleaned != relativePath ||
+		path.IsAbs(cleaned) ||
+		!strings.HasPrefix(cleaned, "imports/") ||
+		strings.Contains(cleaned, ":") {
+		return "", "", ErrImportSourceArchive
+	}
+	return sourceName, cleaned, nil
+}
+
+func stableImportArchiveError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	for _, stable := range []error{
+		ports.ErrUnsupportedImportFormat,
+		ports.ErrEmptyImportSource,
+		ports.ErrImportSourceTooLarge,
+		ports.ErrUnsupportedImportEncoding,
+		ports.ErrUnsafeImportSource,
+		ports.ErrImportArchiveExists,
+		ports.ErrImportArchiveUnsupported,
+		ports.ErrInvalidImportArchivePath,
+	} {
+		if errors.Is(err, stable) {
+			return stable
+		}
+	}
+	return ErrImportSourceArchive
+}
+
+func stableImportStoreError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	for _, stable := range []error{
+		ports.ErrImportJobMissing,
+		ports.ErrDuplicateImportSource,
+		ports.ErrImportJobAlreadyApplied,
+		ports.ErrImportJobNotPrepared,
+		ports.ErrNoImportChaptersSelected,
+		ports.ErrImportChapterMappingMismatch,
+		ports.ErrImportPersistence,
+	} {
+		if errors.Is(err, stable) {
+			return stable
+		}
+	}
+	return ports.ErrImportPersistence
+}
+
+func stableImportConstructionError(err error) error {
+	for _, stable := range []error{
+		importing.ErrBlankValue,
+		importing.ErrInvalidSourceFormat,
+		importing.ErrInvalidSourceHash,
+		importing.ErrInvalidSourceBytes,
+		importing.ErrInvalidChapterCount,
+		importing.ErrInvalidImportChapter,
+	} {
+		if errors.Is(err, stable) {
+			return stable
+		}
+	}
+	return ports.ErrImportPersistence
+}
+
+func safeImportParseFailure(err error) (string, string) {
+	switch {
+	case errors.Is(err, importing.ErrEmptyManuscript):
+		return ImportErrorParseEmpty, "No importable chapters were found."
+	case errors.Is(err, importing.ErrManuscriptLineTooLong):
+		return ImportErrorLineTooLong, "A manuscript line exceeds the supported length."
+	default:
+		return ImportErrorParseUnsupported, "The manuscript could not be parsed."
+	}
+}
+
+func importJobView(
+	job importing.ImportJob,
+	chapters []importing.ImportChapter,
+) ImportJobView {
+	chapterViews := make([]ImportChapterView, 0, len(chapters))
+	for _, chapter := range chapters {
+		chapterViews = append(chapterViews, ImportChapterView{
+			ID:               chapter.ID,
+			VolumeTitle:      chapter.VolumeTitle,
+			Title:            chapter.Title,
+			Body:             chapter.Body,
+			Position:         chapter.Position,
+			SourceStartLine:  chapter.SourceStartLine,
+			SourceEndLine:    chapter.SourceEndLine,
+			ContentHash:      chapter.ContentHash,
+			Selected:         chapter.Selected,
+			CreatedChapterID: chapter.CreatedChapterID,
+		})
+	}
+	hashDigest := job.SourceHash
+	if len(hashDigest) > 12 {
+		hashDigest = hashDigest[:12]
+	}
+	view := ImportJobView{
+		ID:                   job.ID,
+		Status:               string(job.Status),
+		SourceName:           job.SourceName,
+		SourceFormat:         string(job.SourceFormat),
+		SourceEncoding:       job.SourceEncoding,
+		SourceHashDigest:     hashDigest,
+		SourceBytes:          job.SourceBytes,
+		ArchivedRelativePath: job.ArchivedRelativePath,
+		ChapterCount:         job.ChapterCount,
+		SelectedChapterCount: job.SelectedChapterCount,
+		ErrorCode:            job.ErrorCode,
+		ErrorMessage:         job.ErrorMessage,
+		CreatedAt:            job.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:            job.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Chapters:             chapterViews,
+	}
+	if job.AppliedAt != nil {
+		view.AppliedAt = job.AppliedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return view
+}

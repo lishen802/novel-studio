@@ -47,11 +47,30 @@ func (s *Service) cancelAllAgentJobs() {
 func (s *Service) beginVersionOperation() error {
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()
+	if s.importOperation {
+		return ErrImportOperationActive
+	}
 	if len(s.agentJobs) > 0 || s.versionOperation {
 		return ErrAgentRunActive
 	}
 	s.versionOperation = true
 	return nil
+}
+
+func (s *Service) beginImportOperation() error {
+	s.agentJobsMu.Lock()
+	defer s.agentJobsMu.Unlock()
+	if s.importOperation || s.versionOperation {
+		return ErrImportOperationActive
+	}
+	s.importOperation = true
+	return nil
+}
+
+func (s *Service) endImportOperation() {
+	s.agentJobsMu.Lock()
+	s.importOperation = false
+	s.agentJobsMu.Unlock()
 }
 
 func (s *Service) endVersionOperation() {

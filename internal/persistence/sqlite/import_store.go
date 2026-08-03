@@ -242,7 +242,7 @@ func (s *Store) ImportJob(
 	return ports.ImportJobDetails{Job: job, Chapters: chapters}, nil
 }
 
-func (s *Store) DeletePreparedImportJob(ctx context.Context, id string) error {
+func (s *Store) DeleteImportJob(ctx context.Context, id string) error {
 	tx, err := beginImmediate(ctx, s.db)
 	if err != nil {
 		return safeImportStoreError("begin delete import job", err)
@@ -256,16 +256,16 @@ func (s *Store) DeletePreparedImportJob(ctx context.Context, id string) error {
 	switch job.Status {
 	case importing.JobStatusApplied:
 		return ports.ErrImportJobAlreadyApplied
-	case importing.JobStatusPrepared:
+	case importing.JobStatusPrepared, importing.JobStatusFailed:
 	default:
 		return ports.ErrImportJobNotPrepared
 	}
 	result, err := tx.ExecContext(ctx, `
 		DELETE FROM import_jobs
-		WHERE id = ? AND status = 'prepared'
+		WHERE id = ? AND status IN ('prepared', 'failed')
 	`, id)
 	if err != nil {
-		return safeImportStoreError("delete prepared import job", err)
+		return safeImportStoreError("delete import job", err)
 	}
 	deleted, err := result.RowsAffected()
 	if err != nil {
@@ -278,6 +278,12 @@ func (s *Store) DeletePreparedImportJob(ctx context.Context, id string) error {
 		return safeImportStoreError("commit delete import job", err)
 	}
 	return nil
+}
+
+// DeletePreparedImportJob is retained for callers compiled against the
+// pre-import-use-case concrete Store API. New code should use DeleteImportJob.
+func (s *Store) DeletePreparedImportJob(ctx context.Context, id string) error {
+	return s.DeleteImportJob(ctx, id)
 }
 
 func (s *Store) ApplyImportJob(
