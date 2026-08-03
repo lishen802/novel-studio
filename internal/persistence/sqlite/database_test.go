@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,7 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 		"change_sets", "change_operations",
 		"provider_connections", "agent_profiles", "agent_runtime_settings", "agent_runs",
 		"agent_run_steps", "agent_artifacts",
+		"import_jobs", "import_chapters",
 	} {
 		assertSchemaObjectExists(t, db, "table", name)
 	}
@@ -83,6 +85,20 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "index", "idx_chapter_characters_character")
 	assertSchemaObjectExists(t, db, "index", "idx_agent_runs_project_created")
 	assertSchemaObjectExists(t, db, "index", "idx_agent_run_steps_run_position")
+	assertSchemaObjectExists(t, db, "index", "idx_import_jobs_project_source_hash")
+	assertSchemaObjectExists(t, db, "index", "idx_import_chapters_job_position")
+
+	var version int64
+	if err := db.QueryRow(`
+		SELECT MAX(version_id)
+		FROM goose_db_version
+		WHERE is_applied = 1
+	`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 13 {
+		t.Fatalf("schema version = %d, want 13", version)
+	}
 }
 
 func TestChangeSetSchemaSupportsStructuredPartialReview(t *testing.T) {
@@ -253,6 +269,291 @@ func TestAgentRuntimeControlsMigrationPreservesVersionElevenRuns(t *testing.T) {
 	}
 }
 
+func TestManuscriptImportMigrationPreservesVersionTwelveProjectDataAndDownIsClean(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 12); err != nil {
+		t.Fatalf("migrate to version twelve: %v", err)
+	}
+
+	now := formatTime(time.Unix(100, 0))
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{
+			`INSERT INTO projects(id, title, genre, summary, created_at, updated_at)
+			 VALUES ('project-1', '旧项目', '奇幻', '旧简介', ?, ?)`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO chapters(
+				id, project_id, title, position, body, revision,
+				revision_source, revision_summary, created_at, updated_at
+			 ) VALUES ('chapter-1', 'project-1', '第一章', 1, '旧正文', 3, 'author', '旧修订', ?, ?)`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO provider_connections(
+				id, project_id, name, kind, base_url, credential_ref, created_at, updated_at
+			 ) VALUES (
+				'provider-1', 'project-1', 'OpenAI', 'openai',
+				'https://example.test/v1', 'provider:1', ?, ?
+			 )`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO agent_profiles(
+				id, project_id, role, connection_id, model, max_output_tokens,
+				temperature, enabled, created_at, updated_at
+			 ) VALUES (
+				'profile-1', 'project-1', 'planner', 'provider-1', 'model',
+				1000, 0.2, 1, ?, ?
+			 )`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO agent_runs(
+				id, project_id, chapter_id, chapter_base_revision, prompt, status,
+				token_budget, context_char_budget, input_tokens, output_tokens,
+				context_chars, context_truncated, created_at, updated_at
+			 ) VALUES (
+				'run-1', 'project-1', 'chapter-1', 3, '续写', 'completed',
+				4000, 8000, 100, 50, 2000, 0, ?, ?
+			 )`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO agent_run_steps(
+				id, run_id, role, profile_id, position, status, output,
+				provider_request_id, input_tokens, output_tokens, created_at, updated_at
+			 ) VALUES (
+				'step-1', 'run-1', 'planner', 'profile-1', 1, 'completed', '旧规划',
+				'request-1', 100, 50, ?, ?
+			 )`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO agent_artifacts(
+				id, run_id, step_id, kind, content, sha256, created_at
+			 ) VALUES ('artifact-1', 'run-1', 'step-1', 'plan', '旧规划', 'hash', ?)`,
+			[]any{now},
+		},
+	}
+	for index, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seed version twelve statement %d: %v", index, err)
+		}
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("migrate to version thirteen: %v", err)
+	}
+	assertSchemaObjectExists(t, db, "table", "import_jobs")
+	assertSchemaObjectExists(t, db, "table", "import_chapters")
+
+	var projectTitle, chapterBody, revisionSource, artifact string
+	var chapterRevision, inputTokens int
+	if err := db.QueryRowContext(ctx, `
+		SELECT p.title, c.body, c.revision, c.revision_source, r.input_tokens, a.content
+		FROM projects p
+		JOIN chapters c ON c.project_id = p.id
+		JOIN agent_runs r ON r.chapter_id = c.id
+		JOIN agent_artifacts a ON a.run_id = r.id
+		WHERE p.id = 'project-1'
+	`).Scan(
+		&projectTitle,
+		&chapterBody,
+		&chapterRevision,
+		&revisionSource,
+		&inputTokens,
+		&artifact,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if projectTitle != "旧项目" || chapterBody != "旧正文" || chapterRevision != 3 ||
+		revisionSource != "author" || inputTokens != 100 || artifact != "旧规划" {
+		t.Fatalf(
+			"legacy records changed: project=%q body=%q revision=%d source=%q input=%d artifact=%q",
+			projectTitle,
+			chapterBody,
+			chapterRevision,
+			revisionSource,
+			inputTokens,
+			artifact,
+		)
+	}
+
+	if _, err := provider.DownTo(ctx, 12); err != nil {
+		t.Fatalf("migrate down to version twelve: %v", err)
+	}
+	assertSchemaObjectMissing(t, db, "table", "import_chapters")
+	assertSchemaObjectMissing(t, db, "table", "import_jobs")
+	if err := db.QueryRowContext(ctx, "SELECT body FROM chapters WHERE id = 'chapter-1'").
+		Scan(&chapterBody); err != nil {
+		t.Fatalf("read chapter after down migration: %v", err)
+	}
+	if chapterBody != "旧正文" {
+		t.Fatalf("chapter body after down migration = %q", chapterBody)
+	}
+}
+
+func TestManuscriptImportSchemaEnforcesLifecycleCountsUniquenessAndReferences(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := formatTime(time.Unix(100, 0))
+
+	insertJob := func(
+		id, sourceHash, status string,
+		chapterCount, selectedCount int,
+		errorCode, errorMessage string,
+		appliedAt any,
+	) error {
+		_, err := store.db.ExecContext(ctx, `
+			INSERT INTO import_jobs(
+				id, project_id, source_name, source_format, source_encoding,
+				source_hash, source_bytes, archived_relative_path, status,
+				chapter_count, selected_chapter_count, error_code, error_message,
+				created_at, updated_at, applied_at
+			) VALUES (?, ?, 'novel.txt', 'txt', 'UTF-8', ?, 100, 'imports/job.txt', ?,
+				?, ?, ?, ?, ?, ?, ?)
+		`,
+			id,
+			project.ID,
+			sourceHash,
+			status,
+			chapterCount,
+			selectedCount,
+			errorCode,
+			errorMessage,
+			now,
+			now,
+			appliedAt,
+		)
+		return err
+	}
+
+	hashA := strings.Repeat("a", 64)
+	if err := insertJob("prepared", hashA, "prepared", 2, 0, "", "", nil); err != nil {
+		t.Fatalf("insert prepared job: %v", err)
+	}
+	for name, args := range map[string]struct {
+		status                      string
+		chapterCount, selectedCount int
+		errorCode, errorMessage     string
+		appliedAt                   any
+	}{
+		"unknown status":            {"unknown", 1, 0, "", "", nil},
+		"zero chapters":             {"prepared", 0, 0, "", "", nil},
+		"prepared selected":         {"prepared", 1, 1, "", "", nil},
+		"applied without selection": {"applied", 1, 0, "", "", now},
+		"applied without time":      {"applied", 1, 1, "", "", nil},
+		"failed without safe error": {"failed", 1, 0, "", "", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := insertJob(
+				"invalid-"+strings.ReplaceAll(name, " ", "-"),
+				strings.Repeat("b", 63)+string(rune('0'+len(name)%10)),
+				args.status,
+				args.chapterCount,
+				args.selectedCount,
+				args.errorCode,
+				args.errorMessage,
+				args.appliedAt,
+			)
+			if err == nil {
+				t.Fatal("insert succeeded, want CHECK constraint failure")
+			}
+		})
+	}
+	if err := insertJob("duplicate-source", hashA, "prepared", 1, 0, "", "", nil); err == nil {
+		t.Fatal("duplicate project/source hash succeeded")
+	}
+	if err := insertJob(
+		"invalid-source-hash",
+		strings.Repeat("z", 64),
+		"prepared",
+		1,
+		0,
+		"",
+		"",
+		nil,
+	); err == nil {
+		t.Fatal("non-hexadecimal source hash succeeded")
+	}
+
+	insertChapter := func(id, jobID string, position, selected int, createdChapterID any) error {
+		_, err := store.db.ExecContext(ctx, `
+			INSERT INTO import_chapters(
+				id, job_id, volume_title, title, body, position,
+				source_start_line, source_end_line, content_hash,
+				selected, created_chapter_id
+			) VALUES (?, ?, '', '第一章', '正文', ?, 1, 2, ?, ?, ?)
+		`,
+			id,
+			jobID,
+			position,
+			strings.Repeat("c", 64),
+			selected,
+			createdChapterID,
+		)
+		return err
+	}
+	if err := insertChapter("candidate-1", "prepared", 1, 0, nil); err != nil {
+		t.Fatalf("insert import chapter: %v", err)
+	}
+	if err := insertChapter("candidate-duplicate-position", "prepared", 1, 0, nil); err == nil {
+		t.Fatal("duplicate job position succeeded")
+	}
+	if err := insertChapter("candidate-missing-job", "missing", 2, 0, nil); err == nil {
+		t.Fatal("missing job reference succeeded")
+	}
+	if err := insertChapter("candidate-missing-chapter", "prepared", 2, 1, "missing"); err == nil {
+		t.Fatal("missing created chapter reference succeeded")
+	}
+	if err := insertChapter("candidate-selected-without-mapping", "prepared", 2, 1, nil); err == nil {
+		t.Fatal("selected candidate without created chapter mapping succeeded")
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO import_chapters(
+			id, job_id, volume_title, title, body, position,
+			source_start_line, source_end_line, content_hash, selected
+		) VALUES ('candidate-invalid-hash', 'prepared', '', '第二章', '正文', 2, 3, 4, ?, 0)
+	`, strings.Repeat("z", 64)); err == nil {
+		t.Fatal("non-hexadecimal content hash succeeded")
+	}
+
+	if _, err := store.db.ExecContext(ctx, "DELETE FROM import_jobs WHERE id = 'prepared'"); err != nil {
+		t.Fatalf("delete prepared import job: %v", err)
+	}
+	var candidateCount int
+	if err := store.db.QueryRowContext(
+		ctx,
+		"SELECT COUNT(*) FROM import_chapters WHERE job_id = 'prepared'",
+	).Scan(&candidateCount); err != nil {
+		t.Fatal(err)
+	}
+	if candidateCount != 0 {
+		t.Fatalf("candidate count after job delete = %d, want 0", candidateCount)
+	}
+}
+
 func TestOpenDatabaseClassifiesCorruptFileWithoutOverwritingIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "project.db")
 	want := []byte("this is not a sqlite database")
@@ -287,5 +588,21 @@ func assertSchemaObjectExists(t *testing.T, db *sql.DB, objectType, name string)
 	}
 	if count != 1 {
 		t.Fatalf("%s %q count = %d, want 1", objectType, name, count)
+	}
+}
+
+func assertSchemaObjectMissing(t *testing.T, db *sql.DB, objectType, name string) {
+	t.Helper()
+	var count int
+	err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = ? AND name = ?",
+		objectType,
+		name,
+	).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("%s %q count = %d, want 0", objectType, name, count)
 	}
 }
