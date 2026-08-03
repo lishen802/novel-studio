@@ -37,6 +37,8 @@ type ImportStore interface {
 		job importing.ImportJob,
 		chapters []importing.ImportChapter,
 	) error
+	// CreateFailedImportJob persists a terminal, zero-chapter parse failure.
+	CreateFailedImportJob(ctx context.Context, job importing.ImportJob) error
 	ListImportJobs(ctx context.Context, projectID string) ([]importing.ImportJob, error)
 	ImportJob(ctx context.Context, id string) (ImportJobDetails, error)
 	DeletePreparedImportJob(ctx context.Context, id string) error

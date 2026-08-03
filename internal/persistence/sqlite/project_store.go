@@ -63,7 +63,9 @@ func (Factory) Open(ctx context.Context, databasePath string) (ports.ProjectStor
 }
 
 type Store struct {
-	db *sql.DB
+	db                              *sql.DB
+	importJobReadHook               func()
+	importApplyAfterMaxPositionHook func()
 }
 
 func (s *Store) Project(ctx context.Context) (projectdomain.Project, error) {

@@ -63,6 +63,19 @@ type ImportJobParams struct {
 	ChapterCount         int
 }
 
+type FailedImportJobParams struct {
+	ID                   string
+	ProjectID            string
+	SourceName           string
+	SourceFormat         SourceFormat
+	SourceEncoding       string
+	SourceHash           string
+	SourceBytes          int64
+	ArchivedRelativePath string
+	ErrorCode            string
+	ErrorMessage         string
+}
+
 func NewImportJob(params ImportJobParams, now time.Time) (ImportJob, error) {
 	params.ID = strings.TrimSpace(params.ID)
 	params.ProjectID = strings.TrimSpace(params.ProjectID)
@@ -100,6 +113,49 @@ func NewImportJob(params ImportJobParams, now time.Time) (ImportJob, error) {
 		ArchivedRelativePath: params.ArchivedRelativePath,
 		Status:               JobStatusPrepared,
 		ChapterCount:         params.ChapterCount,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}, nil
+}
+
+func NewFailedImportJob(params FailedImportJobParams, now time.Time) (ImportJob, error) {
+	params.ID = strings.TrimSpace(params.ID)
+	params.ProjectID = strings.TrimSpace(params.ProjectID)
+	params.SourceName = strings.TrimSpace(params.SourceName)
+	params.SourceEncoding = strings.TrimSpace(params.SourceEncoding)
+	params.SourceHash = strings.ToLower(strings.TrimSpace(params.SourceHash))
+	params.ArchivedRelativePath = strings.TrimSpace(params.ArchivedRelativePath)
+	params.ErrorCode = strings.TrimSpace(params.ErrorCode)
+	params.ErrorMessage = strings.TrimSpace(params.ErrorMessage)
+
+	if params.ID == "" || params.ProjectID == "" || params.SourceName == "" ||
+		params.SourceEncoding == "" || params.ArchivedRelativePath == "" ||
+		params.ErrorCode == "" || params.ErrorMessage == "" {
+		return ImportJob{}, ErrBlankValue
+	}
+	if !validSourceFormat(params.SourceFormat) {
+		return ImportJob{}, ErrInvalidSourceFormat
+	}
+	if !validSHA256(params.SourceHash) {
+		return ImportJob{}, ErrInvalidSourceHash
+	}
+	if params.SourceBytes < 1 {
+		return ImportJob{}, ErrInvalidSourceBytes
+	}
+
+	now = now.UTC()
+	return ImportJob{
+		ID:                   params.ID,
+		ProjectID:            params.ProjectID,
+		SourceName:           params.SourceName,
+		SourceFormat:         params.SourceFormat,
+		SourceEncoding:       params.SourceEncoding,
+		SourceHash:           params.SourceHash,
+		SourceBytes:          params.SourceBytes,
+		ArchivedRelativePath: params.ArchivedRelativePath,
+		Status:               JobStatusFailed,
+		ErrorCode:            params.ErrorCode,
+		ErrorMessage:         params.ErrorMessage,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}, nil

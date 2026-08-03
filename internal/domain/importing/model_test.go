@@ -96,6 +96,64 @@ func TestNewImportJobRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestNewFailedImportJobCreatesZeroChapterTerminalJob(t *testing.T) {
+	now := time.Date(2026, time.August, 3, 9, 10, 11, 12, time.FixedZone("CST", 8*60*60))
+	job, err := NewFailedImportJob(FailedImportJobParams{
+		ID:                   " failed-job ",
+		ProjectID:            " project-1 ",
+		SourceName:           " broken.txt ",
+		SourceFormat:         SourceFormatTXT,
+		SourceEncoding:       " UTF-8 ",
+		SourceHash:           strings.Repeat("AB", 32),
+		SourceBytes:          12,
+		ArchivedRelativePath: " imports/failed-job.txt ",
+		ErrorCode:            " parse_empty ",
+		ErrorMessage:         " manuscript contains no chapters ",
+	}, now)
+	if err != nil {
+		t.Fatalf("NewFailedImportJob returned error: %v", err)
+	}
+	if job.ID != "failed-job" || job.ProjectID != "project-1" ||
+		job.SourceHash != strings.Repeat("ab", 32) {
+		t.Fatalf("failed job metadata = %#v", job)
+	}
+	if job.Status != JobStatusFailed || job.ChapterCount != 0 ||
+		job.SelectedChapterCount != 0 || job.ErrorCode != "parse_empty" ||
+		job.ErrorMessage != "manuscript contains no chapters" {
+		t.Fatalf("failed job state = %#v", job)
+	}
+	if job.CreatedAt != now.UTC() || job.UpdatedAt != now.UTC() || job.AppliedAt != nil {
+		t.Fatalf("failed job timestamps = %#v", job)
+	}
+}
+
+func TestNewFailedImportJobRejectsBlankFailureSummary(t *testing.T) {
+	valid := FailedImportJobParams{
+		ID:                   "failed-job",
+		ProjectID:            "project-1",
+		SourceName:           "broken.txt",
+		SourceFormat:         SourceFormatTXT,
+		SourceEncoding:       "UTF-8",
+		SourceHash:           strings.Repeat("ab", 32),
+		SourceBytes:          12,
+		ArchivedRelativePath: "imports/failed-job.txt",
+		ErrorCode:            "parse_empty",
+		ErrorMessage:         "no chapters",
+	}
+	for name, change := range map[string]func(*FailedImportJobParams){
+		"blank code":    func(params *FailedImportJobParams) { params.ErrorCode = " " },
+		"blank message": func(params *FailedImportJobParams) { params.ErrorMessage = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			params := valid
+			change(&params)
+			if _, err := NewFailedImportJob(params, time.Now()); !errors.Is(err, ErrBlankValue) {
+				t.Fatalf("error = %v, want ErrBlankValue", err)
+			}
+		})
+	}
+}
+
 func TestImportJobPreparedTransitionsToApplied(t *testing.T) {
 	job := newValidImportJob(t)
 	now := time.Date(2026, time.July, 30, 11, 30, 0, 0, time.FixedZone("CST", 8*60*60))

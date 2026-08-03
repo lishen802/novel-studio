@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -26,9 +28,11 @@ func (s *Store) CreateImportJob(
 	}
 	seenPositions := make(map[int]struct{}, len(chapters))
 	for _, chapter := range chapters {
+		bodyHash := sha256.Sum256([]byte(chapter.Body))
 		if chapter.JobID != job.ID ||
 			chapter.Selected ||
-			chapter.CreatedChapterID != "" {
+			chapter.CreatedChapterID != "" ||
+			chapter.ContentHash != hex.EncodeToString(bodyHash[:]) {
 			return ports.ErrImportChapterMappingMismatch
 		}
 		if _, exists := seenPositions[chapter.Position]; exists {
@@ -37,7 +41,7 @@ func (s *Store) CreateImportJob(
 		seenPositions[chapter.Position] = struct{}{}
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := beginImmediate(ctx, s.db)
 	if err != nil {
 		return safeImportStoreError("begin create import job", err)
 	}
@@ -109,8 +113,71 @@ func (s *Store) CreateImportJob(
 			return safeImportStoreError("create import chapter", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return safeImportStoreError("commit create import job", err)
+	}
+	return nil
+}
+
+func (s *Store) CreateFailedImportJob(ctx context.Context, job importing.ImportJob) error {
+	if job.Status != importing.JobStatusFailed ||
+		job.ChapterCount != 0 ||
+		job.SelectedChapterCount != 0 ||
+		strings.TrimSpace(job.ErrorCode) == "" ||
+		strings.TrimSpace(job.ErrorMessage) == "" ||
+		job.AppliedAt != nil {
+		return ports.ErrImportChapterMappingMismatch
+	}
+
+	tx, err := beginImmediate(ctx, s.db)
+	if err != nil {
+		return safeImportStoreError("begin create failed import job", err)
+	}
+	defer tx.Rollback()
+
+	var existingSourceID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM import_jobs
+		WHERE project_id = ? AND source_hash = ?
+	`, job.ProjectID, job.SourceHash).Scan(&existingSourceID)
+	if err == nil {
+		return ports.ErrDuplicateImportSource
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return safeImportStoreError("check duplicate failed import source", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO import_jobs(
+			id, project_id, source_name, source_format, source_encoding,
+			source_hash, source_bytes, archived_relative_path, status,
+			chapter_count, selected_chapter_count, error_code, error_message,
+			created_at, updated_at, applied_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		job.ID,
+		job.ProjectID,
+		job.SourceName,
+		job.SourceFormat,
+		job.SourceEncoding,
+		job.SourceHash,
+		job.SourceBytes,
+		job.ArchivedRelativePath,
+		job.Status,
+		job.ChapterCount,
+		job.SelectedChapterCount,
+		job.ErrorCode,
+		job.ErrorMessage,
+		formatTime(job.CreatedAt),
+		formatTime(job.UpdatedAt),
+		nil,
+	)
+	if err != nil {
+		return safeImportStoreError("create failed import job", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return safeImportStoreError("commit create failed import job", err)
 	}
 	return nil
 }
@@ -152,19 +219,31 @@ func (s *Store) ImportJob(
 	ctx context.Context,
 	id string,
 ) (ports.ImportJobDetails, error) {
-	job, err := loadImportJob(ctx, s.db, id)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return ports.ImportJobDetails{}, safeImportStoreError("begin read import job", err)
+	}
+	defer tx.Rollback()
+
+	job, err := loadImportJob(ctx, tx, id)
 	if err != nil {
 		return ports.ImportJobDetails{}, err
 	}
-	chapters, err := loadImportChapters(ctx, s.db, id)
+	if s.importJobReadHook != nil {
+		s.importJobReadHook()
+	}
+	chapters, err := loadImportChapters(ctx, tx, id)
 	if err != nil {
 		return ports.ImportJobDetails{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ports.ImportJobDetails{}, safeImportStoreError("commit read import job", err)
 	}
 	return ports.ImportJobDetails{Job: job, Chapters: chapters}, nil
 }
 
 func (s *Store) DeletePreparedImportJob(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := beginImmediate(ctx, s.db)
 	if err != nil {
 		return safeImportStoreError("begin delete import job", err)
 	}
@@ -195,7 +274,7 @@ func (s *Store) DeletePreparedImportJob(ctx context.Context, id string) error {
 	if deleted != 1 {
 		return ports.ErrImportJobNotPrepared
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return safeImportStoreError("commit delete import job", err)
 	}
 	return nil
@@ -233,7 +312,7 @@ func (s *Store) ApplyImportJob(
 		createdChapterIDs[chapterID] = struct{}{}
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := beginImmediate(ctx, s.db)
 	if err != nil {
 		return ports.ImportApplyResult{}, safeImportStoreError("begin apply import job", err)
 	}
@@ -275,6 +354,9 @@ func (s *Store) ApplyImportJob(
 		WHERE project_id = ?
 	`, job.ProjectID).Scan(&maxPosition); err != nil {
 		return ports.ImportApplyResult{}, safeImportStoreError("read maximum chapter position", err)
+	}
+	if s.importApplyAfterMaxPositionHook != nil {
+		s.importApplyAfterMaxPositionHook()
 	}
 
 	appliedAt = appliedAt.UTC()
@@ -365,10 +447,142 @@ func (s *Store) ApplyImportJob(
 		return ports.ImportApplyResult{}, ports.ErrImportJobAlreadyApplied
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return ports.ImportApplyResult{}, safeImportStoreError("commit apply import job", err)
 	}
 	return ports.ImportApplyResult{Job: appliedJob, Chapters: created}, nil
+}
+
+type immediateTx struct {
+	conn      *sql.Conn
+	completed bool
+}
+
+var errImportWriteLockTimeout = errors.New("import write lock wait timed out")
+
+const (
+	importWriteLockRetryInterval = 10 * time.Millisecond
+	importWriteLockWaitLimit     = 5 * time.Second
+	importSQLiteBusyTimeoutMS    = 5000
+)
+
+func beginImmediate(ctx context.Context, db *sql.DB) (*immediateTx, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = 0"); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	restoreAndClose := func() {
+		restoreSQLiteBusyTimeout(conn)
+		_ = conn.Close()
+	}
+
+	waitLimit := time.NewTimer(importWriteLockWaitLimit)
+	defer waitLimit.Stop()
+	for {
+		_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+		if err == nil {
+			if err := restoreSQLiteBusyTimeout(conn); err != nil {
+				_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+				restoreAndClose()
+				return nil, err
+			}
+			return &immediateTx{conn: conn}, nil
+		}
+		if !isSQLiteBusy(err) {
+			restoreAndClose()
+			return nil, err
+		}
+
+		retry := time.NewTimer(importWriteLockRetryInterval)
+		select {
+		case <-ctx.Done():
+			if !retry.Stop() {
+				<-retry.C
+			}
+			restoreAndClose()
+			return nil, ctx.Err()
+		case <-waitLimit.C:
+			if !retry.Stop() {
+				<-retry.C
+			}
+			restoreAndClose()
+			return nil, errImportWriteLockTimeout
+		case <-retry.C:
+		}
+	}
+}
+
+func (tx *immediateTx) ExecContext(
+	ctx context.Context,
+	query string,
+	args ...any,
+) (sql.Result, error) {
+	return tx.conn.ExecContext(ctx, query, args...)
+}
+
+func (tx *immediateTx) QueryContext(
+	ctx context.Context,
+	query string,
+	args ...any,
+) (*sql.Rows, error) {
+	return tx.conn.QueryContext(ctx, query, args...)
+}
+
+func (tx *immediateTx) QueryRowContext(
+	ctx context.Context,
+	query string,
+	args ...any,
+) *sql.Row {
+	return tx.conn.QueryRowContext(ctx, query, args...)
+}
+
+func (tx *immediateTx) Commit(ctx context.Context) error {
+	if tx.completed {
+		return sql.ErrTxDone
+	}
+	if _, err := tx.conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	tx.completed = true
+	return tx.conn.Close()
+}
+
+func (tx *immediateTx) Rollback() {
+	if tx == nil || tx.completed {
+		return
+	}
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _ = tx.conn.ExecContext(rollbackCtx, "ROLLBACK")
+	tx.completed = true
+	_ = tx.conn.Close()
+}
+
+func restoreSQLiteBusyTimeout(conn *sql.Conn) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := conn.ExecContext(ctx, fmt.Sprintf(
+		"PRAGMA busy_timeout = %d",
+		importSQLiteBusyTimeoutMS,
+	))
+	return err
+}
+
+func isSQLiteBusy(err error) bool {
+	var sqliteError interface{ Code() int }
+	if !errors.As(err, &sqliteError) {
+		return false
+	}
+	const (
+		sqliteBusy   = 5
+		sqliteLocked = 6
+	)
+	primaryCode := sqliteError.Code() & 0xff
+	return primaryCode == sqliteBusy || primaryCode == sqliteLocked
 }
 
 type importStoreQuery interface {
@@ -520,6 +734,12 @@ func boolToSQLite(value bool) int {
 }
 
 func safeImportStoreError(operation string, err error) error {
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%s: %w", operation, context.Canceled)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%s: %w", operation, context.DeadlineExceeded)
+	}
 	classified := classifyDatabaseError(err)
 	for _, stable := range []error{
 		ErrDatabasePermission,

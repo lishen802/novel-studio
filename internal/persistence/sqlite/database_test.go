@@ -453,6 +453,18 @@ func TestManuscriptImportSchemaEnforcesLifecycleCountsUniquenessAndReferences(t 
 	if err := insertJob("prepared", hashA, "prepared", 2, 0, "", "", nil); err != nil {
 		t.Fatalf("insert prepared job: %v", err)
 	}
+	if err := insertJob(
+		"failed-zero-chapters",
+		strings.Repeat("d", 64),
+		"failed",
+		0,
+		0,
+		"parse_empty",
+		"manuscript contains no chapters",
+		nil,
+	); err != nil {
+		t.Fatalf("insert zero-chapter failed job: %v", err)
+	}
 	for name, args := range map[string]struct {
 		status                      string
 		chapterCount, selectedCount int

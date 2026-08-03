@@ -63,6 +63,67 @@ func TestImportStoreCreatesListsAndReloadsCompleteJobsInStableOrder(t *testing.T
 	}
 }
 
+func TestImportStoreReadsJobAndCandidatesFromOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "project.db")
+	reader, project := createImportTestStore(t, path)
+	defer reader.Close()
+	opened, err := (Factory{}).Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := opened.(*Store)
+	defer writer.Close()
+
+	job, candidates := mustImportFixture(t, project.ID, "job-snapshot", "novel.txt", "a", time.Unix(100, 0))
+	if err := reader.CreateImportJob(ctx, job, candidates); err != nil {
+		t.Fatal(err)
+	}
+
+	jobRead := make(chan struct{})
+	continueRead := make(chan struct{})
+	reader.importJobReadHook = func() {
+		close(jobRead)
+		<-continueRead
+	}
+	type readResult struct {
+		details ports.ImportJobDetails
+		err     error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		details, err := reader.ImportJob(ctx, job.ID)
+		readDone <- readResult{details: details, err: err}
+	}()
+	<-jobRead
+
+	appliedAt := time.Unix(200, 0)
+	chapter := importChapterForCandidate(candidates[0], "snapshot-created", project.ID, appliedAt)
+	if _, err := writer.ApplyImportJob(
+		ctx,
+		job.ID,
+		[]string{candidates[0].ID},
+		[]projectdomain.Chapter{chapter},
+		appliedAt,
+	); err != nil {
+		t.Fatalf("apply import while snapshot reader is paused: %v", err)
+	}
+	close(continueRead)
+
+	result := <-readDone
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if result.details.Job.Status != importing.JobStatusPrepared {
+		t.Fatalf("snapshot job status = %q, want prepared", result.details.Job.Status)
+	}
+	for _, candidate := range result.details.Chapters {
+		if candidate.Selected || candidate.CreatedChapterID != "" {
+			t.Fatalf("snapshot mixed old job with new candidate mapping: %#v", result.details)
+		}
+	}
+}
+
 func TestImportStoreCreateIsAtomicAndReturnsStableDuplicateSourceError(t *testing.T) {
 	ctx := context.Background()
 	store, project := createTestStore(t)
@@ -99,6 +160,37 @@ func TestImportStoreCreateIsAtomicAndReturnsStableDuplicateSourceError(t *testin
 	if !errors.Is(err, ports.ErrImportPersistence) ||
 		errors.Is(err, ports.ErrDuplicateImportSource) {
 		t.Fatalf("duplicate job ID error = %v, want safe persistence error", err)
+	}
+}
+
+func TestImportStoreRejectsCandidateBodyThatDoesNotMatchItsContentHash(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	job, chapters := mustImportFixture(t, project.ID, "job-tampered", "novel.txt", "a", time.Unix(100, 0))
+	chapters[1].Body = "正文被准备阶段之后篡改"
+
+	err := store.CreateImportJob(ctx, job, chapters)
+	if !errors.Is(err, ports.ErrImportChapterMappingMismatch) {
+		t.Fatalf("error = %v, want ErrImportChapterMappingMismatch", err)
+	}
+	if _, err := store.ImportJob(ctx, job.ID); !errors.Is(err, ports.ErrImportJobMissing) {
+		t.Fatalf("read rejected job error = %v, want ErrImportJobMissing", err)
+	}
+}
+
+func TestSafeImportStoreErrorPreservesContextCancellation(t *testing.T) {
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(want.Error(), func(t *testing.T) {
+			wrapped := errors.Join(errors.New("driver operation failed"), want)
+			got := safeImportStoreError("test import operation", wrapped)
+			if !errors.Is(got, want) {
+				t.Fatalf("error = %v, want wrapping %v", got, want)
+			}
+			if errors.Is(got, ports.ErrImportPersistence) {
+				t.Fatalf("context error was collapsed to ErrImportPersistence: %v", got)
+			}
+		})
 	}
 }
 
@@ -206,6 +298,61 @@ func TestImportStoreReportsMissingJobsAndDeletesOnlyPreparedJobs(t *testing.T) {
 	}
 	if err := store.DeletePreparedImportJob(ctx, applied.ID); !errors.Is(err, ports.ErrImportJobAlreadyApplied) {
 		t.Fatalf("delete applied error = %v, want ErrImportJobAlreadyApplied", err)
+	}
+}
+
+func TestImportStorePersistsZeroChapterFailedJobAsReadOnlyHistory(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	failed, err := importing.NewFailedImportJob(importing.FailedImportJobParams{
+		ID:                   "job-failed",
+		ProjectID:            project.ID,
+		SourceName:           "empty.txt",
+		SourceFormat:         importing.SourceFormatTXT,
+		SourceEncoding:       "UTF-8",
+		SourceHash:           strings.Repeat("e", 64),
+		SourceBytes:          12,
+		ArchivedRelativePath: "imports/job-failed.txt",
+		ErrorCode:            "parse_empty",
+		ErrorMessage:         "manuscript contains no chapters",
+	}, time.Unix(100, 123))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.CreateFailedImportJob(ctx, failed); err != nil {
+		t.Fatalf("create failed import job: %v", err)
+	}
+	details, err := store.ImportJob(ctx, failed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if details.Job != failed || len(details.Chapters) != 0 {
+		t.Fatalf("failed job details = %#v, want %#v with no chapters", details, failed)
+	}
+	if _, err := store.ApplyImportJob(
+		ctx,
+		failed.ID,
+		[]string{"not-present"},
+		[]projectdomain.Chapter{{
+			ID:        "chapter-not-created",
+			ProjectID: project.ID,
+			Title:     "导入正文",
+			Revision:  1,
+		}},
+		time.Unix(200, 0),
+	); !errors.Is(err, ports.ErrImportJobNotPrepared) {
+		t.Fatalf("apply failed job error = %v, want ErrImportJobNotPrepared", err)
+	}
+	if err := store.DeletePreparedImportJob(ctx, failed.ID); !errors.Is(err, ports.ErrImportJobNotPrepared) {
+		t.Fatalf("delete failed job error = %v, want ErrImportJobNotPrepared", err)
+	}
+
+	duplicate := failed
+	duplicate.ID = "job-failed-duplicate"
+	if err := store.CreateFailedImportJob(ctx, duplicate); !errors.Is(err, ports.ErrDuplicateImportSource) {
+		t.Fatalf("duplicate failed source error = %v, want ErrDuplicateImportSource", err)
 	}
 }
 
@@ -507,6 +654,308 @@ func TestImportStoreRollsBackChaptersMappingsAndJobWhenAChapterInsertFails(t *te
 			t.Fatalf("chapter %s persisted after rollback", id)
 		}
 	}
+}
+
+func TestImportStoreAcquiresWriteLockBeforeReadingApplyStateAndMaximumPosition(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "project.db")
+	lockingStore, project := createImportTestStore(t, path)
+	defer lockingStore.Close()
+	opened, err := (Factory{}).Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyingStore := opened.(*Store)
+	defer applyingStore.Close()
+
+	job, candidates := mustImportFixture(t, project.ID, "job-lock-order", "novel.txt", "a", time.Unix(100, 0))
+	if err := lockingStore.CreateImportJob(ctx, job, candidates); err != nil {
+		t.Fatal(err)
+	}
+
+	locker, err := lockingStore.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	if _, err := locker.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	lockCommitted := false
+	defer func() {
+		if !lockCommitted {
+			_, _ = locker.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	now := formatTime(time.Unix(150, 0))
+	if _, err := locker.ExecContext(ctx, `
+		INSERT INTO chapters(
+			id, project_id, title, position, body, revision,
+			revision_source, revision_summary, created_at, updated_at
+		) VALUES ('concurrent-existing', ?, '并发已有章节', 1, '', 1, 'initial', '', ?, ?)
+	`, project.ID, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	applyReadMaximum := make(chan struct{})
+	applyingStore.importApplyAfterMaxPositionHook = func() {
+		close(applyReadMaximum)
+	}
+	type applyResult struct {
+		result ports.ImportApplyResult
+		err    error
+	}
+	applyDone := make(chan applyResult, 1)
+	appliedAt := time.Unix(200, 0)
+	go func() {
+		chapter := importChapterForCandidate(candidates[0], "created-after-lock", project.ID, appliedAt)
+		result, err := applyingStore.ApplyImportJob(
+			ctx,
+			job.ID,
+			[]string{candidates[0].ID},
+			[]projectdomain.Chapter{chapter},
+			appliedAt,
+		)
+		applyDone <- applyResult{result: result, err: err}
+	}()
+
+	readBeforeWriteLock := false
+	select {
+	case <-applyReadMaximum:
+		readBeforeWriteLock = true
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := locker.ExecContext(ctx, "COMMIT"); err != nil {
+		t.Fatal(err)
+	}
+	lockCommitted = true
+	result := <-applyDone
+	if readBeforeWriteLock {
+		t.Fatal("ApplyImportJob read state/MAX(position) before acquiring the SQLite write lock")
+	}
+	if result.err != nil {
+		t.Fatalf("apply after lock release: %v", result.err)
+	}
+	if len(result.result.Chapters) != 1 || result.result.Chapters[0].Position != 2 {
+		t.Fatalf("created chapters = %#v, want position 2", result.result.Chapters)
+	}
+}
+
+func TestImportStoreWriteLockWaitRespectsContextDeadline(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "project.db")
+	lockingStore, project := createImportTestStore(t, path)
+	defer lockingStore.Close()
+	opened, err := (Factory{}).Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitingStore := opened.(*Store)
+	defer waitingStore.Close()
+
+	locker, err := lockingStore.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	if _, err := locker.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = locker.ExecContext(context.Background(), "ROLLBACK")
+	}()
+
+	job, candidates := mustImportFixture(t, project.ID, "job-deadline", "novel.txt", "f", time.Unix(100, 0))
+	deadlineCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	startedAt := time.Now()
+	err = waitingStore.CreateImportJob(deadlineCtx, job, candidates)
+	elapsed := time.Since(startedAt)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("write lock wait took %v, want bounded by context deadline", elapsed)
+	}
+}
+
+func TestImportStoreSerializesConcurrentOperationsAcrossDatabaseHandles(t *testing.T) {
+	t.Run("distinct jobs append without colliding", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		path := filepath.Join(t.TempDir(), "project.db")
+		firstStore, project := createImportTestStore(t, path)
+		defer firstStore.Close()
+		opened, err := (Factory{}).Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondStore := opened.(*Store)
+		defer secondStore.Close()
+
+		firstJob, firstCandidates := mustImportFixture(t, project.ID, "job-concurrent-a", "a.txt", "a", time.Unix(100, 0))
+		secondJob, secondCandidates := mustImportFixture(t, project.ID, "job-concurrent-b", "b.txt", "b", time.Unix(101, 0))
+		if err := firstStore.CreateImportJob(ctx, firstJob, firstCandidates); err != nil {
+			t.Fatal(err)
+		}
+		if err := firstStore.CreateImportJob(ctx, secondJob, secondCandidates); err != nil {
+			t.Fatal(err)
+		}
+
+		start := make(chan struct{})
+		results := make(chan applyConcurrentResult, 2)
+		go applyOneImportAfterStart(
+			ctx,
+			firstStore,
+			firstJob,
+			firstCandidates[0],
+			"concurrent-created-a",
+			project.ID,
+			start,
+			results,
+		)
+		go applyOneImportAfterStart(
+			ctx,
+			secondStore,
+			secondJob,
+			secondCandidates[0],
+			"concurrent-created-b",
+			project.ID,
+			start,
+			results,
+		)
+		close(start)
+		firstResult := <-results
+		secondResult := <-results
+		if firstResult.err != nil || secondResult.err != nil {
+			t.Fatalf("concurrent apply errors = (%v, %v)", firstResult.err, secondResult.err)
+		}
+		positions := map[int]bool{
+			firstResult.result.Chapters[0].Position:  true,
+			secondResult.result.Chapters[0].Position: true,
+		}
+		if !positions[1] || !positions[2] || len(positions) != 2 {
+			t.Fatalf(
+				"concurrent chapter positions = (%d, %d), want 1 and 2",
+				firstResult.result.Chapters[0].Position,
+				secondResult.result.Chapters[0].Position,
+			)
+		}
+	})
+
+	t.Run("same job has one success and one stable already applied", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		path := filepath.Join(t.TempDir(), "project.db")
+		firstStore, project := createImportTestStore(t, path)
+		defer firstStore.Close()
+		opened, err := (Factory{}).Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondStore := opened.(*Store)
+		defer secondStore.Close()
+
+		job, candidates := mustImportFixture(t, project.ID, "job-double-apply", "same.txt", "c", time.Unix(100, 0))
+		if err := firstStore.CreateImportJob(ctx, job, candidates); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan applyConcurrentResult, 2)
+		go applyOneImportAfterStart(
+			ctx, firstStore, job, candidates[0], "double-created-a", project.ID, start, results,
+		)
+		go applyOneImportAfterStart(
+			ctx, secondStore, job, candidates[0], "double-created-b", project.ID, start, results,
+		)
+		close(start)
+		got := []applyConcurrentResult{<-results, <-results}
+		successes := 0
+		alreadyApplied := 0
+		for _, result := range got {
+			switch {
+			case result.err == nil:
+				successes++
+			case errors.Is(result.err, ports.ErrImportJobAlreadyApplied):
+				alreadyApplied++
+			default:
+				t.Fatalf("unexpected concurrent apply error: %v", result.err)
+			}
+		}
+		if successes != 1 || alreadyApplied != 1 {
+			t.Fatalf("successes=%d alreadyApplied=%d, want 1 each", successes, alreadyApplied)
+		}
+	})
+
+	t.Run("same source has one success and one stable duplicate", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		path := filepath.Join(t.TempDir(), "project.db")
+		firstStore, project := createImportTestStore(t, path)
+		defer firstStore.Close()
+		opened, err := (Factory{}).Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondStore := opened.(*Store)
+		defer secondStore.Close()
+
+		firstJob, firstCandidates := mustImportFixture(t, project.ID, "job-source-a", "same.txt", "d", time.Unix(100, 0))
+		secondJob, secondCandidates := mustImportFixture(t, project.ID, "job-source-b", "same.txt", "d", time.Unix(101, 0))
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		go func() {
+			<-start
+			results <- firstStore.CreateImportJob(ctx, firstJob, firstCandidates)
+		}()
+		go func() {
+			<-start
+			results <- secondStore.CreateImportJob(ctx, secondJob, secondCandidates)
+		}()
+		close(start)
+		got := []error{<-results, <-results}
+		successes := 0
+		duplicates := 0
+		for _, err := range got {
+			switch {
+			case err == nil:
+				successes++
+			case errors.Is(err, ports.ErrDuplicateImportSource):
+				duplicates++
+			default:
+				t.Fatalf("unexpected concurrent create error: %v", err)
+			}
+		}
+		if successes != 1 || duplicates != 1 {
+			t.Fatalf("successes=%d duplicates=%d, want 1 each", successes, duplicates)
+		}
+	})
+}
+
+type applyConcurrentResult struct {
+	result ports.ImportApplyResult
+	err    error
+}
+
+func applyOneImportAfterStart(
+	ctx context.Context,
+	store *Store,
+	job importing.ImportJob,
+	candidate importing.ImportChapter,
+	chapterID, projectID string,
+	start <-chan struct{},
+	results chan<- applyConcurrentResult,
+) {
+	<-start
+	chapter := importChapterForCandidate(candidate, chapterID, projectID, time.Unix(300, 0))
+	result, err := store.ApplyImportJob(
+		ctx,
+		job.ID,
+		[]string{candidate.ID},
+		[]projectdomain.Chapter{chapter},
+		time.Unix(300, 0),
+	)
+	results <- applyConcurrentResult{result: result, err: err}
 }
 
 func createImportTestStore(t *testing.T, path string) (*Store, projectdomain.Project) {

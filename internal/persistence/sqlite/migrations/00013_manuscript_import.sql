@@ -11,7 +11,7 @@ CREATE TABLE import_jobs (
     source_bytes INTEGER NOT NULL CHECK (source_bytes >= 1),
     archived_relative_path TEXT NOT NULL CHECK (length(trim(archived_relative_path)) >= 1),
     status TEXT NOT NULL CHECK (status IN ('prepared', 'applied', 'failed')),
-    chapter_count INTEGER NOT NULL CHECK (chapter_count >= 1),
+    chapter_count INTEGER NOT NULL CHECK (chapter_count >= 0),
     selected_chapter_count INTEGER NOT NULL DEFAULT 0 CHECK (
         selected_chapter_count >= 0 AND selected_chapter_count <= chapter_count
     ),
@@ -23,6 +23,7 @@ CREATE TABLE import_jobs (
     CHECK (
         (
             status = 'prepared'
+            AND chapter_count >= 1
             AND selected_chapter_count = 0
             AND error_code = ''
             AND error_message = ''
@@ -30,6 +31,7 @@ CREATE TABLE import_jobs (
         )
         OR (
             status = 'applied'
+            AND chapter_count >= 1
             AND selected_chapter_count >= 1
             AND error_code = ''
             AND error_message = ''
