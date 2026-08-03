@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -343,7 +342,10 @@ func (s *Service) ApplyImportJob(
 	}
 	workspaceChapters, err := s.active.store.ListChapters(ctx)
 	if err != nil {
-		return ImportApplyView{}, fmt.Errorf("list chapters after manuscript import: %w", err)
+		return ImportApplyView{}, errors.Join(
+			ErrImportAppliedRefresh,
+			stableImportWorkspaceReadError(err),
+		)
 	}
 	sort.SliceStable(workspaceChapters, func(i, j int) bool {
 		return workspaceChapters[i].Position < workspaceChapters[j].Position
@@ -367,7 +369,7 @@ func (s *Service) importStoreAndProjectLocked(
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
-		return nil, projectdomain.Project{}, fmt.Errorf("read active project for import: %w", err)
+		return nil, projectdomain.Project{}, stableImportWorkspaceReadError(err)
 	}
 	return store, project, nil
 }
@@ -447,6 +449,16 @@ func stableImportStoreError(err error) error {
 		}
 	}
 	return ports.ErrImportPersistence
+}
+
+func stableImportWorkspaceReadError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return ErrImportWorkspaceRead
 }
 
 func stableImportConstructionError(err error) error {

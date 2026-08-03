@@ -13,4 +13,6 @@ var (
 	ErrImportStoreUnavailable   = errors.New("active project does not support manuscript imports")
 	ErrImportJobProjectMismatch = errors.New("import job belongs to a different project")
 	ErrImportOperationActive    = errors.New("a manuscript import operation is already active")
+	ErrImportWorkspaceRead      = errors.New("manuscript import workspace data could not be read")
+	ErrImportAppliedRefresh     = errors.New("manuscript import was applied but workspace refresh failed")
 )

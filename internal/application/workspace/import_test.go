@@ -206,6 +206,103 @@ func TestPrepareManuscriptImportReturnsStableArchiveErrorAndPreservesContext(t *
 	}
 }
 
+func TestImportUseCasesSanitizeActiveProjectReadFailures(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	for _, test := range []struct {
+		name string
+		call func(*Service) error
+	}{
+		{
+			name: "prepare",
+			call: func(service *Service) error {
+				_, err := service.PrepareManuscriptImport(
+					context.Background(),
+					"/private/secret/novel.txt",
+				)
+				return err
+			},
+		},
+		{
+			name: "list",
+			call: func(service *Service) error {
+				_, err := service.ImportJobs(context.Background())
+				return err
+			},
+		},
+		{
+			name: "detail",
+			call: func(service *Service) error {
+				_, err := service.ImportJob(context.Background(), "job-1")
+				return err
+			},
+		},
+		{
+			name: "delete",
+			call: func(service *Service) error {
+				return service.DeleteImportJob(context.Background(), "job-1")
+			},
+		},
+		{
+			name: "apply",
+			call: func(service *Service) error {
+				_, err := service.ApplyImportJob(
+					context.Background(),
+					"job-1",
+					[]string{"candidate-1"},
+				)
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newFakeImportStore(project)
+			service := openImportTestService(
+				t,
+				store,
+				validFakeImportArchive(),
+				&fakeLicense{},
+				&sequenceIDs{ids: []string{"job-1"}},
+			)
+			store.projectErr = errors.New(
+				"SELECT project failed for /private/secret/project.db",
+			)
+
+			err := test.call(service)
+			if !errors.Is(err, ErrImportWorkspaceRead) {
+				t.Fatalf("error = %v, want ErrImportWorkspaceRead", err)
+			}
+			if strings.Contains(err.Error(), "SELECT project") ||
+				strings.Contains(err.Error(), "/private/secret") {
+				t.Fatalf("error leaks project adapter details: %v", err)
+			}
+		})
+	}
+}
+
+func TestImportProjectReadFailurePreservesContextWithoutLeakingAdapterText(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeImportStore(project)
+	service := openImportTestService(
+		t,
+		store,
+		validFakeImportArchive(),
+		&fakeLicense{},
+		&sequenceIDs{},
+	)
+	store.projectErr = errors.Join(
+		errors.New("read /private/secret/project.db"),
+		context.DeadlineExceeded,
+	)
+
+	_, err := service.ImportJobs(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline preserved", err)
+	}
+	if strings.Contains(err.Error(), "/private/secret") {
+		t.Fatalf("error leaks project adapter details: %v", err)
+	}
+}
+
 func TestImportJobQueriesAreProjectIsolated(t *testing.T) {
 	project := mustProject(t, "project-1", "长夜织境")
 	store := newFakeImportStore(project)
@@ -335,6 +432,69 @@ func TestApplyImportJobUsesCandidateOrderAndReturnsCompleteWorkspaceChapters(t *
 	sort.Ints(positions)
 	if !reflect.DeepEqual(positions, []int{3, 4, 5}) {
 		t.Fatalf("workspace chapter positions = %#v", positions)
+	}
+}
+
+func TestApplyImportJobReportsAppliedRefreshFailureWithoutLosingCommittedState(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeImportStore(project)
+	job, candidates := mustWorkspaceImportJob(t, "job-1", project.ID, importing.JobStatusPrepared)
+	store.jobs[job.ID] = ports.ImportJobDetails{Job: job, Chapters: candidates}
+	service := openImportTestService(
+		t,
+		store,
+		validFakeImportArchive(),
+		&fakeLicense{},
+		&sequenceIDs{ids: []string{"chapter-1", "retry-unused"}},
+	)
+	store.listChaptersErr = errors.New(
+		"SELECT chapters failed for /private/secret/project.db",
+	)
+
+	_, err := service.ApplyImportJob(
+		context.Background(),
+		job.ID,
+		[]string{"candidate-1"},
+	)
+	if !errors.Is(err, ErrImportAppliedRefresh) ||
+		!errors.Is(err, ErrImportWorkspaceRead) {
+		t.Fatalf(
+			"error = %v, want ErrImportAppliedRefresh and ErrImportWorkspaceRead",
+			err,
+		)
+	}
+	if strings.Contains(err.Error(), "SELECT chapters") ||
+		strings.Contains(err.Error(), "/private/secret") {
+		t.Fatalf("refresh error leaks adapter details: %v", err)
+	}
+	stored, readErr := store.ImportJob(context.Background(), job.ID)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if stored.Job.Status != importing.JobStatusApplied ||
+		stored.Job.SelectedChapterCount != 1 ||
+		!stored.Chapters[0].Selected ||
+		stored.Chapters[0].CreatedChapterID != "chapter-1" {
+		t.Fatalf("committed import details = %#v", stored)
+	}
+	if chapter, found := store.chapters["chapter-1"]; !found ||
+		chapter.Body != candidates[0].Body {
+		t.Fatalf("created chapter = (%#v, %v)", chapter, found)
+	}
+
+	_, retryErr := service.ApplyImportJob(
+		context.Background(),
+		job.ID,
+		[]string{"candidate-1"},
+	)
+	if !errors.Is(retryErr, ports.ErrImportJobAlreadyApplied) {
+		t.Fatalf(
+			"retry error = %v, want explicit ErrImportJobAlreadyApplied",
+			retryErr,
+		)
+	}
+	if store.applyCalls != 1 {
+		t.Fatalf("ApplyImportJob calls after retry = %d, want 1", store.applyCalls)
 	}
 }
 
@@ -671,6 +831,8 @@ type fakeImportStore struct {
 	failedCreateErr       error
 	deleteErr             error
 	applyErr              error
+	projectErr            error
+	listChaptersErr       error
 	createCalls           int
 	failedCreateCalls     int
 	importJobCalls        int
@@ -686,6 +848,26 @@ func newFakeImportStore(project projectdomain.Project) *fakeImportStore {
 		fakeStore: newFakeStore(project),
 		jobs:      make(map[string]ports.ImportJobDetails),
 	}
+}
+
+func (f *fakeImportStore) Project(ctx context.Context) (projectdomain.Project, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.projectErr != nil {
+		return projectdomain.Project{}, f.projectErr
+	}
+	return f.fakeStore.Project(ctx)
+}
+
+func (f *fakeImportStore) ListChapters(
+	ctx context.Context,
+) ([]projectdomain.Chapter, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listChaptersErr != nil {
+		return nil, f.listChaptersErr
+	}
+	return f.fakeStore.ListChapters(ctx)
 }
 
 func (f *fakeImportStore) CreateImportJob(
