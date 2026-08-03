@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
+	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
@@ -18,6 +20,7 @@ import (
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
@@ -436,6 +439,83 @@ func TestDesktopAPIDirectoryCancellationReturnsEmpty(t *testing.T) {
 	if err != nil || projectPath != "" {
 		t.Fatalf("ChooseProjectToOpen = (%q, %v)", projectPath, err)
 	}
+	importPath, err := api.ChooseManuscriptToImport()
+	if err != nil || importPath != "" {
+		t.Fatalf("ChooseManuscriptToImport = (%q, %v)", importPath, err)
+	}
+}
+
+func TestDesktopAPIForwardsManuscriptImportOperations(t *testing.T) {
+	job := workspace.ImportJobView{
+		ID:               "import-1",
+		Status:           "prepared",
+		SourceName:       "长夜.md",
+		SourceHashDigest: "0123456789ab",
+	}
+	applied := workspace.ImportApplyView{
+		Job:      workspace.ImportJobView{ID: job.ID, Status: "applied"},
+		Chapters: []workspace.ChapterView{{ID: "chapter-1", Title: "第一章"}},
+	}
+	workspaces := &fakeWorkspace{
+		importPrepareResult: workspace.ImportPrepareResult{Job: job},
+		importJobsResult:    []workspace.ImportJobView{job},
+		importJobResult:     job,
+		importApplyResult:   applied,
+	}
+	picker := &fakeDirectoryPicker{importPath: "/books/长夜.md"}
+	api := newDesktopAPI(workspaces, picker)
+	api.startup(context.Background())
+
+	sourcePath, err := api.ChooseManuscriptToImport()
+	if err != nil || sourcePath != "/books/长夜.md" {
+		t.Fatalf("ChooseManuscriptToImport = (%q, %v)", sourcePath, err)
+	}
+	prepared, err := api.PrepareManuscriptImport(sourcePath)
+	if err != nil || !reflect.DeepEqual(prepared, workspaces.importPrepareResult) || workspaces.preparedImportPath != sourcePath {
+		t.Fatalf("PrepareManuscriptImport = (%#v, %v), path %q", prepared, err, workspaces.preparedImportPath)
+	}
+	jobs, err := api.ImportJobs()
+	if err != nil || !reflect.DeepEqual(jobs, workspaces.importJobsResult) {
+		t.Fatalf("ImportJobs = (%#v, %v)", jobs, err)
+	}
+	detail, err := api.ImportJob(job.ID)
+	if err != nil || !reflect.DeepEqual(detail, job) || workspaces.importJobID != job.ID {
+		t.Fatalf("ImportJob = (%#v, %v), id %q", detail, err, workspaces.importJobID)
+	}
+	selected := []string{"candidate-2", "candidate-1"}
+	gotApply, err := api.ApplyImportJob(job.ID, selected)
+	if err != nil || !reflect.DeepEqual(gotApply, applied) {
+		t.Fatalf("ApplyImportJob = (%#v, %v)", gotApply, err)
+	}
+	if workspaces.appliedImportJobID != job.ID || !reflect.DeepEqual(workspaces.appliedImportChapterIDs, selected) {
+		t.Fatalf("ApplyImportJob args = (%q, %#v)", workspaces.appliedImportJobID, workspaces.appliedImportChapterIDs)
+	}
+	if err := api.DeleteImportJob(job.ID); err != nil || workspaces.deletedImportJobID != job.ID {
+		t.Fatalf("DeleteImportJob = (%q, %v)", workspaces.deletedImportJobID, err)
+	}
+}
+
+func TestWailsDirectoryPickerUsesFilteredFileDialogForManuscripts(t *testing.T) {
+	var options runtime.OpenDialogOptions
+	picker := wailsDirectoryPicker{
+		openFileDialog: func(_ context.Context, got runtime.OpenDialogOptions) (string, error) {
+			options = got
+			return "/books/长夜.md", nil
+		},
+	}
+
+	got, err := picker.ChooseManuscriptToImport(context.Background())
+
+	if err != nil || got != "/books/长夜.md" {
+		t.Fatalf("ChooseManuscriptToImport = (%q, %v)", got, err)
+	}
+	if options.Title != "选择要导入的小说" {
+		t.Fatalf("dialog title = %q", options.Title)
+	}
+	if len(options.Filters) != 1 ||
+		options.Filters[0].Pattern != "*.txt;*.md;*.markdown" {
+		t.Fatalf("dialog filters = %#v", options.Filters)
+	}
 }
 
 func TestDesktopAPIMapsWorkspaceErrorToSafeDesktopError(t *testing.T) {
@@ -453,6 +533,55 @@ func TestDesktopAPIMapsWorkspaceErrorToSafeDesktopError(t *testing.T) {
 	}
 	if got := err.Error(); got == "" || containsAny(got, "SELECT", "secret text") {
 		t.Fatalf("unsafe error was exposed: %q", got)
+	}
+}
+
+func TestSafeDesktopErrorClassifiesManuscriptImportFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		code    desktopErrorCode
+		message string
+	}{
+		{"format", ports.ErrUnsupportedImportFormat, "IMPORT_FORMAT_UNSUPPORTED", "仅支持 TXT、MD 或 MARKDOWN 小说文件。"},
+		{"empty", ports.ErrEmptyImportSource, "IMPORT_SOURCE_EMPTY", "所选小说文件为空。"},
+		{"too large", ports.ErrImportSourceTooLarge, "IMPORT_SOURCE_TOO_LARGE", "小说文件超过 20 MiB 上限。"},
+		{"encoding", ports.ErrUnsupportedImportEncoding, "IMPORT_ENCODING_UNSUPPORTED", "无法识别小说文件编码，请转换为 UTF-8、UTF-16 或 GB18030。"},
+		{"unsafe", ports.ErrUnsafeImportSource, "IMPORT_SOURCE_UNSAFE", "所选来源不是安全的普通文件。"},
+		{"duplicate", ports.ErrDuplicateImportSource, "IMPORT_SOURCE_DUPLICATE", "这份小说已在当前项目中准备过。"},
+		{"missing", ports.ErrImportJobMissing, "IMPORT_JOB_MISSING", "导入任务不存在或已被删除。"},
+		{"applied", ports.ErrImportJobAlreadyApplied, "IMPORT_JOB_APPLIED", "该导入任务已经应用，不能重复操作。"},
+		{"not prepared", ports.ErrImportJobNotPrepared, "IMPORT_JOB_NOT_PREPARED", "该导入任务尚未准备完成。"},
+		{"selection", ports.ErrNoImportChaptersSelected, "IMPORT_SELECTION_REQUIRED", "请至少选择一个章节。"},
+		{"mapping", ports.ErrImportChapterMappingMismatch, "IMPORT_MAPPING_INVALID", "所选章节与导入预览不一致，请刷新后重试。"},
+		{"archive unsupported", ports.ErrImportArchiveUnsupported, "IMPORT_ARCHIVE_UNSUPPORTED", "当前文件系统不支持安全归档，请换到本机磁盘后重试。"},
+		{"archive cleanup", workspace.ErrImportArchiveCleanup, "IMPORT_ARCHIVE_CLEANUP_FAILED", "导入未完成，且暂存文件清理失败。"},
+		{"active", workspace.ErrImportOperationActive, "IMPORT_ACTIVE", "另一个导入操作正在进行，请稍后重试。"},
+		{"applied refresh", workspace.ErrImportAppliedRefresh, "IMPORT_APPLIED_REFRESH_FAILED", "章节已导入，但工作区刷新失败，请重新打开项目。"},
+		{"workspace read", workspace.ErrImportWorkspaceRead, "IMPORT_WORKSPACE_READ_FAILED", "无法读取导入工作区，请重新打开项目。"},
+		{"generic archive", workspace.ErrImportSourceArchive, "IMPORT_SOURCE_PREPARE_FAILED", "无法安全准备小说文件，请检查文件后重试。"},
+		{"store unavailable", workspace.ErrImportStoreUnavailable, "IMPORT_UNAVAILABLE", "当前项目不支持小说导入，请升级或重新打开项目。"},
+		{"project mismatch", workspace.ErrImportJobProjectMismatch, "IMPORT_JOB_MISSING", "导入任务不存在或已被删除。"},
+		{"invalid source metadata", importdomain.ErrInvalidSourceHash, "IMPORT_DATA_INVALID", "导入数据无效，请重新选择小说文件。"},
+		{"persistence", ports.ErrImportPersistence, "IMPORT_PERSISTENCE_FAILED", "无法保存导入任务，请检查项目写入权限。"},
+		{"cancelled", context.Canceled, "OPERATION_CANCELLED", "操作已取消。"},
+		{"deadline", context.DeadlineExceeded, "OPERATION_TIMEOUT", "操作超时，请重试。"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var safe *desktopError
+			err := safeDesktopError(errors.Join(test.err, errors.New("SELECT /Users/author/private.md")))
+			if !errors.As(err, &safe) {
+				t.Fatalf("safeDesktopError(%v) = %#v", test.err, err)
+			}
+			if safe.Code != test.code || safe.Message != test.message {
+				t.Fatalf("safe error = %#v", safe)
+			}
+			if containsAny(err.Error(), "SELECT /Users", "/Users/author") {
+				t.Fatalf("unsafe detail leaked: %q", err)
+			}
+		})
 	}
 }
 
@@ -651,6 +780,8 @@ type fakeDirectoryPicker struct {
 	parentErr  error
 	openPath   string
 	openErr    error
+	importPath string
+	importErr  error
 }
 
 func (f *fakeDirectoryPicker) ChooseProjectParent(context.Context) (string, error) {
@@ -659,6 +790,10 @@ func (f *fakeDirectoryPicker) ChooseProjectParent(context.Context) (string, erro
 
 func (f *fakeDirectoryPicker) ChooseProjectToOpen(context.Context) (string, error) {
 	return f.openPath, f.openErr
+}
+
+func (f *fakeDirectoryPicker) ChooseManuscriptToImport(context.Context) (string, error) {
+	return f.importPath, f.importErr
 }
 
 type draftCall struct {
@@ -774,6 +909,15 @@ type fakeWorkspace struct {
 	factConflictInput        workspace.FactConflictInput
 	resolvedFactConflictID   string
 	deletedFactConflictID    string
+	importPrepareResult      workspace.ImportPrepareResult
+	preparedImportPath       string
+	importJobsResult         []workspace.ImportJobView
+	importJobResult          workspace.ImportJobView
+	importJobID              string
+	deletedImportJobID       string
+	importApplyResult        workspace.ImportApplyView
+	appliedImportJobID       string
+	appliedImportChapterIDs  []string
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -1217,4 +1361,29 @@ func (f *fakeWorkspace) AgentRuns(context.Context) ([]workspace.AgentRunView, er
 }
 func (f *fakeWorkspace) AgentRun(context.Context, string) (workspace.AgentRunView, error) {
 	return workspace.AgentRunView{}, nil
+}
+
+func (f *fakeWorkspace) PrepareManuscriptImport(_ context.Context, sourcePath string) (workspace.ImportPrepareResult, error) {
+	f.preparedImportPath = sourcePath
+	return f.importPrepareResult, nil
+}
+
+func (f *fakeWorkspace) ImportJobs(context.Context) ([]workspace.ImportJobView, error) {
+	return f.importJobsResult, nil
+}
+
+func (f *fakeWorkspace) ImportJob(_ context.Context, id string) (workspace.ImportJobView, error) {
+	f.importJobID = id
+	return f.importJobResult, nil
+}
+
+func (f *fakeWorkspace) DeleteImportJob(_ context.Context, id string) error {
+	f.deletedImportJobID = id
+	return nil
+}
+
+func (f *fakeWorkspace) ApplyImportJob(_ context.Context, id string, selectedIDs []string) (workspace.ImportApplyView, error) {
+	f.appliedImportJobID = id
+	f.appliedImportChapterIDs = append([]string(nil), selectedIDs...)
+	return f.importApplyResult, nil
 }

@@ -24,6 +24,7 @@ function installNative(overrides: Record<string, unknown> = {}) {
   const api = {
     ChooseProjectParent: vi.fn(async () => ""),
     ChooseProjectToOpen: vi.fn(async () => ""),
+    ChooseManuscriptToImport: vi.fn(async () => ""),
     CreateProject: vi.fn(async () => project),
     OpenProject: vi.fn(async () => project),
     ListChapters: vi.fn(async () => []),
@@ -164,6 +165,11 @@ function installNative(overrides: Record<string, unknown> = {}) {
     RetryAgentRun: vi.fn(),
     AgentRuns: vi.fn(async () => []),
     AgentRun: vi.fn(),
+    PrepareManuscriptImport: vi.fn(),
+    ImportJobs: vi.fn(async () => []),
+    ImportJob: vi.fn(),
+    DeleteImportJob: vi.fn(async () => undefined),
+    ApplyImportJob: vi.fn(),
     CompleteClose: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -181,6 +187,110 @@ describe("wailsStudioClient", () => {
     installNative();
 
     await expect(wailsStudioClient.chooseProjectParent()).resolves.toBeNull();
+  });
+
+  it("validates and forwards manuscript import operations without exposing archive paths", async () => {
+    const job = {
+      id: "import-1",
+      status: "prepared",
+      sourceName: "长夜.md",
+      sourceFormat: "markdown",
+      sourceEncoding: "UTF-8",
+      sourceHashDigest: "0123456789ab",
+      sourceBytes: 2048,
+      archivedRelativePath: "imports/import-1.md",
+      chapterCount: 1,
+      selectedChapterCount: 0,
+      errorCode: "",
+      errorMessage: "",
+      createdAt: "2026-08-03T08:00:00Z",
+      updatedAt: "2026-08-03T08:00:00Z",
+      appliedAt: "",
+      chapters: [
+        {
+          id: "candidate-1",
+          volumeTitle: "第一卷",
+          title: "第一章 雾港",
+          body: "潮声越过防波堤。",
+          position: 1,
+          sourceStartLine: 3,
+          sourceEndLine: 5,
+          contentHashSummary: "abcdef012345",
+          selected: false,
+          createdChapterId: "",
+        },
+      ],
+    };
+    const chapter = {
+      id: "chapter-1",
+      projectId: "project-1",
+      title: "第一章 雾港",
+      position: 1,
+      body: "潮声越过防波堤。",
+      revision: 1,
+      updatedAt: "2026-08-03T08:01:00Z",
+      hasRecoveryDraft: false,
+    };
+    const api = installNative({
+      ChooseManuscriptToImport: vi.fn(async () => "/Users/author/长夜.md"),
+      PrepareManuscriptImport: vi.fn(async () => ({ job })),
+      ImportJobs: vi.fn(async () => [job]),
+      ImportJob: vi.fn(async () => job),
+      ApplyImportJob: vi.fn(async () => ({
+        job: { ...job, status: "applied", selectedChapterCount: 1 },
+        chapters: [chapter],
+      })),
+    });
+
+    await expect(wailsStudioClient.chooseManuscriptToImport()).resolves.toBe(
+      "/Users/author/长夜.md",
+    );
+    const prepared = await wailsStudioClient.prepareManuscriptImport(
+      "/Users/author/长夜.md",
+    );
+    await expect(wailsStudioClient.importJobs()).resolves.toHaveLength(1);
+    await expect(wailsStudioClient.importJob(job.id)).resolves.toMatchObject({
+      id: job.id,
+      chapters: [{ sourceStartLine: 3, sourceEndLine: 5 }],
+    });
+    await wailsStudioClient.deleteImportJob(job.id);
+    await expect(
+      wailsStudioClient.applyImportJob(job.id, ["candidate-1"]),
+    ).resolves.toMatchObject({ chapters: [chapter] });
+
+    expect(prepared.job).not.toHaveProperty("archivedRelativePath");
+    expect(api.PrepareManuscriptImport).toHaveBeenCalledWith(
+      "/Users/author/长夜.md",
+    );
+    expect(api.ApplyImportJob).toHaveBeenCalledWith(job.id, ["candidate-1"]);
+    expect(api.DeleteImportJob).toHaveBeenCalledWith(job.id);
+  });
+
+  it("rejects malformed manuscript hashes from the native boundary", async () => {
+    installNative({
+      ImportJobs: vi.fn(async () => [
+        {
+          id: "import-1",
+          status: "prepared",
+          sourceName: "长夜.md",
+          sourceFormat: "markdown",
+          sourceEncoding: "UTF-8",
+          sourceHashDigest: "/Users/author/private.md",
+          sourceBytes: 2048,
+          archivedRelativePath: "imports/import-1.md",
+          chapterCount: 0,
+          selectedChapterCount: 0,
+          errorCode: "",
+          errorMessage: "",
+          createdAt: "2026-08-03T08:00:00Z",
+          updatedAt: "2026-08-03T08:00:00Z",
+          appliedAt: "",
+          chapters: [],
+        },
+      ]),
+    });
+
+    await expect(wailsStudioClient.importJobs()).rejects.toThrow();
   });
 
   it("forwards create input and validates the returned project DTO", async () => {

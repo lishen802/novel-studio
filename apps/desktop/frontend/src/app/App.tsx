@@ -77,6 +77,7 @@ export function App({
         onCreateChapter={state.createChapter}
         onSelectChapter={state.selectChapter}
         onChapterUpdated={state.updateChapter}
+        onChaptersImported={state.replaceChapters}
         onWorkspaceRestored={state.restoreWorkspace}
         onBeforeVersionOperation={flushPendingChapterChanges}
         onDismissError={state.clearWorkspaceError}

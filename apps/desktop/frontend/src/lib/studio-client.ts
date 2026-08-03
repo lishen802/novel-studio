@@ -590,9 +590,57 @@ export type AgentRunView = {
   updatedAt: string;
 };
 
+export type ImportJobStatus = "prepared" | "applied" | "failed";
+export type ImportSourceFormat = "txt" | "markdown";
+export type ImportChapterView = {
+  id: string;
+  volumeTitle: string;
+  title: string;
+  body: string;
+  position: number;
+  sourceStartLine: number;
+  sourceEndLine: number;
+  contentHashSummary: string;
+  selected: boolean;
+  createdChapterId: string;
+};
+export type ImportJobView = {
+  id: string;
+  status: ImportJobStatus;
+  sourceName: string;
+  sourceFormat: ImportSourceFormat;
+  sourceEncoding: string;
+  sourceHashDigest: string;
+  sourceBytes: number;
+  chapterCount: number;
+  selectedChapterCount: number;
+  errorCode: string;
+  errorMessage: string;
+  createdAt: string;
+  updatedAt: string;
+  appliedAt: string;
+  chapters: ImportChapterView[];
+};
+export type ImportPrepareView = {
+  job: ImportJobView;
+};
+export type ImportApplyView = {
+  job: ImportJobView;
+  chapters: ChapterView[];
+};
+
 export interface StudioClient {
   chooseProjectParent(): Promise<string | null>;
   chooseProjectToOpen(): Promise<string | null>;
+  chooseManuscriptToImport(): Promise<string | null>;
+  prepareManuscriptImport(sourcePath: string): Promise<ImportPrepareView>;
+  importJobs(): Promise<ImportJobView[]>;
+  importJob(id: string): Promise<ImportJobView>;
+  deleteImportJob(id: string): Promise<void>;
+  applyImportJob(
+    id: string,
+    selectedChapterIds: string[],
+  ): Promise<ImportApplyView>;
   createProject(input: CreateProjectInput): Promise<ProjectView>;
   openProject(path: string): Promise<ProjectView>;
   listChapters(): Promise<ChapterView[]>;

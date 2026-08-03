@@ -113,12 +113,18 @@ type WorkspaceUseCases interface {
 	RetryAgentRun(context.Context, string) (workspace.AgentRunView, error)
 	AgentRuns(context.Context) ([]workspace.AgentRunView, error)
 	AgentRun(context.Context, string) (workspace.AgentRunView, error)
+	PrepareManuscriptImport(context.Context, string) (workspace.ImportPrepareResult, error)
+	ImportJobs(context.Context) ([]workspace.ImportJobView, error)
+	ImportJob(context.Context, string) (workspace.ImportJobView, error)
+	DeleteImportJob(context.Context, string) error
+	ApplyImportJob(context.Context, string, []string) (workspace.ImportApplyView, error)
 	Close() error
 }
 
 type DirectoryPicker interface {
 	ChooseProjectParent(context.Context) (string, error)
 	ChooseProjectToOpen(context.Context) (string, error)
+	ChooseManuscriptToImport(context.Context) (string, error)
 }
 
 type CreateProjectInput struct {
@@ -214,6 +220,30 @@ func (a *DesktopAPI) ChooseProjectParent() (string, error) {
 
 func (a *DesktopAPI) ChooseProjectToOpen() (string, error) {
 	return safeResult(a.picker.ChooseProjectToOpen(a.ctx))
+}
+
+func (a *DesktopAPI) ChooseManuscriptToImport() (string, error) {
+	return safeResult(a.picker.ChooseManuscriptToImport(a.ctx))
+}
+
+func (a *DesktopAPI) PrepareManuscriptImport(sourcePath string) (workspace.ImportPrepareResult, error) {
+	return safeResult(a.workspace.PrepareManuscriptImport(a.ctx, sourcePath))
+}
+
+func (a *DesktopAPI) ImportJobs() ([]workspace.ImportJobView, error) {
+	return safeResult(a.workspace.ImportJobs(a.ctx))
+}
+
+func (a *DesktopAPI) ImportJob(id string) (workspace.ImportJobView, error) {
+	return safeResult(a.workspace.ImportJob(a.ctx, id))
+}
+
+func (a *DesktopAPI) DeleteImportJob(id string) error {
+	return safeDesktopError(a.workspace.DeleteImportJob(a.ctx, id))
+}
+
+func (a *DesktopAPI) ApplyImportJob(id string, selectedChapterIDs []string) (workspace.ImportApplyView, error) {
+	return safeResult(a.workspace.ApplyImportJob(a.ctx, id, selectedChapterIDs))
 }
 
 func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectView, error) {
@@ -601,7 +631,9 @@ func (a *DesktopAPI) CompleteClose() {
 	}
 }
 
-type wailsDirectoryPicker struct{}
+type wailsDirectoryPicker struct {
+	openFileDialog func(context.Context, runtime.OpenDialogOptions) (string, error)
+}
 
 func (wailsDirectoryPicker) ChooseProjectParent(ctx context.Context) (string, error) {
 	return runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{
@@ -612,5 +644,19 @@ func (wailsDirectoryPicker) ChooseProjectParent(ctx context.Context) (string, er
 func (wailsDirectoryPicker) ChooseProjectToOpen(ctx context.Context) (string, error) {
 	return runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{
 		Title: "打开小说项目",
+	})
+}
+
+func (p wailsDirectoryPicker) ChooseManuscriptToImport(ctx context.Context) (string, error) {
+	openFileDialog := p.openFileDialog
+	if openFileDialog == nil {
+		openFileDialog = runtime.OpenFileDialog
+	}
+	return openFileDialog(ctx, runtime.OpenDialogOptions{
+		Title: "选择要导入的小说",
+		Filters: []runtime.FileFilter{{
+			DisplayName: "小说文本 (*.txt, *.md, *.markdown)",
+			Pattern:     "*.txt;*.md;*.markdown",
+		}},
 	})
 }

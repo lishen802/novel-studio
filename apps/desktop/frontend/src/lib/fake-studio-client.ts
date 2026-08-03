@@ -79,6 +79,9 @@ import type {
   AgentRuntimeSettingsInput,
   AgentRuntimeSettingsView,
   AgentRunView,
+  ImportApplyView,
+  ImportJobView,
+  ImportPrepareView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -106,6 +109,7 @@ function deriveFakeChangeSetStatus(
 export class FakeStudioClient implements StudioClient {
   projectParent: string | null = null;
   projectToOpen: string | null = null;
+  manuscriptToImport: string | null = null;
   createProjectResult: ProjectView = {
     id: "project-1",
     title: "长夜织境",
@@ -195,6 +199,9 @@ export class FakeStudioClient implements StudioClient {
     updatedAt: "2026-07-30T10:00:00Z",
   };
   agentRunsResult: AgentRunView[] = [];
+  importJobsResult: ImportJobView[] = [];
+  prepareManuscriptImportResult: ImportPrepareView | null = null;
+  importApplyResult: ImportApplyView | null = null;
 
   createProjectError: Error | null = null;
   openProjectError: Error | null = null;
@@ -206,6 +213,9 @@ export class FakeStudioClient implements StudioClient {
   storyWorldError: Error | null = null;
   worldMutationError: Error | null = null;
   worldAssetMutationError: Error | null = null;
+  importJobsError: Error | null = null;
+  prepareManuscriptImportError: Error | null = null;
+  importMutationError: Error | null = null;
 
   createProjectCalls: CreateProjectInput[] = [];
   openProjectCalls: string[] = [];
@@ -316,6 +326,14 @@ export class FakeStudioClient implements StudioClient {
   executeAgentRunCalls: string[] = [];
   cancelAgentRunCalls: string[] = [];
   retryAgentRunCalls: string[] = [];
+  importJobsCalls = 0;
+  prepareManuscriptImportCalls: string[] = [];
+  importJobCalls: string[] = [];
+  deleteImportJobCalls: string[] = [];
+  applyImportJobCalls: Array<{
+    id: string;
+    selectedChapterIds: string[];
+  }> = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -331,6 +349,68 @@ export class FakeStudioClient implements StudioClient {
 
   async chooseProjectToOpen(): Promise<string | null> {
     return this.projectToOpen;
+  }
+
+  async chooseManuscriptToImport(): Promise<string | null> {
+    return this.manuscriptToImport;
+  }
+
+  async prepareManuscriptImport(
+    sourcePath: string,
+  ): Promise<ImportPrepareView> {
+    this.prepareManuscriptImportCalls.push(sourcePath);
+    if (this.prepareManuscriptImportError) {
+      throw this.prepareManuscriptImportError;
+    }
+    if (!this.prepareManuscriptImportResult) {
+      throw new Error("未配置导入准备结果");
+    }
+    const result = this.prepareManuscriptImportResult;
+    this.importJobsResult = [
+      result.job,
+      ...this.importJobsResult.filter((item) => item.id !== result.job.id),
+    ];
+    return result;
+  }
+
+  async importJobs(): Promise<ImportJobView[]> {
+    this.importJobsCalls++;
+    if (this.importJobsError) throw this.importJobsError;
+    return this.importJobsResult;
+  }
+
+  async importJob(id: string): Promise<ImportJobView> {
+    this.importJobCalls.push(id);
+    const job = this.importJobsResult.find((item) => item.id === id);
+    if (!job) throw new Error("导入任务不存在");
+    return job;
+  }
+
+  async deleteImportJob(id: string): Promise<void> {
+    this.deleteImportJobCalls.push(id);
+    if (this.importMutationError) throw this.importMutationError;
+    const job = this.importJobsResult.find((item) => item.id === id);
+    if (job?.status === "applied") throw new Error("已应用任务不可删除");
+    this.importJobsResult = this.importJobsResult.filter(
+      (item) => item.id !== id,
+    );
+  }
+
+  async applyImportJob(
+    id: string,
+    selectedChapterIds: string[],
+  ): Promise<ImportApplyView> {
+    this.applyImportJobCalls.push({
+      id,
+      selectedChapterIds: [...selectedChapterIds],
+    });
+    if (this.importMutationError) throw this.importMutationError;
+    if (!this.importApplyResult) throw new Error("未配置导入应用结果");
+    this.importJobsResult = this.importJobsResult.map((item) =>
+      item.id === id ? this.importApplyResult!.job : item,
+    );
+    this.chaptersResult = [...this.importApplyResult.chapters];
+    return this.importApplyResult;
   }
 
   async createProject(input: CreateProjectInput): Promise<ProjectView> {

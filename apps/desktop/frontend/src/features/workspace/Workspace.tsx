@@ -2,6 +2,7 @@ import {
   BookOpenText,
   Bot,
   Clock3,
+  FileSearch2,
   FilePlus2,
   Feather,
   GitCompareArrows,
@@ -21,6 +22,7 @@ import { ChapterEditor } from "../editor/ChapterEditor";
 import { AgentWorkbench } from "../agents/AgentWorkbench";
 import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
 import { ContinuityWorkbench } from "../continuity/ContinuityWorkbench";
+import { ImportWorkbench } from "../imports/ImportWorkbench";
 import { ChangeReviewWorkbench } from "../revisions/ChangeReviewWorkbench";
 import { VersionHistoryWorkbench } from "../revisions/VersionHistoryWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
@@ -37,6 +39,7 @@ type WorkspaceProps = {
   onCreateChapter(title: string): Promise<boolean>;
   onSelectChapter(id: string): Promise<void>;
   onChapterUpdated(chapter: ChapterView): void;
+  onChaptersImported(chapters: ChapterView[]): void;
   onWorkspaceRestored(result: WorkspaceReplacement): void;
   onBeforeVersionOperation(): Promise<void>;
   onDismissError(): void;
@@ -50,6 +53,7 @@ export function Workspace({
   onCreateChapter,
   onSelectChapter,
   onChapterUpdated,
+  onChaptersImported,
   onWorkspaceRestored,
   onBeforeVersionOperation,
   onDismissError,
@@ -64,6 +68,7 @@ export function Workspace({
     | "world"
     | "assets"
     | "continuity"
+    | "imports"
     | "changes"
     | "agents"
     | "versions"
@@ -125,6 +130,14 @@ export function Workspace({
           >
             <BookOpenText size={17} />
             正文编辑
+          </button>
+          <button
+            type="button"
+            className={activeView === "imports" ? "is-active" : ""}
+            onClick={() => setActiveView("imports")}
+          >
+            <FileSearch2 size={17} />
+            导入分析
           </button>
           <button
             type="button"
@@ -229,7 +242,12 @@ export function Workspace({
             </button>
           </div>
         )}
-        {activeView === "story" ? (
+        {activeView === "imports" ? (
+          <ImportWorkbench
+            client={client}
+            onChaptersImported={onChaptersImported}
+          />
+        ) : activeView === "story" ? (
           <StoryArchitecture
             client={client}
             chapters={workspace.chapters}

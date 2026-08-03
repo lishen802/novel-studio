@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
 
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
+	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
@@ -34,6 +37,28 @@ const (
 	errorAgentBudgetExceeded  desktopErrorCode = "AGENT_BUDGET_EXCEEDED"
 	errorAgentContextExceeded desktopErrorCode = "AGENT_CONTEXT_EXCEEDED"
 	errorAgentRunActive       desktopErrorCode = "AGENT_RUN_ACTIVE"
+	errorOperationCancelled   desktopErrorCode = "OPERATION_CANCELLED"
+	errorOperationTimeout     desktopErrorCode = "OPERATION_TIMEOUT"
+	errorImportFormat         desktopErrorCode = "IMPORT_FORMAT_UNSUPPORTED"
+	errorImportEmpty          desktopErrorCode = "IMPORT_SOURCE_EMPTY"
+	errorImportTooLarge       desktopErrorCode = "IMPORT_SOURCE_TOO_LARGE"
+	errorImportEncoding       desktopErrorCode = "IMPORT_ENCODING_UNSUPPORTED"
+	errorImportUnsafe         desktopErrorCode = "IMPORT_SOURCE_UNSAFE"
+	errorImportDuplicate      desktopErrorCode = "IMPORT_SOURCE_DUPLICATE"
+	errorImportJobMissing     desktopErrorCode = "IMPORT_JOB_MISSING"
+	errorImportJobApplied     desktopErrorCode = "IMPORT_JOB_APPLIED"
+	errorImportJobNotPrepared desktopErrorCode = "IMPORT_JOB_NOT_PREPARED"
+	errorImportSelection      desktopErrorCode = "IMPORT_SELECTION_REQUIRED"
+	errorImportMapping        desktopErrorCode = "IMPORT_MAPPING_INVALID"
+	errorImportArchive        desktopErrorCode = "IMPORT_ARCHIVE_UNSUPPORTED"
+	errorImportCleanup        desktopErrorCode = "IMPORT_ARCHIVE_CLEANUP_FAILED"
+	errorImportActive         desktopErrorCode = "IMPORT_ACTIVE"
+	errorImportRefresh        desktopErrorCode = "IMPORT_APPLIED_REFRESH_FAILED"
+	errorImportWorkspaceRead  desktopErrorCode = "IMPORT_WORKSPACE_READ_FAILED"
+	errorImportPrepare        desktopErrorCode = "IMPORT_SOURCE_PREPARE_FAILED"
+	errorImportUnavailable    desktopErrorCode = "IMPORT_UNAVAILABLE"
+	errorImportInvalid        desktopErrorCode = "IMPORT_DATA_INVALID"
+	errorImportPersistence    desktopErrorCode = "IMPORT_PERSISTENCE_FAILED"
 	errorValidationFailed     desktopErrorCode = "VALIDATION_FAILED"
 	errorOperationFailed      desktopErrorCode = "OPERATION_FAILED"
 )
@@ -56,6 +81,57 @@ func safeDesktopError(err error) error {
 	message := "操作失败，请重试。"
 	lowerMessage := strings.ToLower(err.Error())
 	switch {
+	case errors.Is(err, context.Canceled):
+		code, message = errorOperationCancelled, "操作已取消。"
+	case errors.Is(err, context.DeadlineExceeded):
+		code, message = errorOperationTimeout, "操作超时，请重试。"
+	case errors.Is(err, ports.ErrUnsupportedImportFormat):
+		code, message = errorImportFormat, "仅支持 TXT、MD 或 MARKDOWN 小说文件。"
+	case errors.Is(err, ports.ErrEmptyImportSource), errors.Is(err, importdomain.ErrEmptyManuscript):
+		code, message = errorImportEmpty, "所选小说文件为空。"
+	case errors.Is(err, ports.ErrImportSourceTooLarge):
+		code, message = errorImportTooLarge, "小说文件超过 20 MiB 上限。"
+	case errors.Is(err, ports.ErrUnsupportedImportEncoding):
+		code, message = errorImportEncoding, "无法识别小说文件编码，请转换为 UTF-8、UTF-16 或 GB18030。"
+	case errors.Is(err, ports.ErrUnsafeImportSource), errors.Is(err, ports.ErrInvalidImportArchivePath):
+		code, message = errorImportUnsafe, "所选来源不是安全的普通文件。"
+	case errors.Is(err, ports.ErrDuplicateImportSource):
+		code, message = errorImportDuplicate, "这份小说已在当前项目中准备过。"
+	case errors.Is(err, ports.ErrImportJobMissing), errors.Is(err, workspace.ErrImportJobProjectMismatch):
+		code, message = errorImportJobMissing, "导入任务不存在或已被删除。"
+	case errors.Is(err, ports.ErrImportJobAlreadyApplied):
+		code, message = errorImportJobApplied, "该导入任务已经应用，不能重复操作。"
+	case errors.Is(err, ports.ErrImportJobNotPrepared):
+		code, message = errorImportJobNotPrepared, "该导入任务尚未准备完成。"
+	case errors.Is(err, ports.ErrNoImportChaptersSelected):
+		code, message = errorImportSelection, "请至少选择一个章节。"
+	case errors.Is(err, ports.ErrImportChapterMappingMismatch):
+		code, message = errorImportMapping, "所选章节与导入预览不一致，请刷新后重试。"
+	case errors.Is(err, ports.ErrImportArchiveUnsupported):
+		code, message = errorImportArchive, "当前文件系统不支持安全归档，请换到本机磁盘后重试。"
+	case errors.Is(err, workspace.ErrImportArchiveCleanup):
+		code, message = errorImportCleanup, "导入未完成，且暂存文件清理失败。"
+	case errors.Is(err, workspace.ErrImportOperationActive):
+		code, message = errorImportActive, "另一个导入操作正在进行，请稍后重试。"
+	case errors.Is(err, workspace.ErrImportAppliedRefresh):
+		code, message = errorImportRefresh, "章节已导入，但工作区刷新失败，请重新打开项目。"
+	case errors.Is(err, workspace.ErrImportWorkspaceRead):
+		code, message = errorImportWorkspaceRead, "无法读取导入工作区，请重新打开项目。"
+	case errors.Is(err, workspace.ErrImportSourceArchive), errors.Is(err, ports.ErrImportArchiveExists):
+		code, message = errorImportPrepare, "无法安全准备小说文件，请检查文件后重试。"
+	case errors.Is(err, workspace.ErrImportStoreUnavailable):
+		code, message = errorImportUnavailable, "当前项目不支持小说导入，请升级或重新打开项目。"
+	case errors.Is(err, importdomain.ErrBlankValue),
+		errors.Is(err, importdomain.ErrInvalidSourceFormat),
+		errors.Is(err, importdomain.ErrInvalidSourceHash),
+		errors.Is(err, importdomain.ErrInvalidSourceBytes),
+		errors.Is(err, importdomain.ErrInvalidChapterCount),
+		errors.Is(err, importdomain.ErrInvalidJobTransition),
+		errors.Is(err, importdomain.ErrInvalidImportChapter),
+		errors.Is(err, importdomain.ErrManuscriptLineTooLong):
+		code, message = errorImportInvalid, "导入数据无效，请重新选择小说文件。"
+	case errors.Is(err, ports.ErrImportPersistence):
+		code, message = errorImportPersistence, "无法保存导入任务，请检查项目写入权限。"
 	case errors.Is(err, workspace.ErrTokenBudgetExceeded):
 		code, message = errorAgentBudgetExceeded, "智能创作令牌预算不足，请提高预算或降低角色输出上限。"
 	case errors.Is(err, workspace.ErrContextBudgetExceeded):

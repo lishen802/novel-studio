@@ -79,6 +79,9 @@ import {
   type AgentRuntimeSettingsInput,
   type AgentRuntimeSettingsView,
   type AgentRunView,
+  type ImportApplyView,
+  type ImportJobView,
+  type ImportPrepareView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -580,9 +583,69 @@ const continuitySchema = z.object({
   consistencyIssues: z.array(consistencyIssueSchema),
 });
 
+const importChapterSchema = z
+  .object({
+    id: z.string().min(1),
+    volumeTitle: z.string(),
+    title: z.string().min(1),
+    body: z.string(),
+    position: z.number().int().positive(),
+    sourceStartLine: z.number().int().positive(),
+    sourceEndLine: z.number().int().positive(),
+    contentHashSummary: z.string().regex(/^[a-f0-9]{12}$/),
+    selected: z.boolean(),
+    createdChapterId: z.string().optional(),
+  })
+  .strict()
+  .transform((value) => ({
+    ...value,
+    createdChapterId: value.createdChapterId ?? "",
+  }));
+const importJobSchema = z
+  .object({
+    id: z.string().min(1),
+    status: z.enum(["prepared", "applied", "failed"]),
+    sourceName: z.string().min(1),
+    sourceFormat: z.enum(["txt", "markdown"]),
+    sourceEncoding: z.string().min(1),
+    sourceHashDigest: z.string().regex(/^[a-f0-9]{12}$/),
+    sourceBytes: z.number().int().nonnegative(),
+    archivedRelativePath: z.string(),
+    chapterCount: z.number().int().nonnegative(),
+    selectedChapterCount: z.number().int().nonnegative(),
+    errorCode: z.string().optional(),
+    errorMessage: z.string().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    appliedAt: z.string().optional(),
+    chapters: z.array(importChapterSchema),
+  })
+  .strict()
+  .transform(({ archivedRelativePath: _archive, ...value }) => ({
+    ...value,
+    errorCode: value.errorCode ?? "",
+    errorMessage: value.errorMessage ?? "",
+    appliedAt: value.appliedAt ?? "",
+  }));
+const importPrepareSchema = z
+  .object({ job: importJobSchema })
+  .strict();
+const importApplySchema = z
+  .object({
+    job: importJobSchema,
+    chapters: z.array(chapterSchema),
+  })
+  .strict();
+
 type NativeDesktopAPI = {
   ChooseProjectParent(): Promise<string>;
   ChooseProjectToOpen(): Promise<string>;
+  ChooseManuscriptToImport(): Promise<string>;
+  PrepareManuscriptImport(sourcePath: string): Promise<unknown>;
+  ImportJobs(): Promise<unknown>;
+  ImportJob(id: string): Promise<unknown>;
+  DeleteImportJob(id: string): Promise<void>;
+  ApplyImportJob(id: string, selectedChapterIds: string[]): Promise<unknown>;
   CreateProject(input: CreateProjectInput): Promise<unknown>;
   OpenProject(path: string): Promise<unknown>;
   ListChapters(): Promise<unknown>;
@@ -842,6 +905,14 @@ const characterKnowledgeView = (value: unknown): CharacterKnowledgeView =>
   characterKnowledgeSchema.parse(value);
 const characterKnowledgeViews = (value: unknown): CharacterKnowledgeView[] =>
   z.array(characterKnowledgeSchema).parse(value);
+const importPrepareView = (value: unknown): ImportPrepareView =>
+  importPrepareSchema.parse(value);
+const importJobView = (value: unknown): ImportJobView =>
+  importJobSchema.parse(value);
+const importJobViews = (value: unknown): ImportJobView[] =>
+  z.array(importJobSchema).parse(value);
+const importApplyView = (value: unknown): ImportApplyView =>
+  importApplySchema.parse(value);
 
 function safeCall<T>(operation: () => Promise<T>): Promise<T> {
   return operation().catch((error: unknown) => {
@@ -863,6 +934,30 @@ export const wailsStudioClient: StudioClient = {
   },
   async chooseProjectToOpen() {
     return (await safeCall(() => nativeAPI().ChooseProjectToOpen())) || null;
+  },
+  async chooseManuscriptToImport() {
+    return (
+      (await safeCall(() => nativeAPI().ChooseManuscriptToImport())) || null
+    );
+  },
+  async prepareManuscriptImport(sourcePath) {
+    return importPrepareView(
+      await safeCall(() => nativeAPI().PrepareManuscriptImport(sourcePath)),
+    );
+  },
+  async importJobs() {
+    return importJobViews(await safeCall(() => nativeAPI().ImportJobs()));
+  },
+  async importJob(id) {
+    return importJobView(await safeCall(() => nativeAPI().ImportJob(id)));
+  },
+  async deleteImportJob(id) {
+    await safeCall(() => nativeAPI().DeleteImportJob(id));
+  },
+  async applyImportJob(id, selectedChapterIds) {
+    return importApplyView(
+      await safeCall(() => nativeAPI().ApplyImportJob(id, selectedChapterIds)),
+    );
   },
   async createProject(input) {
     return projectView(await safeCall(() => nativeAPI().CreateProject(input)));

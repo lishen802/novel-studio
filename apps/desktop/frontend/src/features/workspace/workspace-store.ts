@@ -32,6 +32,7 @@ export type WorkspaceState = {
   createChapter(title: string): Promise<boolean>;
   selectChapter(id: string): Promise<void>;
   updateChapter(chapter: ChapterView): void;
+  replaceChapters(chapters: ChapterView[]): void;
   restoreWorkspace(result: WorkspaceReplacement): void;
   clearWorkspaceError(): void;
 };
@@ -202,6 +203,27 @@ export function createWorkspaceStore(
               item.id === chapter.id ? chapter : item,
             ),
           },
+        };
+      });
+    },
+
+    replaceChapters(chapters) {
+      selectionRequest++;
+      set((latest) => {
+        if (latest.status.kind !== "ready") return {};
+        const current = latest.status;
+        const activeChapterId = chapters.some(
+          (chapter) => chapter.id === current.activeChapterId,
+        )
+          ? current.activeChapterId
+          : (chapters[0]?.id ?? null);
+        return {
+          status: {
+            ...current,
+            chapters,
+            activeChapterId,
+          },
+          workspaceError: null,
         };
       });
     },

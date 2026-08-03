@@ -113,4 +113,49 @@ describe("workspace store", () => {
       activeChapterId: client.createChapterResult.id,
     });
   });
+
+  it("replaces imported chapters while preserving a surviving active chapter", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const first = client.createChapterResult;
+    const second = { ...first, id: "chapter-2", title: "第二章", position: 2 };
+    client.chaptersResult = [first, second];
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    await store.getState().selectChapter(second.id);
+    const imported = [
+      first,
+      second,
+      { ...first, id: "chapter-3", title: "第三章", position: 3 },
+    ];
+
+    store.getState().replaceChapters(imported);
+
+    expect(store.getState().status).toMatchObject({
+      kind: "ready",
+      chapters: imported,
+      activeChapterId: second.id,
+    });
+  });
+
+  it("focuses the first imported chapter when the previous selection disappeared", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    await store.getState().selectChapter(client.createChapterResult.id);
+    const replacement = [
+      {
+        ...client.createChapterResult,
+        id: "chapter-imported",
+        title: "导入章节",
+      },
+    ];
+
+    store.getState().replaceChapters(replacement);
+
+    expect(store.getState().status).toMatchObject({
+      activeChapterId: "chapter-imported",
+      chapters: replacement,
+    });
+  });
 });

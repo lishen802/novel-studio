@@ -87,6 +87,92 @@ describe("Workspace", () => {
     expect(screen.getByText("选择一个章节开始创作")).toBeInTheDocument();
   });
 
+  it("opens manuscript import analysis from the product navigation", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "导入分析" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "导入分析" }),
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes and focuses workspace chapters after applying an import", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const candidate = {
+      id: "candidate-1",
+      volumeTitle: "",
+      title: "导入第一章",
+      body: "雾从海面升起。",
+      position: 1,
+      sourceStartLine: 1,
+      sourceEndLine: 2,
+      contentHashSummary: "abcdef012345",
+      selected: false,
+      createdChapterId: "",
+    };
+    const job = {
+      id: "import-1",
+      status: "prepared" as const,
+      sourceName: "旧稿.txt",
+      sourceFormat: "txt" as const,
+      sourceEncoding: "UTF-8",
+      sourceHashDigest: "0123456789ab",
+      sourceBytes: 128,
+      chapterCount: 1,
+      selectedChapterCount: 0,
+      errorCode: "",
+      errorMessage: "",
+      createdAt: "2026-08-03T08:00:00Z",
+      updatedAt: "2026-08-03T08:00:00Z",
+      appliedAt: "",
+      chapters: [candidate],
+    };
+    const created = {
+      ...client.createChapterResult,
+      id: "chapter-imported",
+      title: candidate.title,
+      body: candidate.body,
+    };
+    client.importJobsResult = [job];
+    client.importApplyResult = {
+      job: {
+        ...job,
+        status: "applied",
+        selectedChapterCount: 1,
+        chapters: [
+          {
+            ...candidate,
+            selected: true,
+            createdChapterId: created.id,
+          },
+        ],
+      },
+      chapters: [created],
+    };
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "导入分析" }),
+    );
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: `选择 ${candidate.title}`,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "导入所选章节" }));
+    await user.click(screen.getByRole("button", { name: "正文编辑" }));
+
+    expect(
+      await screen.findByRole("heading", { name: candidate.title }),
+    ).toBeInTheDocument();
+  });
+
   it("opens the characters and factions workbench from the product navigation", async () => {
     const client = FakeStudioClient.withReadyProject();
     const user = userEvent.setup();
