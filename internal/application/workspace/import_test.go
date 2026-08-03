@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sort"
@@ -65,7 +66,8 @@ func TestPrepareManuscriptImportPersistsTXTAndMarkdownMetadataAndCandidates(t *t
 			if first.ID != "candidate-1" ||
 				first.VolumeTitle != "第一卷 起点" ||
 				first.Title != "第一章 相逢" ||
-				first.Body != "正文一" ||
+				first.BodyPreview != "正文一" ||
+				first.WordCount != 3 ||
 				first.Position != 1 ||
 				first.SourceStartLine != 3 ||
 				first.SourceEndLine != 3 ||
@@ -360,6 +362,140 @@ func TestImportJobQueriesAreProjectIsolated(t *testing.T) {
 	}
 	if _, err := service.ImportJob(context.Background(), otherJob.ID); !errors.Is(err, ErrImportJobProjectMismatch) {
 		t.Fatalf("other project error = %v, want ErrImportJobProjectMismatch", err)
+	}
+}
+
+func TestImportJobBoundsChapterPreviewWithoutChangingStoredOrAppliedBody(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeImportStore(project)
+	job, candidates := mustWorkspaceImportJob(
+		t,
+		"job-long",
+		project.ID,
+		importing.JobStatusPrepared,
+	)
+	longBody := strings.Repeat("不可跨边界泄露的完整正文", 100) +
+		"\n\n第二段\n\n第三段\n\n绝不能进入预览的尾段"
+	candidate, err := importing.NewImportChapter(importing.ImportChapterParams{
+		ID:              candidates[0].ID,
+		JobID:           job.ID,
+		Title:           candidates[0].Title,
+		Body:            longBody,
+		Position:        candidates[0].Position,
+		SourceStartLine: candidates[0].SourceStartLine,
+		SourceEndLine:   candidates[0].SourceEndLine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.jobs[job.ID] = ports.ImportJobDetails{
+		Job:      job,
+		Chapters: []importing.ImportChapter{candidate},
+	}
+	service := openImportTestService(
+		t,
+		store,
+		validFakeImportArchive(),
+		&fakeLicense{},
+		&sequenceIDs{ids: []string{"created-1"}},
+	)
+
+	detail, err := service.ImportJob(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := detail.Chapters[0]
+	if got.WordCount != len([]rune(strings.ReplaceAll(longBody, "\n", ""))) {
+		t.Fatalf("WordCount = %d", got.WordCount)
+	}
+	if got.BodyPreview == longBody ||
+		len([]rune(got.BodyPreview)) > 600 ||
+		strings.Contains(got.BodyPreview, "绝不能进入预览的尾段") {
+		t.Fatalf("unbounded preview = %q", got.BodyPreview)
+	}
+	encoded, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var boundary struct {
+		Chapters []map[string]any `json:"chapters"`
+	}
+	if err := json.Unmarshal(encoded, &boundary); err != nil {
+		t.Fatal(err)
+	}
+	if _, leaksBody := boundary.Chapters[0]["body"]; leaksBody {
+		t.Fatalf("view JSON leaks full body: %s", encoded)
+	}
+	if store.jobs[job.ID].Chapters[0].Body != longBody {
+		t.Fatal("view construction changed the persisted candidate body")
+	}
+
+	if _, err := service.ApplyImportJob(
+		context.Background(),
+		job.ID,
+		[]string{candidate.ID},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.lastRequestedChapters) != 1 ||
+		store.lastRequestedChapters[0].Body != longBody {
+		t.Fatal("apply did not use the complete persisted candidate body")
+	}
+}
+
+func TestImportJobPreservesShortPreviewAndPrecomputesWordCount(t *testing.T) {
+	job, candidates := mustWorkspaceImportJob(
+		t,
+		"job-short",
+		"project-1",
+		importing.JobStatusPrepared,
+	)
+
+	view := importJobView(job, candidates)
+
+	if view.Chapters[0].BodyPreview != "正文一" ||
+		view.Chapters[0].WordCount != 3 {
+		t.Fatalf("short preview = %#v", view.Chapters[0])
+	}
+
+	empty, err := importing.NewImportChapter(importing.ImportChapterParams{
+		ID:              "candidate-empty",
+		JobID:           job.ID,
+		Title:           "空章节",
+		Body:            "",
+		Position:        2,
+		SourceStartLine: 3,
+		SourceEndLine:   3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyView := importJobView(job, []importing.ImportChapter{empty})
+	if emptyView.Chapters[0].BodyPreview != "" ||
+		emptyView.Chapters[0].WordCount != 0 {
+		t.Fatalf("empty preview = %#v", emptyView.Chapters[0])
+	}
+
+	paragraphBody := "第一段\n\n第二段\n\n第三段\n\n第四段不得进入预览"
+	paragraph, err := importing.NewImportChapter(importing.ImportChapterParams{
+		ID:              "candidate-paragraphs",
+		JobID:           job.ID,
+		Title:           "多段章节",
+		Body:            paragraphBody,
+		Position:        3,
+		SourceStartLine: 4,
+		SourceEndLine:   10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paragraphView := importJobView(
+		job,
+		[]importing.ImportChapter{paragraph},
+	).Chapters[0]
+	if strings.Contains(paragraphView.BodyPreview, "第四段") ||
+		paragraphView.BodyPreview == paragraphBody {
+		t.Fatalf("paragraph preview is not bounded: %q", paragraphView.BodyPreview)
 	}
 }
 

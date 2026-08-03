@@ -32,7 +32,8 @@ function importJob(
         id: "candidate-1",
         volumeTitle: "第一卷 雾港",
         title: "第一章 潮声",
-        body: "潮声越过防波堤。\n守灯人回头。",
+        wordCount: 9876,
+        bodyPreview: "潮声越过防波堤。\n守灯人回头。",
         position: 1,
         sourceStartLine: 3,
         sourceEndLine: 5,
@@ -44,7 +45,8 @@ function importJob(
         id: "candidate-2",
         volumeTitle: "第二卷 北境",
         title: "第二章 雪线",
-        body: "雪落在旧界碑上。",
+        wordCount: 8,
+        bodyPreview: "雪落在旧界碑上。",
         position: 2,
         sourceStartLine: 9,
         sourceEndLine: 10,
@@ -153,6 +155,7 @@ describe("ImportWorkbench", () => {
     expect(screen.getByText("第二卷 北境")).toBeInTheDocument();
     const first = screen.getByRole("group", { name: "第一章 潮声" });
     expect(within(first).getByText(/原文第\s*3–5\s*行/)).toBeInTheDocument();
+    expect(within(first).getByText(/9876 字/)).toBeInTheDocument();
     expect(within(first).getByText("潮声越过防波堤。")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "导入所选章节" }),
@@ -175,6 +178,39 @@ describe("ImportWorkbench", () => {
     ).toBeDisabled();
   });
 
+  it("requires explicit import confirmation and cancellation has no side effects", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const prepared = importJob();
+    client.importJobsResult = [prepared];
+    const user = userEvent.setup();
+    render(
+      <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
+    );
+    const first = await screen.findByRole("group", {
+      name: "第一章 潮声",
+    });
+
+    await user.click(
+      within(first).getByRole("checkbox", { name: "选择 第一章 潮声" }),
+    );
+    await user.click(screen.getByRole("button", { name: "导入所选章节" }));
+
+    const dialog = screen.getByRole("dialog", { name: "确认导入章节" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveTextContent("长夜.md");
+    expect(dialog).toHaveTextContent("1 个章节");
+    expect(dialog).toHaveTextContent("正式章节");
+    expect(dialog).toHaveTextContent("任务将锁定");
+    expect(client.applyImportJobCalls).toHaveLength(0);
+
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    expect(
+      screen.queryByRole("dialog", { name: "确认导入章节" }),
+    ).not.toBeInTheDocument();
+    expect(client.applyImportJobCalls).toHaveLength(0);
+  });
+
   it("applies selected chapters once and refreshes the workspace with the complete chapter list", async () => {
     const client = FakeStudioClient.withReadyProject();
     const prepared = importJob();
@@ -184,7 +220,7 @@ describe("ImportWorkbench", () => {
       projectId: "project-1",
       title: "第一章 潮声",
       position: 1,
-      body: prepared.chapters[0].body,
+      body: "潮声越过防波堤。\n守灯人回头。",
       revision: 1,
       updatedAt: "2026-08-03T08:01:00Z",
       hasRecoveryDraft: false,
@@ -224,6 +260,11 @@ describe("ImportWorkbench", () => {
       within(first).getByRole("checkbox", { name: "选择 第一章 潮声" }),
     );
     await user.click(screen.getByRole("button", { name: "导入所选章节" }));
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "确认导入章节" }),
+      ).getByRole("button", { name: "确认导入" }),
+    );
 
     await waitFor(() =>
       expect(onChaptersImported).toHaveBeenCalledWith([created]),
@@ -258,6 +299,19 @@ describe("ImportWorkbench", () => {
       await screen.findByText("没有识别到可导入章节。"),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "删除任务" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "确认删除导入任务",
+    });
+    expect(dialog).toHaveTextContent("长夜.md");
+    expect(client.deleteImportJobCalls).toHaveLength(0);
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(client.deleteImportJobCalls).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "删除任务" }));
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "确认删除导入任务" }),
+      ).getByRole("button", { name: "确认删除" }),
+    );
 
     await waitFor(() =>
       expect(client.deleteImportJobCalls).toEqual(["import-1"]),
@@ -316,9 +370,13 @@ describe("ImportWorkbench", () => {
       expect(client.importJob).toHaveBeenCalledWith(taskB.id),
     );
 
-    expect(
-      screen.getByText("正在读取章节预览…"),
-    ).toBeInTheDocument();
+    const loading = screen.getByText("正在读取章节预览…");
+    expect(loading).toBeInTheDocument();
+    expect(loading.closest(".import-detail")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(loading.parentElement).toHaveAttribute("aria-live", "polite");
     expect(
       screen.queryByRole("heading", { name: "任务A.md" }),
     ).not.toBeInTheDocument();
@@ -372,5 +430,77 @@ describe("ImportWorkbench", () => {
     expect(
       screen.queryByRole("button", { name: "导入所选章节" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("retries a transient detail failure and restores the selected task", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const task = importJob();
+    client.importJobsResult = [task];
+    let attempts = 0;
+    client.importJob = vi.fn(async () => {
+      attempts++;
+      if (attempts === 1) throw new Error("暂时无法读取导入任务");
+      return task;
+    });
+    const user = userEvent.setup();
+
+    render(
+      <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "暂时无法读取导入任务",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "重试读取任务详情" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "长夜.md" }),
+    ).toBeInTheDocument();
+    expect(client.importJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks the selected task and disables task switching during apply", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const taskA = importJob({
+      id: "import-a",
+      sourceName: "任务A.md",
+    });
+    const taskB = importJob({
+      id: "import-b",
+      sourceName: "任务B.md",
+    });
+    client.importJobsResult = [taskA, taskB];
+    const applying = deferred<ImportApplyView>();
+    client.applyImportJob = vi.fn(() => applying.promise);
+    const user = userEvent.setup();
+
+    render(
+      <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
+    );
+
+    const first = await screen.findByRole("group", {
+      name: "第一章 潮声",
+    });
+    expect(
+      screen.getByRole("button", { name: /任务A\.md/ }),
+    ).toHaveAttribute("aria-current", "true");
+    await user.click(
+      within(first).getByRole("checkbox", { name: "选择 第一章 潮声" }),
+    );
+    await user.click(screen.getByRole("button", { name: "导入所选章节" }));
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "确认导入章节" }),
+      ).getByRole("button", { name: "确认导入" }),
+    );
+
+    expect(
+      screen.getByRole("button", { name: /任务A\.md/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /任务B\.md/ }),
+    ).toBeDisabled();
   });
 });

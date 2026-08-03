@@ -20,6 +20,42 @@ const project = {
   path: "/books/长夜织境.zjproject",
 };
 
+function nativeImportJob(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "import-1",
+    status: "prepared",
+    sourceName: "长夜.md",
+    sourceFormat: "markdown",
+    sourceEncoding: "UTF-8",
+    sourceHashDigest: "0123456789ab",
+    sourceBytes: 2048,
+    archivedRelativePath: "imports/import-1.md",
+    chapterCount: 1,
+    selectedChapterCount: 0,
+    errorCode: "",
+    errorMessage: "",
+    createdAt: "2026-08-03T08:00:00Z",
+    updatedAt: "2026-08-03T08:00:00Z",
+    appliedAt: "",
+    chapters: [
+      {
+        id: "candidate-1",
+        volumeTitle: "第一卷",
+        title: "第一章 雾港",
+        wordCount: 9,
+        bodyPreview: "潮声越过防波堤。",
+        position: 1,
+        sourceStartLine: 3,
+        sourceEndLine: 5,
+        contentHashSummary: "abcdef012345",
+        selected: false,
+        createdChapterId: "",
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function installNative(overrides: Record<string, unknown> = {}) {
   const api = {
     ChooseProjectParent: vi.fn(async () => ""),
@@ -190,37 +226,7 @@ describe("wailsStudioClient", () => {
   });
 
   it("validates and forwards manuscript import operations without exposing archive paths", async () => {
-    const job = {
-      id: "import-1",
-      status: "prepared",
-      sourceName: "长夜.md",
-      sourceFormat: "markdown",
-      sourceEncoding: "UTF-8",
-      sourceHashDigest: "0123456789ab",
-      sourceBytes: 2048,
-      archivedRelativePath: "imports/import-1.md",
-      chapterCount: 1,
-      selectedChapterCount: 0,
-      errorCode: "",
-      errorMessage: "",
-      createdAt: "2026-08-03T08:00:00Z",
-      updatedAt: "2026-08-03T08:00:00Z",
-      appliedAt: "",
-      chapters: [
-        {
-          id: "candidate-1",
-          volumeTitle: "第一卷",
-          title: "第一章 雾港",
-          body: "潮声越过防波堤。",
-          position: 1,
-          sourceStartLine: 3,
-          sourceEndLine: 5,
-          contentHashSummary: "abcdef012345",
-          selected: false,
-          createdChapterId: "",
-        },
-      ],
-    };
+    const job = nativeImportJob();
     const chapter = {
       id: "chapter-1",
       projectId: "project-1",
@@ -237,7 +243,17 @@ describe("wailsStudioClient", () => {
       ImportJobs: vi.fn(async () => [job]),
       ImportJob: vi.fn(async () => job),
       ApplyImportJob: vi.fn(async () => ({
-        job: { ...job, status: "applied", selectedChapterCount: 1 },
+        job: {
+          ...job,
+          status: "applied",
+          selectedChapterCount: 1,
+          appliedAt: "2026-08-03T08:01:00Z",
+          chapters: job.chapters.map((candidate) => ({
+            ...candidate,
+            selected: true,
+            createdChapterId: chapter.id,
+          })),
+        },
         chapters: [chapter],
       })),
     });
@@ -251,7 +267,14 @@ describe("wailsStudioClient", () => {
     await expect(wailsStudioClient.importJobs()).resolves.toHaveLength(1);
     await expect(wailsStudioClient.importJob(job.id)).resolves.toMatchObject({
       id: job.id,
-      chapters: [{ sourceStartLine: 3, sourceEndLine: 5 }],
+      chapters: [
+        {
+          sourceStartLine: 3,
+          sourceEndLine: 5,
+          wordCount: 9,
+          bodyPreview: "潮声越过防波堤。",
+        },
+      ],
     });
     await wailsStudioClient.deleteImportJob(job.id);
     await expect(
@@ -291,6 +314,175 @@ describe("wailsStudioClient", () => {
     });
 
     await expect(wailsStudioClient.importJobs()).rejects.toThrow();
+  });
+
+  it("accepts lightweight prepared and failed task summaries without candidates", async () => {
+    installNative({
+      ImportJobs: vi.fn(async () => [
+        nativeImportJob({ chapters: [] }),
+        nativeImportJob({
+          id: "import-failed",
+          status: "failed",
+          chapterCount: 0,
+          selectedChapterCount: 0,
+          errorCode: "IMPORT_PARSE_EMPTY",
+          errorMessage: "No importable chapters were found.",
+          chapters: [],
+        }),
+      ]),
+    });
+
+    await expect(wailsStudioClient.importJobs()).resolves.toMatchObject([
+      { id: "import-1", status: "prepared", chapters: [] },
+      { id: "import-failed", status: "failed", chapters: [] },
+    ]);
+  });
+
+  it.each([
+    ["source path", { sourceName: "/Users/author/长夜.md" }],
+    [
+      "reversed source lines",
+      {
+        chapters: [
+          {
+            ...nativeImportJob().chapters[0],
+            sourceStartLine: 5,
+            sourceEndLine: 3,
+          },
+        ],
+      },
+    ],
+    [
+      "duplicate candidate IDs",
+      {
+        chapterCount: 2,
+        chapters: [
+          nativeImportJob().chapters[0],
+          {
+            ...nativeImportJob().chapters[0],
+            position: 2,
+          },
+        ],
+      },
+    ],
+    [
+      "duplicate candidate positions",
+      {
+        chapterCount: 2,
+        chapters: [
+          nativeImportJob().chapters[0],
+          {
+            ...nativeImportJob().chapters[0],
+            id: "candidate-2",
+          },
+        ],
+      },
+    ],
+    ["chapter count mismatch", { chapterCount: 2 }],
+    ["prepared selection count", { selectedChapterCount: 1 }],
+    [
+      "full body crossing the boundary",
+      {
+        chapters: [
+          {
+            ...nativeImportJob().chapters[0],
+            body: "不应跨过 Wails 边界的完整正文",
+          },
+        ],
+      },
+    ],
+    [
+      "oversized body preview",
+      {
+        chapters: [
+          {
+            ...nativeImportJob().chapters[0],
+            bodyPreview: "长".repeat(601),
+          },
+        ],
+      },
+    ],
+  ])("rejects malformed import job invariant: %s", async (_name, override) => {
+    installNative({
+      ImportJob: vi.fn(async () => nativeImportJob(override)),
+    });
+
+    await expect(wailsStudioClient.importJob("import-1")).rejects.toThrow();
+  });
+
+  it.each([
+    ["empty chapter result", []],
+    [
+      "duplicate chapter IDs",
+      [
+        {
+          id: "chapter-1",
+          projectId: "project-1",
+          title: "第一章",
+          position: 1,
+          body: "正文",
+          revision: 1,
+          updatedAt: "2026-08-03T08:01:00Z",
+          hasRecoveryDraft: false,
+        },
+        {
+          id: "chapter-1",
+          projectId: "project-1",
+          title: "第二章",
+          position: 2,
+          body: "正文",
+          revision: 1,
+          updatedAt: "2026-08-03T08:01:00Z",
+          hasRecoveryDraft: false,
+        },
+      ],
+    ],
+    [
+      "mixed project IDs",
+      [
+        {
+          id: "chapter-1",
+          projectId: "project-1",
+          title: "第一章",
+          position: 1,
+          body: "正文",
+          revision: 1,
+          updatedAt: "2026-08-03T08:01:00Z",
+          hasRecoveryDraft: false,
+        },
+        {
+          id: "chapter-2",
+          projectId: "project-2",
+          title: "第二章",
+          position: 2,
+          body: "正文",
+          revision: 1,
+          updatedAt: "2026-08-03T08:01:00Z",
+          hasRecoveryDraft: false,
+        },
+      ],
+    ],
+  ])("rejects malformed import apply invariant: %s", async (_name, chapters) => {
+    const candidate = {
+      ...nativeImportJob().chapters[0],
+      selected: true,
+      createdChapterId: "chapter-1",
+    };
+    installNative({
+      ApplyImportJob: vi.fn(async () => ({
+        job: nativeImportJob({
+          status: "applied",
+          selectedChapterCount: 1,
+          appliedAt: "2026-08-03T08:01:00Z",
+          chapters: [candidate],
+        }),
+        chapters,
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.applyImportJob("import-1", ["candidate-1"]),
+    ).rejects.toThrow();
   });
 
   it("forwards create input and validates the returned project DTO", async () => {

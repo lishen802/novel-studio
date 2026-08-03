@@ -596,7 +596,8 @@ export type ImportChapterView = {
   id: string;
   volumeTitle: string;
   title: string;
-  body: string;
+  wordCount: number;
+  bodyPreview: string;
   position: number;
   sourceStartLine: number;
   sourceEndLine: number;

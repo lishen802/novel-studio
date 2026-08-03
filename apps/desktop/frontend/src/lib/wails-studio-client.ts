@@ -583,12 +583,26 @@ const continuitySchema = z.object({
   consistencyIssues: z.array(consistencyIssueSchema),
 });
 
+const importBodyPreviewSchema = z.string().superRefine((value, context) => {
+  let runeCount = 0;
+  for (const _rune of value) {
+    runeCount++;
+    if (runeCount > 600) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "body preview exceeds the boundary limit",
+      });
+      break;
+    }
+  }
+});
 const importChapterSchema = z
   .object({
     id: z.string().min(1),
     volumeTitle: z.string(),
     title: z.string().min(1),
-    body: z.string(),
+    wordCount: z.number().int().nonnegative(),
+    bodyPreview: importBodyPreviewSchema,
     position: z.number().int().positive(),
     sourceStartLine: z.number().int().positive(),
     sourceEndLine: z.number().int().positive(),
@@ -597,11 +611,20 @@ const importChapterSchema = z
     createdChapterId: z.string().optional(),
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.sourceEndLine < value.sourceStartLine) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "source line range is reversed",
+        path: ["sourceEndLine"],
+      });
+    }
+  })
   .transform((value) => ({
     ...value,
     createdChapterId: value.createdChapterId ?? "",
   }));
-const importJobSchema = z
+const rawImportJobSchema = z
   .object({
     id: z.string().min(1),
     status: z.enum(["prepared", "applied", "failed"]),
@@ -620,7 +643,167 @@ const importJobSchema = z
     appliedAt: z.string().optional(),
     chapters: z.array(importChapterSchema),
   })
-  .strict()
+  .strict();
+
+type RawImportJob = z.infer<typeof rawImportJobSchema>;
+
+function addImportInvariantIssue(
+  context: z.RefinementCtx,
+  path: Array<string | number>,
+  message: string,
+) {
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    message,
+    path,
+  });
+}
+
+function validateImportJob(
+  value: RawImportJob,
+  context: z.RefinementCtx,
+  requireDetails: boolean,
+) {
+  if (
+    value.sourceName === "." ||
+    value.sourceName === ".." ||
+    /[/\\]/u.test(value.sourceName)
+  ) {
+    addImportInvariantIssue(
+      context,
+      ["sourceName"],
+      "source name must be a basename",
+    );
+  }
+
+  const candidateIDs = new Set<string>();
+  const positions = new Set<number>();
+  for (const [index, chapter] of value.chapters.entries()) {
+    if (candidateIDs.has(chapter.id)) {
+      addImportInvariantIssue(
+        context,
+        ["chapters", index, "id"],
+        "candidate IDs must be unique",
+      );
+    }
+    candidateIDs.add(chapter.id);
+    if (positions.has(chapter.position)) {
+      addImportInvariantIssue(
+        context,
+        ["chapters", index, "position"],
+        "candidate positions must be unique",
+      );
+    }
+    positions.add(chapter.position);
+  }
+
+  if (
+    (requireDetails || value.chapters.length > 0) &&
+    value.chapterCount !== value.chapters.length
+  ) {
+    addImportInvariantIssue(
+      context,
+      ["chapterCount"],
+      "chapter count does not match candidates",
+    );
+  }
+
+  const selected = value.chapters.filter((chapter) => chapter.selected);
+  const hasAppliedAt = Boolean(value.appliedAt);
+  const hasError = Boolean(value.errorCode) || Boolean(value.errorMessage);
+  switch (value.status) {
+    case "prepared":
+      if (value.chapterCount < 1 || value.selectedChapterCount !== 0) {
+        addImportInvariantIssue(
+          context,
+          ["selectedChapterCount"],
+          "prepared task has an invalid selection count",
+        );
+      }
+      if (hasAppliedAt || hasError) {
+        addImportInvariantIssue(
+          context,
+          ["status"],
+          "prepared task has terminal metadata",
+        );
+      }
+      for (const [index, chapter] of value.chapters.entries()) {
+        if (chapter.selected || chapter.createdChapterId) {
+          addImportInvariantIssue(
+            context,
+            ["chapters", index],
+            "prepared candidate has applied metadata",
+          );
+        }
+      }
+      break;
+    case "applied":
+      if (
+        value.chapterCount < 1 ||
+        value.selectedChapterCount < 1 ||
+        value.selectedChapterCount > value.chapterCount ||
+        !hasAppliedAt ||
+        hasError
+      ) {
+        addImportInvariantIssue(
+          context,
+          ["status"],
+          "applied task metadata is inconsistent",
+        );
+      }
+      if (
+        value.chapters.length > 0 &&
+        selected.length !== value.selectedChapterCount
+      ) {
+        addImportInvariantIssue(
+          context,
+          ["selectedChapterCount"],
+          "selected count does not match candidates",
+        );
+      }
+      for (const [index, chapter] of value.chapters.entries()) {
+        if (chapter.selected !== Boolean(chapter.createdChapterId)) {
+          addImportInvariantIssue(
+            context,
+            ["chapters", index, "createdChapterId"],
+            "created chapter mapping is inconsistent",
+          );
+        }
+      }
+      break;
+    case "failed":
+      if (
+        value.chapterCount !== 0 ||
+        value.selectedChapterCount !== 0 ||
+        value.chapters.length !== 0 ||
+        hasAppliedAt ||
+        !value.errorCode ||
+        !value.errorMessage
+      ) {
+        addImportInvariantIssue(
+          context,
+          ["status"],
+          "failed task metadata is inconsistent",
+        );
+      }
+      break;
+  }
+}
+
+const importJobSchema = rawImportJobSchema
+  .superRefine((value, context) =>
+    validateImportJob(value, context, false),
+  )
+  .transform(({ archivedRelativePath: _archive, ...value }) => ({
+    ...value,
+    errorCode: value.errorCode ?? "",
+    errorMessage: value.errorMessage ?? "",
+    appliedAt: value.appliedAt ?? "",
+  }));
+const importJobDetailSchema = rawImportJobSchema
+  .superRefine((value, context) =>
+    validateImportJob(value, context, true),
+  )
   .transform(({ archivedRelativePath: _archive, ...value }) => ({
     ...value,
     errorCode: value.errorCode ?? "",
@@ -628,14 +811,76 @@ const importJobSchema = z
     appliedAt: value.appliedAt ?? "",
   }));
 const importPrepareSchema = z
-  .object({ job: importJobSchema })
+  .object({ job: importJobDetailSchema })
   .strict();
 const importApplySchema = z
   .object({
-    job: importJobSchema,
+    job: importJobDetailSchema,
     chapters: z.array(chapterSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.chapters.length === 0) {
+      addImportInvariantIssue(
+        context,
+        ["chapters"],
+        "applied workspace chapters must not be empty",
+      );
+      return;
+    }
+    const chapterIDs = new Set<string>();
+    const positions = new Set<number>();
+    const projectID = value.chapters[0].projectId;
+    for (const [index, chapter] of value.chapters.entries()) {
+      if (
+        !chapter.id ||
+        !chapter.projectId ||
+        !Number.isInteger(chapter.position) ||
+        chapter.position < 1
+      ) {
+        addImportInvariantIssue(
+          context,
+          ["chapters", index],
+          "workspace chapter identity is invalid",
+        );
+      }
+      if (chapterIDs.has(chapter.id)) {
+        addImportInvariantIssue(
+          context,
+          ["chapters", index, "id"],
+          "workspace chapter IDs must be unique",
+        );
+      }
+      chapterIDs.add(chapter.id);
+      if (positions.has(chapter.position)) {
+        addImportInvariantIssue(
+          context,
+          ["chapters", index, "position"],
+          "workspace chapter positions must be unique",
+        );
+      }
+      positions.add(chapter.position);
+      if (chapter.projectId !== projectID) {
+        addImportInvariantIssue(
+          context,
+          ["chapters", index, "projectId"],
+          "workspace chapters must belong to one project",
+        );
+      }
+    }
+    for (const candidate of value.job.chapters) {
+      if (
+        candidate.selected &&
+        !chapterIDs.has(candidate.createdChapterId)
+      ) {
+        addImportInvariantIssue(
+          context,
+          ["job", "chapters"],
+          "created chapter mapping is missing from workspace",
+        );
+      }
+    }
+  });
 
 type NativeDesktopAPI = {
   ChooseProjectParent(): Promise<string>;
@@ -908,7 +1153,7 @@ const characterKnowledgeViews = (value: unknown): CharacterKnowledgeView[] =>
 const importPrepareView = (value: unknown): ImportPrepareView =>
   importPrepareSchema.parse(value);
 const importJobView = (value: unknown): ImportJobView =>
-  importJobSchema.parse(value);
+  importJobDetailSchema.parse(value);
 const importJobViews = (value: unknown): ImportJobView[] =>
   z.array(importJobSchema).parse(value);
 const importApplyView = (value: unknown): ImportApplyView =>

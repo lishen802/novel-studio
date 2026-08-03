@@ -103,11 +103,14 @@ describe("Workspace", () => {
 
   it("refreshes and focuses workspace chapters after applying an import", async () => {
     const client = FakeStudioClient.withReadyProject();
+    const original = client.createChapterResult;
+    client.chaptersResult = [original];
     const candidate = {
       id: "candidate-1",
       volumeTitle: "",
       title: "导入第一章",
-      body: "雾从海面升起。",
+      wordCount: 7,
+      bodyPreview: "雾从海面升起。",
       position: 1,
       sourceStartLine: 1,
       sourceEndLine: 2,
@@ -136,7 +139,8 @@ describe("Workspace", () => {
       ...client.createChapterResult,
       id: "chapter-imported",
       title: candidate.title,
-      body: candidate.body,
+      position: 2,
+      body: "雾从海面升起。",
     };
     client.importJobsResult = [job];
     client.importApplyResult = {
@@ -152,11 +156,17 @@ describe("Workspace", () => {
           },
         ],
       },
-      chapters: [created],
+      chapters: [original, created],
     };
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
+    await user.click(
+      await screen.findByRole("button", { name: /第一章/ }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: original.title }),
+    ).toBeInTheDocument();
     await user.click(
       await screen.findByRole("button", { name: "导入分析" }),
     );
@@ -166,10 +176,23 @@ describe("Workspace", () => {
       }),
     );
     await user.click(screen.getByRole("button", { name: "导入所选章节" }));
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "确认导入章节" }),
+      ).getByRole("button", { name: "确认导入" }),
+    );
     await user.click(screen.getByRole("button", { name: "正文编辑" }));
 
+    const chapterList = screen.getByRole("navigation", {
+      name: "章节列表",
+    });
+    expect(within(chapterList).getByText(original.title)).toBeInTheDocument();
+    expect(within(chapterList).getByText(candidate.title)).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { name: candidate.title }),
+      within(chapterList).getByText(original.title).closest("button"),
+    ).toHaveClass("is-active");
+    expect(
+      await screen.findByRole("heading", { name: original.title }),
     ).toBeInTheDocument();
   });
 

@@ -5,7 +5,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChapterView,
   ImportChapterView,
@@ -65,10 +65,6 @@ function formatBytes(bytes: number): string {
   return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
 }
 
-function wordCount(body: string): number {
-  return Array.from(body.replace(/\s/g, "")).length;
-}
-
 function groupChapters(chapters: ImportChapterView[]) {
   const groups = new Map<string, ImportChapterView[]>();
   for (const chapter of chapters) {
@@ -90,8 +86,15 @@ export function ImportWorkbench({
   );
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailLoadFailed, setDetailLoadFailed] = useState(false);
+  const [detailLoadNonce, setDetailLoadNonce] = useState(0);
   const [busy, setBusy] = useState<"prepare" | "apply" | "delete" | null>(null);
+  const [confirmation, setConfirmation] = useState<
+    "apply" | "delete" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
+  const selectedJobIDRef = useRef(selectedJobId);
+  selectedJobIDRef.current = selectedJobId;
   const detail = loadedDetail?.id === selectedJobId ? loadedDetail : null;
 
   const selectDetail = (job: ImportJobView) => {
@@ -133,10 +136,18 @@ export function ImportWorkbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
+  useEffect(
+    () => () => {
+      selectedJobIDRef.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!selectedJobId) return;
     let current = true;
     setDetailLoading(true);
+    setDetailLoadFailed(false);
     setError(null);
     void client
       .importJob(selectedJobId)
@@ -144,7 +155,10 @@ export function ImportWorkbench({
         if (current) selectDetail(job);
       })
       .catch((loadError: unknown) => {
-        if (current) setError(errorMessage(loadError));
+        if (current) {
+          setDetailLoadFailed(true);
+          setError(errorMessage(loadError));
+        }
       })
       .finally(() => {
         if (current) setDetailLoading(false);
@@ -152,7 +166,7 @@ export function ImportWorkbench({
     return () => {
       current = false;
     };
-  }, [client, selectedJobId]);
+  }, [client, detailLoadNonce, selectedJobId]);
 
   const groups = useMemo(
     () => groupChapters(detail?.chapters ?? []),
@@ -185,11 +199,12 @@ export function ImportWorkbench({
 
   const remove = async () => {
     if (!detail || detail.status === "applied") return;
+    const targetID = detail.id;
     setBusy("delete");
     setError(null);
     try {
-      await client.deleteImportJob(detail.id);
-      const remaining = jobs.filter((job) => job.id !== detail.id);
+      await client.deleteImportJob(targetID);
+      const remaining = jobs.filter((job) => job.id !== targetID);
       setJobs(remaining);
       setSelectedJobId(remaining[0]?.id ?? null);
       if (remaining.length === 0) {
@@ -199,27 +214,31 @@ export function ImportWorkbench({
     } catch (deleteError) {
       setError(errorMessage(deleteError));
     } finally {
+      setConfirmation(null);
       setBusy(null);
     }
   };
 
   const apply = async () => {
     if (!detail || !selectable || selectedChapterIds.size === 0) return;
+    const targetID = detail.id;
     setBusy("apply");
     setError(null);
     try {
       const orderedSelection = detail.chapters
         .filter((chapter) => selectedChapterIds.has(chapter.id))
         .map((chapter) => chapter.id);
-      const result = await client.applyImportJob(detail.id, orderedSelection);
+      const result = await client.applyImportJob(targetID, orderedSelection);
       setJobs((current) =>
-        current.map((job) => (job.id === detail.id ? result.job : job)),
+        current.map((job) => (job.id === targetID ? result.job : job)),
       );
+      if (selectedJobIDRef.current !== targetID) return;
       selectDetail(result.job);
       onChaptersImported(result.chapters);
     } catch (applyError) {
       setError(errorMessage(applyError));
     } finally {
+      setConfirmation(null);
       setBusy(null);
     }
   };
@@ -254,7 +273,7 @@ export function ImportWorkbench({
         <button
           type="button"
           className="primary-action"
-          disabled={busy !== null}
+          disabled={busy !== null || confirmation !== null}
           onClick={() => void prepare()}
         >
           <Upload size={17} aria-hidden="true" />
@@ -272,7 +291,7 @@ export function ImportWorkbench({
       )}
 
       {loading ? (
-        <div className="import-state">
+        <div className="import-state" role="status" aria-live="polite">
           <FileSearch2 size={28} aria-hidden="true" />
           <p>正在读取导入任务…</p>
         </div>
@@ -290,6 +309,10 @@ export function ImportWorkbench({
                 type="button"
                 key={job.id}
                 className={job.id === selectedJobId ? "is-active" : ""}
+                aria-current={
+                  job.id === selectedJobId ? "true" : undefined
+                }
+                disabled={busy !== null || confirmation !== null}
                 onClick={() => setSelectedJobId(job.id)}
               >
                 <span>{job.sourceName}</span>
@@ -298,10 +321,27 @@ export function ImportWorkbench({
             ))}
           </aside>
 
-          <div className="import-detail">
+          <div className="import-detail" aria-busy={detailLoading}>
             {detailLoading && !detail ? (
-              <div className="import-state">
+              <div
+                className="import-state"
+                role="status"
+                aria-live="polite"
+              >
                 <p>正在读取章节预览…</p>
+              </div>
+            ) : detailLoadFailed && !detail ? (
+              <div className="import-state" role="status" aria-live="polite">
+                <FileSearch2 size={28} aria-hidden="true" />
+                <p>任务详情暂时无法读取。</p>
+                <button
+                  type="button"
+                  className="secondary-action"
+                  disabled={busy !== null}
+                  onClick={() => setDetailLoadNonce((current) => current + 1)}
+                >
+                  重试读取任务详情
+                </button>
               </div>
             ) : detail ? (
               <>
@@ -364,7 +404,11 @@ export function ImportWorkbench({
                         {detail.chapters.length} 章
                       </p>
                       {selectable && (
-                        <button type="button" onClick={toggleAll}>
+                        <button
+                          type="button"
+                          disabled={confirmation !== null}
+                          onClick={toggleAll}
+                        >
                           {allSelected ? "取消全选" : "全选章节"}
                         </button>
                       )}
@@ -385,20 +429,22 @@ export function ImportWorkbench({
                                   type="checkbox"
                                   aria-label={`选择 ${chapter.title}`}
                                   checked={selectedChapterIds.has(chapter.id)}
-                                  disabled={!selectable}
+                                  disabled={
+                                    !selectable || confirmation !== null
+                                  }
                                   onChange={() => toggleChapter(chapter.id)}
                                 />
                                 <span>
                                   <strong>{chapter.title}</strong>
                                   <small>
-                                    {wordCount(chapter.body)} 字 · 原文第{" "}
+                                    {chapter.wordCount} 字 · 原文第{" "}
                                     {chapter.sourceStartLine}–
                                     {chapter.sourceEndLine} 行
                                   </small>
                                 </span>
                               </label>
                               <div className="import-body-preview">
-                                {chapter.body
+                                {chapter.bodyPreview
                                   .split(/\n+/)
                                   .filter(Boolean)
                                   .slice(0, 3)
@@ -422,7 +468,7 @@ export function ImportWorkbench({
                       type="button"
                       className="secondary-action import-delete"
                       disabled={busy !== null}
-                      onClick={() => void remove()}
+                      onClick={() => setConfirmation("delete")}
                     >
                       <Trash2 size={16} aria-hidden="true" />
                       {busy === "delete" ? "正在删除…" : "删除任务"}
@@ -436,7 +482,7 @@ export function ImportWorkbench({
                       selectedChapterIds.size === 0 ||
                       busy !== null
                     }
-                    onClick={() => void apply()}
+                    onClick={() => setConfirmation("apply")}
                   >
                     {busy === "apply" ? "正在导入…" : "导入所选章节"}
                   </button>
@@ -444,6 +490,75 @@ export function ImportWorkbench({
               </>
             ) : null}
           </div>
+        </div>
+      )}
+
+      {confirmation === "apply" && detail && (
+        <div className="dialog-backdrop">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认导入章节"
+          >
+            <p className="eyebrow">正式写入确认</p>
+            <h2>导入“{detail.sourceName}”？</h2>
+            <p>
+              已选择 {selectedChapterIds.size} 个章节；确认后将创建正式章节，
+              导入任务将锁定为只读，不能再次应用。
+            </p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={busy !== null}
+                onClick={() => setConfirmation(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="primary-action"
+                disabled={busy !== null}
+                onClick={() => void apply()}
+              >
+                {busy === "apply" ? "正在导入…" : "确认导入"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {confirmation === "delete" && detail && detail.status !== "applied" && (
+        <div className="dialog-backdrop">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认删除导入任务"
+          >
+            <p className="eyebrow">删除任务确认</p>
+            <h2>删除“{detail.sourceName}”的导入任务？</h2>
+            <p>任务记录和章节预览会被删除，此操作无法撤销。</p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={busy !== null}
+                onClick={() => setConfirmation(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="danger-action"
+                disabled={busy !== null}
+                onClick={() => void remove()}
+              >
+                {busy === "delete" ? "正在删除…" : "确认删除"}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </section>

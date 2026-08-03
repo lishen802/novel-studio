@@ -208,18 +208,45 @@ export function createWorkspaceStore(
     },
 
     replaceChapters(chapters) {
+      const current = get().status;
+      if (current.kind !== "ready") return;
+      const ids = new Set<string>();
+      const positions = new Set<number>();
+      const invalid = chapters.some((chapter) => {
+        const duplicate =
+          ids.has(chapter.id) || positions.has(chapter.position);
+        ids.add(chapter.id);
+        positions.add(chapter.position);
+        return (
+          !chapter.id ||
+          chapter.projectId !== current.project.id ||
+          !Number.isInteger(chapter.position) ||
+          chapter.position < 1 ||
+          duplicate
+        );
+      });
+      if (chapters.length === 0 || invalid) {
+        set({ workspaceError: "导入章节数据无效，请重试。" });
+        return;
+      }
+      const projectID = current.project.id;
       selectionRequest++;
       set((latest) => {
-        if (latest.status.kind !== "ready") return {};
-        const current = latest.status;
+        if (
+          latest.status.kind !== "ready" ||
+          latest.status.project.id !== projectID
+        ) {
+          return {};
+        }
+        const currentWorkspace = latest.status;
         const activeChapterId = chapters.some(
-          (chapter) => chapter.id === current.activeChapterId,
+          (chapter) => chapter.id === currentWorkspace.activeChapterId,
         )
-          ? current.activeChapterId
+          ? currentWorkspace.activeChapterId
           : (chapters[0]?.id ?? null);
         return {
           status: {
-            ...current,
+            ...currentWorkspace,
             chapters,
             activeChapterId,
           },

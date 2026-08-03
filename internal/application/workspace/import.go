@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -18,13 +19,17 @@ const (
 	ImportErrorParseEmpty       = "IMPORT_PARSE_EMPTY"
 	ImportErrorLineTooLong      = "IMPORT_PARSE_LINE_TOO_LONG"
 	ImportErrorParseUnsupported = "IMPORT_PARSE_FAILED"
+
+	importChapterPreviewRunes      = 600
+	importChapterPreviewParagraphs = 3
 )
 
 type ImportChapterView struct {
 	ID                 string `json:"id"`
 	VolumeTitle        string `json:"volumeTitle"`
 	Title              string `json:"title"`
-	Body               string `json:"body"`
+	WordCount          int    `json:"wordCount"`
+	BodyPreview        string `json:"bodyPreview"`
 	Position           int    `json:"position"`
 	SourceStartLine    int    `json:"sourceStartLine"`
 	SourceEndLine      int    `json:"sourceEndLine"`
@@ -530,7 +535,8 @@ func importJobView(
 			ID:                 chapter.ID,
 			VolumeTitle:        chapter.VolumeTitle,
 			Title:              chapter.Title,
-			Body:               chapter.Body,
+			WordCount:          importChapterWordCount(chapter.Body),
+			BodyPreview:        importChapterBodyPreview(chapter.Body),
 			Position:           chapter.Position,
 			SourceStartLine:    chapter.SourceStartLine,
 			SourceEndLine:      chapter.SourceEndLine,
@@ -564,4 +570,60 @@ func importJobView(
 		view.AppliedAt = job.AppliedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return view
+}
+
+func importChapterWordCount(body string) int {
+	count := 0
+	for _, value := range body {
+		if !unicode.IsSpace(value) {
+			count++
+		}
+	}
+	return count
+}
+
+func importChapterBodyPreview(body string) string {
+	if body == "" {
+		return ""
+	}
+	paragraphs := importPreviewParagraphs(body)
+	if len([]rune(body)) <= importChapterPreviewRunes &&
+		len(paragraphs) <= importChapterPreviewParagraphs {
+		return body
+	}
+
+	preview := body
+	if len(paragraphs) > 0 {
+		if len(paragraphs) > importChapterPreviewParagraphs {
+			paragraphs = paragraphs[:importChapterPreviewParagraphs]
+		}
+		preview = strings.Join(paragraphs, "\n\n")
+	}
+	runes := []rune(preview)
+	if len(runes) >= importChapterPreviewRunes {
+		runes = runes[:importChapterPreviewRunes-1]
+	}
+	return string(runes) + "…"
+}
+
+func importPreviewParagraphs(body string) []string {
+	lines := strings.Split(body, "\n")
+	paragraphs := make([]string, 0, importChapterPreviewParagraphs+1)
+	current := make([]string, 0, 1)
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		paragraphs = append(paragraphs, strings.Join(current, "\n"))
+		current = current[:0]
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		current = append(current, line)
+	}
+	flush()
+	return paragraphs
 }

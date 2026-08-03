@@ -158,4 +158,44 @@ describe("workspace store", () => {
       chapters: replacement,
     });
   });
+
+  it("rejects imported chapters from another project without changing the workspace", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    const before = store.getState().status;
+
+    store.getState().replaceChapters([
+      {
+        ...client.createChapterResult,
+        id: "foreign-chapter",
+        projectId: "project-2",
+      },
+    ]);
+
+    expect(store.getState().status).toEqual(before);
+    expect(store.getState().workspaceError).toBe(
+      "导入章节数据无效，请重试。",
+    );
+  });
+
+  it("rejects duplicate imported chapter IDs without changing the workspace", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    const before = store.getState().status;
+    const duplicate = {
+      ...client.createChapterResult,
+      id: "duplicate-chapter",
+    };
+
+    store.getState().replaceChapters([duplicate, { ...duplicate, position: 2 }]);
+
+    expect(store.getState().status).toEqual(before);
+    expect(store.getState().workspaceError).toBe(
+      "导入章节数据无效，请重试。",
+    );
+  });
 });
