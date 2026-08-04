@@ -4,6 +4,7 @@
 - 状态：已确认，待实施计划
 - 产品定位：中文网络长篇小说的本地优先 AI 主创作平台
 - 前置：既有 Go + Wails v2 + React + SQLite 基线、项目包、版本与候选变更机制
+- 交互规格：`docs/superpowers/specs/2026-08-04-ai-first-authoring-interaction-design.md`
 
 ## 1. 设计结论
 
@@ -157,7 +158,9 @@ AI 默认在以下阶段等待作者确认：
 
 模型连接、API Key、连接测试、默认创作方案和高级参数属于应用级设置，不属于某一部小说。API Key 仅存 macOS Keychain 或 Windows Credential Manager。
 
-第一版仅展示 OpenAI 和 Anthropic。作者可以为不同小说选择不同的已配置创作方案，但无需再次输入密钥或配置技术角色。系统默认推荐规划、写作和审阅模型组合，并允许高级用户调整。
+第一版模型连接分为 API 与订阅运行时。API 连接至少展示 OpenAI 和 Anthropic；订阅运行时展示用户已登录且通过能力验证的 Cursor 与 ChatGPT/Codex 连接。作者可以为不同小说选择不同的已配置创作方案，但无需再次输入密钥或配置技术角色。系统默认推荐规划、写作和审阅模型组合，并允许高级用户调整。
+
+Cursor 中可用的 GPT、Claude、Gemini 等模型必须标明“来自 Cursor 订阅”；ChatGPT/Codex 订阅只表示当前账号拥有的 OpenAI/Codex 权益。订阅连接不得被描述为通用 API，不得静默切换到会产生额外费用的 API 连接。
 
 ### 7.2 运行安全
 

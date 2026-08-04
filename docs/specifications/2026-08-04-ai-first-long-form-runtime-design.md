@@ -3,6 +3,7 @@
 - 日期：2026-08-04
 - 状态：已确认，待实施计划
 - 产品规格：`docs/superpowers/specs/2026-08-04-ai-first-long-form-authoring-design.md`
+- 交互规格：`docs/superpowers/specs/2026-08-04-ai-first-authoring-interaction-design.md`
 - 技术基线：Go 1.25、Wails v2.13.0、React、TypeScript、Vite、SQLite
 
 ## 1. 技术结论
