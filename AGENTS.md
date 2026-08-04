@@ -11,7 +11,7 @@
 
 ## Workflow
 
-- Read `docs/handoff/START-HERE.md`, `docs/product/product-baseline.md`, and architecture decisions before planning changes.
+- Read `docs/handoff/START-HERE.md`, `docs/product/requirements.md`, `docs/product/design.md`, `docs/architecture/system-design.md`, and applicable architecture decisions before planning changes.
 - Complete product and architecture specifications before scaffolding production modules.
 - Keep Go domain, application, persistence, agent runtime, provider adapters, platform adapters, and UI boundaries explicit.
 - Keep Wails bindings thin; React components must not call persistence or model providers directly.
