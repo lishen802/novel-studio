@@ -1,7 +1,7 @@
 # AI 主创作与百万字长篇运行时技术方案
 
 - 日期：2026-08-04
-- 状态：待用户技术评审
+- 状态：已确认，待实施计划
 - 产品规格：`docs/superpowers/specs/2026-08-04-ai-first-long-form-authoring-design.md`
 - 技术基线：Go 1.25、Wails v2.13.0、React、TypeScript、Vite、SQLite
 
@@ -18,13 +18,14 @@
 - 持久化运行、取消、重试、恢复、Token 预算和上下文裁剪；
 - TXT/Markdown 归档、编码识别、卷章切分和原文行证据。
 
-新增能力分为五个边界：
+新增能力分为六个边界：
 
 1. 应用级模型设置；
-2. 作品方案与全书章节路线图；
-3. 有界批量创作与自动审阅；
-4. 带证据的长篇记忆 harness；
-5. 导入小说结构化重建与续写接入。
+2. API 与 Cursor/Codex 订阅双通道模型运行时；
+3. 作品方案与全书章节路线图；
+4. 有界批量创作与自动审阅；
+5. 带证据的长篇记忆 harness；
+6. 导入小说结构化重建与续写接入。
 
 未来 AI 作者市场只依赖稳定的 `AuthorProfile` / `AuthorTeam` 模板协议，不进入当前在线实现范围。
 
@@ -61,7 +62,13 @@
 
 当前 Provider 连接与角色配置保存在每个作品数据库中。新产品要求它们属于应用设置，并供多部作品复用。项目只保存“选用哪个创作方案”及运行时冻结快照，不保存 API Key。
 
-### 2.4 导入只完成确定性阶段
+### 2.4 运行时只有 API Provider
+
+当前 P3 只支持 OpenAI Responses 与 Anthropic Messages API。产品还需要让作者使用自己的 Cursor 订阅和 ChatGPT/Codex 订阅，但不能把“订阅登录”伪装成普通 API Key，也不能复制第三方工具的 OAuth Client ID、私有端点或未公开协议。
+
+API 与订阅运行时必须共享上层创作协议，同时保留不同的认证、模型目录、额度来源、能力限制、错误分类和生命周期。
+
+### 2.5 导入只完成确定性阶段
 
 现有 P4 能安全保存和应用章节，但尚无分章模型抽取、跨章合并、冲突保留、证据确认和续写准备。
 
@@ -88,8 +95,13 @@ Go Application
 Infrastructure
 ├── App SQLite（全局模型与作者模板）
 ├── Project SQLite（正文、候选、记忆、运行）
-├── Provider adapters
+├── Model Runtime
+│   ├── API Provider adapters
+│   ├── Codex SubscriptionRuntime
+│   ├── Cursor SubscriptionRuntime
+│   └── Local Model adapters
 ├── Keychain / Credential Manager
+├── official runtime process supervisor
 └── projectfs / import archive / snapshot / branch
 ```
 
@@ -110,6 +122,8 @@ Infrastructure
 
 ```text
 model_connections
+model_connection_accounts
+model_catalog_entries
 creative_profiles
 creative_profile_roles
 installed_author_profiles
@@ -118,7 +132,19 @@ legacy_connection_imports
 app_schema_migrations
 ```
 
-`model_connections` 只保存供应商、Base URL、显示名称和 credential reference。API Key 继续只存在系统凭据仓库。
+`model_connections` 根据连接类型保存供应商、Base URL、显示名称、credential reference，或官方运行时类型、受支持版本和可执行文件路径指纹。API Key 继续只存在系统凭据仓库，订阅 OAuth 凭据继续只由官方运行时管理。
+
+连接按来源分类：
+
+```text
+api                  官方 API、兼容 API 或网关
+subscription_runtime 用户已登录的 Cursor/Codex 官方本地运行时
+local_runtime        Ollama、LM Studio 等本地模型服务
+```
+
+`model_connection_accounts` 只保存非敏感账号标识、登录状态摘要和最近验证时间。OAuth access token、refresh token、Cookie 和官方运行时本地认证文件均不得复制到 `settings.db`。
+
+`model_catalog_entries` 是带来源、运行时版本和 `verified_at` 的缓存，不是永久权益声明。过期目录必须重新发现或验证后才能用于新运行。
 
 ### 4.2 创作方案
 
@@ -139,7 +165,134 @@ impact_analyst
 
 每次创建运行时，把所选方案完整快照保存进项目运行记录，避免全局设置变化改写历史。
 
-### 4.3 兼容迁移
+角色不直接引用供应商字符串，而是引用稳定的 `ModelTarget`：
+
+```text
+connection_id
+model_id
+source_kind
+provider_family
+capability_snapshot
+optional fallback targets
+```
+
+`provider_family` 表示底层模型家族，`source_kind` 表示额度来源。例如 Claude 经 Cursor 订阅运行时使用时，两者分别是 `anthropic` 与 `subscription_runtime`，不能显示成 Anthropic API。
+
+### 4.3 统一模型运行端口
+
+新增 `internal/application/modelruntime` 端口：
+
+```text
+ModelRuntime
+├── ValidateConnection
+├── DiscoverModels
+├── Capabilities
+├── StartStream
+├── Cancel
+└── UsageSnapshot
+```
+
+所有 API、订阅和本地模型都通过同一请求信封进入现有 Artifact、Token 计量、取消和持久化运行机制。请求信封不暴露具体 SDK 类型，至少包含：
+
+- 运行、步骤和角色标识；
+- 模型目标和冻结的能力快照；
+- system/user 内容与结构化输出 Schema；
+- 上下文、输出和时间预算；
+- 幂等键、取消信号和重试策略。
+
+`Capabilities` 至少声明：
+
+- 是否支持流式输出；
+- 是否支持 JSON Schema 或只能做提示式 JSON；
+- 是否能精确报告输入/输出用量；
+- 是否支持模型目录发现；
+- 上下文和最大输出限制的可信来源；
+- 是否支持图片、工具调用、远端压缩和会话恢复；
+- 额度来源、实验状态和当前连接健康度。
+
+运行时不能因为多个来源最终调用同一模型家族，就假设它们具有相同协议和能力。
+
+### 4.4 API 连接
+
+OpenAI、Anthropic 和后续兼容 Provider 继续作为主要生产通道：
+
+- 用户录入 API Key 时只写入 Keychain/Credential Manager；
+- App 数据库保存 credential reference；
+- Base URL、自定义 Header 和模型目录属于应用设置；
+- API 连接可以提供精确 Token 计量、结构化输出和可预测的重试语义；
+- 长批次默认推荐 API 连接，订阅连接可以由作者主动选用或加入回退链。
+
+已有 P3 OpenAI/Anthropic Provider 适配到 `ModelRuntime`，不重写其流式协议与错误分类。
+
+### 4.5 Codex 订阅运行时
+
+Codex 第一版使用用户安装并已登录的官方 Codex 本地运行时：
+
+1. 设置页检测受支持的 Codex 可执行文件与版本；
+2. 用户在官方登录流程中选择 ChatGPT/Codex 订阅账号；
+3. Go 进程通过官方 Codex App Server 的版本化 JSON-RPC 接口创建会话；官方 SDK 只作为协议验证和后续替代方案；
+4. 只使用官方运行时返回或官方文档声明的可用模型；
+5. 小说软件不读取、解析、导入或同步 Codex 本地 OAuth 凭据；
+6. 登录失效时返回 `login_required`，由用户重新完成官方登录。
+
+Codex 订阅只代表该账号当前拥有的 OpenAI/Codex 权益，不能被描述为 Claude、Gemini 等其他供应商的授权来源。
+
+Codex 是面向编程的运行时。适配器必须在隔离的空工作目录中运行，关闭不必要的文件与 Shell 工具，只发送本次由 `longform-v1` 组装的有界上下文。若官方运行时无法提供所需的纯生成、结构化输出或安全隔离能力，该模型目标不得被标记为“推荐用于连续创作”。
+
+### 4.6 Cursor 订阅运行时
+
+Cursor 第一版优先使用用户安装并已登录的官方 Cursor CLI Headless 模式；官方 SDK 只有在其分发、版本和双平台运行成本通过独立验证后才作为替代实现。
+
+```text
+Go CursorSubscriptionRuntime
+→ 启动受支持的 cursor-agent
+→ 通过 stdin/stream-json 发送有界任务
+→ 解析流事件、用量、终态和错误
+→ 转换为统一 ModelRuntime 事件
+```
+
+约束：
+
+- 使用用户自己的 Cursor 账号、订阅或官方 User API Key；
+- 只展示官方运行时向该账号开放或验证成功的模型；
+- Cursor 中的 GPT、Claude、Gemini 等模型显示为“来自 Cursor 订阅”；
+- 不调用 `api2.cursor.sh` 等内部端点；
+- 不复制 Cursor OAuth Client ID、protobuf 或客户端版本伪装逻辑；
+- 不把一个账号的订阅额度提供给其他用户；
+- 账号额度、模型上下架和限流由 Cursor 决定，运行时必须按动态能力处理。
+
+如果官方 CLI 不能枚举模型，`DiscoverModels` 返回 `unsupported`。UI 可以展示经过版本验证的候选目录，但必须逐个执行轻量能力测试后才允许加入创作方案，不能把静态目录当成账号真实权益。
+
+Cursor 同样是编程 Agent。进程在应用私有的隔离临时工作目录运行；织境不向它传入 `.zjproject` 路径、无关 Provider 的 API Key 或作者未选入上下文的正文。官方运行时可以自行访问其正常登录所必需的认证存储，但织境不读取或转发其中内容。进程退出、取消和子进程清理由 supervisor 负责。
+
+### 4.7 模型选择与回退
+
+每个创作角色拥有一个主 `ModelTarget` 和可选回退链。回退规则：
+
+1. 只在完整步骤边界切换，不在同一次模型流中途拼接两个模型输出；
+2. 登录失效默认暂停并等待作者处理；
+3. 临时网络错误、429、额度耗尽或模型下架可以按作者预先启用的链切换；
+4. 从订阅切到付费 API 前必须有明确授权，不能产生静默费用；
+5. 回退后重新从冻结输入执行当前步骤，旧的部分输出保留为 Artifact 但不进入候选稿；
+6. 实际连接、模型、来源、用量可信度和回退原因写入运行记录。
+
+异构审阅规则继续按底层提供方与模型家族判断。写作模型经 Cursor 调用 Claude 时，审阅模型不能因为连接 ID 不同就把另一个 Cursor Claude 错判为异构。
+
+### 4.8 订阅运行时安全边界
+
+- 不读取 `~/.codex`、`~/.cursor` 或第三方工具数据库中的原始令牌；
+- 不把第三方 OAuth 凭据转存到系统凭据仓库；
+- 不复用不属于织境的 OAuth Client ID 实现自有登录页；
+- 不记录 CLI 环境、请求 Header、Token、Cookie 或认证回调正文；
+- 只允许配置并校验过的官方可执行文件路径；
+- 子进程使用清理后的环境变量、隔离工作目录、有界 stdin/stdout 和超时；保留官方运行时完成自身登录所必需的环境，移除无关 Provider API Key；
+- 发送模型前继续展示数据范围和连接来源，遵循作者的外发授权；
+- 订阅连接默认是当前电脑、当前系统用户私有设置，不随项目包导出；
+- 第三方条款或协议发生变化时，由本地兼容门禁或软件更新禁用不兼容的适配器版本，不引入云端必需开关，也不得影响 API 通道和本地项目数据。
+
+`oh-my-pi` 不作为生产必需依赖。未来若增加外部 Agent RPC 兼容层，只能作为用户自行安装和登录的可选连接器，并复用本节安全边界；不得借其绕过官方运行时限制。
+
+### 4.9 兼容迁移
 
 旧项目中的 Provider 连接和三个角色配置不删除。首次打开旧项目时：
 
@@ -435,7 +588,9 @@ chapter extraction
 Wails API 只暴露用例：
 
 ```text
-AppModelSettings / SaveModelConnection / TestModelConnection
+AppModelSettings / SaveModelConnection / RemoveModelConnection
+DetectSubscriptionRuntime / ConnectSubscriptionRuntime / DisconnectSubscriptionRuntime
+TestModelConnection / DiscoverConnectionModels / ConnectionCapabilities
 CreateStoryDirectionRun / StoryDirections
 CreateWorkProposal / UpdateWorkProposal / AcceptWorkProposal
 ChapterRoadmap
@@ -451,7 +606,11 @@ CreateImportExtractionRun / ConfirmImportCandidates
 ## 11. 错误、恢复与并发
 
 - Provider、结构化输出、预算、取消、持久化和冲突错误继续分类。
+- 订阅运行时新增 `runtime_missing`、`runtime_version_unsupported`、`login_required`、`account_unavailable`、`model_unavailable`、`quota_exhausted`、`protocol_error` 和 `child_process_failed`。
 - 模型响应失败只使当前步骤失败，不删除已完成 Artifact。
+- 订阅运行时异常退出时 supervisor 必须回收子进程、保存最后已确认事件并把当前步骤标为可重试；不得自动重新提交可能已经产生费用的未知请求。
+- 模型目录或账号权益变化不得重写历史运行；只使尚未开始的新步骤重新验证其 `ModelTarget`。
+- 登录失效不得自动降级到 API；只有作者预先批准的回退链可以切换额度来源。
 - 批次运行期间阻止分支切换、快照恢复、导入应用和项目关闭数据库替换；关闭项目先取消并等待运行释放读锁。
 - 作者编辑章节导致基线变化时，候选应用使用 revision 和 canonical head 双重校验。
 - 磁盘不足时停止新模型调用并保留可恢复状态。
@@ -463,6 +622,9 @@ CreateImportExtractionRun / ConfirmImportCandidates
 
 - 状态机、批次 1–50 边界和单活动批次；
 - 批次顺序执行、取消、恢复、独立重试；
+- API、订阅和本地模型使用相同运行信封与事件合同；
+- 回退只发生在步骤边界，且订阅切 API 需要显式授权；
+- 实际模型来源与底层模型家族参与异构性判断；
 - 候选与正式事实隔离；
 - 影响方案在 canonical head 变化后失效；
 - 定稿事务与记忆更新原子性；
@@ -483,6 +645,15 @@ CreateImportExtractionRun / ConfirmImportCandidates
 
 测试使用 fake Provider、固定 IDs/clock 和合成文本，不访问真实模型 API。
 
+订阅运行时使用伪 Codex/Cursor 可执行文件与固定 JSON-RPC/stream-json transcript，覆盖：
+
+- 运行时发现、版本不兼容和登录失效；
+- 模型目录发现支持与不支持两种情况；
+- 流式输出、取消、超时、子进程崩溃和残留进程清理；
+- 429、额度耗尽、模型下架和回退；
+- stdout/stderr 与日志中的凭据、Header 和正文脱敏；
+- 织境不传入项目包路径、无关 Provider API Key 或原始认证内容，官方运行时仍能使用自己的登录状态。
+
 ### 12.3 性能
 
 以 500 章、200 万字符、2,000 条记忆记录为基线：
@@ -499,6 +670,8 @@ Windows/macOS 分别验证：
 
 - App 数据库位置和升级；
 - Keychain/Credential Manager；
+- 官方 Codex/Cursor 运行时检测、登录状态、路径含空格与非 ASCII 字符；
+- 订阅子进程启动、取消、应用退出清理和运行时升级后的协议兼容；
 - 长任务休眠、网络切换和应用重启恢复；
 - 项目包跨平台复制后，缺失全局创作方案时的安全降级；
 - production build 与人工长任务验收。
@@ -507,15 +680,29 @@ Windows/macOS 分别验证：
 
 本设计跨越多个独立子系统，不用一个巨型提交实现。拆为以下计划：
 
-### 计划 A：应用级模型设置
+### 计划 A1：应用级模型设置与统一运行端口
 
 - App SQLite、系统路径和迁移；
 - 全局连接、创作方案和旧项目兼容导入；
+- `ModelRuntime`、`ModelTarget`、能力快照和回退策略；
+- 现有 OpenAI/Anthropic Provider 适配；
 - 设置 UI；
 - 项目选择创作方案；
 - 保留现有 P3 运行兼容。
 
 退出门槛：打开任何项目都可使用全局 OpenAI/Anthropic 配置，项目包不保存 API Key。
+
+### 计划 A2：Codex/Cursor 订阅运行时
+
+- 官方运行时发现、版本门禁和进程 supervisor；
+- Codex App Server JSON-RPC 适配；
+- Cursor CLI Headless stream-json 适配；
+- 账号状态、模型目录、能力测试和来源标识；
+- 登录失效、额度耗尽、模型下架和回退；
+- 隔离工作目录、织境不接触原始凭据和双平台进程测试；
+- 设置 UI 中独立的“订阅连接”区域。
+
+退出门槛：用户可在当前电脑登录自己的 Codex 或 Cursor 官方运行时，从软件设置中选择账号实际可用的模型完成一次受审计的创作步骤；小说软件不保存第三方 OAuth Token，也不调用私有接口。
 
 ### 计划 B：作品方案与 AI 创作驾驶舱
 
@@ -566,3 +753,21 @@ Windows/macOS 分别验证：
 5. 不为记忆检索提前引入 Rust、外部向量数据库或云端必需服务。
 6. 不在一个迁移中同时搬迁全局设置、批次、记忆和导入数据。
 7. 每个计划独立迁移、独立回滚测试、独立双平台门禁。
+8. 不将 Cursor/Codex 订阅描述为通用 API，也不承诺订阅可使用所有模型。
+9. 不复制第三方 OAuth Client ID、认证文件、私有端点或未公开协议。
+10. 不允许订阅连接静默产生 API 费用、跨用户共享额度或绕过限流。
+
+## 15. 外部接口依据与非依赖
+
+实现前必须重新核对官方文档、分发许可和服务条款；以下页面是本方案当前采用的接口依据：
+
+- OpenAI Codex Authentication：`https://learn.chatgpt.com/docs/auth`
+- OpenAI Codex App Server：`https://learn.chatgpt.com/docs/app-server`
+- OpenAI Codex SDK：`https://learn.chatgpt.com/docs/codex-sdk`
+- Cursor CLI Headless：`https://docs.cursor.com/en/cli/headless`
+- Cursor CLI Authentication：`https://docs.cursor.com/en/cli/reference/authentication`
+- Cursor SDK：`https://cursor.com/changelog/sdk-release`
+- Cursor Terms of Service：`https://cursor.com/en-US/terms-of-service`
+- OpenAI Terms of Use：`https://openai.com/policies/terms-of-use/`
+
+`can1357/oh-my-pi` 仅作为多供应商路由、能力目录和外部运行时协议设计的研究参考。它的 MIT 代码许可不等于 Cursor、OpenAI 或其他供应商后端的商业访问授权；本项目不依赖其二进制、认证存储或私有 Provider 实现。
