@@ -28,7 +28,21 @@ export type ChangeOperationKind =
   | "replace_chapter_body"
   | "update_outline_node"
   | "update_character"
-  | "update_fact";
+  | "update_fact"
+  | "create_outline_node"
+  | "create_character"
+  | "create_relationship"
+  | "create_world_rule"
+  | "create_story_event"
+  | "create_fact"
+  | "create_foreshadowing_hook";
+export type EvidenceView = {
+  chapterId: string;
+  chapterTitle: string;
+  startLine: number;
+  endLine: number;
+  excerpt: string;
+};
 export type ChangeOperationView = {
   id: string;
   kind: ChangeOperationKind;
@@ -39,6 +53,7 @@ export type ChangeOperationView = {
   afterValue: string;
   reason: string;
   status: ChangeSetStatus;
+  evidence?: EvidenceView[];
 };
 export type ChangeSetView = {
   id: string;
@@ -620,6 +635,8 @@ export type ImportJobView = {
   createdAt: string;
   updatedAt: string;
   appliedAt: string;
+  extractionStatus: string;
+  extractionRunId: string;
   chapters: ImportChapterView[];
 };
 export type ImportPrepareView = {
@@ -628,6 +645,55 @@ export type ImportPrepareView = {
 export type ImportApplyView = {
   job: ImportJobView;
   chapters: ChapterView[];
+};
+
+export type ExtractionStatus =
+  | "none"
+  | "running"
+  | "completed"
+  | "failed";
+export type ExtractionRunInput = {
+  importJobId: string;
+  connectionId: string;
+  model: string;
+  instruction: string;
+};
+export type ExtractionStepView = {
+  id: string;
+  importChapterId: string;
+  createdChapterId: string;
+  chapterTitle: string;
+  position: number;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  output: string;
+  errorCode: string;
+  errorMessage: string;
+  providerRequestId: string;
+  inputTokens: number;
+  outputTokens: number;
+};
+export type ExtractionTaskView = {
+  id: string;
+  importJobId: string;
+  connectionId: string;
+  model: string;
+  prompt: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "recoverable";
+  errorCode: string;
+  errorMessage: string;
+  changeSetId: string;
+  retryOf: string;
+  tokenBudget: number;
+  contextCharBudget: number;
+  inputTokens: number;
+  outputTokens: number;
+  steps: ExtractionStepView[];
+  createdAt: string;
+  updatedAt: string;
+};
+export type ExtractionRunView = {
+  task: ExtractionTaskView;
+  changeSet: ChangeSetView | null;
 };
 
 export interface StudioClient {
@@ -642,6 +708,12 @@ export interface StudioClient {
     id: string,
     selectedChapterIds: string[],
   ): Promise<ImportApplyView>;
+  extractionTasks(): Promise<ExtractionTaskView[]>;
+  extractionTask(id: string): Promise<ExtractionRunView>;
+  startExtractionRun(input: ExtractionRunInput): Promise<ExtractionRunView>;
+  executeExtractionRun(id: string): Promise<ExtractionRunView>;
+  cancelExtractionRun(id: string): Promise<void>;
+  retryExtractionRun(id: string): Promise<ExtractionRunView>;
   createProject(input: CreateProjectInput): Promise<ProjectView>;
   openProject(path: string): Promise<ProjectView>;
   listChapters(): Promise<ChapterView[]>;

@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   FileSearch2,
   FileText,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import type {
   ImportJobView,
   StudioClient,
 } from "../../lib/studio-client";
+import { ExtractionWorkbench } from "../extraction/ExtractionWorkbench";
 
 type ImportWorkbenchProps = {
   client: StudioClient;
@@ -84,6 +86,7 @@ export function ImportWorkbench({
   client,
   onChaptersImported,
 }: ImportWorkbenchProps) {
+  const [mode, setMode] = useState<"imports" | "extraction">("imports");
   const [jobs, setJobs] = useState<ImportJobView[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loadedDetail, setLoadedDetail] = useState<ImportJobView | null>(null);
@@ -369,6 +372,31 @@ export function ImportWorkbench({
     );
   };
 
+  if (mode === "extraction") {
+    return (
+      <section className="import-workbench">
+        <header className="import-heading">
+          <div>
+            <p className="eyebrow">原稿设定抽取</p>
+            <h2>设定抽取</h2>
+            <p>从已导入稿件中逐章抽取设定候选，合并后由你审阅应用。</p>
+          </div>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setMode("imports")}
+          >
+            返回导入任务
+          </button>
+        </header>
+        <ExtractionWorkbench
+          client={client}
+          onExtractionApplied={() => void refreshImports()}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="import-workbench">
       <header className="import-heading">
@@ -377,16 +405,26 @@ export function ImportWorkbench({
           <h2>导入分析</h2>
           <p>先预览章节边界，再由你决定哪些正文进入当前项目。</p>
         </div>
-        <button
-          ref={prepareButtonRef}
-          type="button"
-          className="primary-action"
-          disabled={busy !== null || confirmation !== null}
-          onClick={() => void prepare()}
-        >
-          <Upload size={17} aria-hidden="true" />
-          {busy === "prepare" ? "正在分析…" : "选择小说文件"}
-        </button>
+        <div className="import-heading__actions">
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setMode("extraction")}
+          >
+            <Sparkles size={16} aria-hidden="true" />
+            设定抽取
+          </button>
+          <button
+            ref={prepareButtonRef}
+            type="button"
+            className="primary-action"
+            disabled={busy !== null || confirmation !== null}
+            onClick={() => void prepare()}
+          >
+            <Upload size={17} aria-hidden="true" />
+            {busy === "prepare" ? "正在分析…" : "选择小说文件"}
+          </button>
+        </div>
       </header>
 
       {error && (

@@ -87,6 +87,11 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "index", "idx_agent_run_steps_run_position")
 	assertSchemaObjectExists(t, db, "index", "idx_import_jobs_project_source_hash")
 	assertSchemaObjectExists(t, db, "index", "idx_import_chapters_job_position")
+	assertSchemaObjectExists(t, db, "table", "extraction_tasks")
+	assertSchemaObjectExists(t, db, "table", "extraction_steps")
+	assertSchemaObjectExists(t, db, "table", "extraction_artifacts")
+	assertSchemaObjectExists(t, db, "index", "idx_extraction_tasks_project")
+	assertSchemaObjectExists(t, db, "index", "idx_extraction_steps_task")
 
 	var version int64
 	if err := db.QueryRow(`
@@ -96,8 +101,8 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 13 {
-		t.Fatalf("schema version = %d, want 13", version)
+	if version != 14 {
+		t.Fatalf("schema version = %d, want 14", version)
 	}
 }
 
@@ -410,6 +415,213 @@ func TestManuscriptImportMigrationPreservesVersionTwelveProjectDataAndDownIsClea
 	}
 	if chapterBody != "旧正文" {
 		t.Fatalf("chapter body after down migration = %q", chapterBody)
+	}
+}
+
+func TestExtractionRuntimeMigrationPreservesVersionThirteenDataAndDownIsClean(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 13); err != nil {
+		t.Fatalf("migrate to version thirteen: %v", err)
+	}
+
+	now := formatTime(time.Unix(100, 0))
+	seedStatements := []struct {
+		query string
+		args  []any
+	}{
+		{
+			`INSERT INTO projects(id, title, genre, summary, created_at, updated_at)
+			 VALUES ('project-1', '旧项目', '奇幻', '旧简介', ?, ?)`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO chapters(
+				id, project_id, title, position, body, revision,
+				revision_source, revision_summary, created_at, updated_at
+			 ) VALUES ('chapter-1', 'project-1', '第一章', 1, '旧正文', 2, 'author', '旧修订', ?, ?)`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO characters(
+				id, project_id, name, aliases_json, role, summary, motivation, fear,
+				secret, arc, status, created_at, updated_at, deleted_at
+			 ) VALUES ('character-1', 'project-1', '林默', '[]', 'protagonist', '旧摘要', '', '', '', '', 'active', ?, ?, NULL)`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO change_sets(
+				id, project_id, title, summary, created_by, status, created_at, updated_at
+			 ) VALUES ('change-set-1', 'project-1', '旧候选', '', 'agent:planner', 'applied', ?, ?)`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO change_operations(
+				id, change_set_id, kind, position, target_id, base_revision, base_fingerprint,
+				before_value, after_value, reason, status, created_at, updated_at
+			 ) VALUES (
+				'operation-1', 'change-set-1', 'update_character', 1, 'character-1', 0, 'fp',
+				'{"name":"林默"}', '{"name":"林默","summary":"新摘要"}', '更新摘要', 'applied', ?, ?
+			 )`,
+			[]any{now, now},
+		},
+		{
+			`INSERT INTO import_jobs(
+				id, project_id, source_name, source_format, source_encoding,
+				source_hash, source_bytes, archived_relative_path, status,
+				chapter_count, selected_chapter_count, error_code, error_message,
+				created_at, updated_at, applied_at
+			 ) VALUES (
+				'import-job-1', 'project-1', 'novel.txt', 'txt', 'UTF-8',
+				'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1024, 'imports/novel.txt', 'applied',
+				1, 1, '', '', ?, ?, ?
+			 )`,
+			[]any{now, now, now},
+		},
+	}
+	for index, statement := range seedStatements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seed version thirteen statement %d: %v", index, err)
+		}
+	}
+
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("migrate to version fourteen: %v", err)
+	}
+
+	// New extraction runtime tables exist.
+	assertSchemaObjectExists(t, db, "table", "extraction_tasks")
+	assertSchemaObjectExists(t, db, "table", "extraction_steps")
+	assertSchemaObjectExists(t, db, "table", "extraction_artifacts")
+	assertSchemaObjectExists(t, db, "index", "idx_extraction_tasks_project")
+	assertSchemaObjectExists(t, db, "index", "idx_extraction_steps_task")
+
+	// change_operations gained an evidence column defaulting to "[]" for
+	// existing rows, and the kind CHECK now admits the create_* family.
+	var evidence, kind, afterValue string
+	if err := db.QueryRowContext(ctx, `
+		SELECT evidence, kind, after_value
+		FROM change_operations
+		WHERE id = 'operation-1'
+	`).Scan(&evidence, &kind, &afterValue); err != nil {
+		t.Fatalf("read migrated change operation: %v", err)
+	}
+	if evidence != "[]" || kind != "update_character" || afterValue != `{"name":"林默","summary":"新摘要"}` {
+		t.Fatalf("migrated operation = (evidence=%q kind=%q after=%q)", evidence, kind, afterValue)
+	}
+	// The create_* family is now accepted by the kind CHECK. Insert one of
+	// each kind to prove the constraint admits them, then verify the downgrade
+	// guard refuses to silently discard them.
+	for _, accepted := range []string{
+		"create_outline_node", "create_character", "create_relationship",
+		"create_world_rule", "create_story_event", "create_fact",
+		"create_foreshadowing_hook",
+	} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO change_operations(
+				id, change_set_id, kind, position, target_id, base_revision, base_fingerprint,
+				before_value, after_value, reason, evidence, status, created_at, updated_at
+			) VALUES (
+				?, 'change-set-1', ?, 2, 'target-1', 0, ?,
+				'{}', '{"v":1}', '抽取候选', '[]', 'pending', ?, ?
+			)
+		`, "operation-"+accepted, accepted, "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae", now, now); err != nil {
+			t.Fatalf("insert %s operation: %v", accepted, err)
+		}
+	}
+
+	// import_jobs gained extraction_status (default "none") and extraction_run_id.
+	var extractionStatus string
+	var extractionRunID sql.NullString
+	if err := db.QueryRowContext(ctx, `
+		SELECT extraction_status, extraction_run_id
+		FROM import_jobs
+		WHERE id = 'import-job-1'
+	`).Scan(&extractionStatus, &extractionRunID); err != nil {
+		t.Fatalf("read migrated import job: %v", err)
+	}
+	if extractionStatus != "none" || extractionRunID.Valid {
+		t.Fatalf("migrated import job extraction = (status=%q runID=%v)", extractionStatus, extractionRunID)
+	}
+
+	// Legacy chapter and character data are untouched.
+	var chapterBody string
+	var chapterRevision int
+	if err := db.QueryRowContext(ctx, "SELECT body, revision FROM chapters WHERE id = 'chapter-1'").
+		Scan(&chapterBody, &chapterRevision); err != nil {
+		t.Fatalf("read chapter after upgrade: %v", err)
+	}
+	if chapterBody != "旧正文" || chapterRevision != 2 {
+		t.Fatalf("chapter changed after upgrade: body=%q revision=%d", chapterBody, chapterRevision)
+	}
+	var characterSummary string
+	if err := db.QueryRowContext(ctx, "SELECT summary FROM characters WHERE id = 'character-1'").
+		Scan(&characterSummary); err != nil {
+		t.Fatalf("read character after upgrade: %v", err)
+	}
+	if characterSummary != "旧摘要" {
+		t.Fatalf("character summary changed after upgrade: %q", characterSummary)
+	}
+
+	// Down migration to thirteen must refuse to silently discard create_*
+	// rows. The guard aborts via a NOT NULL constraint on a temp table.
+	if _, err := provider.DownTo(ctx, 13); err == nil {
+		t.Fatal("downgrade with create_* operations should have been refused")
+	}
+
+	// After removing the create_* rows, the downgrade succeeds and preserves
+	// the pre-existing update_* rows.
+	if _, err := db.ExecContext(ctx, `
+		DELETE FROM change_operations
+		WHERE kind IN (
+			'create_outline_node', 'create_character', 'create_relationship',
+			'create_world_rule', 'create_story_event', 'create_fact',
+			'create_foreshadowing_hook'
+		)
+	`); err != nil {
+		t.Fatalf("delete create_* operations before downgrade: %v", err)
+	}
+	if _, err := provider.DownTo(ctx, 13); err != nil {
+		t.Fatalf("migrate down to version thirteen: %v", err)
+	}
+	assertSchemaObjectMissing(t, db, "table", "extraction_tasks")
+	assertSchemaObjectMissing(t, db, "table", "extraction_steps")
+	assertSchemaObjectMissing(t, db, "table", "extraction_artifacts")
+
+	// The original update_character row remains intact after downgrade.
+	var survivingKind, survivingAfter string
+	if err := db.QueryRowContext(ctx, `
+		SELECT kind, after_value
+		FROM change_operations
+		WHERE id = 'operation-1'
+	`).Scan(&survivingKind, &survivingAfter); err != nil {
+		t.Fatalf("read surviving change operation after downgrade: %v", err)
+	}
+	if survivingKind != "update_character" || survivingAfter != `{"name":"林默","summary":"新摘要"}` {
+		t.Fatalf("surviving operation = (kind=%q after=%q)", survivingKind, survivingAfter)
+	}
+
+	if err := db.QueryRowContext(ctx, "SELECT body FROM chapters WHERE id = 'chapter-1'").
+		Scan(&chapterBody); err != nil {
+		t.Fatalf("read chapter after downgrade: %v", err)
+	}
+	if chapterBody != "旧正文" {
+		t.Fatalf("chapter body changed after downgrade: %q", chapterBody)
 	}
 }
 

@@ -32,6 +32,17 @@ const (
 	JobStatusFailed   JobStatus = "failed"
 )
 
+// ExtractionStatus tracks whether the applied ImportJob has been processed by
+// an AI extraction task. It only advances after Status reaches JobStatusApplied.
+type ExtractionStatus string
+
+const (
+	ExtractionStatusNone      ExtractionStatus = "none"
+	ExtractionStatusRunning   ExtractionStatus = "running"
+	ExtractionStatusCompleted ExtractionStatus = "completed"
+	ExtractionStatusFailed    ExtractionStatus = "failed"
+)
+
 type ImportJob struct {
 	ID                   string
 	ProjectID            string
@@ -46,6 +57,8 @@ type ImportJob struct {
 	SelectedChapterCount int
 	ErrorCode            string
 	ErrorMessage         string
+	ExtractionStatus     ExtractionStatus
+	ExtractionRunID      string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	AppliedAt            *time.Time
@@ -113,6 +126,7 @@ func NewImportJob(params ImportJobParams, now time.Time) (ImportJob, error) {
 		ArchivedRelativePath: params.ArchivedRelativePath,
 		Status:               JobStatusPrepared,
 		ChapterCount:         params.ChapterCount,
+		ExtractionStatus:     ExtractionStatusNone,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}, nil
@@ -156,6 +170,7 @@ func NewFailedImportJob(params FailedImportJobParams, now time.Time) (ImportJob,
 		Status:               JobStatusFailed,
 		ErrorCode:            params.ErrorCode,
 		ErrorMessage:         params.ErrorMessage,
+		ExtractionStatus:     ExtractionStatusNone,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}, nil
@@ -194,6 +209,51 @@ func (job ImportJob) MarkFailed(errorCode, errorMessage string, now time.Time) (
 	job.ErrorMessage = errorMessage
 	job.UpdatedAt = now.UTC()
 	job.AppliedAt = nil
+	return job, nil
+}
+
+// MarkExtractionStarted records that an extraction task is running for this
+// applied ImportJob. The prior extraction status must be none or failed so
+// that authors can retry a failed extraction without first clearing it.
+func (job ImportJob) MarkExtractionStarted(runID string, now time.Time) (ImportJob, error) {
+	if job.Status != JobStatusApplied {
+		return ImportJob{}, ErrInvalidJobTransition
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ImportJob{}, ErrBlankValue
+	}
+	if job.ExtractionStatus != ExtractionStatusNone && job.ExtractionStatus != ExtractionStatusFailed {
+		return ImportJob{}, ErrInvalidJobTransition
+	}
+
+	job.ExtractionStatus = ExtractionStatusRunning
+	job.ExtractionRunID = runID
+	job.UpdatedAt = now.UTC()
+	return job, nil
+}
+
+// MarkExtractionCompleted records that extraction has produced a ChangeSet
+// for authors to review.
+func (job ImportJob) MarkExtractionCompleted(now time.Time) (ImportJob, error) {
+	if job.Status != JobStatusApplied || job.ExtractionStatus != ExtractionStatusRunning {
+		return ImportJob{}, ErrInvalidJobTransition
+	}
+	job.ExtractionStatus = ExtractionStatusCompleted
+	job.UpdatedAt = now.UTC()
+	return job, nil
+}
+
+// MarkExtractionFailed records that extraction failed for the applied ImportJob
+// so that authors can retry from the workbench. The detailed error message
+// lives on the bound ExtractionTask; the ImportJob only tracks the lifecycle
+// so the workbench can show "retry extraction".
+func (job ImportJob) MarkExtractionFailed(now time.Time) (ImportJob, error) {
+	if job.Status != JobStatusApplied || job.ExtractionStatus != ExtractionStatusRunning {
+		return ImportJob{}, ErrInvalidJobTransition
+	}
+	job.ExtractionStatus = ExtractionStatusFailed
+	job.UpdatedAt = now.UTC()
 	return job, nil
 }
 

@@ -118,6 +118,12 @@ type WorkspaceUseCases interface {
 	ImportJob(context.Context, string) (workspace.ImportJobView, error)
 	DeleteImportJob(context.Context, string) error
 	ApplyImportJob(context.Context, string, []string) (workspace.ImportApplyView, error)
+	StartExtractionRun(context.Context, workspace.ExtractionRunInput) (workspace.ExtractionRunView, error)
+	ExecuteExtractionRun(context.Context, string) (workspace.ExtractionRunView, error)
+	CancelExtractionRun(context.Context, string) error
+	RetryExtractionRun(context.Context, string) (workspace.ExtractionRunView, error)
+	ExtractionTasks(context.Context) ([]workspace.ExtractionTaskView, error)
+	ExtractionTask(context.Context, string) (workspace.ExtractionRunView, error)
 	Close() error
 }
 
@@ -244,6 +250,30 @@ func (a *DesktopAPI) DeleteImportJob(id string) error {
 
 func (a *DesktopAPI) ApplyImportJob(id string, selectedChapterIDs []string) (workspace.ImportApplyView, error) {
 	return safeResult(a.workspace.ApplyImportJob(a.ctx, id, selectedChapterIDs))
+}
+
+func (a *DesktopAPI) StartExtractionRun(input workspace.ExtractionRunInput) (workspace.ExtractionRunView, error) {
+	return safeResult(a.workspace.StartExtractionRun(a.ctx, input))
+}
+
+func (a *DesktopAPI) ExecuteExtractionRun(id string) (workspace.ExtractionRunView, error) {
+	return safeResult(a.workspace.ExecuteExtractionRun(a.ctx, id))
+}
+
+func (a *DesktopAPI) CancelExtractionRun(id string) error {
+	return safeDesktopError(a.workspace.CancelExtractionRun(a.ctx, id))
+}
+
+func (a *DesktopAPI) RetryExtractionRun(id string) (workspace.ExtractionRunView, error) {
+	return safeResult(a.workspace.RetryExtractionRun(a.ctx, id))
+}
+
+func (a *DesktopAPI) ExtractionTasks() ([]workspace.ExtractionTaskView, error) {
+	return safeResult(a.workspace.ExtractionTasks(a.ctx))
+}
+
+func (a *DesktopAPI) ExtractionTask(id string) (workspace.ExtractionRunView, error) {
+	return safeResult(a.workspace.ExtractionTask(a.ctx, id))
 }
 
 func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectView, error) {

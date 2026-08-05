@@ -40,6 +40,13 @@ const kindNames: Record<ChangeOperationKind, string> = {
   update_outline_node: "大纲节点",
   update_character: "角色档案",
   update_fact: "故事事实",
+  create_outline_node: "新建大纲节点",
+  create_character: "新建角色",
+  create_relationship: "新建人物关系",
+  create_world_rule: "新建世界规则",
+  create_story_event: "新建故事事件",
+  create_fact: "新建事实",
+  create_foreshadowing_hook: "新建伏笔",
 };
 
 const fieldNames: Record<string, string> = {

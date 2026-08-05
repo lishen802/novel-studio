@@ -918,6 +918,17 @@ type fakeWorkspace struct {
 	importApplyResult        workspace.ImportApplyView
 	appliedImportJobID       string
 	appliedImportChapterIDs  []string
+	extractionRunInput       workspace.ExtractionRunInput
+	startExtractionResult    workspace.ExtractionRunView
+	executeExtractionID      string
+	executeExtractionResult  workspace.ExtractionRunView
+	cancelExtractionID       string
+	cancelExtractionErr      error
+	retryExtractionID        string
+	retryExtractionResult    workspace.ExtractionRunView
+	extractionTasksResult    []workspace.ExtractionTaskView
+	extractionTaskID         string
+	extractionTaskResult     workspace.ExtractionRunView
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -1386,4 +1397,33 @@ func (f *fakeWorkspace) ApplyImportJob(_ context.Context, id string, selectedIDs
 	f.appliedImportJobID = id
 	f.appliedImportChapterIDs = append([]string(nil), selectedIDs...)
 	return f.importApplyResult, nil
+}
+
+func (f *fakeWorkspace) StartExtractionRun(_ context.Context, input workspace.ExtractionRunInput) (workspace.ExtractionRunView, error) {
+	f.extractionRunInput = input
+	return f.startExtractionResult, nil
+}
+
+func (f *fakeWorkspace) ExecuteExtractionRun(_ context.Context, id string) (workspace.ExtractionRunView, error) {
+	f.executeExtractionID = id
+	return f.executeExtractionResult, nil
+}
+
+func (f *fakeWorkspace) CancelExtractionRun(_ context.Context, id string) error {
+	f.cancelExtractionID = id
+	return f.cancelExtractionErr
+}
+
+func (f *fakeWorkspace) RetryExtractionRun(_ context.Context, id string) (workspace.ExtractionRunView, error) {
+	f.retryExtractionID = id
+	return f.retryExtractionResult, nil
+}
+
+func (f *fakeWorkspace) ExtractionTasks(context.Context) ([]workspace.ExtractionTaskView, error) {
+	return f.extractionTasksResult, nil
+}
+
+func (f *fakeWorkspace) ExtractionTask(_ context.Context, id string) (workspace.ExtractionRunView, error) {
+	f.extractionTaskID = id
+	return f.extractionTaskResult, nil
 }

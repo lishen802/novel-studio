@@ -63,14 +63,18 @@ func (s *Store) CreateChangeSet(ctx context.Context, changeSet revisiondomain.Ch
 		return databaseOperationError("create change set", err)
 	}
 	for index, operation := range changeSet.Operations {
+		evidenceJSON, err := encodeEvidence(operation.Evidence)
+		if err != nil {
+			return databaseOperationError("encode change operation evidence", err)
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO change_operations(
 				id, change_set_id, kind, position, target_id, base_revision, base_fingerprint,
-				before_value, after_value, reason, status, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				before_value, after_value, reason, evidence, status, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, operation.ID, operation.ChangeSetID, operation.Kind, index+1, operation.TargetID,
 			operation.BaseRevision, operation.BaseFingerprint, operation.BeforeValue,
-			operation.AfterValue, operation.Reason, operation.Status,
+			operation.AfterValue, operation.Reason, evidenceJSON, operation.Status,
 			formatTime(operation.CreatedAt), formatTime(operation.UpdatedAt))
 		if err != nil {
 			return databaseOperationError("create change operation", err)
@@ -323,6 +327,20 @@ func prepareOperation(
 		return prepareCharacterOperation(ctx, tx, changeSet, operation, appliedAt)
 	case revisiondomain.OperationUpdateFact:
 		return prepareFactOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateOutlineNode:
+		return prepareCreateOutlineOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateCharacter:
+		return prepareCreateCharacterOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateRelationship:
+		return prepareCreateRelationshipOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateWorldRule:
+		return prepareCreateWorldRuleOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateStoryEvent:
+		return prepareCreateStoryEventOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateFact:
+		return prepareCreateFactOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateForeshadowingHook:
+		return prepareCreateForeshadowingHookOperation(ctx, tx, changeSet, operation, appliedAt)
 	default:
 		return preparedOperation{}, revisiondomain.ErrInvalidOperation
 	}
@@ -670,7 +688,7 @@ func loadChangeSet(ctx context.Context, queryer changeSetQueryer, id string) (re
 
 	rows, err := queryer.QueryContext(ctx, `
 		SELECT id, change_set_id, kind, target_id, base_revision, base_fingerprint,
-			before_value, after_value, reason, status, created_at, updated_at
+			before_value, after_value, reason, evidence, status, created_at, updated_at
 		FROM change_operations WHERE change_set_id = ?
 		ORDER BY position, id
 	`, id)
@@ -681,14 +699,18 @@ func loadChangeSet(ctx context.Context, queryer changeSetQueryer, id string) (re
 	changeSet.Operations = make([]revisiondomain.PatchOperation, 0)
 	for rows.Next() {
 		var operation revisiondomain.PatchOperation
-		var operationCreatedAt, operationUpdatedAt string
+		var operationCreatedAt, operationUpdatedAt, evidenceJSON string
 		if err := rows.Scan(
 			&operation.ID, &operation.ChangeSetID, &operation.Kind, &operation.TargetID,
 			&operation.BaseRevision, &operation.BaseFingerprint, &operation.BeforeValue,
-			&operation.AfterValue, &operation.Reason, &operation.Status,
+			&operation.AfterValue, &operation.Reason, &evidenceJSON, &operation.Status,
 			&operationCreatedAt, &operationUpdatedAt,
 		); err != nil {
 			return revisiondomain.ChangeSet{}, databaseOperationError("scan change operation", err)
+		}
+		operation.Evidence, err = decodeEvidence(evidenceJSON)
+		if err != nil {
+			return revisiondomain.ChangeSet{}, databaseOperationError("decode change operation evidence", err)
 		}
 		operation.CreatedAt, err = parseTime(operationCreatedAt)
 		if err != nil {

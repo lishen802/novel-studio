@@ -54,6 +54,8 @@ type ImportJobView struct {
 	CreatedAt            string              `json:"createdAt"`
 	UpdatedAt            string              `json:"updatedAt"`
 	AppliedAt            string              `json:"appliedAt,omitempty"`
+	ExtractionStatus     string              `json:"extractionStatus,omitempty"`
+	ExtractionRunID      string              `json:"extractionRunId,omitempty"`
 	Chapters             []ImportChapterView `json:"chapters"`
 }
 
@@ -570,6 +572,12 @@ func importJobView(
 	if job.AppliedAt != nil {
 		view.AppliedAt = job.AppliedAt.UTC().Format(time.RFC3339Nano)
 	}
+	// "none" is the default for applied jobs; omit it so the front end can treat
+	// absence as "no extraction run yet" without special-casing the string.
+	if job.ExtractionStatus != "" && job.ExtractionStatus != importing.ExtractionStatusNone {
+		view.ExtractionStatus = string(job.ExtractionStatus)
+	}
+	view.ExtractionRunID = job.ExtractionRunID
 	return view
 }
 

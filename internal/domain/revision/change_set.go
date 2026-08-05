@@ -37,6 +37,49 @@ const (
 	OperationUpdateFact         OperationKind = "update_fact"
 )
 
+// Create operations introduce brand-new story assets. They are produced by
+// manuscript extraction (and future AI proposals) where no baseline entity
+// exists yet. before_value is canonicalized to "{}" and base_fingerprint to
+// the SHA-256 of "{}", satisfying the change_operations CHECK constraints
+// inherited from migration 00010.
+const (
+	OperationCreateOutlineNode       OperationKind = "create_outline_node"
+	OperationCreateCharacter         OperationKind = "create_character"
+	OperationCreateRelationship      OperationKind = "create_relationship"
+	OperationCreateWorldRule         OperationKind = "create_world_rule"
+	OperationCreateStoryEvent        OperationKind = "create_story_event"
+	OperationCreateFact              OperationKind = "create_fact"
+	OperationCreateForeshadowingHook OperationKind = "create_foreshadowing_hook"
+)
+
+// Evidence ties a candidate operation back to the manuscript line range that
+// motivated it, so authors can verify AI-proposed assets against the source
+// text before confirming.
+type Evidence struct {
+	ChapterID    string `json:"chapterId"`
+	ChapterTitle string `json:"chapterTitle"`
+	StartLine    int    `json:"startLine"`
+	EndLine      int    `json:"endLine"`
+	Excerpt      string `json:"excerpt"`
+}
+
+// IsCreateOperation reports whether the kind introduces a new asset.
+func IsCreateOperation(kind OperationKind) bool {
+	switch kind {
+	case OperationCreateOutlineNode, OperationCreateCharacter, OperationCreateRelationship,
+		OperationCreateWorldRule, OperationCreateStoryEvent, OperationCreateFact,
+		OperationCreateForeshadowingHook:
+		return true
+	}
+	return false
+}
+
+// EmptyObjectFingerprint is the base_fingerprint value for create operations.
+func EmptyObjectFingerprint() string {
+	sum := sha256.Sum256([]byte("{}"))
+	return hex.EncodeToString(sum[:])
+}
+
 type PatchOperationSpec struct {
 	ID           string
 	Kind         OperationKind
@@ -45,6 +88,7 @@ type PatchOperationSpec struct {
 	BeforeValue  string
 	AfterValue   string
 	Reason       string
+	Evidence     []Evidence
 }
 
 type PatchOperation struct {
@@ -58,6 +102,7 @@ type PatchOperation struct {
 	AfterValue      string
 	Reason          string
 	Status          ChangeSetStatus
+	Evidence        []Evidence
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -167,6 +212,7 @@ func NewChangeSet(
 			AfterValue:      afterValue,
 			Reason:          strings.TrimSpace(spec.Reason),
 			Status:          ChangeSetPending,
+			Evidence:        append([]Evidence(nil), spec.Evidence...),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		})
@@ -374,7 +420,14 @@ func validOperationKind(kind OperationKind) bool {
 	case OperationReplaceChapterBody,
 		OperationUpdateOutlineNode,
 		OperationUpdateCharacter,
-		OperationUpdateFact:
+		OperationUpdateFact,
+		OperationCreateOutlineNode,
+		OperationCreateCharacter,
+		OperationCreateRelationship,
+		OperationCreateWorldRule,
+		OperationCreateStoryEvent,
+		OperationCreateFact,
+		OperationCreateForeshadowingHook:
 		return true
 	default:
 		return false
@@ -386,6 +439,16 @@ func normalizeOperationValues(
 	beforeValue string,
 	afterValue string,
 ) (string, string, error) {
+	if IsCreateOperation(kind) {
+		afterValue, err := canonicalJSONObject(afterValue)
+		if err != nil {
+			return "", "", ErrInvalidOperation
+		}
+		if afterValue == "{}" {
+			return "", "", ErrNoopOperation
+		}
+		return "{}", afterValue, nil
+	}
 	if kind == OperationReplaceChapterBody {
 		if beforeValue == afterValue {
 			return "", "", ErrNoopOperation

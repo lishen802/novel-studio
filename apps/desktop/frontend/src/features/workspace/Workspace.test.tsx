@@ -128,6 +128,8 @@ describe("Workspace", () => {
       sourceBytes: 128,
       chapterCount: 1,
       selectedChapterCount: 0,
+      extractionStatus: "none",
+      extractionRunId: "",
       errorCode: "",
       errorMessage: "",
       createdAt: "2026-08-03T08:00:00Z",

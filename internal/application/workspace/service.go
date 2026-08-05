@@ -32,6 +32,8 @@ type Service struct {
 
 	agentJobsMu      sync.Mutex
 	agentJobs        map[string]context.CancelFunc
+	extractionJobsMu sync.Mutex
+	extractionJobs   map[string]context.CancelFunc
 	versionOperation bool
 	importOperation  bool
 }
@@ -59,6 +61,7 @@ func NewService(
 		snapshots:           snapshots,
 		branchMergePreviews: make(map[string]branchMergePreview),
 		agentJobs:           make(map[string]context.CancelFunc),
+		extractionJobs:      make(map[string]context.CancelFunc),
 	}
 	if len(branchArchives) > 0 {
 		service.branches = branchArchives[0]
@@ -320,6 +323,7 @@ func (s *Service) Close() error {
 	s.closed = true
 
 	s.cancelAllAgentJobs()
+	s.cancelAllExtractionJobs()
 	s.mu.Lock()
 	active := s.active
 	s.active = nil
@@ -347,6 +351,7 @@ func (s *Service) endLifecycleOperation() {
 // replaceActive must be called while lifecycleMu is held.
 func (s *Service) replaceActive(next activeWorkspace) {
 	s.cancelAllAgentJobs()
+	s.cancelAllExtractionJobs()
 	s.mu.Lock()
 	previous := s.active
 	s.active = &next
