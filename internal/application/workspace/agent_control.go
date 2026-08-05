@@ -44,6 +44,42 @@ func (s *Service) cancelAllAgentJobs() {
 	}
 }
 
+// beginExtractionJob registers a cancellable context for an extraction run.
+// It mirrors beginAgentJob so CancelExtractionRun can interrupt a long-running
+// model call, while preventing two concurrent runs on the same task.
+func (s *Service) beginExtractionJob(parent context.Context, taskID string) (context.Context, error) {
+	s.extractionJobsMu.Lock()
+	defer s.extractionJobsMu.Unlock()
+	if _, exists := s.extractionJobs[taskID]; exists {
+		return nil, fmt.Errorf("%w: %s", ErrExtractionRunActive, taskID)
+	}
+	ctx, cancel := context.WithCancel(parent)
+	s.extractionJobs[taskID] = cancel
+	return ctx, nil
+}
+
+func (s *Service) endExtractionJob(taskID string) {
+	s.extractionJobsMu.Lock()
+	cancel := s.extractionJobs[taskID]
+	delete(s.extractionJobs, taskID)
+	s.extractionJobsMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) cancelAllExtractionJobs() {
+	s.extractionJobsMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.extractionJobs))
+	for _, cancel := range s.extractionJobs {
+		cancels = append(cancels, cancel)
+	}
+	s.extractionJobsMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
 func (s *Service) beginVersionOperation() error {
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()

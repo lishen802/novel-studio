@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrExtractionTaskMissing   = errors.New("extraction task does not exist")
-	ErrExtractionTaskConflict  = errors.New("extraction task state changed concurrently")
-	ErrExtractionStepMissing   = errors.New("extraction step does not exist")
-	ErrExtractionPersistence   = errors.New("extraction persistence operation failed")
+	ErrExtractionTaskMissing  = errors.New("extraction task does not exist")
+	ErrExtractionTaskConflict = errors.New("extraction task state changed concurrently")
+	ErrExtractionStepMissing  = errors.New("extraction step does not exist")
+	ErrExtractionPersistence  = errors.New("extraction persistence operation failed")
 )
 
 // ExtractionArtifact is a snapshot persisted alongside a task for audit. The

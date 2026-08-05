@@ -54,14 +54,16 @@ func insertExtractionStep(ctx context.Context, tx *sql.Tx, step extractiondomain
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO extraction_steps(
 			id, task_id, import_chapter_id, created_chapter_id, chapter_title, position,
+			source_start_line, source_end_line,
 			status, output, error_code, error_message,
 			input_tokens, output_tokens, provider_request_id,
 			created_at, updated_at, started_at, completed_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 	`,
 		step.ID, step.TaskID, step.ImportChapterID, step.CreatedChapterID, step.ChapterTitle, step.Position,
+		step.SourceStartLine, step.SourceEndLine,
 		step.Status, step.Output, step.ErrorCode, step.ErrorMessage,
 		step.InputTokens, step.OutputTokens, step.ProviderRequestID,
 		formatTime(step.CreatedAt), formatTime(step.UpdatedAt),
@@ -207,6 +209,7 @@ func (s *Store) TasksForImport(ctx context.Context, importJobID string) ([]extra
 func (s *Store) listExtractionSteps(ctx context.Context, taskID string) ([]extractiondomain.Step, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, task_id, import_chapter_id, created_chapter_id, chapter_title, position,
+			source_start_line, source_end_line,
 			status, output, error_code, error_message,
 			input_tokens, output_tokens, provider_request_id,
 			created_at, updated_at, started_at, completed_at
@@ -348,6 +351,7 @@ func scanExtractionStep(scanner rowScanner) (extractiondomain.Step, error) {
 	var startedAt, completedAt sql.NullString
 	err := scanner.Scan(
 		&step.ID, &step.TaskID, &step.ImportChapterID, &step.CreatedChapterID, &step.ChapterTitle, &step.Position,
+		&step.SourceStartLine, &step.SourceEndLine,
 		&step.Status, &step.Output, &step.ErrorCode, &step.ErrorMessage,
 		&step.InputTokens, &step.OutputTokens, &step.ProviderRequestID,
 		&createdAt, &updatedAt, &startedAt, &completedAt,

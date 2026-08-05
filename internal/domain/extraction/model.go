@@ -52,13 +52,13 @@ const (
 
 // StepSpec describes a chapter to extract from when constructing a Task.
 type StepSpec struct {
-	ID                string
-	ImportChapterID   string
-	CreatedChapterID  string
-	ChapterTitle      string
-	SourceStartLine   int
-	SourceEndLine     int
-	ChapterBody       string
+	ID               string
+	ImportChapterID  string
+	CreatedChapterID string
+	ChapterTitle     string
+	SourceStartLine  int
+	SourceEndLine    int
+	ChapterBody      string
 }
 
 // Task is an AI extraction job bound to an applied ImportJob.

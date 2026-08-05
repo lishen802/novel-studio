@@ -31,15 +31,25 @@ type OutlineContentInput struct {
 	Goal     string `json:"goal"`
 	Conflict string `json:"conflict"`
 	Outcome  string `json:"outcome"`
+	// Level and Position are only used for create_outline_node operations
+	// produced by manuscript extraction. Update operations leave them empty.
+	Level    string `json:"level,omitempty"`
+	Position int    `json:"position,omitempty"`
+	ParentID string `json:"parentId,omitempty"`
 }
 
 type StructuredChangeOperationInput struct {
-	Kind      string               `json:"kind"`
-	TargetID  string               `json:"targetId"`
-	Reason    string               `json:"reason"`
-	Outline   *OutlineContentInput `json:"outline,omitempty"`
-	Character *CharacterInput      `json:"character,omitempty"`
-	Fact      *FactInput           `json:"fact,omitempty"`
+	Kind              string                    `json:"kind"`
+	TargetID          string                    `json:"targetId"`
+	Reason            string                    `json:"reason"`
+	Outline           *OutlineContentInput      `json:"outline,omitempty"`
+	Character         *CharacterInput           `json:"character,omitempty"`
+	Relationship      *RelationshipInput        `json:"relationship,omitempty"`
+	WorldRule         *WorldRuleInput           `json:"worldRule,omitempty"`
+	StoryEvent        *StoryEventInput          `json:"storyEvent,omitempty"`
+	Fact              *FactInput                `json:"fact,omitempty"`
+	ForeshadowingHook *ForeshadowingHookInput   `json:"foreshadowingHook,omitempty"`
+	Evidence          []revisiondomain.Evidence `json:"evidence,omitempty"`
 }
 
 type StructuredChangeInput struct {
@@ -50,24 +60,29 @@ type StructuredChangeInput struct {
 }
 
 type ChangeOperationEditInput struct {
-	ChangeSetID string               `json:"changeSetId"`
-	OperationID string               `json:"operationId"`
-	ChapterBody string               `json:"chapterBody"`
-	Outline     *OutlineContentInput `json:"outline,omitempty"`
-	Character   *CharacterInput      `json:"character,omitempty"`
-	Fact        *FactInput           `json:"fact,omitempty"`
+	ChangeSetID       string                  `json:"changeSetId"`
+	OperationID       string                  `json:"operationId"`
+	ChapterBody       string                  `json:"chapterBody"`
+	Outline           *OutlineContentInput    `json:"outline,omitempty"`
+	Character         *CharacterInput         `json:"character,omitempty"`
+	Relationship      *RelationshipInput      `json:"relationship,omitempty"`
+	WorldRule         *WorldRuleInput         `json:"worldRule,omitempty"`
+	StoryEvent        *StoryEventInput        `json:"storyEvent,omitempty"`
+	Fact              *FactInput              `json:"fact,omitempty"`
+	ForeshadowingHook *ForeshadowingHookInput `json:"foreshadowingHook,omitempty"`
 }
 
 type ChangeOperationView struct {
-	ID              string `json:"id"`
-	Kind            string `json:"kind"`
-	TargetID        string `json:"targetId"`
-	BaseRevision    int64  `json:"baseRevision"`
-	BaseFingerprint string `json:"baseFingerprint"`
-	BeforeValue     string `json:"beforeValue"`
-	AfterValue      string `json:"afterValue"`
-	Reason          string `json:"reason"`
-	Status          string `json:"status"`
+	ID              string                    `json:"id"`
+	Kind            string                    `json:"kind"`
+	TargetID        string                    `json:"targetId"`
+	BaseRevision    int64                     `json:"baseRevision"`
+	BaseFingerprint string                    `json:"baseFingerprint"`
+	BeforeValue     string                    `json:"beforeValue"`
+	AfterValue      string                    `json:"afterValue"`
+	Reason          string                    `json:"reason"`
+	Status          string                    `json:"status"`
+	Evidence        []revisiondomain.Evidence `json:"evidence,omitempty"`
 }
 
 type ChangeSetView struct {
@@ -307,7 +322,7 @@ func (s *Service) RejectChangeSet(ctx context.Context, id string) error {
 func changeSetView(changeSet revisiondomain.ChangeSet) ChangeSetView {
 	operations := make([]ChangeOperationView, 0, len(changeSet.Operations))
 	for _, operation := range changeSet.Operations {
-		operations = append(operations, ChangeOperationView{
+		view := ChangeOperationView{
 			ID:              operation.ID,
 			Kind:            string(operation.Kind),
 			TargetID:        operation.TargetID,
@@ -317,7 +332,11 @@ func changeSetView(changeSet revisiondomain.ChangeSet) ChangeSetView {
 			AfterValue:      operation.AfterValue,
 			Reason:          operation.Reason,
 			Status:          string(operation.Status),
-		})
+		}
+		if len(operation.Evidence) > 0 {
+			view.Evidence = append([]revisiondomain.Evidence(nil), operation.Evidence...)
+		}
+		operations = append(operations, view)
 	}
 	return ChangeSetView{
 		ID:         changeSet.ID,
@@ -392,6 +411,55 @@ func (s *Service) structuredOperationSpecLocked(
 		}
 		spec.BeforeValue = mustJSON(factInputFromDomain(current))
 		spec.AfterValue = mustJSON(factMutableInput(*input.Fact))
+	case revisiondomain.OperationCreateOutlineNode:
+		if input.Outline == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(*input.Outline)
+		spec.Evidence = input.Evidence
+	case revisiondomain.OperationCreateCharacter:
+		if input.Character == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(*input.Character)
+		spec.Evidence = input.Evidence
+	case revisiondomain.OperationCreateRelationship:
+		if input.Relationship == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(*input.Relationship)
+		spec.Evidence = input.Evidence
+	case revisiondomain.OperationCreateWorldRule:
+		if input.WorldRule == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(*input.WorldRule)
+		spec.Evidence = input.Evidence
+	case revisiondomain.OperationCreateStoryEvent:
+		if input.StoryEvent == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(*input.StoryEvent)
+		spec.Evidence = input.Evidence
+	case revisiondomain.OperationCreateFact:
+		if input.Fact == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(factMutableInput(*input.Fact))
+		spec.Evidence = input.Evidence
+	case revisiondomain.OperationCreateForeshadowingHook:
+		if input.ForeshadowingHook == nil {
+			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
+		}
+		spec.BeforeValue = "{}"
+		spec.AfterValue = mustJSON(*input.ForeshadowingHook)
+		spec.Evidence = input.Evidence
 	default:
 		return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
 	}
@@ -445,6 +513,41 @@ func (s *Service) editedOperationValueLocked(
 			return "", err
 		}
 		return mustJSON(factMutableInput(*input.Fact)), nil
+	case revisiondomain.OperationCreateOutlineNode:
+		if input.Outline == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(*input.Outline), nil
+	case revisiondomain.OperationCreateCharacter:
+		if input.Character == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(*input.Character), nil
+	case revisiondomain.OperationCreateRelationship:
+		if input.Relationship == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(*input.Relationship), nil
+	case revisiondomain.OperationCreateWorldRule:
+		if input.WorldRule == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(*input.WorldRule), nil
+	case revisiondomain.OperationCreateStoryEvent:
+		if input.StoryEvent == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(*input.StoryEvent), nil
+	case revisiondomain.OperationCreateFact:
+		if input.Fact == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(factMutableInput(*input.Fact)), nil
+	case revisiondomain.OperationCreateForeshadowingHook:
+		if input.ForeshadowingHook == nil {
+			return "", revisiondomain.ErrInvalidOperation
+		}
+		return mustJSON(*input.ForeshadowingHook), nil
 	default:
 		return "", revisiondomain.ErrInvalidOperation
 	}

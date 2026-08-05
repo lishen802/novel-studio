@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lishen802/novel-studio/internal/domain/revision"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	"github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
@@ -34,31 +34,31 @@ type createOutlineNodeValue struct {
 // merge step is responsible for resolving model-supplied names to the
 // target_id of co-located create_character operations in the same ChangeSet.
 type createRelationshipValue struct {
-	SourceCharacterID string                      `json:"sourceCharacterId"`
-	TargetCharacterID string                      `json:"targetCharacterId"`
+	SourceCharacterID string                       `json:"sourceCharacterId"`
+	TargetCharacterID string                       `json:"targetCharacterId"`
 	Kind              worlddomain.RelationshipKind `json:"kind"`
-	Label             string                      `json:"label"`
-	Strength          int                         `json:"strength"`
-	PublicState       string                      `json:"publicState"`
-	TrueState         string                      `json:"trueState"`
+	Label             string                       `json:"label"`
+	Strength          int                          `json:"strength"`
+	PublicState       string                       `json:"publicState"`
+	TrueState         string                       `json:"trueState"`
 }
 
 type createWorldRuleValue struct {
-	Name        string                        `json:"name"`
-	Description string                        `json:"description"`
-	ScopeType   worlddomain.RuleScopeType     `json:"scopeType"`
-	ScopeID     string                        `json:"scopeId,omitempty"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	ScopeType   worlddomain.RuleScopeType `json:"scopeType"`
+	ScopeID     string                    `json:"scopeId,omitempty"`
 }
 
 type createStoryEventValue struct {
-	Title          string                       `json:"title"`
-	Summary        string                       `json:"summary,omitempty"`
-	Cause          string                       `json:"cause,omitempty"`
-	Result         string                       `json:"result,omitempty"`
-	StoryTime      string                       `json:"storyTime,omitempty"`
-	StoryOrder     int64                        `json:"storyOrder"`
-	NarrativeOrder int                          `json:"narrativeOrder"`
-	Status         timelinedomain.EventStatus   `json:"status"`
+	Title          string                     `json:"title"`
+	Summary        string                     `json:"summary,omitempty"`
+	Cause          string                     `json:"cause,omitempty"`
+	Result         string                     `json:"result,omitempty"`
+	StoryTime      string                     `json:"storyTime,omitempty"`
+	StoryOrder     int64                      `json:"storyOrder"`
+	NarrativeOrder int                        `json:"narrativeOrder"`
+	Status         timelinedomain.EventStatus `json:"status"`
 }
 
 type createForeshadowingHookValue struct {
@@ -202,7 +202,7 @@ func prepareCreateRelationshipOperation(
 	}
 	relationship := worlddomain.Relationship{
 		ID:                operation.TargetID,
-		ProjectID:          changeSet.ProjectID,
+		ProjectID:         changeSet.ProjectID,
 		SourceCharacterID: proposed.SourceCharacterID,
 		TargetCharacterID: proposed.TargetCharacterID,
 		Kind:              proposed.Kind,

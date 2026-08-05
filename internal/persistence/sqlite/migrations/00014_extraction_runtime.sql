@@ -27,13 +27,13 @@ CREATE TABLE extraction_tasks (
     started_at TEXT,
     completed_at TEXT,
     CHECK (
-        (status IN ('queued', 'cancelled') AND started_at IS NULL AND completed_at IS NULL)
+        (status = 'queued' AND started_at IS NULL AND completed_at IS NULL)
         OR (status IN ('running', 'recoverable') AND started_at IS NOT NULL AND completed_at IS NULL)
-        OR (status IN ('completed', 'failed') AND started_at IS NOT NULL AND completed_at IS NOT NULL)
+        OR (status IN ('completed', 'failed', 'cancelled') AND completed_at IS NOT NULL)
     ),
     CHECK (
         error_code = '' AND error_message = ''
-        OR status IN ('failed', 'recoverable')
+        OR status IN ('failed', 'recoverable', 'cancelled')
     )
 );
 
@@ -54,6 +54,8 @@ CREATE TABLE extraction_steps (
     created_chapter_id TEXT NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
     chapter_title TEXT NOT NULL CHECK (length(trim(chapter_title)) >= 1),
     position INTEGER NOT NULL CHECK (position >= 1),
+    source_start_line INTEGER NOT NULL CHECK (source_start_line >= 1),
+    source_end_line INTEGER NOT NULL CHECK (source_end_line >= source_start_line),
     status TEXT NOT NULL CHECK (
         status IN ('queued', 'running', 'completed', 'failed', 'cancelled')
     ),
@@ -68,13 +70,13 @@ CREATE TABLE extraction_steps (
     started_at TEXT,
     completed_at TEXT,
     CHECK (
-        (status IN ('queued', 'cancelled') AND started_at IS NULL AND completed_at IS NULL)
+        (status = 'queued' AND started_at IS NULL AND completed_at IS NULL)
         OR (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL)
-        OR (status IN ('completed', 'failed') AND started_at IS NOT NULL AND completed_at IS NOT NULL)
+        OR (status IN ('completed', 'failed', 'cancelled') AND completed_at IS NOT NULL)
     ),
     CHECK (
         error_code = '' AND error_message = ''
-        OR status = 'failed'
+        OR status IN ('failed', 'cancelled')
     )
 );
 

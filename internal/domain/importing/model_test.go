@@ -264,11 +264,11 @@ func TestImportJobExtractionStatusLifecycle(t *testing.T) {
 		t.Fatalf("restart running extraction error = %v, want ErrInvalidJobTransition", err)
 	}
 	// Cannot complete extraction that hasn't started.
-	if _, err := appliedJob.MarkExtractionCompleted(now.Add(3*time.Minute)); !errors.Is(err, ErrInvalidJobTransition) {
+	if _, err := appliedJob.MarkExtractionCompleted(now.Add(3 * time.Minute)); !errors.Is(err, ErrInvalidJobTransition) {
 		t.Fatalf("complete not-started extraction error = %v", err)
 	}
 
-	completed, err := running.MarkExtractionCompleted(now.Add(3*time.Minute))
+	completed, err := running.MarkExtractionCompleted(now.Add(3 * time.Minute))
 	if err != nil {
 		t.Fatalf("MarkExtractionCompleted: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestImportJobExtractionCanRetryAfterFailure(t *testing.T) {
 	}
 
 	// failed → running again is allowed for retry.
-	retried, err := failed.MarkExtractionStarted("run-2", now.Add(3 * time.Minute))
+	retried, err := failed.MarkExtractionStarted("run-2", now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("retry MarkExtractionStarted: %v", err)
 	}

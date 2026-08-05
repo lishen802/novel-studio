@@ -396,42 +396,42 @@ func TestStoreAppliesExtractionCreateOperationsWithEvidence(t *testing.T) {
 			{
 				ID: "operation-outline", Kind: revisiondomain.OperationCreateOutlineNode, TargetID: "outline-1",
 				AfterValue: `{"level":"book","title":"雾城钟声","summary":"追查钟楼异响","goal":"找到失踪者","conflict":"城卫阻挠","outcome":"发现密道","position":1}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-character-1", Kind: revisiondomain.OperationCreateCharacter, TargetID: "character-1",
 				AfterValue: `{"name":"林默","aliases":["阿默"],"role":"protagonist","summary":"失忆的巡夜人","motivation":"找回记忆","fear":"再次失去同伴","secret":"曾进入钟楼","arc":"从逃避到承担","status":"active"}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-character-2", Kind: revisiondomain.OperationCreateCharacter, TargetID: "character-2",
 				AfterValue: `{"name":"苏雨","aliases":[],"role":"supporting","summary":"钟楼守门人","motivation":"守护秘密","fear":"真相曝光","secret":"知道密道","arc":"从隐瞒到坦白","status":"active"}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-relationship", Kind: revisiondomain.OperationCreateRelationship, TargetID: "relationship-1",
 				AfterValue: `{"sourceCharacterId":"character-1","targetCharacterId":"character-2","kind":"mentor","label":"师徒","strength":60,"publicState":"尊敬","trueState":"猜疑"}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-world-rule", Kind: revisiondomain.OperationCreateWorldRule, TargetID: "world-rule-1",
 				AfterValue: `{"name":"钟楼密道","description":"钟楼地下通往城外的密道","scopeType":"project"}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-story-event", Kind: revisiondomain.OperationCreateStoryEvent, TargetID: "story-event-1",
 				AfterValue: `{"title":"钟楼初探","summary":"林默首次进入钟楼","cause":"追寻线索","result":"发现密道入口","storyTime":"第一夜","storyOrder":1,"narrativeOrder":1,"status":"occurred"}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-fact", Kind: revisiondomain.OperationCreateFact, TargetID: "fact-1",
 				AfterValue: `{"text":"钟楼在城西","category":"location","status":"ai_inferred","confidence":0.8,"validFromEventId":"","validUntilEventId":""}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 			{
 				ID: "operation-foreshadowing", Kind: revisiondomain.OperationCreateForeshadowingHook, TargetID: "foreshadowing-1",
 				AfterValue: `{"title":"密道尽头","setup":"钟楼地下有未被探索的通道","plantedChapterId":"` + chapter.ID + `"}`,
-				Evidence:  evidence,
+				Evidence:   evidence,
 			},
 		}, time.Unix(200, 0),
 	)
