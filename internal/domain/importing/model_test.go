@@ -227,6 +227,91 @@ func TestImportJobRejectsInvalidTransitionData(t *testing.T) {
 	}
 }
 
+func TestImportJobExtractionStatusLifecycle(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	preparedJob := newValidImportJob(t)
+	if preparedJob.ExtractionStatus != ExtractionStatusNone {
+		t.Fatalf("new job extraction status = %q, want none", preparedJob.ExtractionStatus)
+	}
+
+	// Extraction can only start on an applied job.
+	if _, err := preparedJob.MarkExtractionStarted("run-1", now); !errors.Is(err, ErrInvalidJobTransition) {
+		t.Fatalf("MarkExtractionStarted on prepared job error = %v, want ErrInvalidJobTransition", err)
+	}
+
+	appliedJob, err := preparedJob.MarkApplied(2, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("MarkApplied: %v", err)
+	}
+	if appliedJob.ExtractionStatus != ExtractionStatusNone {
+		t.Fatalf("applied job extraction status = %q, want none", appliedJob.ExtractionStatus)
+	}
+	// Blank run id is rejected even on an applied job.
+	if _, err := appliedJob.MarkExtractionStarted("", now.Add(time.Minute)); !errors.Is(err, ErrBlankValue) {
+		t.Fatalf("blank run id error = %v, want ErrBlankValue", err)
+	}
+
+	// none → running → completed.
+	running, err := appliedJob.MarkExtractionStarted("run-1", now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("MarkExtractionStarted: %v", err)
+	}
+	if running.ExtractionStatus != ExtractionStatusRunning || running.ExtractionRunID != "run-1" {
+		t.Fatalf("running job = %#v", running)
+	}
+	// Cannot restart extraction while one is already running.
+	if _, err := running.MarkExtractionStarted("run-2", now.Add(3*time.Minute)); !errors.Is(err, ErrInvalidJobTransition) {
+		t.Fatalf("restart running extraction error = %v, want ErrInvalidJobTransition", err)
+	}
+	// Cannot complete extraction that hasn't started.
+	if _, err := appliedJob.MarkExtractionCompleted(now.Add(3*time.Minute)); !errors.Is(err, ErrInvalidJobTransition) {
+		t.Fatalf("complete not-started extraction error = %v", err)
+	}
+
+	completed, err := running.MarkExtractionCompleted(now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("MarkExtractionCompleted: %v", err)
+	}
+	if completed.ExtractionStatus != ExtractionStatusCompleted || completed.ExtractionRunID != "run-1" {
+		t.Fatalf("completed job = %#v", completed)
+	}
+	// Cannot transition completed extraction back to running (retry creates a new task).
+	if _, err := completed.MarkExtractionStarted("run-2", now.Add(4*time.Minute)); !errors.Is(err, ErrInvalidJobTransition) {
+		t.Fatalf("restart completed extraction error = %v", err)
+	}
+}
+
+func TestImportJobExtractionCanRetryAfterFailure(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	preparedJob := newValidImportJob(t)
+	appliedJob, err := preparedJob.MarkApplied(1, now)
+	if err != nil {
+		t.Fatalf("MarkApplied: %v", err)
+	}
+
+	// First run fails.
+	running, err := appliedJob.MarkExtractionStarted("run-1", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("MarkExtractionStarted: %v", err)
+	}
+	failed, err := running.MarkExtractionFailed(now.Add(2 * time.Minute))
+	if err != nil {
+		t.Fatalf("MarkExtractionFailed: %v", err)
+	}
+	if failed.ExtractionStatus != ExtractionStatusFailed || failed.ExtractionRunID != "run-1" {
+		t.Fatalf("failed job = %#v", failed)
+	}
+
+	// failed → running again is allowed for retry.
+	retried, err := failed.MarkExtractionStarted("run-2", now.Add(3 * time.Minute))
+	if err != nil {
+		t.Fatalf("retry MarkExtractionStarted: %v", err)
+	}
+	if retried.ExtractionStatus != ExtractionStatusRunning || retried.ExtractionRunID != "run-2" {
+		t.Fatalf("retried job = %#v", retried)
+	}
+}
+
 func TestNewImportChapterCapturesReviewAndSourceMetadata(t *testing.T) {
 	chapter, err := NewImportChapter(ImportChapterParams{
 		ID:               " import-chapter-1 ",

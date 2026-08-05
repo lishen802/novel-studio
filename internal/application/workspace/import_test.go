@@ -1241,6 +1241,18 @@ func (f *fakeImportStore) ApplyImportJob(
 	return ports.ImportApplyResult{Job: applied, Chapters: created}, nil
 }
 
+func (f *fakeImportStore) UpdateImportJobExtraction(ctx context.Context, job importing.ImportJob) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	details, found := f.jobs[job.ID]
+	if !found {
+		return ports.ErrImportJobMissing
+	}
+	details.Job = job
+	f.jobs[job.ID] = details
+	return nil
+}
+
 func mustWorkspaceImportJob(
 	t *testing.T,
 	id, projectID string,

@@ -14,6 +14,7 @@ var (
 	ErrDuplicateImportSource        = errors.New("import source was already prepared for this project")
 	ErrImportJobAlreadyApplied      = errors.New("import job was already applied")
 	ErrImportJobNotPrepared         = errors.New("import job is not prepared")
+	ErrImportJobNotApplied          = errors.New("import job has not been applied yet")
 	ErrNoImportChaptersSelected     = errors.New("at least one import chapter must be selected")
 	ErrImportChapterMappingMismatch = errors.New("selected import chapters do not match chapters to create")
 	ErrImportPersistence            = errors.New("import persistence operation failed")
@@ -56,4 +57,8 @@ type ImportStore interface {
 		chapters []projectdomain.Chapter,
 		appliedAt time.Time,
 	) (ImportApplyResult, error)
+	// UpdateImportJobExtraction persists the extraction lifecycle state for an
+	// applied ImportJob. Callers derive the new state via
+	// importing.ImportJob.MarkExtraction* before invoking this.
+	UpdateImportJobExtraction(ctx context.Context, job importing.ImportJob) error
 }

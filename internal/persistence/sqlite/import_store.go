@@ -191,6 +191,7 @@ func (s *Store) ListImportJobs(
 			id, project_id, source_name, source_format, source_encoding,
 			source_hash, source_bytes, archived_relative_path, status,
 			chapter_count, selected_chapter_count, error_code, error_message,
+			extraction_status, extraction_run_id,
 			created_at, updated_at, applied_at
 		FROM import_jobs
 		WHERE project_id = ?
@@ -459,6 +460,32 @@ func (s *Store) ApplyImportJob(
 	return ports.ImportApplyResult{Job: appliedJob, Chapters: created}, nil
 }
 
+// UpdateImportJobExtraction persists the extraction lifecycle state for an
+// applied ImportJob. The job must already be in JobStatusApplied; callers
+// derive the new state via importing.ImportJob.MarkExtraction*.
+func (s *Store) UpdateImportJobExtraction(
+	ctx context.Context,
+	job importing.ImportJob,
+) error {
+	if job.Status != importing.JobStatusApplied {
+		return ports.ErrImportJobNotApplied
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE import_jobs
+		SET extraction_status = ?, extraction_run_id = NULLIF(?, ''), updated_at = ?
+		WHERE id = ? AND status = 'applied'
+	`,
+		job.ExtractionStatus,
+		job.ExtractionRunID,
+		formatTime(job.UpdatedAt),
+		job.ID,
+	)
+	if err != nil {
+		return safeImportStoreError("update import job extraction", err)
+	}
+	return requireAffected(result, "import job extraction", job.ID)
+}
+
 type immediateTx struct {
 	conn      *sql.Conn
 	completed bool
@@ -622,6 +649,7 @@ func loadImportJob(
 			id, project_id, source_name, source_format, source_encoding,
 			source_hash, source_bytes, archived_relative_path, status,
 			chapter_count, selected_chapter_count, error_code, error_message,
+			extraction_status, extraction_run_id,
 			created_at, updated_at, applied_at
 		FROM import_jobs
 		WHERE id = ?
@@ -670,9 +698,9 @@ func loadImportChapters(
 
 func scanImportJob(row scanner) (importing.ImportJob, error) {
 	var job importing.ImportJob
-	var sourceFormat, status string
+	var sourceFormat, status, extractionStatus string
 	var createdAt, updatedAt string
-	var appliedAt sql.NullString
+	var appliedAt, extractionRunID sql.NullString
 	err := row.Scan(
 		&job.ID,
 		&job.ProjectID,
@@ -687,6 +715,8 @@ func scanImportJob(row scanner) (importing.ImportJob, error) {
 		&job.SelectedChapterCount,
 		&job.ErrorCode,
 		&job.ErrorMessage,
+		&extractionStatus,
+		&extractionRunID,
 		&createdAt,
 		&updatedAt,
 		&appliedAt,
@@ -696,6 +726,14 @@ func scanImportJob(row scanner) (importing.ImportJob, error) {
 	}
 	job.SourceFormat = importing.SourceFormat(sourceFormat)
 	job.Status = importing.JobStatus(status)
+	if extractionStatus == "" {
+		job.ExtractionStatus = importing.ExtractionStatusNone
+	} else {
+		job.ExtractionStatus = importing.ExtractionStatus(extractionStatus)
+	}
+	if extractionRunID.Valid {
+		job.ExtractionRunID = extractionRunID.String
+	}
 	job.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
 		return importing.ImportJob{}, err

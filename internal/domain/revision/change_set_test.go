@@ -230,3 +230,142 @@ func TestStructuredChangeSetRejectsInvalidJSONAndNoopOperations(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateOperationsCanonicalizeBeforeValueAndRejectEmptyAfter(t *testing.T) {
+	now := time.Unix(100, 0)
+	tests := []struct {
+		name      string
+		kind      OperationKind
+		after     string
+		wantError error
+	}{
+		{
+			name:  "create outline node",
+			kind:  OperationCreateOutlineNode,
+			after: `{"level":"volume","title":"第一卷","position":1}`,
+		},
+		{
+			name:  "create character with reordered keys",
+			kind:  OperationCreateCharacter,
+			after: `{"motivation":"守护","name":"墨老","role":"supporting"}`,
+		},
+		{
+			name:  "create relationship",
+			kind:  OperationCreateRelationship,
+			after: `{"sourceCharacterId":"c1","targetCharacterId":"c2","kind":"ally","strength":50}`,
+		},
+		{
+			name:      "create character with empty after json rejects noop",
+			kind:      OperationCreateCharacter,
+			after:     `{}`,
+			wantError: ErrNoopOperation,
+		},
+		{
+			name:      "create fact with invalid json rejects",
+			kind:      OperationCreateFact,
+			after:     `{not-json`,
+			wantError: ErrInvalidOperation,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			changeSet, err := NewChangeSet(
+				"change-set",
+				"project-1",
+				"抽取候选",
+				"",
+				"extraction-task:1",
+				[]PatchOperationSpec{{
+					ID:         "operation-1",
+					Kind:       test.kind,
+					TargetID:   "target-1",
+					AfterValue: test.after,
+				}},
+				now,
+			)
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("error = %v, want %v", err, test.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewChangeSet: %v", err)
+			}
+			operation := changeSet.Operations[0]
+			if operation.BeforeValue != "{}" {
+				t.Fatalf("before_value = %q, want {}", operation.BeforeValue)
+			}
+			if operation.BaseRevision != 0 {
+				t.Fatalf("base_revision = %d, want 0", operation.BaseRevision)
+			}
+			if operation.BaseFingerprint != EmptyObjectFingerprint() {
+				t.Fatalf("base_fingerprint = %q, want %q", operation.BaseFingerprint, EmptyObjectFingerprint())
+			}
+			if operation.AfterValue == "{}" {
+				t.Fatalf("after_value should not be canonical-noop")
+			}
+		})
+	}
+}
+
+func TestCreateOperationDistinguishesFromUpdateKinds(t *testing.T) {
+	createKinds := []OperationKind{
+		OperationCreateOutlineNode,
+		OperationCreateCharacter,
+		OperationCreateRelationship,
+		OperationCreateWorldRule,
+		OperationCreateStoryEvent,
+		OperationCreateFact,
+		OperationCreateForeshadowingHook,
+	}
+	for _, kind := range createKinds {
+		if !IsCreateOperation(kind) {
+			t.Fatalf("IsCreateOperation(%q) = false, want true", kind)
+		}
+	}
+	for _, kind := range []OperationKind{
+		OperationReplaceChapterBody,
+		OperationUpdateOutlineNode,
+		OperationUpdateCharacter,
+		OperationUpdateFact,
+	} {
+		if IsCreateOperation(kind) {
+			t.Fatalf("IsCreateOperation(%q) = true, want false", kind)
+		}
+	}
+}
+
+func TestPatchOperationSpecEvidenceIsCopiedDefensively(t *testing.T) {
+	now := time.Unix(100, 0)
+	evidence := []Evidence{{
+		ChapterID: "chapter-1", ChapterTitle: "第一章", StartLine: 10, EndLine: 20, Excerpt: "引文",
+	}}
+	changeSet, err := NewChangeSet(
+		"change-set",
+		"project-1",
+		"抽取候选",
+		"",
+		"extraction-task:1",
+		[]PatchOperationSpec{{
+			ID:         "operation-1",
+			Kind:       OperationCreateCharacter,
+			TargetID:   "character-1",
+			AfterValue: `{"name":"墨老","role":"supporting"}`,
+			Evidence:   evidence,
+		}},
+		now,
+	)
+	if err != nil {
+		t.Fatalf("NewChangeSet: %v", err)
+	}
+	operation := changeSet.Operations[0]
+	if len(operation.Evidence) != 1 || operation.Evidence[0].ChapterID != "chapter-1" {
+		t.Fatalf("evidence = %#v", operation.Evidence)
+	}
+	// Mutating the input slice after construction must not affect the operation.
+	evidence[0].Excerpt = "tampered"
+	if operation.Evidence[0].Excerpt == "tampered" {
+		t.Fatal("evidence slice was not copied defensively")
+	}
+}
