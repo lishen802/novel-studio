@@ -82,6 +82,11 @@ import {
   type ImportApplyView,
   type ImportJobView,
   type ImportPrepareView,
+  type ExtractionRunInput,
+  type ExtractionRunView,
+  type ExtractionStepView,
+  type ExtractionTaskView,
+  type EvidenceView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -111,6 +116,13 @@ const changeSetStatusSchema = z.enum([
   "rejected",
   "conflicted",
 ]);
+const evidenceSchema = z.object({
+  chapterId: z.string(),
+  chapterTitle: z.string(),
+  startLine: z.number().int().nonnegative(),
+  endLine: z.number().int().nonnegative(),
+  excerpt: z.string(),
+});
 const changeOperationSchema = z.object({
   id: z.string(),
   kind: z.enum([
@@ -118,6 +130,13 @@ const changeOperationSchema = z.object({
     "update_outline_node",
     "update_character",
     "update_fact",
+    "create_outline_node",
+    "create_character",
+    "create_relationship",
+    "create_world_rule",
+    "create_story_event",
+    "create_fact",
+    "create_foreshadowing_hook",
   ]),
   targetId: z.string(),
   baseRevision: z.number(),
@@ -126,6 +145,7 @@ const changeOperationSchema = z.object({
   afterValue: z.string(),
   reason: z.string(),
   status: changeSetStatusSchema,
+  evidence: z.array(evidenceSchema).optional(),
 });
 const changeSetSchema = z.object({
   id: z.string(),
@@ -267,6 +287,51 @@ const agentRunSchema = z.object({
   steps: z.array(agentRunStepSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+
+const extractionStepSchema = z.object({
+  id: z.string(),
+  importChapterId: z.string(),
+  createdChapterId: z.string(),
+  chapterTitle: z.string(),
+  position: z.number().int().positive(),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
+  output: z.string(),
+  errorCode: z.string(),
+  errorMessage: z.string(),
+  providerRequestId: z.string(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+});
+const extractionTaskSchema = z.object({
+  id: z.string(),
+  importJobId: z.string(),
+  connectionId: z.string(),
+  model: z.string(),
+  prompt: z.string(),
+  status: z.enum([
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "recoverable",
+  ]),
+  errorCode: z.string(),
+  errorMessage: z.string(),
+  changeSetId: z.string(),
+  retryOf: z.string(),
+  tokenBudget: z.number().int().nonnegative(),
+  contextCharBudget: z.number().int().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  steps: z.array(extractionStepSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const extractionRunSchema = z.object({
+  task: extractionTaskSchema,
+  changeSet: changeSetSchema.nullable(),
 });
 
 const outlineNodeSchema = z.object({
@@ -636,6 +701,8 @@ const rawImportJobSchema = z
     archivedRelativePath: z.string(),
     chapterCount: z.number().int().nonnegative(),
     selectedChapterCount: z.number().int().nonnegative(),
+    extractionStatus: z.string().optional(),
+    extractionRunId: z.string().optional(),
     errorCode: z.string().optional(),
     errorMessage: z.string().optional(),
     createdAt: z.string(),
@@ -673,6 +740,44 @@ function validateImportJob(
       context,
       ["sourceName"],
       "source name must be a basename",
+    );
+  }
+
+  const extractionStatus = value.extractionStatus ?? "";
+  const extractionRunId = value.extractionRunId ?? "";
+  if (
+    extractionStatus !== "" &&
+    extractionStatus !== "none" &&
+    extractionStatus !== "running" &&
+    extractionStatus !== "completed" &&
+    extractionStatus !== "failed"
+  ) {
+    addImportInvariantIssue(
+      context,
+      ["extractionStatus"],
+      "extraction status must be one of none, running, completed, or failed",
+    );
+  }
+  const hasRun = extractionStatus !== "" && extractionStatus !== "none";
+  if (hasRun && extractionRunId === "") {
+    addImportInvariantIssue(
+      context,
+      ["extractionRunId"],
+      "extraction run id is required when extraction status is active",
+    );
+  }
+  if (!hasRun && extractionRunId !== "") {
+    addImportInvariantIssue(
+      context,
+      ["extractionRunId"],
+      "extraction run id must be empty when extraction status is none",
+    );
+  }
+  if (value.status !== "applied" && hasRun) {
+    addImportInvariantIssue(
+      context,
+      ["extractionStatus"],
+      "only applied import jobs may have an extraction run",
     );
   }
 
@@ -799,6 +904,8 @@ const importJobSchema = rawImportJobSchema
     errorCode: value.errorCode ?? "",
     errorMessage: value.errorMessage ?? "",
     appliedAt: value.appliedAt ?? "",
+    extractionStatus: value.extractionStatus ?? "none",
+    extractionRunId: value.extractionRunId ?? "",
   }));
 const importJobDetailSchema = rawImportJobSchema
   .superRefine((value, context) =>
@@ -809,6 +916,8 @@ const importJobDetailSchema = rawImportJobSchema
     errorCode: value.errorCode ?? "",
     errorMessage: value.errorMessage ?? "",
     appliedAt: value.appliedAt ?? "",
+    extractionStatus: value.extractionStatus ?? "none",
+    extractionRunId: value.extractionRunId ?? "",
   }));
 const importPrepareSchema = z
   .object({ job: importJobDetailSchema })
@@ -891,6 +1000,12 @@ type NativeDesktopAPI = {
   ImportJob(id: string): Promise<unknown>;
   DeleteImportJob(id: string): Promise<void>;
   ApplyImportJob(id: string, selectedChapterIds: string[]): Promise<unknown>;
+  ExtractionTasks(): Promise<unknown>;
+  ExtractionTask(id: string): Promise<unknown>;
+  StartExtractionRun(input: ExtractionRunInput): Promise<unknown>;
+  ExecuteExtractionRun(id: string): Promise<unknown>;
+  CancelExtractionRun(id: string): Promise<void>;
+  RetryExtractionRun(id: string): Promise<unknown>;
   CreateProject(input: CreateProjectInput): Promise<unknown>;
   OpenProject(path: string): Promise<unknown>;
   ListChapters(): Promise<unknown>;
@@ -1096,6 +1211,14 @@ const agentRunView = (value: unknown): AgentRunView =>
   agentRunSchema.parse(value);
 const agentRunViews = (value: unknown): AgentRunView[] =>
   z.array(agentRunSchema).parse(value);
+const extractionStepView = (value: unknown): ExtractionStepView =>
+  extractionStepSchema.parse(value);
+const extractionTaskView = (value: unknown): ExtractionTaskView =>
+  extractionTaskSchema.parse(value);
+const extractionTaskViews = (value: unknown): ExtractionTaskView[] =>
+  z.array(extractionTaskSchema).parse(value);
+const extractionRunView = (value: unknown): ExtractionRunView =>
+  extractionRunSchema.parse(value);
 
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
@@ -1247,6 +1370,34 @@ export const wailsStudioClient: StudioClient = {
       await safeCall(() => nativeAPI().ApplyImportJob(id, selectedChapterIds)),
       id,
       selectedChapterIds,
+    );
+  },
+  async extractionTasks() {
+    return extractionTaskViews(
+      await safeCall(() => nativeAPI().ExtractionTasks()),
+    );
+  },
+  async extractionTask(id) {
+    return extractionRunView(
+      await safeCall(() => nativeAPI().ExtractionTask(id)),
+    );
+  },
+  async startExtractionRun(input) {
+    return extractionRunView(
+      await safeCall(() => nativeAPI().StartExtractionRun(input)),
+    );
+  },
+  async executeExtractionRun(id) {
+    return extractionRunView(
+      await safeCall(() => nativeAPI().ExecuteExtractionRun(id)),
+    );
+  },
+  async cancelExtractionRun(id) {
+    await safeCall(() => nativeAPI().CancelExtractionRun(id));
+  },
+  async retryExtractionRun(id) {
+    return extractionRunView(
+      await safeCall(() => nativeAPI().RetryExtractionRun(id)),
     );
   },
   async createProject(input) {

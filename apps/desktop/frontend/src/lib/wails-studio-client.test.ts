@@ -206,6 +206,12 @@ function installNative(overrides: Record<string, unknown> = {}) {
     ImportJob: vi.fn(),
     DeleteImportJob: vi.fn(async () => undefined),
     ApplyImportJob: vi.fn(),
+    ExtractionTasks: vi.fn(async () => []),
+    ExtractionTask: vi.fn(),
+    StartExtractionRun: vi.fn(),
+    ExecuteExtractionRun: vi.fn(),
+    CancelExtractionRun: vi.fn(async () => undefined),
+    RetryExtractionRun: vi.fn(),
     CompleteClose: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -1207,5 +1213,182 @@ describe("wailsStudioClient", () => {
       code: "PROJECT_CORRUPT",
       message: "项目格式无效或数据已损坏。",
     });
+  });
+
+  it("forwards extraction run operations and validates task DTOs", async () => {
+    const step = {
+      id: "step-1",
+      importChapterId: "candidate-1",
+      createdChapterId: "chapter-1",
+      chapterTitle: "第一章 潮声",
+      position: 1,
+      status: "completed",
+      output: "",
+      errorCode: "",
+      errorMessage: "",
+      providerRequestId: "req-1",
+      inputTokens: 1200,
+      outputTokens: 800,
+    };
+    const task = {
+      id: "extraction-1",
+      importJobId: "import-1",
+      connectionId: "conn-1",
+      model: "gpt-4o",
+      prompt: "抽取设定",
+      status: "completed",
+      errorCode: "",
+      errorMessage: "",
+      changeSetId: "changeset-1",
+      retryOf: "",
+      tokenBudget: 30000,
+      contextCharBudget: 120000,
+      inputTokens: 1200,
+      outputTokens: 800,
+      steps: [step],
+      createdAt: "2026-08-04T08:00:00Z",
+      updatedAt: "2026-08-04T09:00:00Z",
+    };
+    const changeSet = {
+      id: "changeset-1",
+      title: "设定抽取",
+      summary: "已合并",
+      createdBy: "extraction",
+      status: "pending",
+      operations: [
+        {
+          id: "op-1",
+          kind: "create_character",
+          targetId: "",
+          baseRevision: 1,
+          baseFingerprint: "",
+          beforeValue: "{}",
+          afterValue: '{"name":"苏沉"}',
+          reason: "主角",
+          status: "pending",
+          evidence: [
+            {
+              chapterId: "chapter-1",
+              chapterTitle: "第一章 潮声",
+              startLine: 3,
+              endLine: 12,
+              excerpt: "苏沉推开灯塔木门。",
+            },
+          ],
+        },
+      ],
+      createdAt: "2026-08-04T09:00:00Z",
+      updatedAt: "2026-08-04T09:00:00Z",
+    };
+    const run = { task, changeSet };
+    const api = installNative({
+      ExtractionTasks: vi.fn(async () => [task]),
+      ExtractionTask: vi.fn(async () => run),
+      StartExtractionRun: vi.fn(async () => run),
+      ExecuteExtractionRun: vi.fn(async () => run),
+      CancelExtractionRun: vi.fn(async () => undefined),
+      RetryExtractionRun: vi.fn(async () => run),
+    });
+
+    await expect(wailsStudioClient.extractionTasks()).resolves.toEqual([task]);
+    await expect(
+      wailsStudioClient.extractionTask(task.id),
+    ).resolves.toEqual(run);
+    await expect(
+      wailsStudioClient.startExtractionRun({
+        importJobId: "import-1",
+        connectionId: "conn-1",
+        model: "gpt-4o",
+        instruction: "",
+      }),
+    ).resolves.toEqual(run);
+    await expect(
+      wailsStudioClient.executeExtractionRun(task.id),
+    ).resolves.toEqual(run);
+    await expect(
+      wailsStudioClient.cancelExtractionRun(task.id),
+    ).resolves.toBeUndefined();
+    await expect(
+      wailsStudioClient.retryExtractionRun(task.id),
+    ).resolves.toEqual(run);
+
+    expect(api.ExtractionTasks).toHaveBeenCalledOnce();
+    expect(api.ExtractionTask).toHaveBeenCalledWith(task.id);
+    expect(api.StartExtractionRun).toHaveBeenCalledWith({
+      importJobId: "import-1",
+      connectionId: "conn-1",
+      model: "gpt-4o",
+      instruction: "",
+    });
+    expect(api.ExecuteExtractionRun).toHaveBeenCalledWith(task.id);
+    expect(api.CancelExtractionRun).toHaveBeenCalledWith(task.id);
+    expect(api.RetryExtractionRun).toHaveBeenCalledWith(task.id);
+  });
+
+  it("rejects extraction tasks with invalid status values", async () => {
+    installNative({
+      ExtractionTasks: vi.fn(async () => [
+        {
+          id: "extraction-bad",
+          importJobId: "import-1",
+          connectionId: "conn-1",
+          model: "gpt-4o",
+          prompt: "",
+          status: "unknown",
+          errorCode: "",
+          errorMessage: "",
+          changeSetId: "",
+          retryOf: "",
+          tokenBudget: 0,
+          contextCharBudget: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          steps: [],
+          createdAt: "2026-08-04T08:00:00Z",
+          updatedAt: "2026-08-04T08:00:00Z",
+        },
+      ]),
+    });
+
+    await expect(wailsStudioClient.extractionTasks()).rejects.toThrow();
+  });
+
+  it("rejects import jobs that report extraction status on non-applied tasks", async () => {
+    installNative({
+      ImportJobs: vi.fn(async () => [
+        {
+          id: "import-prepared",
+          status: "prepared",
+          sourceName: "稿.md",
+          sourceFormat: "markdown",
+          sourceEncoding: "UTF-8",
+          sourceHashDigest: "0123456789ab",
+          sourceBytes: 1024,
+          archivedRelativePath: "archive/import-prepared",
+          chapterCount: 1,
+          selectedChapterCount: 0,
+          extractionStatus: "running",
+          extractionRunId: "run-1",
+          createdAt: "2026-08-03T08:00:00Z",
+          updatedAt: "2026-08-03T08:00:00Z",
+          chapters: [
+            {
+              id: "candidate-1",
+              volumeTitle: "",
+              title: "第一章",
+              wordCount: 100,
+              bodyPreview: "正文",
+              position: 1,
+              sourceStartLine: 1,
+              sourceEndLine: 2,
+              contentHashSummary: "abcdef012345",
+              selected: false,
+            },
+          ],
+        },
+      ]),
+    });
+
+    await expect(wailsStudioClient.importJobs()).rejects.toThrow();
   });
 });

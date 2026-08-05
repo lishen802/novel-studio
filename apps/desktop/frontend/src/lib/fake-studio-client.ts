@@ -82,6 +82,11 @@ import type {
   ImportApplyView,
   ImportJobView,
   ImportPrepareView,
+  ExtractionRunInput,
+  ExtractionRunView,
+  ExtractionStepView,
+  ExtractionTaskView,
+  EvidenceView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -202,6 +207,11 @@ export class FakeStudioClient implements StudioClient {
   importJobsResult: ImportJobView[] = [];
   prepareManuscriptImportResult: ImportPrepareView | null = null;
   importApplyResult: ImportApplyView | null = null;
+  extractionTasksResult: ExtractionTaskView[] = [];
+  extractionRunResult: ExtractionRunView | null = null;
+  extractionStartResult: ExtractionRunView | null = null;
+  extractionExecuteResult: ExtractionRunView | null = null;
+  extractionRetryResult: ExtractionRunView | null = null;
 
   createProjectError: Error | null = null;
   openProjectError: Error | null = null;
@@ -216,6 +226,7 @@ export class FakeStudioClient implements StudioClient {
   importJobsError: Error | null = null;
   prepareManuscriptImportError: Error | null = null;
   importMutationError: Error | null = null;
+  extractionError: Error | null = null;
 
   createProjectCalls: CreateProjectInput[] = [];
   openProjectCalls: string[] = [];
@@ -334,6 +345,12 @@ export class FakeStudioClient implements StudioClient {
     id: string;
     selectedChapterIds: string[];
   }> = [];
+  extractionTasksCalls = 0;
+  extractionTaskCalls: string[] = [];
+  startExtractionRunCalls: ExtractionRunInput[] = [];
+  executeExtractionRunCalls: string[] = [];
+  cancelExtractionRunCalls: string[] = [];
+  retryExtractionRunCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
 
@@ -411,6 +428,69 @@ export class FakeStudioClient implements StudioClient {
     );
     this.chaptersResult = [...this.importApplyResult.chapters];
     return this.importApplyResult;
+  }
+
+  async extractionTasks(): Promise<ExtractionTaskView[]> {
+    this.extractionTasksCalls++;
+    if (this.extractionError) throw this.extractionError;
+    return this.extractionTasksResult;
+  }
+
+  async extractionTask(id: string): Promise<ExtractionRunView> {
+    this.extractionTaskCalls.push(id);
+    if (this.extractionError) throw this.extractionError;
+    if (this.extractionRunResult) return this.extractionRunResult;
+    const task = this.extractionTasksResult.find(
+      (item) => item.id === id,
+    );
+    if (!task) throw new Error("抽取任务不存在");
+    return { task, changeSet: null };
+  }
+
+  async startExtractionRun(
+    input: ExtractionRunInput,
+  ): Promise<ExtractionRunView> {
+    this.startExtractionRunCalls.push(input);
+    if (this.extractionError) throw this.extractionError;
+    if (!this.extractionStartResult) throw new Error("未配置抽取启动结果");
+    const run = this.extractionStartResult;
+    this.extractionTasksResult = [
+      run.task,
+      ...this.extractionTasksResult.filter(
+        (item) => item.id !== run.task.id,
+      ),
+    ];
+    return run;
+  }
+
+  async executeExtractionRun(id: string): Promise<ExtractionRunView> {
+    this.executeExtractionRunCalls.push(id);
+    if (this.extractionError) throw this.extractionError;
+    if (!this.extractionExecuteResult) throw new Error("未配置抽取执行结果");
+    const run = this.extractionExecuteResult;
+    this.extractionTasksResult = this.extractionTasksResult.map((item) =>
+      item.id === id ? run.task : item,
+    );
+    return run;
+  }
+
+  async cancelExtractionRun(id: string): Promise<void> {
+    this.cancelExtractionRunCalls.push(id);
+    if (this.extractionError) throw this.extractionError;
+    this.extractionTasksResult = this.extractionTasksResult.filter(
+      (item) => item.id !== id,
+    );
+  }
+
+  async retryExtractionRun(id: string): Promise<ExtractionRunView> {
+    this.retryExtractionRunCalls.push(id);
+    if (this.extractionError) throw this.extractionError;
+    if (!this.extractionRetryResult) throw new Error("未配置抽取重试结果");
+    const run = this.extractionRetryResult;
+    this.extractionTasksResult = this.extractionTasksResult.map((item) =>
+      item.id === id ? run.task : item,
+    );
+    return run;
   }
 
   async createProject(input: CreateProjectInput): Promise<ProjectView> {
