@@ -11,7 +11,7 @@
 5. [总体开发路线图](roadmap/development-roadmap.md)：阶段依赖、实现顺序和退出标准；
 6. [架构决策](architecture/)：仍有效的技术基线与目录边界；
 7. [实施计划](plans/)：当前具体能力的可执行任务与验证；
-8. [项目恢复](operations/project-recovery.md) 与 [基础验收](testing/foundation-acceptance.md)：运行与质量保障。
+8. [自动化测试基线](testing/automated-test-baseline.md)、[项目恢复](operations/project-recovery.md)与[基础手工验收](testing/foundation-acceptance.md)：自动门禁、运行保障和双平台人工验收。
 
 ## 文档优先级
 

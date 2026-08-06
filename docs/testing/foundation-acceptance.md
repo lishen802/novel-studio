@@ -2,6 +2,8 @@
 
 本清单保留早期基础纵切的验收项，作为当前[产品需求](../product/requirements.md)和[系统技术设计](../architecture/system-design.md)的补充，不定义或限制完整 AI 长篇创作产品的功能范围。
 
+提交级测试命令和 CI Job 由[自动化测试基线](automated-test-baseline.md)定义。本清单只覆盖必须在真实 Windows/macOS 应用环境观察的安装、WebView、原生对话框、文件锁、恢复和跨平台行为。
+
 本清单用于同一候选提交在 Windows 与 macOS 上的人工验收。自动化测试通过不代替本清单；每次候选发布都应记录系统版本、应用提交、执行人、日期、结果和证据路径。
 
 ## 验收记录

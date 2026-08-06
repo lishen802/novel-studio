@@ -25,6 +25,8 @@ wails doctor
 
 ## 可复制的验证与运行命令
 
+完整命令顺序、CI Job 分工和 fixture 隐私规则见[自动化测试基线](docs/testing/automated-test-baseline.md)。
+
 首次安装正式前端依赖并构建嵌入资源：
 
 ```bash
