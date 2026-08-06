@@ -145,7 +145,7 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 
 ### 待建立实施计划
 
-1. `R1 Agent job lease 与工作区锁隔离`
+1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`draft`）
 2. `R1 JobEvent 持久化与应用 API`
 3. `R1 React JobEvent replay`
 4. `R1 项目 OS lease 与只读 store`
@@ -447,4 +447,4 @@ docs/plans/YYYY-MM-DD-r<阶段>-<能力>-implementation.md
 
 计划状态为 `draft/approved/in_progress/completed/superseded`。只有 `approved` 或 `in_progress` 的计划可以指导实现；产品设计变化后，旧计划必须更新或标记 `superseded`，不能继续凭历史任务清单开发。
 
-R0 已全部完成。下一份应创建的实施计划是 `R1 Agent job lease 与工作区锁隔离`（R1.1，领域/协议基础）。完成该计划评审后再开始代码修改；R1 的其他计划按其退出标准依次创建，不一次性提前展开 R2–R9 的文件级任务。
+R0 已全部完成。`R1 Agent job lease 与工作区锁隔离` 计划已起草（`draft`），评审通过改为 `approved`/`in_progress` 后再开始代码修改；R1 的其他计划按其退出标准依次创建，不一次性提前展开 R2–R9 的文件级任务。
