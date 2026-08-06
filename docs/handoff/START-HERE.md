@@ -12,8 +12,9 @@
 2. [完整产品需求](../product/requirements.md)；
 3. [产品与交互设计](../product/design.md)；
 4. [系统技术设计](../architecture/system-design.md)；
-5. [Go-first 架构决策](../architecture/0002-go-first-wails-stack.md) 与 [Wails 目录决策](../architecture/0003-wails-project-layout.md)；
-6. 与任务相关时阅读 [基础验收](../testing/foundation-acceptance.md) 和 [项目恢复](../operations/project-recovery.md)。
+5. [总体开发路线图](../roadmap/development-roadmap.md)；
+6. [Go-first 架构决策](../architecture/0002-go-first-wails-stack.md) 与 [Wails 目录决策](../architecture/0003-wails-project-layout.md)；
+7. 开始具体能力前阅读对应[实施计划](../plans/)，并在相关时阅读[基础验收](../testing/foundation-acceptance.md)和[项目恢复](../operations/project-recovery.md)。
 
 ## 不可突破的约束
 
@@ -28,4 +29,4 @@
 
 ## 工作方式
 
-先以当前三份权威设计校验需求，再将每项改动做成可测试的纵切。大型能力必须在隔离 worktree 内实现；完成验证后再合入主线。旧需求、设计和计划已从工作树移除，仅可作为 Git 历史参考。
+先以当前三份权威设计校验需求，再按总体开发路线图选择首个未完成阶段，并为当前具体能力建立可测试的实施计划。实施计划不能修改产品范围或绕过架构决策。大型能力必须在隔离 worktree 内实现；完成验证后再合入主线。旧需求、设计和计划已从工作树移除，仅可作为 Git 历史参考。
