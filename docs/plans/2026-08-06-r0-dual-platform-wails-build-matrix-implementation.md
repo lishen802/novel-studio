@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 路线图阶段：[R0：固定基线与 CI](../roadmap/development-roadmap.md#5-r0固定基线与-ci)
 - 上游依据：[产品需求 7.1/7.5](../product/requirements.md#71-平台与性能)、[系统设计 14](../architecture/system-design.md#14-测试与质量门槛)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 前置计划：[R0 CI 与测试基线](2026-08-06-r0-ci-test-baseline-implementation.md)（`completed`）
@@ -1204,7 +1204,18 @@ Expected: 完成状态提交触发的最终 main Foundation CI 仍为 success。
 - Windows Runner `wails doctor`：构建与验证步骤均 PASS，无阻断警告；
 - 两个平台均使用 Wails v2.13.0、Go 1.25.12、Node 22。
 
-计划和路线图继续保持 `in_progress`，等待合入 `main` 后的最终 CI 验证。
+### 合入 main 后最终 CI
+
+- 合入方式：`git merge --ff-only`，main 推进至 `46b4ab7`；
+- main Foundation CI Run ID：`31077341425`；
+- Run URL：https://github.com/lishen802/novel-studio/actions/runs/31077341425
+- 三个 Job 结论：
+  - `Ubuntu tests`：`success`
+  - `macOS production build`：`success`
+  - `Windows production build`：`success`
+- 双平台 artifact 在 main run 中仍可下载，结构与分支 run 一致。
+
+分支与 main 的 Foundation CI 均为 `success`，双平台 artifact 通过 manifest 与入口哈希校验，本计划标记为 `completed`。
 
 ## 6. 阶段完成后
 
