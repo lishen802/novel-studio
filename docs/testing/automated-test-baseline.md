@@ -63,10 +63,10 @@ cd ../..
 | Job | 职责 | 不负责 |
 | --- | --- | --- |
 | Ubuntu tests | 策略门禁、产物契约单元测试、正式前端、Go race/vet、原型 | Wails 原生安装与签名 |
-| macOS production build | 固定 arm64 Runner 上构建、结构/plist 校验、manifest、短期 tar artifact | Developer ID、正式签名、公证、安装和升级 |
+| macOS production build | 固定 arm64 Runner 上构建、结构/plist 校验、manifest、短期 tar artifact、旧项目迁移命名测试 | Developer ID、正式签名、公证、安装和升级 |
 | Windows production build | 固定 x64 Runner 上构建、PE 校验、manifest、Windows Go tests、短期 zip artifact | Authenticode、安装器和升级 |
 
-签名、公证、安装器和升级属于 R8；旧项目迁移 fixture 与平台矩阵的进一步硬化由后续 R0 独立实施计划定义。
+签名、公证、安装器和升级属于 R8。旧项目迁移的 fixture 规格、三阶段状态机、恢复矩阵和平台门禁入口见[旧项目迁移测试基线](legacy-project-migration.md)。
 
 ## 隐私与 fixture 规则
 
