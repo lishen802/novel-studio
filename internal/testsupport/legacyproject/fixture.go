@@ -8,12 +8,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
-	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
@@ -136,7 +136,7 @@ func Build(t testing.TB, parentDir string) Fixture {
 	}
 	databasePath := filepath.Join(packagePath, databaseFile)
 
-	migrationFS := sqlite.MigrationsFS()
+	migrationFS := migrationsFS(t)
 	seedSQL := readFixtureFile(t, "seed.sql")
 	expected := readExpected(t)
 
@@ -242,5 +242,20 @@ func repoRoot(t testing.TB) string {
 		t.Fatalf("resolve repo root: %v", err)
 	}
 	return cleaned
+}
+
+// migrationsFS returns an fs.FS rooted at the canonical Goose migration
+// directory (internal/persistence/sqlite/migrations). The migrations are read
+// from disk at test time rather than embedded, because embedding would require
+// importing the sqlite package and create an import cycle when sqlite tests
+// consume this fixture. The migration files are version-controlled and always
+// present during `go test`.
+func migrationsFS(t testing.TB) fs.FS {
+	t.Helper()
+	dir := filepath.Join(repoRoot(t), "internal", "persistence", "sqlite", "migrations")
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("locate migrations directory %s: %v", dir, err)
+	}
+	return os.DirFS(dir)
 }
 
