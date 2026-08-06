@@ -162,74 +162,115 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	defer s.endExtractionJob(taskID)
 	ctx = executionCtx
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// Phase 1: short write lock. Capture the extraction/agent/import stores,
+	// the project store and generation, acquire a job lease, transition the
+	// task to Running and persist.
+	s.mu.Lock()
 	store, err := s.extractionStoreLocked()
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 	agentStore, err := s.agentStoreLocked()
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 	if s.credentials == nil || s.providers == nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, ErrAgentRuntimeUnavailable
 	}
 
 	task, err := store.Task(ctx, taskID)
 	if err != nil {
 		if ctx.Err() != nil {
+			s.mu.Unlock()
 			return s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
 		}
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 	if task.Status != extractiondomain.StatusQueued {
+		s.mu.Unlock()
 		return ExtractionRunView{}, fmt.Errorf("extraction task is not queued: %s", task.Status)
 	}
 
-	project, err := s.active.store.Project(ctx)
+	projectStore := s.active.store
+	project, err := projectStore.Project(ctx)
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
-	importStore, _, err := s.importStoreAndProjectLocked(ctx)
-	if err != nil {
-		return ExtractionRunView{}, err
+	importStore, ok := projectStore.(ports.ImportStore)
+	if !ok {
+		s.mu.Unlock()
+		return ExtractionRunView{}, ErrImportStoreUnavailable
 	}
 	importDetails, err := importStore.ImportJob(ctx, task.ImportJobID)
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, stableImportStoreError(err)
 	}
 
 	connection, err := agentStore.ProviderConnection(ctx, task.ConnectionID)
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 	apiKey, err := s.credentials.Get(ctx, connection.CredentialRef)
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 	provider, err := s.providers.New(connection)
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 
+	generation := s.active.generation
+	lease, err := s.leases.acquire(taskID, generation)
+	if err != nil {
+		s.mu.Unlock()
+		return ExtractionRunView{}, err
+	}
 	task, _ = task.Transition(extractiondomain.StatusRunning, "", s.clock.Now())
 	if err := store.UpdateTask(ctx, task); err != nil {
+		s.mu.Unlock()
 		if ctx.Err() != nil {
 			return s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
 		}
 		return ExtractionRunView{}, err
 	}
-
 	currentJob, err := importDetails.Job.MarkExtractionStarted(task.ID, s.clock.Now())
 	if err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, err
 	}
 	if err := importStore.UpdateImportJobExtraction(ctx, currentJob); err != nil {
+		s.mu.Unlock()
 		return ExtractionRunView{}, stableImportStoreError(err)
 	}
+	s.mu.Unlock()
 
+	// stale reports whether the store generation has changed or the lease was
+	// force-marked stale by a drain timeout.
+	stale := func() bool {
+		return lease.IsStale() || s.currentGeneration() != generation
+	}
+
+	// failStale transitions the task to Recoverable without touching the
+	// (possibly closed) captured stores.
+	failStale := func() (ExtractionRunView, error) {
+		task, _ = task.Transition(extractiondomain.StatusRecoverable, ErrAgentRunStaleStore.Error(), s.clock.Now())
+		return extractionRunView(task, nil), ErrAgentRunStaleStore
+	}
+
+	// failed is the exit path for errors during the lock-free phase.
 	failed := func(cause error) (ExtractionRunView, error) {
+		if stale() {
+			return failStale()
+		}
 		if errors.Is(cause, context.Canceled) {
 			persistCtx := context.WithoutCancel(ctx)
 			if cancelErr := s.persistCancelledExtraction(persistCtx, store, task); cancelErr != nil {
@@ -246,6 +287,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		return extractionRunView(task, nil), cause
 	}
 
+	// Phase 2: lock-free context assembly and provider calls.
 	for index := range task.Steps {
 		step := task.Steps[index]
 		if ctx.Err() != nil {
@@ -255,6 +297,9 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		if err != nil {
 			return failed(err)
 		}
+		if stale() {
+			return failStale()
+		}
 		if err := store.UpdateStep(ctx, runningStep); err != nil {
 			return failed(err)
 		}
@@ -263,12 +308,16 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		if err != nil {
 			return failed(err)
 		}
+		if stale() {
+			return failStale()
+		}
 		if err := store.CreateArtifact(ctx, newExtractionArtifact(
 			s.ids.NewID(), task.ID, runningStep.ID, "context_manifest", contextJSON, s.clock.Now(),
 		)); err != nil {
 			return failed(err)
 		}
 
+		// Provider call — lock-free.
 		generated, err := provider.Generate(ctx, apiKey, ports.ModelGenerateRequest{
 			Model:           task.Model,
 			System:          extractionSystemPrompt,
@@ -286,7 +335,9 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 			failedStep, _ := runningStep.Transition(extractiondomain.StepFailed, err.Error(), s.clock.Now())
 			failedStep.ErrorCode = "provider_error"
 			failedStep.ErrorMessage = err.Error()
-			_ = store.UpdateStep(context.WithoutCancel(ctx), failedStep)
+			if !stale() {
+				_ = store.UpdateStep(context.WithoutCancel(ctx), failedStep)
+			}
 			task.Steps[index] = failedStep
 			return failed(err)
 		}
@@ -302,6 +353,9 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		task = task.RecordUsage(generated.InputTokens, generated.OutputTokens)
 		task.Steps[index] = completedStep
 
+		if stale() {
+			return failStale()
+		}
 		persistCtx := context.WithoutCancel(ctx)
 		if err := store.UpdateStep(persistCtx, completedStep); err != nil {
 			return ExtractionRunView{}, err
@@ -322,6 +376,10 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		}
 	}
 
+	// Completion: merge results, create change set, transition to Completed.
+	if stale() {
+		return failStale()
+	}
 	specs, err := mergeExtractionResults(task.Steps, s.ids.NewID)
 	if err != nil {
 		return failed(err)
@@ -340,7 +398,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	if err != nil {
 		return failed(err)
 	}
-	if err := s.active.store.CreateChangeSet(ctx, changeSet); err != nil {
+	if err := projectStore.CreateChangeSet(ctx, changeSet); err != nil {
 		return failed(err)
 	}
 	task.ChangeSetID = changeSet.ID

@@ -71,6 +71,9 @@ func (s *Service) endExtractionJob(taskID string) {
 	if cancel != nil {
 		cancel()
 	}
+	// Release the lease last so switch/close drain waits until the extraction
+	// job has finished all persistence before closing the store.
+	s.leases.release(taskID)
 }
 
 func (s *Service) cancelAllExtractionJobs() {
