@@ -82,7 +82,7 @@ jobs:
 
   macos-build:
     name: macOS production build
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 25
     steps:
       - name: Check out source
@@ -114,6 +114,36 @@ jobs:
       - name: Build macOS application
         run: wails build -clean -m
         working-directory: apps/desktop
+
+      - name: Validate macOS application bundle
+        env:
+          BUILD_RUNNER_LABEL: macos-15
+        run: |
+          node scripts/ci/wails-build-artifact.mjs \
+            --platform darwin \
+            --build-dir apps/desktop/build/bin \
+            --output apps/desktop/build/bin/build-manifest.json
+          plutil -lint apps/desktop/build/bin/NovelStudio.app/Contents/Info.plist
+
+      - name: Package macOS inspection artifact
+        run: |
+          mkdir -p apps/desktop/build/artifacts
+          tar -czf apps/desktop/build/artifacts/NovelStudio-macos-arm64.tar.gz \
+            -C apps/desktop/build/bin \
+            NovelStudio.app \
+            build-manifest.json
+          tar -tzf apps/desktop/build/artifacts/NovelStudio-macos-arm64.tar.gz
+
+      - name: Upload macOS inspection artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: novel-studio-macos-arm64-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            apps/desktop/build/artifacts/NovelStudio-macos-arm64.tar.gz
+            apps/desktop/build/bin/build-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   windows-build:
     name: Windows production build
