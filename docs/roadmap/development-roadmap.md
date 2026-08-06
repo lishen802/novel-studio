@@ -1,7 +1,7 @@
 # 织境 Story Studio 总体开发路线图
 
 - 状态：已批准
-- 更新日期：2026-08-06（R0 完成）
+- 更新日期：2026-08-06（R1.1 完成）
 - 适用范围：当前商业发布底线与完整 V1
 - 上游依据：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 实施计划规范：[实施计划目录说明](../plans/README.md)
@@ -145,11 +145,13 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 
 ### 待建立实施计划
 
-1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`in_progress`）
+1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`completed`）
 2. `R1 JobEvent 持久化与应用 API`
 3. `R1 React JobEvent replay`
 4. `R1 项目 OS lease 与只读 store`
 5. `R1 Windows 文件锁与路径边界`
+
+R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race/vet、macOS 生产构建、Windows 完整 Go tests 与生产构建）。Agent 与抽取作业的 Provider 调用不再持有工作区全局锁，作者可在模型 IO 期间保存草稿与新建章节；项目切换/关闭先 drain job lease 再关闭 store，generation 安全网保证作业不向已关闭 store 回写，超时作业转入 `recoverable` 供作者重试。R1.2–R1.5 按其退出标准依次创建。
 
 ## 7. R2：正式资产写入与导入正确性
 
@@ -447,4 +449,4 @@ docs/plans/YYYY-MM-DD-r<阶段>-<能力>-implementation.md
 
 计划状态为 `draft/approved/in_progress/completed/superseded`。只有 `approved` 或 `in_progress` 的计划可以指导实现；产品设计变化后，旧计划必须更新或标记 `superseded`，不能继续凭历史任务清单开发。
 
-R0 已全部完成。`R1 Agent job lease 与工作区锁隔离` 计划已起草（`draft`），评审通过改为 `approved`/`in_progress` 后再开始代码修改；R1 的其他计划按其退出标准依次创建，不一次性提前展开 R2–R9 的文件级任务。
+R0 已全部完成。`R1 Agent job lease 与工作区锁隔离` 计划已完成（`completed`，CI run `31089401016` 三平台通过）；R1 的其他计划按其退出标准依次创建，不一次性提前展开 R2–R9 的文件级任务。

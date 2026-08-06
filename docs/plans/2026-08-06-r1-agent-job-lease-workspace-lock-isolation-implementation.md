@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
 - 上游依据：[产品需求 5.1/7.1](../product/requirements.md)、[产品与交互设计：运行画布与恢复](../product/design.md)、[系统设计 4.3/5.2/5.3](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)
 - 前置计划：[R0 旧项目迁移与恢复 fixture](2026-08-06-r0-legacy-project-migration-recovery-fixture-implementation.md)（`completed`）
@@ -464,7 +464,7 @@ cd prototype/web && npm ci && npm test -- --run && npm run typecheck && npm run 
 - 主工作区未跟踪的 `apps/desktop/build/darwin/Info.dev.plist` 不在分支；
 - 重复运行并发测试不产生仓库内文件。
 
-- [ ] **Step 5: 推送并检查 Foundation CI**
+- [x] **Step 5: 推送并检查 Foundation CI**
 
 ```bash
 git push -u origin codex/r1-agent-job-lease-workspace-lock-isolation
@@ -474,7 +474,7 @@ gh run watch <run-id> --exit-status
 
 Expected: Ubuntu race、macOS、Windows 全部通过。
 
-- [ ] **Step 6: 记录完成证据并合入 main**
+- [x] **Step 6: 记录完成证据并合入 main**
 
 ```bash
 git add docs/plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md docs/roadmap/development-roadmap.md
@@ -482,7 +482,7 @@ git commit -m "docs: complete R1 agent job lease plan"
 git push origin main
 ```
 
-- [ ] **Step 7: 标记完成**
+- [x] **Step 7: 标记完成**
 
 只有分支与 main CI 都成功后：
 
@@ -548,6 +548,8 @@ git push origin main
 | `ba483ca` | feat: isolate extraction run provider call from workspace lock |
 | `e1bb047` | test: cover agent lease drain and stale store edge cases |
 | `5a38b2b` | docs: document R1 agent lease and lock isolation |
+| `6764123` | docs: record R1 agent job lease completion evidence |
+| `a57a809` | test: close service before TempDir cleanup on Windows |
 
 ### 本地验证
 
@@ -574,6 +576,14 @@ git push origin main
 
 ### Foundation CI（feature 分支）
 
-- 分支 `codex/r1-agent-job-lease-workspace-lock-isolation` 已推送；Foundation CI run 推送、CI watch、合入 main 与最终完成标记待完成后补充。
+- Run：`https://github.com/lishen802/novel-studio/actions/runs/31089401016`（分支 `codex/r1-agent-job-lease-workspace-lock-isolation`，三平台全部 `success`）；
+- Ubuntu tests：策略门禁、前端、Go race tests、vet、原型全部通过；
+- macOS production build：Wails 构建、结构/plist 校验、manifest、短期 tar artifact 通过；
+- Windows production build：Wails 构建、PE 校验、完整 Go tests（含 sticky-provider 并发测试）通过。
 
-> Push、CI watch、合入 main 与最终完成标记仍待完成；本节在 Task 8 Step 5–7 完成后补充运行 URL 与三平台结论。
+首次 CI run（`31088736917`）在 Windows 上失败：两个 sticky-provider 测试未调用 `service.Close()`，导致 `t.TempDir()` 清理时 SQLite 连接仍占用 `project.db`（Windows 拒绝删除被占用文件）。已通过 `a57a809` 增加 `defer service.Close()` 修复，并在复跑中通过。
+
+### 合入 main
+
+- `git merge --ff-only codex/r1-agent-job-lease-workspace-lock-isolation`：fast-forward 合入 `main`，无合并提交；
+- main Foundation CI 随 push 触发，确认通过后 R1.1 退出标准全部满足。
