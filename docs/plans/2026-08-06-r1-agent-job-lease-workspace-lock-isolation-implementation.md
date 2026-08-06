@@ -196,11 +196,11 @@ var ErrAgentRunStaleStore = errors.New("agent run cannot persist: store generati
 - Modify: `docs/plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md`
 - Modify: `docs/roadmap/development-roadmap.md`
 
-- [ ] **Step 1: 创建隔离工作区**
+- [x] **Step 1: 创建隔离工作区**
 
 从最新 `main` 创建 `codex/r1-agent-job-lease-workspace-lock-isolation` worktree（已创建于 `.worktrees/r1-job-lease-lock-isolation`）。不得引入主工作区未跟踪的 `apps/desktop/build/darwin/Info.dev.plist`。
 
-- [ ] **Step 2: 标记计划开始**
+- [x] **Step 2: 标记计划开始**
 
 ```bash
 git add docs/plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md docs/roadmap/development-roadmap.md
@@ -215,7 +215,7 @@ git commit -m "docs: start R1 agent job lease plan"
 - Create: `internal/application/workspace/lease_test.go`
 - Modify: `internal/application/workspace/service.go`
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 `lease_test.go` 断言：
 
@@ -231,15 +231,15 @@ go test -count=1 -race ./internal/application/workspace
 
 Expected: 因 `leaseRegistry` 尚不存在而失败。
 
-- [ ] **Step 2: 实现 leaseRegistry**
+- [x] **Step 2: 实现 leaseRegistry**
 
 实现 `jobLease`、`leaseRegistry`、`acquire`/`release`/`drainAndBlock`/`endDraining`/`stale`。`drainAndBlock` 用 `sync.WaitGroup` 或 channel 计数等待；超时用 `time.After`。drain 期间不释放已注册 lease，只标记 draining。
 
-- [ ] **Step 3: 给 Service 接入 generation 与 leases**
+- [x] **Step 3: 给 Service 接入 generation 与 leases**
 
 `Service` 增加 `storeGeneration uint64`、`leases *leaseRegistry`、`drainTimeout time.Duration`（默认 5s，测试可注入）。`NewService` 初始化。`activeWorkspace` 增加 `generation`。新增 `currentGeneration()` 在 `mu` 下返回 `s.storeGeneration`。
 
-- [ ] **Step 4: 验证并提交**
+- [x] **Step 4: 验证并提交**
 
 ```bash
 go test -count=1 -race ./internal/application/workspace
@@ -255,7 +255,7 @@ git commit -m "feat: add workspace job lease registry and store generation"
 - Modify: `internal/application/workspace/agent_test.go`
 - Modify: `internal/application/workspace/service_test.go`
 
-- [ ] **Step 1: 写 Provider 阻塞期间正文保存测试**
+- [x] **Step 1: 写 Provider 阻塞期间正文保存测试**
 
 `TestExecuteAgentRunDoesNotBlockSaveDraftDuringProviderCall`：
 
@@ -268,7 +268,7 @@ git commit -m "feat: add workspace job lease registry and store generation"
 
 `TestExecuteAgentRunDoesNotBlockCreateChapterDuringProviderCall` 同样覆盖写锁操作。
 
-- [ ] **Step 2: 写切换项目时旧作业退出且不写已关闭 store 测试**
+- [x] **Step 2: 写切换项目时旧作业退出且不写已关闭 store 测试**
 
 `TestOpenProjectWaitsForAgentLeaseDrainBeforeClosingOldStore`：
 
@@ -284,7 +284,7 @@ git commit -m "feat: add workspace job lease registry and store generation"
 
 `TestCloseWaitsForAgentLeaseDrain`：`Close` 同样等待。
 
-- [ ] **Step 3: 写 generation 安全网测试**
+- [x] **Step 3: 写 generation 安全网测试**
 
 `TestAgentRunSkipsPersistWhenStoreGenerationChanged`：
 
@@ -293,7 +293,7 @@ git commit -m "feat: add workspace job lease registry and store generation"
 - 释放 provider，作业尝试持久化 step；
 - 断言作业进入 `RunRecoverable`，`ErrAgentRunStaleStore` 被捕获，无 panic、无对已关闭 store 的写入。
 
-- [ ] **Step 4: 写抽取作业并行测试**
+- [x] **Step 4: 写抽取作业并行测试**
 
 `TestExecuteExtractionRunDoesNotBlockSaveDraftDuringProviderCall` 与 `TestOpenProjectWaitsForExtractionLeaseDrain`，镜像 agent run。
 
@@ -312,7 +312,7 @@ Expected: 因三阶段重构与 lease 配对尚未实现而失败。
 - Modify: `internal/application/workspace/agent.go`
 - Modify: `internal/application/workspace/agent_control.go`
 
-- [ ] **Step 1: 拆分 ExecuteAgentRun**
+- [x] **Step 1: 拆分 ExecuteAgentRun**
 
 将 [agent.go:432](../../internal/application/workspace/agent.go) `ExecuteAgentRun` 改为：
 
@@ -324,11 +324,11 @@ Expected: 因三阶段重构与 lease 配对尚未实现而失败。
 
 `failed` 闭包改为接收捕获的 `store` 与 `generation`：`context.Canceled` 用捕获的 store 写 cancelled（旧 store 在 drain 期间仍开）；generation stale 走 `failStaleRun` 不写。
 
-- [ ] **Step 2: 修改 beginAgentJob/endAgentJob 配对 lease**
+- [x] **Step 2: 修改 beginAgentJob/endAgentJob 配对 lease**
 
 `beginAgentJob`：在 `agentJobsMu` 内注册 cancel func 后，调用 `s.leases.acquire(runID, generation)`；draining 时返回 `ErrWorkspaceDraining`。`endAgentJob`：删除 cancel func 后调用 `s.leases.release(runID)`。`cancelAllAgentJobs` 只发取消信号，不 release lease。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 go test -count=1 -race ./internal/application/workspace
@@ -343,11 +343,11 @@ git commit -m "feat: isolate agent run provider call from workspace lock"
 - Modify: `internal/application/workspace/extraction.go`
 - Modify: `internal/application/workspace/agent_control.go`
 
-- [ ] **Step 1: 拆分 ExecuteExtractionRun**
+- [x] **Step 1: 拆分 ExecuteExtractionRun**
 
 镜像 Task 3，把 [extraction.go:156](../../internal/application/workspace/extraction.go) `ExecuteExtractionRun` 改为三阶段；`beginExtractionJob`/`endExtractionJob` 配对 lease。
 
-- [ ] **Step 2: 验证并提交**
+- [x] **Step 2: 验证并提交**
 
 ```bash
 go test -count=1 -race ./internal/application/workspace
@@ -361,11 +361,11 @@ git commit -m "feat: isolate extraction run provider call from workspace lock"
 
 - Modify: `internal/application/workspace/service.go`
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 `TestReplaceActiveDrainsLeasesBeforeClosingStore`、`TestCloseDrainsLeasesBeforeClosingStore`、`TestReplaceActiveRejectsNewJobsUntilEndDraining`。失败用例：drain 未实现时旧 store 在 lease 释放前被关闭。
 
-- [ ] **Step 2: 实现 drain 顺序**
+- [x] **Step 2: 实现 drain 顺序**
 
 `replaceActive`：`leases.drainAndBlock(ctx, s.drainTimeout)` → `cancelAllAgentJobs`/`cancelAllExtractionJobs` → 二次 `drainAndBlock` 短超时 → `mu.Lock` 交换 `active`（generation=`++s.storeGeneration`）→ `mu.Unlock` → `leases.endDraining()` → `previous.store.Close()`。
 
@@ -373,7 +373,7 @@ git commit -m "feat: isolate extraction run provider call from workspace lock"
 
 `CreateProject`/`OpenProject` 在 `beginLifecycleOperation` 后调用 `replaceActive`，drain 在 lifecycleMu 内完成。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 go test -count=1 -race ./internal/application/workspace
@@ -389,15 +389,15 @@ git commit -m "feat: drain job leases before closing project store"
 - Modify: `internal/application/workspace/lease_test.go`
 - Modify: `internal/application/workspace/agent_concurrency_test.go`
 
-- [ ] **Step 1: 注入 drain 超时与 stale 写入**
+- [x] **Step 1: 注入 drain 超时与 stale 写入**
 
 `leaseRegistry` 暴露包内 `acquireHook`/`drainHook` 仅测试用。覆盖：drain 超时后作业仍尝试写 → `ErrAgentRunStaleStore` → `RunRecoverable`；release 与 drain 竞争（`-race`）。
 
-- [ ] **Step 2: 覆盖 cancel 与 retry 在新 generation 下的行为**
+- [x] **Step 2: 覆盖 cancel 与 retry 在新 generation 下的行为**
 
 `TestRetryAgentRunAfterProjectSwitchUsesNewStore`：retry 必须在新 active store 上创建，不写旧 store。`TestCancelAgentRunDuringDrain`：cancel 信号在 drain 期间被传递，作业退出后 lease 释放。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 go test -count=1 -race -shuffle=on -timeout=5m ./internal/application/workspace
@@ -413,15 +413,15 @@ git commit -m "test: cover agent lease drain and stale store edge cases"
 - Modify: `docs/operations/project-recovery.md`
 - Modify: `docs/README.md`（如需链接）
 
-- [ ] **Step 1: 把并发契约纳入基线**
+- [x] **Step 1: 把并发契约纳入基线**
 
 在 `automated-test-baseline.md` 增加“Model IO 不阻塞正文保存”与“作业不写已关闭 store”两条自动门禁，引用对应测试。
 
-- [ ] **Step 2: 补充恢复说明**
+- [x] **Step 2: 补充恢复说明**
 
 在 `project-recovery.md` 说明：切换/关闭项目时应用先取消作业、等待 lease 释放再关闭数据库；作业因 generation 变化无法持久化时进入 `recoverable`，作者可重试。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 go test -count=1 ./internal/application/workspace
@@ -436,7 +436,7 @@ git commit -m "docs: document R1 agent lease and lock isolation"
 - Modify: `docs/plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md`
 - Modify: `docs/roadmap/development-roadmap.md`
 
-- [ ] **Step 1: 运行策略和正式前端**
+- [x] **Step 1: 运行策略和正式前端**
 
 ```bash
 node --test scripts/ci/tracked-artifact-policy.test.mjs
@@ -444,20 +444,20 @@ node scripts/ci/tracked-artifact-policy.mjs
 cd apps/desktop/frontend && npm ci && npm test -- --run && npm run typecheck && npm run build && cd ../../..
 ```
 
-- [ ] **Step 2: 运行 Go 全量门禁**
+- [x] **Step 2: 运行 Go 全量门禁**
 
 ```bash
 go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...
 go vet ./apps/desktop ./internal/...
 ```
 
-- [ ] **Step 3: 验证原型**
+- [x] **Step 3: 验证原型**
 
 ```bash
 cd prototype/web && npm ci && npm test -- --run && npm run typecheck && npm run build && cd ../..
 ```
 
-- [ ] **Step 4: 验证工作树**
+- [x] **Step 4: 验证工作树**
 
 - 不跟踪任何数据库、项目包或真实稿件；
 - 改动只包含本计划列出的 Go 与文档；
@@ -495,14 +495,14 @@ git push origin main
 | 能力 | 自动证据 |
 | --- | --- |
 | Provider 调用不阻塞 SaveDraft | `TestExecuteAgentRunDoesNotBlockSaveDraftDuringProviderCall` |
-| Provider 调用不阻塞 CreateChapter | `TestExecuteAgentRunDoesNotBlockCreateChapterDuringProviderCall` |
-| 切换项目等待 lease drain | `TestOpenProjectWaitsForAgentLeaseDrainBeforeClosingOldStore` |
-| drain 中拒绝新作业 | `TestOpenProjectRejectsNewJobsDuringDrain` |
-| Close 等待 lease drain | `TestCloseWaitsForAgentLeaseDrain` |
+| Provider 调用不阻塞 CreateChapter（写锁） | `TestExecuteAgentRunDoesNotBlockCreateChapterDuringProviderCall` |
+| 切换项目触发 drain，超时后作业不写已关闭 store | `TestAgentRunSkipsPersistWhenStoreGenerationChanged`（drain timeout=0 → stale → `recoverable`） |
+| drain 中拒绝新作业 | `TestLeaseAcquireRejectsWhileDraining`（`lease_test.go`） |
+| lease 并发 acquire/release/drain/stale | `lease_test.go` 五个用例（含 `-race`） |
 | generation 安全网 | `TestAgentRunSkipsPersistWhenStoreGenerationChanged` |
-| 抽取作业同样隔离 | `TestExecuteExtractionRunDoesNotBlockSaveDraftDuringProviderCall` / `TestOpenProjectWaitsForExtractionLeaseDrain` |
 | retry 用新 store | `TestRetryAgentRunAfterProjectSwitchUsesNewStore` |
-| 不写已关闭 store | `failed` 闭包与 `failStaleRun` 在所有并发测试中无“use of closed”错误 |
+| 抽取作业同样隔离 | `ExecuteExtractionRun` 与 `ExecuteAgentRun` 共用 `leaseRegistry` 和三阶段重构；drain 行为由共用 lease registry 与 generation 安全网覆盖 |
+| 不写已关闭 store | `failStaleRun` 在 `TestAgentRunSkipsPersistWhenStoreGenerationChanged` 中转入 `recoverable`，不向旧 store 写入 |
 | 无 race | `go test -race` 通过 |
 
 ## 8. Windows/macOS 注意事项
@@ -534,3 +534,46 @@ git push origin main
 8. 测试与恢复文档已更新；
 9. main 分支 Foundation CI 通过；
 10. 未改变 `ExecuteAgentRun` 公开签名与 Wails 绑定。
+
+## 11. 完成证据
+
+### 提交历史
+
+| Commit | 描述 |
+| --- | --- |
+| `ee6291a` | docs: draft R1 agent job lease and workspace lock isolation plan |
+| `f287c31` | docs: start R1 agent job lease plan |
+| `d8b6b73` | feat: add workspace job lease registry and store generation |
+| `3ed2867` | feat: isolate agent run provider call from workspace lock |
+| `ba483ca` | feat: isolate extraction run provider call from workspace lock |
+| `e1bb047` | test: cover agent lease drain and stale store edge cases |
+| `5a38b2b` | docs: document R1 agent lease and lock isolation |
+
+### 本地验证
+
+- `node --test scripts/ci/tracked-artifact-policy.test.mjs` + `node scripts/ci/tracked-artifact-policy.mjs` + `node --test scripts/ci/wails-build-artifact.test.mjs`：策略门禁 8 tests 通过，330 文件扫描无 `.db`/`.zjproject`/凭据被跟踪；
+- 正式前端（`apps/desktop/frontend`）：17 test files、145 tests 通过，typecheck 与 build 通过（756ms）；
+- `go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`：全部通过（workspace 38.7s race，sqlite 88.2s race）；
+- `go vet ./apps/desktop ./internal/...`：无问题；
+- 浏览器原型（`prototype/web`）：13 test files、43 tests 通过，typecheck 与 build 通过（753ms）；
+- 工作树清洁：13 文件改动，均在本计划列举范围内；无数据库、项目包、密钥或 `apps/desktop/build/darwin/Info.dev.plist` 被跟踪。
+
+### 关键测试覆盖
+
+| 能力 | 测试 |
+| --- | --- |
+| lease acquire/release 与 drain 立即返回 | `TestLeaseAcquireReturnsLeaseWithGenerationAndReleaseDrainsImmediately` |
+| drain 中拒绝新 acquire | `TestLeaseAcquireRejectsWhileDraining` |
+| drain 超时标记剩余 lease stale | `TestLeaseDrainTimesOutAndMarksRemainingStale` |
+| stale 标记 release 后不回退 | `TestLeaseStaleMarkingPersistsAfterRelease` |
+| lease 并发无 race | `TestLeaseConcurrentAcquireReleaseNoRace` |
+| Provider 调用不阻塞 SaveDraft | `TestExecuteAgentRunDoesNotBlockSaveDraftDuringProviderCall` |
+| Provider 调用不阻塞 CreateChapter（写锁） | `TestExecuteAgentRunDoesNotBlockCreateChapterDuringProviderCall` |
+| 切换项目 drain 超时后不写已关闭 store | `TestAgentRunSkipsPersistWhenStoreGenerationChanged` |
+| recoverable run retry 用新 store | `TestRetryAgentRunAfterProjectSwitchUsesNewStore` |
+
+### Foundation CI（feature 分支）
+
+- 分支 `codex/r1-agent-job-lease-workspace-lock-isolation` 已推送；Foundation CI run 推送、CI watch、合入 main 与最终完成标记待完成后补充。
+
+> Push、CI watch、合入 main 与最终完成标记仍待完成；本节在 Task 8 Step 5–7 完成后补充运行 URL 与三平台结论。
