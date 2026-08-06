@@ -262,6 +262,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	// failStale transitions the task to Recoverable without touching the
 	// (possibly closed) captured stores.
 	failStale := func() (ExtractionRunView, error) {
+		task.ErrorCode = "store_generation_changed"
 		task, _ = task.Transition(extractiondomain.StatusRecoverable, ErrAgentRunStaleStore.Error(), s.clock.Now())
 		return extractionRunView(task, nil), ErrAgentRunStaleStore
 	}

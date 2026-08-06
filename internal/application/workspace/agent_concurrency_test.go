@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -184,5 +185,183 @@ func TestExecuteAgentRunDoesNotBlockSaveDraftDuringProviderCall(t *testing.T) {
 	}
 	if !view.HasRecoveryDraft {
 		t.Fatal("recovery draft was not persisted")
+	}
+}
+
+// stickyModelProviderFactory produces providers that block ONLY on a release
+// channel and ignore ctx cancellation. This lets tests hold a job inside Model
+// IO past the drain timeout so the lease is force-marked stale, exercising the
+// generation safety net that prevents writes to a closed store.
+type stickyModelProviderFactory struct {
+	outputs map[string]string
+	release chan struct{}
+	started chan struct{}
+	once    sync.Once
+}
+
+func newStickyModelProviderFactory(outputs map[string]string) *stickyModelProviderFactory {
+	return &stickyModelProviderFactory{
+		outputs: outputs,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+}
+
+func (f *stickyModelProviderFactory) New(agentdomain.ProviderConnection) (ports.ModelProvider, error) {
+	return stickyModelProvider{factory: f}, nil
+}
+
+type stickyModelProvider struct {
+	factory *stickyModelProviderFactory
+}
+
+func (provider stickyModelProvider) Generate(
+	_ context.Context,
+	_ string,
+	request ports.ModelGenerateRequest,
+	onDelta func(string),
+) (ports.ModelGenerateResult, error) {
+	provider.factory.once.Do(func() { close(provider.factory.started) })
+	<-provider.factory.release
+	output := provider.factory.outputs[request.Model]
+	if onDelta != nil {
+		onDelta(output)
+	}
+	return ports.ModelGenerateResult{
+		Text:              output,
+		ProviderRequestID: "request-" + request.Model,
+		InputTokens:       10,
+		OutputTokens:      5,
+	}, nil
+}
+
+// TestAgentRunSkipsPersistWhenStoreGenerationChanged asserts that when a project
+// switch drains an in-flight agent run past the drain timeout, the job's
+// subsequent persistence attempt is skipped and the run transitions to
+// Recoverable instead of writing to the closed store.
+func TestAgentRunSkipsPersistWhenStoreGenerationChanged(t *testing.T) {
+	ctx := context.Background()
+	factory := newStickyModelProviderFactory(gatedAuthoringOutputs())
+	service, chapter := configuredAgentService(t, factory)
+	// A zero drain timeout causes replaceActive to mark remaining leases stale
+	// immediately, simulating a drain that cannot wait for the stuck provider.
+	service.drainTimeout = 0
+
+	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章。")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runDone := make(chan AgentRunView, 1)
+	runErrCh := make(chan error, 1)
+	go func() {
+		got, executeErr := service.ExecuteAgentRun(ctx, run.ID)
+		runDone <- got
+		runErrCh <- executeErr
+	}()
+
+	waitForStickyProviderStarted(t, factory)
+
+	// Switch to a new project. replaceActive will drain (timeout=0 → stale),
+	// close the old store, and install the new generation.
+	parentDirectory := t.TempDir()
+	if _, err := service.CreateProject(ctx, parentDirectory, "新项目", "奇幻", "简介"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Release the stuck provider. The job will try to persist the step result
+	// but the generation has changed and the lease is stale.
+	close(factory.release)
+
+	select {
+	case got := <-runDone:
+		if got.Status != "recoverable" {
+			t.Fatalf("run status = %s, want recoverable", got.Status)
+		}
+		if got.ErrorCode != "store_generation_changed" {
+			t.Fatalf("run error code = %s, want store_generation_changed", got.ErrorCode)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ExecuteAgentRun did not return after releasing the provider")
+	}
+
+	select {
+	case executeErr := <-runErrCh:
+		if !errors.Is(executeErr, ErrAgentRunStaleStore) {
+			t.Fatalf("ExecuteAgentRun error = %v, want ErrAgentRunStaleStore", executeErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ExecuteAgentRun error not received")
+	}
+}
+
+// TestRetryAgentRunAfterProjectSwitchUsesNewStore asserts that after a stale
+// run is recovered (via RecoverInterruptedAgentRuns on project reopen), the
+// retry creates a new run on the reopened store rather than writing to the old
+// closed one.
+func TestRetryAgentRunAfterProjectSwitchUsesNewStore(t *testing.T) {
+	ctx := context.Background()
+	factory := newStickyModelProviderFactory(gatedAuthoringOutputs())
+	service, chapter := configuredAgentService(t, factory)
+	service.drainTimeout = 0
+	projectPath := service.active.packageInfo.Root
+
+	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章。")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runDone := make(chan struct{})
+	go func() {
+		_, _ = service.ExecuteAgentRun(ctx, run.ID)
+		close(runDone)
+	}()
+
+	waitForStickyProviderStarted(t, factory)
+
+	// Switch to a new project — the old store is closed and the lease is stale.
+	parentDirectory := t.TempDir()
+	if _, err := service.CreateProject(ctx, parentDirectory, "新项目", "奇幻", "简介"); err != nil {
+		t.Fatal(err)
+	}
+	close(factory.release)
+	<-runDone
+
+	// Reopen the original project. RecoverInterruptedAgentRuns should
+	// transition the stuck Running run to Recoverable.
+	if _, err := service.OpenProject(ctx, projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := service.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != "recoverable" {
+		t.Fatalf("recovered run status = %s, want recoverable", recovered.Status)
+	}
+
+	// Retry on the reopened store. This must succeed and create a new queued run.
+	retry, err := service.RetryAgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("RetryAgentRun: %v", err)
+	}
+	if retry.ID == run.ID {
+		t.Fatal("retry run ID must differ from original")
+	}
+	if retry.Status != "queued" {
+		t.Fatalf("retry status = %s, want queued", retry.Status)
+	}
+	if retry.RetryOf != run.ID {
+		t.Fatalf("retry.RetryOf = %s, want %s", retry.RetryOf, run.ID)
+	}
+}
+
+func waitForStickyProviderStarted(t *testing.T, factory *stickyModelProviderFactory) {
+	t.Helper()
+	select {
+	case <-factory.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("sticky provider never started; run did not reach Model IO")
 	}
 }

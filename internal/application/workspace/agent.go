@@ -498,6 +498,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	// closed) captured store. Callers return the resulting view and
 	// ErrAgentRunStaleStore so the user can retry on the new active store.
 	failStale := func() (AgentRunView, error) {
+		run.ErrorCode = agentRunErrorCode(ErrAgentRunStaleStore)
 		run, _ = run.Transition(agentdomain.RunRecoverable, ErrAgentRunStaleStore.Error(), s.clock.Now())
 		return agentRunView(run), ErrAgentRunStaleStore
 	}
