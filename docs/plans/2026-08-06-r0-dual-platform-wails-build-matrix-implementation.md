@@ -1161,6 +1161,51 @@ gh run watch "$WAILS_FINAL_RUN_ID" --exit-status
 
 Expected: 完成状态提交触发的最终 main Foundation CI 仍为 success。若失败，计划恢复为 `in_progress` 并记录失败 Job，不能宣告完成。
 
+## 完成证据（分支）
+
+### 分支 Foundation CI
+
+- 分支：`codex/r0-dual-platform-wails-build-matrix`
+- Run ID：`31076648201`
+- Run URL：https://github.com/lishen802/novel-studio/actions/runs/31076648201
+- 触发 commit：`1475e6325e4361ac5b9a8c28850b13a910fd1b22`
+- 三个 Job 结论：
+  - `Ubuntu tests`：`success`，5m32s
+  - `macOS production build`：`success`，1m36s
+  - `Windows production build`：`success`，3m3s
+
+### 双平台 artifact
+
+| 平台 | artifact 名称 | Runner | 架构 | manifest commit | 入口 SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| darwin | `NovelStudio-macos-arm64.tar.gz` | `macos-15` | ARM64 | `1475e63` | `d2965f8761258e7b70d2d1c9bb59520e5590ae37eb8f461d01aff364239bf733` |
+| windows | `NovelStudio-windows-x64.zip` | `windows-2025` | X64 | `1475e63` | `1ab1f85ef90b1bb0e674e655d8e2d279f1a246515d52c181b3485bc1f6bde5e0` |
+
+下载检查确认：
+
+- 每个 artifact 含平台压缩包与 `build-manifest.json`；
+- 外层 manifest 与解包后 manifest 完全一致；
+- manifest 的 `source.commit` 等于 run head SHA；
+- manifest 的 `runner.label`/`runner.arch` 分别为 `macos-15`/`ARM64` 与 `windows-2025`/`X64`；
+- 解包后入口 SHA-256 与 manifest 的 `entrypoint_sha256` 一致；
+- 解包后只包含平台 production build 与 manifest。
+
+### 本地验收
+
+- 策略门禁：`tracked-artifact-policy` 4 项测试 PASS、仓库扫描 PASS（313 文件）；`wails-build-artifact` 4 项测试 PASS；
+- 桌面前端：17 个测试文件、145 项测试 PASS；typecheck 与 production build PASS；
+- Go：`go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...` 全部 `ok`；`go vet` 退出码 0；
+- 浏览器原型：13 个测试文件、43 项测试 PASS；typecheck 与 production build PASS；
+- 本地 macOS production build smoke：`wails doctor` SUCCESS；`wails build -clean -m` 生成 `NovelStudio.app`；产物检查器 PASS；`plutil -lint Info.plist` OK。
+
+### Runner 与 Wails 诊断
+
+- macOS Runner `wails doctor`：Xcode CLT、Node、npm 已安装；Xcode/upx/nsis 标记为可选（Available），不阻断构建；
+- Windows Runner `wails doctor`：构建与验证步骤均 PASS，无阻断警告；
+- 两个平台均使用 Wails v2.13.0、Go 1.25.12、Node 22。
+
+计划和路线图继续保持 `in_progress`，等待合入 `main` 后的最终 CI 验证。
+
 ## 6. 阶段完成后
 
 本计划完成后，R0 仍缺少 `R0 旧项目迁移与恢复 fixture`。下一份计划应覆盖：
