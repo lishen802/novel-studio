@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 路线图阶段：[R0：固定基线与 CI](../roadmap/development-roadmap.md#5-r0固定基线与-ci)
 - 上游依据：[产品需求 7.5](../product/requirements.md#75-质量与可验证性)、[系统设计 14](../architecture/system-design.md#14-测试与质量门槛)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 后续独立计划：`R0 双平台 Wails 构建矩阵`、`R0 旧项目迁移与恢复 fixture`
@@ -709,3 +709,9 @@ git commit -m "docs: complete R0 CI test baseline plan"
 2. `R0 旧项目迁移与恢复 fixture`：旧 Schema 项目、升级前备份、失败恢复和跨版本兼容。
 
 两份计划完成并满足 R0 阶段退出标准后，才进入 R1 长任务与项目可靠性。
+
+## 5. 完成证据
+
+- 分支 `codex/r0-ci-test-baseline` Foundation CI 运行 `31069148208`：`Ubuntu tests`、`macOS production build`、`Windows production build` 三 Job 全绿；
+- Windows Job 中此前失败的 `Run Go tests on Windows` 步骤经 §2.1 测试卫生修复后通过；
+- 本地 macOS 证据：策略测试 4 项通过、仓库扫描 310 文件通过、桌面前端 17 文件 145 测试通过、原型 13 文件 43 测试通过、`go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...` 与 `go vet` 通过。
