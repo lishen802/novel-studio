@@ -68,6 +68,20 @@ cd ../..
 
 签名、公证、安装器和升级属于 R8。旧项目迁移的 fixture 规格、三阶段状态机、恢复矩阵和平台门禁入口见[旧项目迁移测试基线](legacy-project-migration.md)。
 
+## 并发与作业恢复契约
+
+R1 引入“Model IO 不持有工作区全局锁”与“作业不向已关闭 store 回写”两条自动门禁。它们不是可选优化，而是产品需求 7.1 与系统设计 5.3 要求的数据保护底线，普通提交必须保持。
+
+| 契约 | 自动证据 |
+| --- | --- |
+| Agent Provider 调用期间作者可保存恢复草稿 | `TestExecuteAgentRunDoesNotBlockSaveDraftDuringProviderCall` |
+| Agent Provider 调用期间作者可新建章节（写锁操作） | `TestExecuteAgentRunDoesNotBlockCreateChapterDuringProviderCall` |
+| 切换项目 drain 超时后，作业不写已关闭 store 而转入 `recoverable` | `TestAgentRunSkipsPersistWhenStoreGenerationChanged` |
+| 旧 generation 的 `recoverable` run 重试在新 active store 上执行 | `TestRetryAgentRunAfterProjectSwitchUsesNewStore` |
+| lease registry 并发 acquire/release、drain 超时与 stale 标记 | `internal/application/workspace/lease_test.go` |
+
+这些测试位于 `internal/application/workspace`，由本地 `go test -race -shuffle=on` 与 Ubuntu Foundation CI Job 覆盖；失败按并发缺陷处理，不得关闭 `-race` 或从 package pattern 排除。契约背后由 `workspace.Service` 的单调 `storeGeneration` 与 `leaseRegistry` 实现，详见 [R1 实施计划](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)。
+
 ## 隐私与 fixture 规则
 
 - 不提交 `.zjproject`、SQLite 数据库、WAL/SHM、API Key、私钥或签名证书；
@@ -93,4 +107,5 @@ cd ../..
 2. 正式前端测试、typecheck 和 build 通过；
 3. Go race tests 和 vet 通过；
 4. 原型测试、typecheck 和 build 通过；
-5. GitHub Foundation CI 的相关 Job 通过。
+5. 并发与作业恢复契约测试通过（见上文表格）；
+6. GitHub Foundation CI 的相关 Job 通过。
