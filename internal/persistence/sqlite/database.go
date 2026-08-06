@@ -17,6 +17,21 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// MigrationsFS returns the versioned Goose SQL migrations that bring a SQLite
+// database up to the current application schema. Production code should keep
+// calling OpenDatabase or OpenExistingDatabase; this export exists so that
+// testsupport helpers can build deterministic legacy fixtures from the same
+// canonical migration source instead of duplicating or rediscovering it.
+func MigrationsFS() fs.FS {
+	sub, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		// The sub-FS layout is fixed at compile time; if this ever fails it
+		// indicates the embed directive was edited incorrectly.
+		panic(fmt.Sprintf("sqlite: invalid embedded migrations layout: %v", err))
+	}
+	return sub
+}
+
 func OpenDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	if err := ensureDatabaseFile(path); err != nil {
 		return nil, err

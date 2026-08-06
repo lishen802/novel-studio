@@ -1,0 +1,59 @@
+{
+  "project": {
+    "id": "legacy-project-1",
+    "title": "雾港异闻录",
+    "genre": "奇幻",
+    "summary": "旧版数据库迁移测试用合成稿件"
+  },
+  "chapter": {
+    "id": "legacy-chapter-1",
+    "title": "第一章 雾港",
+    "position": 1,
+    "body": "雾港的清晨，林澈握紧了那把旧铜钥匙。",
+    "revision": 2
+  },
+  "chapter_revision": {
+    "id": 1,
+    "chapter_id": "legacy-chapter-1",
+    "revision": 1,
+    "title": "第一章 雾港",
+    "body": "雾港的清晨，林澈走在湿滑的石板路上。"
+  },
+  "draft": {
+    "chapter_id": "legacy-chapter-1",
+    "body": "林澈打开旧铜钥匙下的信件。",
+    "base_revision": 2
+  },
+  "character": {
+    "id": "legacy-character-1",
+    "name": "林澈",
+    "role": "protagonist",
+    "summary": "旧铜钥匙的持有者"
+  },
+  "world_rule": {
+    "id": "legacy-world-rule-1",
+    "name": "雾港潮汐律",
+    "description": "每逢朔月，雾港会被浓雾吞没。"
+  },
+  "canon_fact": {
+    "id": "legacy-fact-1",
+    "fact_text": "林澈持有旧铜钥匙。",
+    "category": "character",
+    "origin": "author",
+    "status": "author_confirmed"
+  },
+  "change_set": {
+    "id": "legacy-change-set-1",
+    "title": "旧版本正文候选",
+    "status": "pending"
+  },
+  "change_operation": {
+    "id": "legacy-change-op-1",
+    "change_set_id": "legacy-change-set-1",
+    "kind": "replace_chapter_body",
+    "target_id": "legacy-chapter-1",
+    "base_revision": 2,
+    "before_value": "雾港的清晨，林澈握紧了那把旧铜钥匙。",
+    "after_value": "雾港的清晨，林澈紧握那把旧铜钥匙，听见远处的钟声。"
+  }
+}
