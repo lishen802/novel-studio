@@ -38,6 +38,9 @@ func TestNewLayoutSanitizesCrossPlatformName(t *testing.T) {
 	if layout.Snapshots != filepath.Join(wantRoot, "snapshots") {
 		t.Fatalf("Snapshots = %q", layout.Snapshots)
 	}
+	if layout.Recovery != filepath.Join(wantRoot, "recovery") {
+		t.Fatalf("Recovery = %q", layout.Recovery)
+	}
 	if layout.Branches != filepath.Join(wantRoot, "branches") {
 		t.Fatalf("Branches = %q", layout.Branches)
 	}
@@ -69,6 +72,7 @@ func TestLayoutCreateCreatesRequiredDirectories(t *testing.T) {
 		layout.Attachments,
 		layout.Exports,
 		layout.Imports,
+		layout.Recovery,
 		layout.Snapshots,
 		layout.Branches,
 	} {
@@ -98,6 +102,92 @@ func TestLayoutCreateDoesNotOverwriteExistingPackage(t *testing.T) {
 	err = layout.Create()
 	if !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("error = %v, want fs.ErrExist", err)
+	}
+}
+
+func TestLayoutCreateIncludesRecoveryDirectory(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "长夜织境")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+
+	if layout.Recovery != filepath.Join(layout.Root, "recovery") {
+		t.Fatalf("Recovery = %q, want %q", layout.Recovery, filepath.Join(layout.Root, "recovery"))
+	}
+	info, err := os.Stat(layout.Recovery)
+	if err != nil {
+		t.Fatalf("Stat recovery: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("recovery mode = %v, want directory", info.Mode())
+	}
+}
+
+func TestOpenLayoutCreatesMissingRecoveryDirectoryForLegacyPackage(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "旧作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(layout.Recovery); err != nil {
+		t.Fatal(err)
+	}
+
+	opened, err := OpenLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Recovery != layout.Recovery {
+		t.Fatalf("opened.Recovery = %q, want %q", opened.Recovery, layout.Recovery)
+	}
+	info, err := os.Stat(opened.Recovery)
+	if err != nil {
+		t.Fatalf("Stat recovery: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("recovery mode = %v, want directory", info.Mode())
+	}
+}
+
+func TestOpenLayoutRecoveryDirectoryFailureDoesNotTouchDatabase(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "损坏的旧项目")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a real database so the test can prove OpenLayout leaves it
+	// alone when recovery directory creation fails.
+	wantDatabase := []byte("SQLite format 3\x00placeholder for legacy project.db")
+	if err := os.WriteFile(layout.Database, wantDatabase, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Block recovery/ creation by replacing the directory Create made with a
+	// regular file at the same path.
+	if err := os.Remove(layout.Recovery); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.Recovery, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenLayout(layout.Root)
+	if err == nil {
+		t.Fatal("OpenLayout accepted a non-directory recovery path")
+	}
+
+	gotDatabase, err := os.ReadFile(layout.Database)
+	if err != nil {
+		t.Fatalf("read database after failure: %v", err)
+	}
+	if string(gotDatabase) != string(wantDatabase) {
+		t.Fatalf("database changed during recovery failure:\nwant=%q\ngot =%q", wantDatabase, gotDatabase)
 	}
 }
 

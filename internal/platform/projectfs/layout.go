@@ -29,8 +29,13 @@ type Layout struct {
 	Attachments string
 	Exports     string
 	Imports     string
-	Snapshots   string
-	Branches    string
+	// Recovery is the internal short-path directory used by the safe database
+	// migration coordinator (backup, stage, journal, atomic activation). It
+	// is created by Create and ensured by OpenLayout exactly like Imports; it
+	// is not surfaced in the UI and React/Wails must never read or write it.
+	Recovery  string
+	Snapshots string
+	Branches  string
 }
 
 func NewLayout(parentDirectory, projectTitle string) (Layout, error) {
@@ -51,7 +56,7 @@ func (l Layout) Create() error {
 		return fmt.Errorf("create project package: %w", err)
 	}
 
-	for _, directory := range []string{l.Attachments, l.Exports, l.Imports, l.Snapshots, l.Branches} {
+	for _, directory := range []string{l.Attachments, l.Exports, l.Imports, l.Recovery, l.Snapshots, l.Branches} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return fmt.Errorf("create project directory: %w", err)
 		}
@@ -83,6 +88,9 @@ func OpenLayout(packagePath string) (Layout, error) {
 	if err := cleanupOrphanImportTemporaryFilesForLayout(layout); err != nil {
 		return Layout{}, err
 	}
+	if err := os.MkdirAll(layout.Recovery, 0o755); err != nil {
+		return Layout{}, fmt.Errorf("create recovery directory: %w", err)
+	}
 	return layout, nil
 }
 
@@ -93,6 +101,7 @@ func layoutForRoot(root string) Layout {
 		Attachments: filepath.Join(root, "attachments"),
 		Exports:     filepath.Join(root, "exports"),
 		Imports:     filepath.Join(root, "imports"),
+		Recovery:    filepath.Join(root, "recovery"),
 		Snapshots:   filepath.Join(root, "snapshots"),
 		Branches:    filepath.Join(root, "branches"),
 	}
