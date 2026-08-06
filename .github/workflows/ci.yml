@@ -147,7 +147,7 @@ jobs:
 
   windows-build:
     name: Windows production build
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -173,10 +173,46 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
 
+      - name: Diagnose Wails toolchain
+        run: wails doctor
+
       - name: Build Windows application
         run: wails build -clean -m
         working-directory: apps/desktop
 
+      - name: Validate Windows executable
+        env:
+          BUILD_RUNNER_LABEL: windows-2025
+        run: >
+          node scripts/ci/wails-build-artifact.mjs
+          --platform windows
+          --build-dir apps/desktop/build/bin
+          --output apps/desktop/build/bin/build-manifest.json
+
       - name: Run Go tests on Windows
         run: go test -count=1 ./apps/desktop ./internal/...
+
+      - name: Package Windows inspection artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "apps/desktop/build/artifacts" | Out-Null
+          Compress-Archive `
+            -Path "apps/desktop/build/bin/NovelStudio.exe","apps/desktop/build/bin/build-manifest.json" `
+            -DestinationPath "apps/desktop/build/artifacts/NovelStudio-windows-x64.zip"
+          $archive = Get-Item "apps/desktop/build/artifacts/NovelStudio-windows-x64.zip"
+          if ($archive.Length -le 0) {
+            throw "Windows inspection artifact is empty"
+          }
+          Write-Host "Created $($archive.FullName) ($($archive.Length) bytes)"
+
+      - name: Upload Windows inspection artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: novel-studio-windows-x64-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            apps/desktop/build/artifacts/NovelStudio-windows-x64.zip
+            apps/desktop/build/bin/build-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
