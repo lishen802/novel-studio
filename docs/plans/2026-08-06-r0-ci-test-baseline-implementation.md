@@ -53,6 +53,15 @@
 - 不创建旧项目迁移 fixture；
 - 不引入第三方 secret scanner、SaaS 扫描器或需要云端账户的 CI 服务。
 
+### 2.1 实施期补充修复（Windows CI 既有失败）
+
+计划编写时本地基线在 macOS 上全绿，但 GitHub Foundation CI 的 `Windows production build` Job 早就有 6 个 Windows 专属失败（`internal/application/workspace` 3 个、`internal/platform/projectfs` 3 个），均源自测试中未关闭的 SQLite 连接或文件句柄：Windows 不允许删除/重命名/读取被另一句柄占用的文件，而 macOS/Linux 允许。这些失败不在本计划声明的文件范围内，但 Task 5 Step 6 要求 Ubuntu/macOS/Windows 全绿才能标记完成，因此经评审确认后在同一 worktree 内补修：
+
+- `internal/application/workspace/branch_test.go`：3 个分支合并测试在 `t.TempDir()` 之后注册 `t.Cleanup(func(){ _ = service.Close() })`，确保活跃 SQLite store 在 TempDir RemoveAll 之前关闭（LIFO 顺序）；
+- `internal/platform/projectfs/import_source_test.go`：`TestCommitImportArchiveNoReplaceRejectsExistingTarget` 与 `TestCommitImportArchiveUsesTheStillOpenTemporaryObject` 在读取断言前显式关闭临时文件与 imports 目录句柄；`TestImportArchiveOperationsStayBoundToVerifiedImportsDirectory` 在 Windows 上跳过，因为“句柄打开期间重命名目录”在 Windows 不被支持，该路径替换绑定语义在 macOS/Linux 仍被验证，Windows 文件锁硬化归 R8。
+
+以上均为测试卫生改动，未改变生产行为或数据库 Schema；提交为 `140ca74`。
+
 ## 3. 文件结构
 
 | 文件 | 职责 |
@@ -675,7 +684,7 @@ git diff --name-only
 Expected:
 
 - `git diff --check` 无输出；
-- 变更文件只包含本计划列出的 CI、脚本和文档；
+- 变更文件只包含本计划列出的 CI、脚本、文档，以及 §2.1 记录的 Windows 测试卫生修复；
 - `apps/desktop/build/darwin/Info.dev.plist` 仍保持未跟踪且未被加入提交；
 - 不出现 `.db`、`.zjproject`、密钥、证书或真实正文。
 
