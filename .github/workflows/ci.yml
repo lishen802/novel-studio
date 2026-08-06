@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CI: "true"
   WAILS_VERSION: v2.13.0
   NODE_VERSION: "22"
 
@@ -40,6 +41,12 @@ jobs:
             apps/desktop/frontend/package-lock.json
             prototype/web/package-lock.json
 
+      - name: Test tracked artifact policy
+        run: node --test scripts/ci/tracked-artifact-policy.test.mjs
+
+      - name: Enforce tracked artifact policy
+        run: node scripts/ci/tracked-artifact-policy.mjs
+
       - name: Install desktop frontend dependencies
         run: npm ci
         working-directory: apps/desktop/frontend
@@ -57,7 +64,7 @@ jobs:
         working-directory: apps/desktop/frontend
 
       - name: Run Go race tests
-        run: go test -count=1 -race ./apps/desktop ./internal/...
+        run: go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...
 
       - name: Vet Go packages
         run: go vet ./apps/desktop ./internal/...
