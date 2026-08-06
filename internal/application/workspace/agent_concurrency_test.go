@@ -243,6 +243,7 @@ func TestAgentRunSkipsPersistWhenStoreGenerationChanged(t *testing.T) {
 	ctx := context.Background()
 	factory := newStickyModelProviderFactory(gatedAuthoringOutputs())
 	service, chapter := configuredAgentService(t, factory)
+	defer service.Close()
 	// A zero drain timeout causes replaceActive to mark remaining leases stale
 	// immediately, simulating a drain that cannot wait for the stuck provider.
 	service.drainTimeout = 0
@@ -303,6 +304,7 @@ func TestRetryAgentRunAfterProjectSwitchUsesNewStore(t *testing.T) {
 	ctx := context.Background()
 	factory := newStickyModelProviderFactory(gatedAuthoringOutputs())
 	service, chapter := configuredAgentService(t, factory)
+	defer service.Close()
 	service.drainTimeout = 0
 	projectPath := service.active.packageInfo.Root
 
