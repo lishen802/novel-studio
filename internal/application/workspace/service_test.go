@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -374,6 +377,18 @@ func (s *sequenceIDs) NewID() string {
 	id := s.ids[0]
 	s.ids = s.ids[1:]
 	return id
+}
+
+// fileSHA256 returns the hex-encoded SHA-256 of the file at path. Used to
+// verify that migration backups are not regenerated on reopen.
+func fileSHA256(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("fileSHA256(%s): %v", path, err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 type fakeLicense struct {
