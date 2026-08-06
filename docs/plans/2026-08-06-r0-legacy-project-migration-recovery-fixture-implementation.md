@@ -232,11 +232,11 @@ var (
 - Modify: `docs/plans/2026-08-06-r0-legacy-project-migration-recovery-fixture-implementation.md`
 - Modify: `docs/roadmap/development-roadmap.md`
 
-- [ ] **Step 1: 创建隔离工作区**
+- [x] **Step 1: 创建隔离工作区**
 
 调用 `superpowers:using-git-worktrees`，从最新 `main` 创建 `codex/r0-legacy-project-migration-recovery-fixture` worktree。不得复制或提交主工作区未跟踪的 `apps/desktop/build/darwin/Info.dev.plist`。
 
-- [ ] **Step 2: 标记计划开始**
+- [x] **Step 2: 标记计划开始**
 
 将本计划和路线图状态从 `draft` 改为 `in_progress`，单独提交：
 
@@ -256,7 +256,7 @@ git commit -m "docs: start R0 legacy migration plan"
 - Create: `internal/testsupport/legacyproject/fixture_test.go`
 - Modify: `fixtures/README.md`
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 测试必须断言：
 
@@ -275,7 +275,7 @@ go test -count=1 ./internal/testsupport/legacyproject
 
 Expected: 因 fixture helper/文件尚不存在而失败。
 
-- [ ] **Step 2: 实现 fixture builder**
+- [x] **Step 2: 实现 fixture builder**
 
 `legacyproject.Build(t, parent)` 返回：
 
@@ -298,7 +298,7 @@ Builder 通过 `runtime.Caller` 定位仓库根，读取 `internal/persistence/s
 - 1 个人物、1 条世界规则、1 条 canonical fact；
 - 1 个 v9 pending change set 和 operation。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 go test -count=1 ./internal/testsupport/legacyproject
@@ -314,7 +314,7 @@ git commit -m "test: add deterministic v9 project fixture"
 - Modify: `internal/platform/projectfs/layout.go`
 - Modify: `internal/platform/projectfs/layout_test.go`
 
-- [ ] **Step 1: 先写失败测试**
+- [x] **Step 1: 先写失败测试**
 
 新增测试：
 
@@ -330,11 +330,11 @@ go test -count=1 ./internal/platform/projectfs
 
 Expected: 前两个用例因目录不存在失败。
 
-- [ ] **Step 2: 最小实现**
+- [x] **Step 2: 最小实现**
 
 给 `Layout` 增加 `Recovery string`，固定为 `filepath.Join(root, "recovery")`。`Create` 创建它；`OpenLayout` 与 `imports/` 一样只补建目录，不创建数据库，不删除冲突文件。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 go test -count=1 ./internal/platform/projectfs
@@ -349,7 +349,7 @@ git commit -m "feat: add project recovery directory"
 - Create: `internal/persistence/sqlite/migration_test.go`
 - Modify: `internal/persistence/sqlite/integrity_test.go`
 
-- [ ] **Step 1: 写成功迁移测试**
+- [x] **Step 1: 写成功迁移测试**
 
 `TestOpenExistingDatabaseMigratesLegacyFixtureThroughValidatedStage` 必须断言：
 
@@ -361,7 +361,7 @@ git commit -m "feat: add project recovery directory"
 - `recovery/migration-v09-v14.sqlite` 存在、可独立打开、仍为 v9、project ID 相同；
 - stage、original、journal 均已清理。
 
-- [ ] **Step 2: 写迁移失败测试**
+- [x] **Step 2: 写迁移失败测试**
 
 通过 `migrationHooks.afterStageValidated` 和包内 migration runner 注入失败，覆盖：
 
@@ -374,7 +374,7 @@ git commit -m "feat: add project recovery directory"
 
 文件身份比较使用源库关闭后的 SHA-256，不能在 WAL 活动时用裸文件字节推导逻辑一致性。
 
-- [ ] **Step 3: 写中断恢复表驱动测试**
+- [x] **Step 3: 写中断恢复表驱动测试**
 
 至少覆盖：
 
@@ -404,7 +404,7 @@ Expected: 因安全迁移协调器尚不存在而失败。
 - Modify: `internal/persistence/sqlite/database.go`
 - Modify: `internal/persistence/sqlite/integrity.go`
 
-- [ ] **Step 1: 拆分数据库打开职责**
+- [x] **Step 1: 拆分数据库打开职责**
 
 把当前 `openDatabase` 拆成：
 
@@ -416,7 +416,7 @@ Expected: 因安全迁移协调器尚不存在而失败。
 
 `OpenDatabase` 对新库执行 migrate；`OpenExistingDatabase` 先 probe 和恢复，再决定直接打开或安全迁移。
 
-- [ ] **Step 2: 实现安全复制**
+- [x] **Step 2: 实现安全复制**
 
 - 源库先 `quickCheck`、读取 from version 和唯一 project ID；
 - 使用参数化/安全转义的 `VACUUM INTO` 生成备份；
@@ -425,21 +425,21 @@ Expected: 因安全迁移协调器尚不存在而失败。
 - 禁止复制 `-wal/-shm`；
 - 所有路径由数据库父目录和固定短文件名推导，不接受 journal 中的任意路径。
 
-- [ ] **Step 3: 实现原子 journal**
+- [x] **Step 3: 实现原子 journal**
 
 先写同目录临时 JSON，`Sync` 文件后 rename 为 `migration.json`，再同步目录。JSON 只允许 schema 1 和三个已知 phase；未知字段可忽略，未知 schema/phase 必须停止。
 
-- [ ] **Step 4: 实现激活与回滚**
+- [x] **Step 4: 实现激活与回滚**
 
 严格按 2.6 顺序 rename。任一错误都通过 `errors.Join` 保留主错误和恢复错误。回滚成功也应向调用者返回原始 migration 错误，不得把旧库悄悄作为“成功打开”继续运行。
 
-- [ ] **Step 5: 实现平台目录同步**
+- [x] **Step 5: 实现平台目录同步**
 
 - Unix/macOS：打开父目录并 `Sync()`；
 - Windows：提供明确实现；若 Go/Windows 对目录句柄同步不支持，只允许把特定“不支持”错误视作 capability limitation，rename 和文件 `Sync` 仍必须成功，其他错误继续上抛；
 - build tags 必须让 Linux、macOS、Windows 都能编译。
 
-- [ ] **Step 6: 运行测试并提交**
+- [x] **Step 6: 运行测试并提交**
 
 ```bash
 go test -count=1 ./internal/persistence/sqlite
@@ -456,7 +456,7 @@ git commit -m "feat: migrate legacy databases through recoverable staging"
 - Modify: `internal/application/workspace/recovery_test.go`
 - Modify: `internal/persistence/sqlite/project_store_test.go`
 
-- [ ] **Step 1: 写 Workspace 端到端测试**
+- [x] **Step 1: 写 Workspace 端到端测试**
 
 用真实 `projectfs.Manager`、`sqlite.Factory` 和 v9 fixture：
 
@@ -466,7 +466,7 @@ git commit -m "feat: migrate legacy databases through recoverable staging"
 - `imports/`、`recovery/` 被兼容创建；
 - 关闭重开不会再次生成备份或再次 migration。
 
-- [ ] **Step 2: 写工作区失败安全测试**
+- [x] **Step 2: 写工作区失败安全测试**
 
 先打开一个当前项目，再尝试打开：
 
@@ -476,7 +476,7 @@ git commit -m "feat: migrate legacy databases through recoverable staging"
 
 断言原当前项目和 store 仍然激活，失败目标原库未变化。
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 go test -count=1 ./internal/application/workspace ./internal/persistence/sqlite ./internal/platform/projectfs
@@ -490,7 +490,7 @@ git commit -m "test: cover legacy project open and recovery"
 
 - Modify: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: 在 macOS build Job 增加明确步骤**
+- [x] **Step 1: 在 macOS build Job 增加明确步骤**
 
 在 Wails build 前增加：
 
@@ -501,14 +501,14 @@ git commit -m "test: cover legacy project open and recovery"
 
 Ubuntu 的 race Job 和 Windows 的完整 Go tests 已覆盖相同 package，不复制第三套脚本。Job 日志应能直接看到旧项目迁移失败阶段。
 
-- [ ] **Step 2: 本地校验 workflow 文本和测试**
+- [x] **Step 2: 本地校验 workflow 文本和测试**
 
 ```bash
 rg -n "Test legacy project migration on macOS|Run Go tests on Windows|Run Go race tests" .github/workflows/ci.yml
 go test -count=1 ./internal/testsupport/legacyproject ./internal/platform/projectfs ./internal/persistence/sqlite ./internal/application/workspace
 ```
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -525,7 +525,7 @@ git commit -m "ci: gate legacy project migration on macOS"
 - Modify: `docs/README.md`
 - Modify: `fixtures/README.md`
 
-- [ ] **Step 1: 编写工程测试文档**
+- [x] **Step 1: 编写工程测试文档**
 
 记录：
 
@@ -536,7 +536,7 @@ git commit -m "ci: gate legacy project migration on macOS"
 - 失败日志不得打印 seed 正文、SQL dump、绝对路径或数据库文件；
 - 如何在临时目录人工生成 fixture 进行诊断。
 
-- [ ] **Step 2: 更新用户/支持恢复说明**
+- [x] **Step 2: 更新用户/支持恢复说明**
 
 补充：
 
@@ -546,7 +546,7 @@ git commit -m "ci: gate legacy project migration on macOS"
 - 若提示“迁移现场无法判定”，保留整个项目包并在副本上排查，不手工删除 recovery 文件；
 - `recovery/` 不等同于用户命名快照，跨设备仍复制完整 `.zjproject`。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add docs fixtures/README.md
@@ -555,7 +555,7 @@ git commit -m "docs: document legacy migration recovery"
 
 ### Task 8: 全量验证、远端证据与合入
 
-- [ ] **Step 1: 运行策略和正式前端**
+- [x] **Step 1: 运行策略和正式前端**
 
 ```bash
 node --test scripts/ci/tracked-artifact-policy.test.mjs
@@ -570,14 +570,14 @@ npm run build
 cd ../../..
 ```
 
-- [ ] **Step 2: 运行 Go 全量门禁**
+- [x] **Step 2: 运行 Go 全量门禁**
 
 ```bash
 go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...
 go vet ./apps/desktop ./internal/...
 ```
 
-- [ ] **Step 3: 验证原型**
+- [x] **Step 3: 验证原型**
 
 ```bash
 cd prototype/web
@@ -588,7 +588,7 @@ npm run build
 cd ../..
 ```
 
-- [ ] **Step 4: 验证工作树**
+- [x] **Step 4: 验证工作树**
 
 ```bash
 git status --short
@@ -689,3 +689,51 @@ git push origin main
 8. 测试与恢复文档已更新；
 9. main 分支 Foundation CI 通过；
 10. R0 三项计划的退出证据完整。
+
+## 11. 完成证据
+
+### 提交历史
+
+| Commit | 描述 |
+| --- | --- |
+| `add0332` | docs: start R0 legacy migration plan |
+| `4f9f540` | test: add deterministic v9 project fixture |
+| `5718e75` | feat: add project recovery directory |
+| `28851d8` | feat: migrate legacy databases through recoverable staging |
+| `06a9696` | test: cover legacy project open and recovery |
+| `5d822c0` | ci: gate legacy project migration on macOS |
+| `a3f3bd2` | docs: document legacy migration recovery |
+
+### 本地验证
+
+- `go test -count=1 -race -shuffle=on -timeout=5m ./internal/...`：全部通过（含 sqlite 82.5s race）；
+- `go test -count=1 ./apps/desktop`：通过；
+- `go vet ./apps/desktop ./internal/...`：无问题；
+- `node scripts/ci/tracked-artifact-policy.mjs`：326 文件扫描通过，无 `.db`/`.zjproject` 被跟踪；
+- `GOOS=windows GOARCH=amd64 go build ./internal/persistence/sqlite/`：通过；
+- `GOOS=linux GOARCH=amd64 go build ./internal/persistence/sqlite/`：通过；
+- 正式前端：17 test files、145 tests 通过，typecheck 和 build 通过；
+- 浏览器原型：13 test files、43 tests 通过，typecheck 和 build 通过。
+
+### 关键测试覆盖
+
+| 能力 | 测试 |
+| --- | --- |
+| v9 fixture 确定性生成 | `TestBuildsDeterministicV9Fixture` |
+| 正常 v9→v14 升级 | `TestOpenExistingDatabaseMigratesLegacyFixtureThroughValidatedStage` |
+| 升级前备份独立可打开 | 同上（验证 backup v9 + project ID + quick_check） |
+| stage 校验失败原库不变 | `TestOpenExistingDatabaseAfterStageValidatedFailureLeavesOriginalIntact` |
+| 激活失败原库恢复 | `TestOpenExistingDatabaseAfterActivatedFailureRestoresOriginal` |
+| 已是 v14 不创建备份 | `TestOpenExistingDatabaseDoesNotMigrateOrCreateBackupForCurrentSchema` |
+| future schema 不创建恢复文件 | `TestOpenExistingDatabaseRejectsFutureSchemaWithoutCreatingRecoveryFiles` |
+| corrupt/missing 错误分类 | `TestOpenExistingDatabaseRejectsCorruptFile...` / `...MissingFile...` |
+| 幂等重开 | `TestOpenExistingDatabaseIsIdempotentAfterSuccessfulMigration` |
+| prepared 中断恢复 | `TestRecoverInterruptedMigrationPreparedPhase...` |
+| activated 中断恢复 | `TestRecoverInterruptedMigrationActivatedPhase...` |
+| committed 中断恢复 | `TestRecoverInterruptedMigrationCommittedPhase...` |
+| damaged journal 停止 | `TestRecoverInterruptedMigrationDamagedJournalStopsAndDeletesNothing` |
+| unknown phase/schema 停止 | `TestRecoverInterruptedMigrationUnknownPhase...` / `...UnknownSchema...` |
+| ambiguous original 恢复 | `TestRecoverInterruptedMigrationAmbiguousOriginalWithoutJournalRestoresOriginal` |
+| Workspace 端到端 | `TestWorkspaceOpensLegacyProjectAndPreservesDataAfterMigration` |
+| Workspace 失败安全 | `TestWorkspaceKeepsCurrentProjectWhenLegacyOpenFailsWithDamagedJournal` / `...FutureSchema` |
+| recovery 目录 | `TestLayoutCreateIncludesRecoveryDirectory` / `TestOpenLayoutCreatesMissingRecoveryDirectoryForLegacyPackage` |
