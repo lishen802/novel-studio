@@ -36,11 +36,26 @@ type Service struct {
 	extractionJobs   map[string]context.CancelFunc
 	versionOperation bool
 	importOperation  bool
+
+	// storeGeneration is a monotonic counter incremented whenever the active
+	// project store changes (create/open/switch/close/recovery). Jobs capture
+	// the generation when they acquire a lease and re-check it before each
+	// persistence step so they never write to a store that has been replaced.
+	storeGeneration uint64
+	// leases coordinates draining in-flight jobs before a project store is
+	// closed. New jobs acquire a lease bound to the current generation; switch
+	// and close drain leases (after cancelling job contexts) before closing the
+	// previous store.
+	leases *leaseRegistry
+	// drainTimeout bounds how long switch/close waits for in-flight job leases
+	// to release before force-marking them stale. Tests inject shorter values.
+	drainTimeout time.Duration
 }
 
 type activeWorkspace struct {
 	packageInfo ports.ProjectPackage
 	store       ports.ProjectStore
+	generation  uint64
 }
 
 func NewService(
@@ -62,6 +77,9 @@ func NewService(
 		branchMergePreviews: make(map[string]branchMergePreview),
 		agentJobs:           make(map[string]context.CancelFunc),
 		extractionJobs:      make(map[string]context.CancelFunc),
+		storeGeneration:     0,
+		leases:              newLeaseRegistry(),
+		drainTimeout:        drainTimeoutDefault,
 	}
 	if len(branchArchives) > 0 {
 		service.branches = branchArchives[0]
@@ -354,10 +372,25 @@ func (s *Service) replaceActive(next activeWorkspace) {
 	s.cancelAllExtractionJobs()
 	s.mu.Lock()
 	previous := s.active
+	s.storeGeneration++
+	next.generation = s.storeGeneration
 	s.active = &next
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
 	if previous != nil {
 		_ = previous.store.Close()
 	}
+}
+
+// currentGeneration returns the store generation of the active workspace, or 0
+// when no project is active. Jobs compare their captured generation against
+// this value before persisting; a mismatch means the store they captured has
+// been replaced and writes must be skipped.
+func (s *Service) currentGeneration() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return 0
+	}
+	return s.active.generation
 }
