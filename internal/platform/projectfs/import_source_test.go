@@ -499,6 +499,10 @@ func TestCommitImportArchiveNoReplaceRejectsExistingTarget(t *testing.T) {
 	}
 
 	err = commitImportArchive(directory, temporary, temporaryName, targetName)
+	// Close handles before reading file contents: Windows rejects reads of
+	// files held open by another handle.
+	_ = temporary.Close()
+	_ = directory.Close()
 
 	if !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("error = %v, want fs.ErrExist", err)
@@ -555,6 +559,10 @@ func TestCommitImportArchiveUsesTheStillOpenTemporaryObject(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	// Close handles before reading the committed archive: Windows rejects
+	// reads of files held open by another handle.
+	_ = temporary.Close()
+	_ = importsDirectory.Close()
 
 	got, err := os.ReadFile(filepath.Join(projectPackage.Imports, "job.txt"))
 	if err != nil {
@@ -695,6 +703,9 @@ func TestImportSourceArchiveDeleteRejectsPathsOutsideImports(t *testing.T) {
 }
 
 func TestImportArchiveOperationsStayBoundToVerifiedImportsDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("rename of an open imports directory is not supported on Windows; see R8 file-lock hardening")
+	}
 	projectPackage := createTestPackage(t)
 	importsDirectory, err := openImportsDirectory(projectPackage)
 	if err != nil {

@@ -26,7 +26,9 @@ func TestProjectBranchesIsolateCompleteWorkspaceAndFastForwardMerge(t *testing.T
 		snapshotfs.Archive{},
 		branchfs.Archive{},
 	)
-	project, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", "")
+	parentDir := t.TempDir()
+	t.Cleanup(func() { _ = service.Close() })
+	project, err := service.CreateProject(ctx, parentDir, "凡人修仙", "修仙", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +114,9 @@ func TestProjectBranchMergeBlocksWhenParentChangedAfterFork(t *testing.T) {
 		snapshotfs.Archive{},
 		branchfs.Archive{},
 	)
-	if _, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", ""); err != nil {
+	parentDir := t.TempDir()
+	t.Cleanup(func() { _ = service.Close() })
+	if _, err := service.CreateProject(ctx, parentDir, "凡人修仙", "修仙", ""); err != nil {
 		t.Fatal(err)
 	}
 	chapter, _ := service.CreateChapter(ctx, "第一章")
@@ -164,7 +168,9 @@ func TestProjectBranchMergeRevalidatesPreviewBeforeCreatingRecoveryPoint(t *test
 		snapshotfs.Archive{},
 		branchfs.Archive{},
 	)
-	if _, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", ""); err != nil {
+	parentDir := t.TempDir()
+	t.Cleanup(func() { _ = service.Close() })
+	if _, err := service.CreateProject(ctx, parentDir, "凡人修仙", "修仙", ""); err != nil {
 		t.Fatal(err)
 	}
 	chapter, _ := service.CreateChapter(ctx, "第一章")
