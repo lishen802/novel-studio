@@ -96,7 +96,7 @@ R0 基线与 CI
 
 ### 待建立实施计划
 
-1. `R0 CI 与测试基线`
+1. [R0 CI 与测试基线](../plans/2026-08-06-r0-ci-test-baseline-implementation.md)（`draft`）
 2. `R0 双平台 Wails 构建矩阵`
 3. `R0 旧项目迁移与恢复 fixture`
 
