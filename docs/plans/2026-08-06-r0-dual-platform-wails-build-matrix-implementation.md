@@ -1079,17 +1079,17 @@ find "$WAILS_ARTIFACT_ROOT" -maxdepth 3 -type f -print | sort
 WAILS_MAC_DIR="$(find "$WAILS_ARTIFACT_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'novel-studio-macos-arm64-*' -print -quit)"
 WAILS_WINDOWS_DIR="$(find "$WAILS_ARTIFACT_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'novel-studio-windows-x64-*' -print -quit)"
 mkdir -p "$WAILS_MAC_DIR/unpacked" "$WAILS_WINDOWS_DIR/unpacked"
-tar -xzf "$WAILS_MAC_DIR/NovelStudio-macos-arm64.tar.gz" -C "$WAILS_MAC_DIR/unpacked"
-unzip -q "$WAILS_WINDOWS_DIR/NovelStudio-windows-x64.zip" -d "$WAILS_WINDOWS_DIR/unpacked"
+tar -xzf "$WAILS_MAC_DIR/artifacts/NovelStudio-macos-arm64.tar.gz" -C "$WAILS_MAC_DIR/unpacked"
+unzip -q "$WAILS_WINDOWS_DIR/artifacts/NovelStudio-windows-x64.zip" -d "$WAILS_WINDOWS_DIR/unpacked"
 
 WAILS_HEAD_SHA="$(git rev-parse HEAD)"
 node -e 'const fs=require("fs"),crypto=require("crypto"); const [outerPath,innerPath,entryPath,platform,label,arch,commit]=process.argv.slice(1); const outerText=fs.readFileSync(outerPath,"utf8"), innerText=fs.readFileSync(innerPath,"utf8"); if(outerText!==innerText) throw new Error(`${platform} inner and outer manifests differ`); const m=JSON.parse(outerText); const hash=crypto.createHash("sha256").update(fs.readFileSync(entryPath)).digest("hex"); if(m.platform!==platform||m.runner.label!==label||m.runner.arch!==arch||m.source.commit!==commit||m.artifact.entrypoint_sha256!==hash) throw new Error(`${platform} manifest verification failed`); console.log(`${platform} artifact verified: ${hash}`)' \
-  "$WAILS_MAC_DIR/build-manifest.json" \
+  "$WAILS_MAC_DIR/bin/build-manifest.json" \
   "$WAILS_MAC_DIR/unpacked/build-manifest.json" \
   "$WAILS_MAC_DIR/unpacked/NovelStudio.app/Contents/MacOS/NovelStudio" \
   darwin macos-15 ARM64 "$WAILS_HEAD_SHA"
 node -e 'const fs=require("fs"),crypto=require("crypto"); const [outerPath,innerPath,entryPath,platform,label,arch,commit]=process.argv.slice(1); const outerText=fs.readFileSync(outerPath,"utf8"), innerText=fs.readFileSync(innerPath,"utf8"); if(outerText!==innerText) throw new Error(`${platform} inner and outer manifests differ`); const m=JSON.parse(outerText); const hash=crypto.createHash("sha256").update(fs.readFileSync(entryPath)).digest("hex"); if(m.platform!==platform||m.runner.label!==label||m.runner.arch!==arch||m.source.commit!==commit||m.artifact.entrypoint_sha256!==hash) throw new Error(`${platform} manifest verification failed`); console.log(`${platform} artifact verified: ${hash}`)' \
-  "$WAILS_WINDOWS_DIR/build-manifest.json" \
+  "$WAILS_WINDOWS_DIR/bin/build-manifest.json" \
   "$WAILS_WINDOWS_DIR/unpacked/build-manifest.json" \
   "$WAILS_WINDOWS_DIR/unpacked/NovelStudio.exe" \
   windows windows-2025 X64 "$WAILS_HEAD_SHA"
@@ -1097,8 +1097,8 @@ node -e 'const fs=require("fs"),crypto=require("crypto"); const [outerPath,inner
 
 Expected:
 
-- macOS artifact 含 `NovelStudio-macos-arm64.tar.gz` 与 `build-manifest.json`；
-- Windows artifact 含 `NovelStudio-windows-x64.zip` 与 `build-manifest.json`；
+- macOS artifact 含 `artifacts/NovelStudio-macos-arm64.tar.gz` 与 `bin/build-manifest.json`；
+- Windows artifact 含 `artifacts/NovelStudio-windows-x64.zip` 与 `bin/build-manifest.json`；
 - 两个 manifest 的 commit 都等于该次 run 的 head SHA；
 - Runner 分别为 `macos-15/ARM64` 与 `windows-2025/X64`；
 - 解包后只包含平台 production build 和 manifest；

@@ -98,7 +98,7 @@ R0 基线与 CI
 
 1. [R0 CI 与测试基线](../plans/2026-08-06-r0-ci-test-baseline-implementation.md)（`completed`）
 2. [R0 双平台 Wails 构建矩阵](../plans/2026-08-06-r0-dual-platform-wails-build-matrix-implementation.md)（`completed`）
-3. `R0 旧项目迁移与恢复 fixture`
+3. [R0 旧项目迁移与恢复 fixture](../plans/2026-08-06-r0-legacy-project-migration-recovery-fixture-implementation.md)（`draft`）
 
 ## 6. R1：长任务与项目可靠性
 
