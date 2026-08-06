@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`draft`
+- 状态：`in_progress`
 - 路线图阶段：[R0：固定基线与 CI](../roadmap/development-roadmap.md#5-r0固定基线与-ci)
 - 上游依据：[产品需求 7.5](../product/requirements.md#75-质量与可验证性)、[系统设计 14](../architecture/system-design.md#14-测试与质量门槛)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 后续独立计划：`R0 双平台 Wails 构建矩阵`、`R0 旧项目迁移与恢复 fixture`
