@@ -11,6 +11,8 @@
 
 CI 不配置真实模型密钥，不访问真实模型 API，不读取用户项目或系统凭据库。
 
+双平台 Runner、产物契约、短期 artifact 与失败分类见 [Wails 双平台构建矩阵](wails-build-matrix.md)。
+
 ## 本地验证顺序
 
 ### 1. 策略门禁
@@ -18,6 +20,7 @@ CI 不配置真实模型密钥，不访问真实模型 API，不读取用户项�
 ```bash
 node --test scripts/ci/tracked-artifact-policy.test.mjs
 node scripts/ci/tracked-artifact-policy.mjs
+node --test scripts/ci/wails-build-artifact.test.mjs
 ```
 
 ### 2. 正式桌面前端
@@ -59,9 +62,9 @@ cd ../..
 
 | Job | 职责 | 不负责 |
 | --- | --- | --- |
-| Ubuntu tests | 策略门禁、正式前端、Go race/vet、原型 | Wails 原生安装与签名 |
-| macOS production build | Wails 原生构建可用性 | Developer ID 签名、公证、安装和升级 |
-| Windows production build | Wails 原生构建与 Windows Go tests | Authenticode 签名、安装器和升级 |
+| Ubuntu tests | 策略门禁、产物契约单元测试、正式前端、Go race/vet、原型 | Wails 原生安装与签名 |
+| macOS production build | 固定 arm64 Runner 上构建、结构/plist 校验、manifest、短期 tar artifact | Developer ID、正式签名、公证、安装和升级 |
+| Windows production build | 固定 x64 Runner 上构建、PE 校验、manifest、Windows Go tests、短期 zip artifact | Authenticode、安装器和升级 |
 
 签名、公证、安装器和升级属于 R8；旧项目迁移 fixture 与平台矩阵的进一步硬化由后续 R0 独立实施计划定义。
 
@@ -70,7 +73,7 @@ cd ../..
 - 不提交 `.zjproject`、SQLite 数据库、WAL/SHM、API Key、私钥或签名证书；
 - fixture 必须是确定性合成内容，不得复制真实作者稿件或受版权保护小说；
 - Provider 测试使用 fake/Recorded Provider 或注入的 HTTP transport；
-- 测试输出、GitHub artifact 和失败日志不得包含正文、Prompt、凭据、SQL 或本地数据库；
+- 测试输出、GitHub artifact 和失败日志不得包含用户正文、Prompt、凭据、本地数据库、SQL dump、调试查询或失败现场数据；生产二进制正常包含的版本化迁移资源不属于额外泄露工件；
 - tracked artifact policy 是最小自动门禁，不替代提交者对 fixture 来源和版权的审查。
 
 ## 失败分类
