@@ -1,7 +1,7 @@
 # 织境 Story Studio 总体开发路线图
 
 - 状态：已批准
-- 更新日期：2026-08-06
+- 更新日期：2026-08-06（R0 完成）
 - 适用范围：当前商业发布底线与完整 V1
 - 上游依据：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 实施计划规范：[实施计划目录说明](../plans/README.md)
@@ -98,7 +98,9 @@ R0 基线与 CI
 
 1. [R0 CI 与测试基线](../plans/2026-08-06-r0-ci-test-baseline-implementation.md)（`completed`）
 2. [R0 双平台 Wails 构建矩阵](../plans/2026-08-06-r0-dual-platform-wails-build-matrix-implementation.md)（`completed`）
-3. [R0 旧项目迁移与恢复 fixture](../plans/2026-08-06-r0-legacy-project-migration-recovery-fixture-implementation.md)（`in_progress`）
+3. [R0 旧项目迁移与恢复 fixture](../plans/2026-08-06-r0-legacy-project-migration-recovery-fixture-implementation.md)（`completed`）
+
+R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet、macOS 含旧项目迁移测试、Windows 完整 Go tests 与生产构建）。R0 退出标准满足，可进入 R1。
 
 ## 6. R1：长任务与项目可靠性
 
@@ -445,4 +447,4 @@ docs/plans/YYYY-MM-DD-r<阶段>-<能力>-implementation.md
 
 计划状态为 `draft/approved/in_progress/completed/superseded`。只有 `approved` 或 `in_progress` 的计划可以指导实现；产品设计变化后，旧计划必须更新或标记 `superseded`，不能继续凭历史任务清单开发。
 
-下一份应创建的实施计划是 `R0 CI 与测试基线`。完成该计划评审后再开始代码修改；R0 的其他计划按其退出标准依次创建，不一次性提前展开 R1–R9 的文件级任务。
+R0 已全部完成。下一份应创建的实施计划是 `R1 Agent job lease 与工作区锁隔离`（R1.1，领域/协议基础）。完成该计划评审后再开始代码修改；R1 的其他计划按其退出标准依次创建，不一次性提前展开 R2–R9 的文件级任务。

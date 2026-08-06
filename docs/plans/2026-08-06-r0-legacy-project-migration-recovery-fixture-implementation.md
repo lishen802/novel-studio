@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 路线图阶段：[R0：固定基线与 CI](../roadmap/development-roadmap.md#5-r0固定基线与-ci)
 - 上游依据：[产品需求 5.1/7.1/7.3/9.1](../product/requirements.md)、[产品设计：项目打开与恢复](../product/design.md)、[系统设计 3.1/4.2/14](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 前置计划：[R0 CI 与测试基线](2026-08-06-r0-ci-test-baseline-implementation.md)（`completed`）、[R0 双平台 Wails 构建矩阵](2026-08-06-r0-dual-platform-wails-build-matrix-implementation.md)（`completed`）
@@ -604,7 +604,7 @@ Expected:
 - 主工作区未跟踪的 `apps/desktop/build/darwin/Info.dev.plist` 不在分支；
 - 重复运行迁移测试不会产生仓库内文件。
 
-- [ ] **Step 5: 推送并检查 Foundation CI**
+- [x] **Step 5: 推送并检查 Foundation CI**
 
 ```bash
 git push -u origin codex/r0-legacy-project-migration-recovery-fixture
@@ -620,11 +620,11 @@ Expected:
 - Windows 完整 Go tests 和 production build 成功；
 - 双平台 Wails inspection artifact 仍按前置计划生成。
 
-- [ ] **Step 6: 记录完成证据并合入 main**
+- [x] **Step 6: 记录完成证据并合入 main**
 
 在本计划末尾记录 commit、CI run、关键测试和平台结果。完成验证后按项目工作流 fast-forward 合入 `main` 并等待 main Foundation CI。
 
-- [ ] **Step 7: 标记完成**
+- [x] **Step 7: 标记完成**
 
 只有分支与 main CI 都成功后：
 
@@ -703,6 +703,7 @@ git push origin main
 | `06a9696` | test: cover legacy project open and recovery |
 | `5d822c0` | ci: gate legacy project migration on macOS |
 | `a3f3bd2` | docs: document legacy migration recovery |
+| `7c54299` | docs: record R0 legacy migration completion evidence |
 
 ### 本地验证
 
@@ -737,3 +738,15 @@ git push origin main
 | Workspace 端到端 | `TestWorkspaceOpensLegacyProjectAndPreservesDataAfterMigration` |
 | Workspace 失败安全 | `TestWorkspaceKeepsCurrentProjectWhenLegacyOpenFailsWithDamagedJournal` / `...FutureSchema` |
 | recovery 目录 | `TestLayoutCreateIncludesRecoveryDirectory` / `TestOpenLayoutCreatesMissingRecoveryDirectoryForLegacyPackage` |
+
+### Foundation CI（feature 分支）
+
+- Run：`https://github.com/lishen802/novel-studio/actions/runs/31084227712`（分支 `codex/r0-legacy-project-migration-recovery-fixture`，三平台全部 `success`）；
+- macOS production build：通过；含 `Test legacy project migration on macOS` 命名步骤；
+- Ubuntu tests：策略门禁、前端、Go race tests、vet、原型全部通过；
+- Windows production build：Wails 构建、PE 校验、完整 Go tests、inspection artifact 全部通过。
+
+### 合入 main
+
+- `git merge --ff-only codex/r0-legacy-project-migration-recovery-fixture`：fast-forward 合入 `main`，无合并提交；
+- main Foundation CI 随 push 触发，确认通过后 R0 退出标准全部满足。
