@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`draft`
+- 状态：`in_progress`
 - 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
 - 上游依据：[产品需求 5.1/7.1](../product/requirements.md)、[产品与交互设计：运行画布与恢复](../product/design.md)、[系统设计 4.3/5.2/5.3](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)
 - 前置计划：[R0 旧项目迁移与恢复 fixture](2026-08-06-r0-legacy-project-migration-recovery-fixture-implementation.md)（`completed`）

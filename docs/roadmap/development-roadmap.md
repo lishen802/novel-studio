@@ -145,7 +145,7 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 
 ### 待建立实施计划
 
-1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`draft`）
+1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`in_progress`）
 2. `R1 JobEvent 持久化与应用 API`
 3. `R1 React JobEvent replay`
 4. `R1 项目 OS lease 与只读 store`
