@@ -8,6 +8,7 @@ var (
 	ErrAgentRuntimeUnavailable    = errors.New("agent runtime is unavailable")
 	ErrAgentStoreUnavailable      = errors.New("active project does not support agent records")
 	ErrAgentRunActive             = errors.New("an agent run is already active")
+	ErrAgentRunStaleStore         = errors.New("agent run cannot persist: store generation changed")
 	ErrTokenBudgetExceeded        = errors.New("agent run token budget exceeded")
 	ErrImportSourceArchive        = errors.New("manuscript import source could not be prepared")
 	ErrImportStoreUnavailable     = errors.New("active project does not support manuscript imports")

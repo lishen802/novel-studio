@@ -340,13 +340,19 @@ func (s *Service) Close() error {
 	}
 	s.closed = true
 
+	// Reject new jobs, signal in-flight jobs to exit, then wait for their
+	// leases to drain before closing the store. This prevents jobs from
+	// writing to a closed store.
+	s.leases.beginDraining()
 	s.cancelAllAgentJobs()
 	s.cancelAllExtractionJobs()
+	_ = s.leases.drainAndBlock(context.Background(), s.drainTimeout)
 	s.mu.Lock()
 	active := s.active
 	s.active = nil
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
+	s.leases.endDraining()
 	if active == nil {
 		return nil
 	}
@@ -366,10 +372,18 @@ func (s *Service) endLifecycleOperation() {
 	s.lifecycleMu.Unlock()
 }
 
-// replaceActive must be called while lifecycleMu is held.
+// replaceActive must be called while lifecycleMu is held. It drains in-flight
+// job leases before swapping the active workspace so jobs don't write to the
+// closed store.
 func (s *Service) replaceActive(next activeWorkspace) {
+	// Reject new jobs, then signal in-flight jobs to exit.
+	s.leases.beginDraining()
 	s.cancelAllAgentJobs()
 	s.cancelAllExtractionJobs()
+	// Wait for cancelled jobs to release their leases (bounded by drainTimeout).
+	// If the timeout fires, remaining leases are marked stale and their next
+	// persistence attempt will transition to Recoverable instead of writing.
+	_ = s.leases.drainAndBlock(context.Background(), s.drainTimeout)
 	s.mu.Lock()
 	previous := s.active
 	s.storeGeneration++
@@ -377,6 +391,7 @@ func (s *Service) replaceActive(next activeWorkspace) {
 	s.active = &next
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
+	s.leases.endDraining()
 	if previous != nil {
 		_ = previous.store.Close()
 	}

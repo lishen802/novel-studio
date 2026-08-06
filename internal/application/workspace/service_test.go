@@ -208,6 +208,8 @@ func TestReplaceActiveWorkspaceInvalidatesBranchMergePreviews(t *testing.T) {
 		branchMergePreviews: map[string]branchMergePreview{
 			"old-preview": {},
 		},
+		leases:       newLeaseRegistry(),
+		drainTimeout:  drainTimeoutDefault,
 	}
 
 	service.replaceActive(activeWorkspace{})

@@ -30,6 +30,11 @@ func (s *Service) endAgentJob(runID string) {
 	if cancel != nil {
 		cancel()
 	}
+	// Release the lease last so switch/close drain waits until the job has
+	// finished all persistence (including the failed/cancelled exit path)
+	// before closing the store. release is a no-op if the lease was never
+	// acquired (e.g. beginAgentJob failed before the short-lock phase).
+	s.leases.release(runID)
 }
 
 func (s *Service) cancelAllAgentJobs() {

@@ -138,6 +138,16 @@ func (r *leaseRegistry) drainAndBlock(ctx context.Context, timeout time.Duration
 	}
 }
 
+// beginDraining marks the registry draining without waiting for in-flight
+// leases. Call this before cancelling job contexts so new acquisitions are
+// rejected during the cancel-and-drain window. Follow with drainAndBlock to
+// wait for the cancelled jobs to release their leases.
+func (r *leaseRegistry) beginDraining() {
+	r.mu.Lock()
+	r.draining = true
+	r.mu.Unlock()
+}
+
 // markRemainingStale marks every still-registered lease stale and records its
 // jobID so stale(jobID) keeps reporting true even after the job eventually
 // releases the lease.

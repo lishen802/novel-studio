@@ -437,36 +437,79 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	}
 	defer s.endAgentJob(runID)
 	ctx = executionCtx
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+
+	// Phase 1: short write lock. Capture the agent store, the project store and
+	// the current generation, acquire a job lease bound to that generation, then
+	// transition the run to Running and persist. The lease is acquired inside
+	// the lock so the captured generation matches the active store; the job
+	// releases the lease (via endAgentJob) only after all persistence is done.
+	s.mu.Lock()
 	store, err := s.agentStoreLocked()
 	if err != nil {
+		s.mu.Unlock()
 		return AgentRunView{}, err
 	}
 	if s.credentials == nil || s.providers == nil {
+		s.mu.Unlock()
 		return AgentRunView{}, ErrAgentRuntimeUnavailable
 	}
 	if ctx.Err() != nil {
+		s.mu.Unlock()
 		return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
 	}
 	run, err := store.AgentRun(ctx, runID)
 	if err != nil {
 		if ctx.Err() != nil {
+			s.mu.Unlock()
 			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
 		}
+		s.mu.Unlock()
 		return AgentRunView{}, err
 	}
 	if run.Status != agentdomain.RunQueued {
+		s.mu.Unlock()
 		return AgentRunView{}, fmt.Errorf("agent run is not queued: %s", run.Status)
+	}
+	generation := s.active.generation
+	lease, err := s.leases.acquire(runID, generation)
+	if err != nil {
+		s.mu.Unlock()
+		return AgentRunView{}, err
 	}
 	run, _ = run.Transition(agentdomain.RunRunning, "", s.clock.Now())
 	if err := store.UpdateAgentRun(ctx, run); err != nil {
+		s.mu.Unlock()
 		if ctx.Err() != nil {
 			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
 		}
 		return AgentRunView{}, err
 	}
+	projectStore := s.active.store
+	s.mu.Unlock()
+
+	// stale reports whether the store generation has changed or the lease was
+	// force-marked stale by a drain timeout. Once true, the job must not write
+	// to the captured store; it transitions to Recoverable instead.
+	stale := func() bool {
+		return lease.IsStale() || s.currentGeneration() != generation
+	}
+
+	// failStale transitions the run to Recoverable without touching the (possibly
+	// closed) captured store. Callers return the resulting view and
+	// ErrAgentRunStaleStore so the user can retry on the new active store.
+	failStale := func() (AgentRunView, error) {
+		run, _ = run.Transition(agentdomain.RunRecoverable, ErrAgentRunStaleStore.Error(), s.clock.Now())
+		return agentRunView(run), ErrAgentRunStaleStore
+	}
+
+	// failed is the exit path for errors during the lock-free phase. If the
+	// store is still current, it persists the failed/cancelled state to the
+	// captured store; if the store is stale, it transitions to Recoverable
+	// without writing.
 	failed := func(cause error) (AgentRunView, error) {
+		if stale() {
+			return failStale()
+		}
 		if errors.Is(cause, context.Canceled) {
 			persistCtx := context.WithoutCancel(ctx)
 			if cancelErr := s.persistCancelledRun(persistCtx, store, run); cancelErr != nil {
@@ -486,12 +529,16 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		return agentRunView(run), cause
 	}
 
-	chapter, err := s.active.store.Chapter(ctx, run.ChapterID)
+	// Phase 2: lock-free context assembly and provider calls. The workspace
+	// lock is not held, so SaveDraft, CreateChapter, OpenProject and other
+	// operations can proceed concurrently with Model IO.
+	chapter, err := projectStore.Chapter(ctx, run.ChapterID)
 	if err != nil {
 		return failed(err)
 	}
 	contextJSON, contextStats, err := s.assembleAuthoringContext(
 		ctx,
+		projectStore,
 		chapter.ID,
 		run.ContextCharBudget,
 	)
@@ -500,6 +547,9 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	}
 	run.ContextChars = contextStats.CharCount
 	run.ContextTruncated = contextStats.Truncated
+	if stale() {
+		return failStale()
+	}
 	if err := store.UpdateAgentRun(ctx, run); err != nil {
 		return failed(err)
 	}
@@ -537,6 +587,9 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		step.Status = agentdomain.StepRunning
 		step.StartedAt = &now
 		step.UpdatedAt = now
+		if stale() {
+			return failStale()
+		}
 		if err := store.UpdateAgentRunStep(ctx, step); err != nil {
 			return failed(err)
 		}
@@ -555,11 +608,13 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			completedAt := s.clock.Now().UTC()
 			step.CompletedAt = &completedAt
 			step.UpdatedAt = completedAt
-			if updateErr := store.UpdateAgentRunStep(
-				context.WithoutCancel(ctx),
-				step,
-			); updateErr != nil {
-				return AgentRunView{}, updateErr
+			if !stale() {
+				if updateErr := store.UpdateAgentRunStep(
+					context.WithoutCancel(ctx),
+					step,
+				); updateErr != nil {
+					return AgentRunView{}, updateErr
+				}
 			}
 			run.Steps[index] = step
 			return failed(err)
@@ -576,11 +631,13 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			completedAt := s.clock.Now().UTC()
 			step.CompletedAt = &completedAt
 			step.UpdatedAt = completedAt
-			if updateErr := store.UpdateAgentRunStep(
-				context.WithoutCancel(ctx),
-				step,
-			); updateErr != nil {
-				return AgentRunView{}, updateErr
+			if !stale() {
+				if updateErr := store.UpdateAgentRunStep(
+					context.WithoutCancel(ctx),
+					step,
+				); updateErr != nil {
+					return AgentRunView{}, updateErr
+				}
 			}
 			run.Steps[index] = step
 			return failed(err)
@@ -590,6 +647,9 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		step.CompletedAt = &completedAt
 		step.UpdatedAt = completedAt
 		run.Steps[index] = step
+		if stale() {
+			return failStale()
+		}
 		persistCtx := context.WithoutCancel(ctx)
 		if err := store.UpdateAgentRunStep(persistCtx, step); err != nil {
 			return AgentRunView{}, err
@@ -621,6 +681,11 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		}
 	}
 
+	// Completion: create the change set and transition to Completed. Check the
+	// generation one last time before writing to the captured store.
+	if stale() {
+		return failStale()
+	}
 	var reviewOutput struct {
 		Summary string `json:"summary"`
 	}
@@ -637,7 +702,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if err != nil {
 		return failed(err)
 	}
-	if err := s.active.store.CreateChangeSet(ctx, changeSet); err != nil {
+	if err := projectStore.CreateChangeSet(ctx, changeSet); err != nil {
 		return failed(err)
 	}
 	run.ChangeSetID = changeSet.ID
@@ -749,74 +814,75 @@ func (s *Service) agentStoreLocked() (ports.AgentStore, error) {
 
 func (s *Service) assembleAuthoringContext(
 	ctx context.Context,
+	store ports.ProjectStore,
 	chapterID string,
 	charBudget int,
 ) (string, contextManifestStats, error) {
-	project, err := s.active.store.Project(ctx)
+	project, err := store.Project(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	chapter, err := s.active.store.Chapter(ctx, chapterID)
+	chapter, err := store.Chapter(ctx, chapterID)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	chapters, err := s.active.store.ListChapters(ctx)
+	chapters, err := store.ListChapters(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	outline, err := s.active.store.ListOutlineNodes(ctx)
+	outline, err := store.ListOutlineNodes(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	scenes, err := s.active.store.ListSceneCards(ctx, chapterID)
+	scenes, err := store.ListSceneCards(ctx, chapterID)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	characters, err := s.active.store.ListCharacters(ctx)
+	characters, err := store.ListCharacters(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	factions, err := s.active.store.ListFactions(ctx)
+	factions, err := store.ListFactions(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	relationships, err := s.active.store.ListRelationships(ctx)
+	relationships, err := store.ListRelationships(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	memberships, err := s.active.store.ListMemberships(ctx)
+	memberships, err := store.ListMemberships(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	appearances, err := s.active.store.ListChapterAppearances(ctx)
+	appearances, err := store.ListChapterAppearances(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	regions, err := s.active.store.ListWorldRegions(ctx)
+	regions, err := store.ListWorldRegions(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	locations, err := s.active.store.ListLocations(ctx)
+	locations, err := store.ListLocations(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	rules, err := s.active.store.ListWorldRules(ctx)
+	rules, err := store.ListWorldRules(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	hooks, err := s.active.store.ListForeshadowingHooks(ctx)
+	hooks, err := store.ListForeshadowingHooks(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	events, err := s.active.store.ListStoryEvents(ctx)
+	events, err := store.ListStoryEvents(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	facts, err := s.active.store.ListFacts(ctx)
+	facts, err := store.ListFacts(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	knowledge, err := s.active.store.ListCharacterKnowledge(ctx)
+	knowledge, err := store.ListCharacterKnowledge(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
@@ -1084,6 +1150,8 @@ func agentRunErrorCode(err error) string {
 		return "token_budget_exceeded"
 	case errors.Is(err, ErrContextBudgetExceeded):
 		return "context_budget_exceeded"
+	case errors.Is(err, ErrAgentRunStaleStore):
+		return "store_generation_changed"
 	default:
 		return "provider_error"
 	}
