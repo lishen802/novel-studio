@@ -82,6 +82,11 @@ func TestAgentAuthoringCreatesReviewableChapterChangeSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitForAgentRunStatus(t, service, run.ID, "completed", 5*time.Second)
+	run, err = service.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if run.Status != "completed" || run.ChangeSetID == "" {
 		t.Fatalf("unexpected run: %#v", run)
 	}
@@ -138,12 +143,16 @@ func TestAgentRunStopsBeforeNextStepWhenActualUsageExhaustsBudget(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := service.ExecuteAgentRun(context.Background(), run.ID)
-	if !errors.Is(err, ErrTokenBudgetExceeded) {
-		t.Fatalf("ExecuteAgentRun() error = %v, want ErrTokenBudgetExceeded", err)
+	if _, err := service.ExecuteAgentRun(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
 	}
+	waitForAgentRunStatus(t, service, run.ID, "failed", 5*time.Second)
 	if providerFactory.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1", providerFactory.calls)
+	}
+	got, err := service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if got.Status != "failed" || got.InputTokens+got.OutputTokens <= got.TokenBudget {
 		t.Fatalf("unexpected budget failure run: %#v", got)
@@ -164,12 +173,16 @@ func TestAgentRunRejectsRequiredContextAboveBudgetBeforeProviderCall(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := service.ExecuteAgentRun(context.Background(), run.ID)
-	if !errors.Is(err, ErrContextBudgetExceeded) {
-		t.Fatalf("ExecuteAgentRun() error = %v, want ErrContextBudgetExceeded", err)
+	if _, err := service.ExecuteAgentRun(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
 	}
+	waitForAgentRunStatus(t, service, run.ID, "failed", 5*time.Second)
 	if providerFactory.calls != 0 {
 		t.Fatalf("provider calls = %d, want 0", providerFactory.calls)
+	}
+	got, err := service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if got.Status != "failed" || got.ErrorCode != "context_budget_exceeded" {
 		t.Fatalf("unexpected context budget failure run: %#v", got)
@@ -195,17 +208,11 @@ func TestCancelAgentRunPropagatesToProviderAndPersistsCancelledState(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := make(chan struct {
-		run AgentRunView
-		err error
-	}, 1)
-	go func() {
-		got, executeErr := service.ExecuteAgentRun(context.Background(), run.ID)
-		result <- struct {
-			run AgentRunView
-			err error
-		}{run: got, err: executeErr}
-	}()
+	// ExecuteAgentRun returns immediately with a running view; the blocking
+	// provider runs in the background goroutine.
+	if _, err := service.ExecuteAgentRun(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-providerFactory.started:
 	case <-time.After(3 * time.Second):
@@ -214,21 +221,18 @@ func TestCancelAgentRunPropagatesToProviderAndPersistsCancelledState(t *testing.
 	if err := service.CancelAgentRun(context.Background(), run.ID); err != nil {
 		t.Fatalf("CancelAgentRun() error = %v", err)
 	}
-	select {
-	case outcome := <-result:
-		if outcome.err != nil {
-			t.Fatalf("ExecuteAgentRun() error after cancellation = %v", outcome.err)
-		}
-		if outcome.run.Status != "cancelled" {
-			t.Fatalf("run status = %q", outcome.run.Status)
-		}
-		if len(outcome.run.Steps) != 3 ||
-			outcome.run.Steps[0].Status != "cancelled" ||
-			outcome.run.Steps[1].Status != "cancelled" {
-			t.Fatalf("unexpected cancelled steps: %#v", outcome.run.Steps)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("cancelled run did not finish")
+	waitForAgentRunStatus(t, service, run.ID, "cancelled", 5*time.Second)
+	got, err := service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "cancelled" {
+		t.Fatalf("run status = %q", got.Status)
+	}
+	if len(got.Steps) != 3 ||
+		got.Steps[0].Status != "cancelled" ||
+		got.Steps[1].Status != "cancelled" {
+		t.Fatalf("unexpected cancelled steps: %#v", got.Steps)
 	}
 }
 
@@ -262,17 +266,31 @@ func TestExecuteAgentRunPersistsCancellationBeforeStartup(t *testing.T) {
 }
 
 func TestAgentRunPreservesCompletedStepArtifactWhenCancelledAfterProviderSuccess(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	providerFactory := &cancelAfterGenerateProviderFactory{cancel: cancel}
+	providerFactory := &cancelAfterGenerateProviderFactory{}
 	service, chapter := configuredAgentService(t, providerFactory)
 	defer service.Close()
 	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := service.ExecuteAgentRun(ctx, run.ID)
+	// The provider cancels the in-flight job (via CancelAgentRun) after the
+	// planner step generates successfully, mirroring a user-initiated cancel
+	// mid-pipeline. The detached job context lets the cancellation reach the
+	// background goroutine even though ExecuteAgentRun has already returned.
+	providerFactory.cancel = func() {
+		_ = service.CancelAgentRun(context.Background(), run.ID)
+	}
+	got, err := service.ExecuteAgentRun(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("ExecuteAgentRun() error = %v", err)
+	}
+	if got.Status != "running" {
+		t.Fatalf("unexpected initial run status: %#v", got)
+	}
+	waitForAgentRunStatus(t, service, run.ID, "cancelled", 5*time.Second)
+	got, err = service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if got.Status != "cancelled" ||
 		got.Steps[0].Status != "completed" ||
@@ -307,9 +325,13 @@ func TestRetryAgentRunCreatesNewQueuedAuditRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecuteAgentRun(context.Background(), original.ID); err == nil {
-		t.Fatal("expected provider failure")
+	// ExecuteAgentRun returns a running view immediately; the provider failure
+	// is persisted by the background goroutine, so wait for the failed terminal
+	// state before retrying.
+	if _, err := service.ExecuteAgentRun(context.Background(), original.ID); err != nil {
+		t.Fatalf("ExecuteAgentRun() error = %v", err)
 	}
+	waitForAgentRunStatus(t, service, original.ID, "failed", 5*time.Second)
 	retry, err := service.RetryAgentRun(context.Background(), original.ID)
 	if err != nil {
 		t.Fatalf("RetryAgentRun() error = %v", err)
@@ -357,50 +379,54 @@ func TestCreateProjectCancelsActiveAgentRunBeforeReplacingWorkspace(t *testing.T
 	providerFactory := &blockingModelProviderFactory{started: make(chan struct{})}
 	service, chapter := configuredAgentService(t, providerFactory)
 	defer service.Close()
+	projectPath := service.active.packageInfo.Root
 	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
 	if err != nil {
 		t.Fatal(err)
 	}
-	executeDone := make(chan AgentRunView, 1)
-	go func() {
-		got, _ := service.ExecuteAgentRun(context.Background(), run.ID)
-		executeDone <- got
-	}()
+	// ExecuteAgentRun returns immediately with a running view; the blocking
+	// provider runs in the background goroutine.
+	got, err := service.ExecuteAgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("ExecuteAgentRun() error = %v", err)
+	}
+	if got.Status != "running" {
+		t.Fatalf("unexpected initial run status: %#v", got)
+	}
 	select {
 	case <-providerFactory.started:
 	case <-time.After(3 * time.Second):
 		t.Fatal("provider did not start")
 	}
 
-	replaceDone := make(chan error, 1)
+	// Switching projects drains the in-flight job: the drain cancels the job
+	// context, the blocking provider unblocks, the goroutine persists the
+	// cancelled state to the soon-to-close store, and releases the lease. This
+	// must complete (not block past the drain timeout) so the workspace can be
+	// replaced.
 	parentDirectory := t.TempDir()
-	go func() {
-		_, createErr := service.CreateProject(
-			context.Background(),
-			parentDirectory,
-			"新项目",
-			"奇幻",
-			"简介",
-		)
-		replaceDone <- createErr
-	}()
-	select {
-	case err := <-replaceDone:
-		if err != nil {
-			t.Fatalf("CreateProject() error = %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		_ = service.CancelAgentRun(context.Background(), run.ID)
-		<-replaceDone
-		t.Fatal("CreateProject blocked instead of cancelling the active agent run")
+	if _, err := service.CreateProject(
+		context.Background(),
+		parentDirectory,
+		"新项目",
+		"奇幻",
+		"简介",
+	); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
 	}
-	select {
-	case got := <-executeDone:
-		if got.Status != "cancelled" {
-			t.Fatalf("run status = %s, want cancelled", got.Status)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("active agent run did not stop")
+
+	// Reopen the original project to verify the run was cancelled before the
+	// store closed (not left running or corrupted). RecoverInterruptedAgentRuns
+	// only transitions running runs; a cancelled run stays cancelled.
+	if _, err := service.OpenProject(context.Background(), projectPath); err != nil {
+		t.Fatalf("OpenProject() error = %v", err)
+	}
+	recovered, err := service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("AgentRun() error = %v", err)
+	}
+	if recovered.Status != "cancelled" {
+		t.Fatalf("run status = %s, want cancelled", recovered.Status)
 	}
 }
 
@@ -567,7 +593,11 @@ type usageModelProvider struct {
 }
 
 type cancelAfterGenerateProviderFactory struct {
-	cancel context.CancelFunc
+	// cancel is invoked after the first Generate succeeds. It is set after the
+	// service and run exist so it can call Service.CancelAgentRun, which cancels
+	// the detached job context (the request ctx is no longer plumbed into the
+	// background pipeline once ExecuteAgentRun returns).
+	cancel func()
 }
 
 func (factory *cancelAfterGenerateProviderFactory) New(agentdomain.ProviderConnection) (ports.ModelProvider, error) {
@@ -584,7 +614,9 @@ func (provider cancelAfterGenerateProvider) Generate(
 	_ ports.ModelGenerateRequest,
 	_ func(string),
 ) (ports.ModelGenerateResult, error) {
-	provider.factory.cancel()
+	if provider.factory.cancel != nil {
+		provider.factory.cancel()
+	}
 	return ports.ModelGenerateResult{
 		Text:              `{"summary":"计划","scenes":[{"title":"场景","goal":"目标","conflict":"冲突","outcome":"结果"}]}`,
 		ProviderRequestID: "request-cancel-after-success",

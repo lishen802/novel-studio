@@ -431,12 +431,20 @@ func (s *Service) createChapterAgentRunLocked(
 
 func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView, error) {
 	runID := strings.TrimSpace(id)
-	executionCtx, err := s.beginAgentJob(ctx, runID)
+	// Detach the job context from the request so the provider pipeline
+	// survives after ExecuteAgentRun returns. CancelAgentRun and Close/
+	// replaceActive cancel via the stored CancelFunc; the request ctx is only
+	// used for Phase 1 input validation.
+	jobCtx, err := s.beginAgentJob(context.Background(), runID)
 	if err != nil {
 		return AgentRunView{}, err
 	}
-	defer s.endAgentJob(runID)
-	ctx = executionCtx
+	goroutineLaunched := false
+	defer func() {
+		if !goroutineLaunched {
+			s.endAgentJob(runID)
+		}
+	}()
 
 	// Phase 1: short write lock. Capture the agent store, the project store and
 	// the current generation, acquire a job lease bound to that generation, then
@@ -490,8 +498,37 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		}
 		return AgentRunView{}, err
 	}
+	s.notifyJobUpdated(ctx, store, run.ID, agentdomain.JobKindAgent)
 	projectStore := s.active.store
 	s.mu.Unlock()
+
+	// Phase 2+3 run asynchronously so the caller gets an immediate running view
+	// and the provider pipeline survives request cancellation. The goroutine
+	// captures the job context (detached from the request), the captured stores,
+	// the lease and the generation. endAgentJob is deferred inside the pipeline
+	// so the lease is released only after all terminal persistence is done.
+	goroutineLaunched = true
+	go s.runAgentPipeline(jobCtx, run, store, projectStore, lease, generation)
+
+	return agentRunView(run), nil
+}
+
+// runAgentPipeline executes the lock-free provider pipeline and terminal
+// persistence for an agent run. It is called in a background goroutine by
+// ExecuteAgentRun after the run has been transitioned to Running and the
+// job_started event has been committed. The job context (ctx) is detached
+// from the Wails request so the pipeline survives page unload; CancelAgentRun
+// cancels it via the stored CancelFunc. endAgentJob is deferred here so the
+// lease is released only after the goroutine has persisted its final state.
+func (s *Service) runAgentPipeline(
+	ctx context.Context,
+	run agentdomain.AgentRun,
+	store ports.AgentStore,
+	projectStore ports.ProjectStore,
+	lease *jobLease,
+	generation uint64,
+) (AgentRunView, error) {
+	defer s.endAgentJob(run.ID)
 
 	// stale reports whether the store generation has changed or the lease was
 	// force-marked stale by a drain timeout. Once true, the job must not write
@@ -522,7 +559,8 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			if cancelErr := s.persistCancelledRun(persistCtx, store, run); cancelErr != nil {
 				return AgentRunView{}, cancelErr
 			}
-			run, err = store.AgentRun(persistCtx, run.ID)
+			s.notifyJobUpdated(persistCtx, store, run.ID, agentdomain.JobKindAgent)
+			run, err := store.AgentRun(persistCtx, run.ID)
 			if err != nil {
 				return AgentRunView{}, err
 			}
@@ -541,6 +579,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		if updateErr := store.UpdateAgentRun(context.WithoutCancel(ctx), run, failedDraft); updateErr != nil {
 			return AgentRunView{}, updateErr
 		}
+		s.notifyJobUpdated(context.WithoutCancel(ctx), store, run.ID, agentdomain.JobKindAgent)
 		return agentRunView(run), cause
 	}
 
@@ -613,6 +652,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		if err := store.UpdateAgentRunStep(ctx, step, stepStartedDraft); err != nil {
 			return failed(err)
 		}
+		s.notifyJobUpdated(ctx, store, run.ID, agentdomain.JobKindAgent)
 		request := agentRequest(step.Role, profile, run.Prompt, contextJSON, plan, draft)
 		generated, err := provider.Generate(ctx, apiKey, request, func(delta string) {
 			step.Output += delta
@@ -704,6 +744,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		if err := store.UpdateAgentRun(persistCtx, run); err != nil {
 			return AgentRunView{}, err
 		}
+		s.notifyJobUpdated(persistCtx, store, run.ID, agentdomain.JobKindAgent)
 		kind := agentdomain.ArtifactPlan
 		switch step.Role {
 		case agentdomain.RolePlanner:
@@ -765,6 +806,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if err := store.UpdateAgentRun(context.WithoutCancel(ctx), run, completedDraft); err != nil {
 		return AgentRunView{}, err
 	}
+	s.notifyJobUpdated(context.WithoutCancel(ctx), store, run.ID, agentdomain.JobKindAgent)
 	return agentRunView(run), nil
 }
 

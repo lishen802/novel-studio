@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -247,52 +246,55 @@ func TestAgentRunSkipsPersistWhenStoreGenerationChanged(t *testing.T) {
 	// A zero drain timeout causes replaceActive to mark remaining leases stale
 	// immediately, simulating a drain that cannot wait for the stuck provider.
 	service.drainTimeout = 0
+	projectPath := service.active.packageInfo.Root
 
 	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章。")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	runDone := make(chan AgentRunView, 1)
-	runErrCh := make(chan error, 1)
-	go func() {
-		got, executeErr := service.ExecuteAgentRun(ctx, run.ID)
-		runDone <- got
-		runErrCh <- executeErr
-	}()
+	// ExecuteAgentRun returns immediately with a running view; the sticky
+	// provider blocks the background goroutine inside Model IO.
+	got, err := service.ExecuteAgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ExecuteAgentRun() error = %v", err)
+	}
+	if got.Status != "running" {
+		t.Fatalf("unexpected initial run status: %#v", got)
+	}
 
 	waitForStickyProviderStarted(t, factory)
 
 	// Switch to a new project. replaceActive will drain (timeout=0 → stale),
-	// close the old store, and install the new generation.
+	// close the old store, and install the new generation. The goroutine must
+	// NOT write its step result to the now-closed store.
 	parentDirectory := t.TempDir()
 	if _, err := service.CreateProject(ctx, parentDirectory, "新项目", "奇幻", "简介"); err != nil {
 		t.Fatal(err)
 	}
 
-	// Release the stuck provider. The job will try to persist the step result
-	// but the generation has changed and the lease is stale.
+	// Release the stuck provider. The job detects the stale lease/generation and
+	// skips persistence, transitioning to Recoverable in memory only.
 	close(factory.release)
 
-	select {
-	case got := <-runDone:
-		if got.Status != "recoverable" {
-			t.Fatalf("run status = %s, want recoverable", got.Status)
-		}
-		if got.ErrorCode != "store_generation_changed" {
-			t.Fatalf("run error code = %s, want store_generation_changed", got.ErrorCode)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("ExecuteAgentRun did not return after releasing the provider")
+	// Reopen the original project. RecoverInterruptedAgentRuns transitions the
+	// stuck Running run to Recoverable. Crucially, the planner step must NOT be
+	// completed: if the goroutine had persisted step_completed to the closed
+	// store, the step would read "completed" here instead of the recovery
+	// terminal state, proving the stale-store write was skipped.
+	if _, err := service.OpenProject(ctx, projectPath); err != nil {
+		t.Fatalf("OpenProject() error = %v", err)
 	}
-
-	select {
-	case executeErr := <-runErrCh:
-		if !errors.Is(executeErr, ErrAgentRunStaleStore) {
-			t.Fatalf("ExecuteAgentRun error = %v, want ErrAgentRunStaleStore", executeErr)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ExecuteAgentRun error not received")
+	recovered, err := service.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("AgentRun() error = %v", err)
+	}
+	if recovered.Status != "recoverable" {
+		t.Fatalf("recovered run status = %s, want recoverable", recovered.Status)
+	}
+	if len(recovered.Steps) == 0 || recovered.Steps[0].Status == "completed" {
+		t.Fatalf("planner step must not be completed after stale-store skip: %#v",
+			recovered.Steps)
 	}
 }
 

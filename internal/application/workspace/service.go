@@ -50,6 +50,10 @@ type Service struct {
 	// drainTimeout bounds how long switch/close waits for in-flight job leases
 	// to release before force-marking them stale. Tests inject shorter values.
 	drainTimeout time.Duration
+	// notifier delivers best-effort job:updated wake-ups to the UI bridge after
+	// each JobEvent commit. It defaults to a noop so tests that don't assert
+	// notifications are unaffected; the Wails layer injects a real emitter.
+	notifier ports.JobEventNotifier
 }
 
 type activeWorkspace struct {
@@ -80,6 +84,7 @@ func NewService(
 		storeGeneration:     0,
 		leases:              newLeaseRegistry(),
 		drainTimeout:        drainTimeoutDefault,
+		notifier:            noopJobEventNotifier{},
 	}
 	if len(branchArchives) > 0 {
 		service.branches = branchArchives[0]

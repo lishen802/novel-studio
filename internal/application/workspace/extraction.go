@@ -156,16 +156,26 @@ func (s *Service) StartExtractionRun(ctx context.Context, input ExtractionRunInp
 
 func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (ExtractionRunView, error) {
 	taskID := strings.TrimSpace(id)
-	executionCtx, err := s.beginExtractionJob(ctx, taskID)
+	// Detach the job context from the request so the provider pipeline
+	// survives after ExecuteExtractionRun returns. CancelExtractionRun and
+	// Close/replaceActive cancel via the stored CancelFunc; the request ctx is
+	// only used for Phase 1 input validation.
+	jobCtx, err := s.beginExtractionJob(context.Background(), taskID)
 	if err != nil {
 		return ExtractionRunView{}, err
 	}
-	defer s.endExtractionJob(taskID)
-	ctx = executionCtx
+	goroutineLaunched := false
+	defer func() {
+		if !goroutineLaunched {
+			s.endExtractionJob(taskID)
+		}
+	}()
 
 	// Phase 1: short write lock. Capture the extraction/agent/import stores,
 	// the project store and generation, acquire a job lease, transition the
-	// task to Running and persist.
+	// task to Running and persist. The lease is acquired inside the lock so the
+	// captured generation matches the active store; the job releases the lease
+	// (via endExtractionJob) only after all persistence is done.
 	s.mu.Lock()
 	store, err := s.extractionStoreLocked()
 	if err != nil {
@@ -249,6 +259,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		}
 		return ExtractionRunView{}, err
 	}
+	s.notifyJobUpdated(ctx, store, task.ID, agentdomain.JobKindExtraction)
 	currentJob, err := importDetails.Job.MarkExtractionStarted(task.ID, s.clock.Now())
 	if err != nil {
 		s.mu.Unlock()
@@ -260,8 +271,45 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	}
 	s.mu.Unlock()
 
+	// Phase 2+3 run asynchronously so the caller gets an immediate running view
+	// and the provider pipeline survives request cancellation. The goroutine
+	// captures the job context (detached from the request), the captured stores,
+	// the lease and the generation. endExtractionJob is deferred inside the
+	// pipeline so the lease is released only after the goroutine has persisted
+	// its final state.
+	goroutineLaunched = true
+	go s.runExtractionPipeline(jobCtx, task, store, projectStore, importStore,
+		currentJob, provider, apiKey, project.ID, lease, generation)
+
+	return extractionRunView(task, nil), nil
+}
+
+// runExtractionPipeline executes the lock-free provider pipeline and terminal
+// persistence for an extraction task. It is called in a background goroutine by
+// ExecuteExtractionRun after the task has been transitioned to Running and the
+// job_started event has been committed. The job context (ctx) is detached
+// from the Wails request so the pipeline survives page unload;
+// CancelExtractionRun cancels it via the stored CancelFunc. endExtractionJob is
+// deferred here so the lease is released only after the goroutine has persisted
+// its final state.
+func (s *Service) runExtractionPipeline(
+	ctx context.Context,
+	task extractiondomain.Task,
+	store ports.ExtractionStore,
+	projectStore ports.ProjectStore,
+	importStore ports.ImportStore,
+	currentJob importingdomain.ImportJob,
+	provider ports.ModelProvider,
+	apiKey string,
+	projectID string,
+	lease *jobLease,
+	generation uint64,
+) (ExtractionRunView, error) {
+	defer s.endExtractionJob(task.ID)
+
 	// stale reports whether the store generation has changed or the lease was
-	// force-marked stale by a drain timeout.
+	// force-marked stale by a drain timeout. Once true, the job must not write
+	// to the captured store; it transitions to Recoverable instead.
 	stale := func() bool {
 		return lease.IsStale() || s.currentGeneration() != generation
 	}
@@ -274,7 +322,10 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		return extractionRunView(task, nil), ErrAgentRunStaleStore
 	}
 
-	// failed is the exit path for errors during the lock-free phase.
+	// failed is the exit path for errors during the lock-free phase. If the
+	// store is still current, it persists the failed/cancelled state to the
+	// captured store; if the store is stale, it transitions to Recoverable
+	// without writing.
 	failed := func(cause error) (ExtractionRunView, error) {
 		if stale() {
 			return failStale()
@@ -284,6 +335,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 			if cancelErr := s.persistCancelledExtraction(persistCtx, store, task); cancelErr != nil {
 				return ExtractionRunView{}, cancelErr
 			}
+			s.notifyJobUpdated(persistCtx, store, task.ID, agentdomain.JobKindExtraction)
 			task, _ = store.Task(persistCtx, task.ID)
 			return extractionRunView(task, nil), nil
 		}
@@ -298,6 +350,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 			return ExtractionRunView{}, draftErr
 		}
 		_ = store.UpdateTask(context.WithoutCancel(ctx), task, failedDraft)
+		s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 		failedJob, _ := currentJob.MarkExtractionFailed(s.clock.Now())
 		_ = importStore.UpdateImportJobExtraction(context.WithoutCancel(ctx), failedJob)
 		return extractionRunView(task, nil), cause
@@ -327,8 +380,9 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		if err := store.UpdateStep(ctx, runningStep, stepStartedDraft); err != nil {
 			return failed(err)
 		}
+		s.notifyJobUpdated(ctx, store, task.ID, agentdomain.JobKindExtraction)
 
-		contextJSON, err := assembleExtractionContext(runningStep, task.Prompt, project.ID)
+		contextJSON, err := assembleExtractionContext(runningStep, task.Prompt, projectID)
 		if err != nil {
 			return failed(err)
 		}
@@ -409,6 +463,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		)); err != nil {
 			return ExtractionRunView{}, err
 		}
+		s.notifyJobUpdated(persistCtx, store, task.ID, agentdomain.JobKindExtraction)
 		if err := ctx.Err(); err != nil {
 			return failed(err)
 		}
@@ -436,11 +491,12 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 			return ExtractionRunView{}, draftErr
 		}
 		_ = store.UpdateTask(context.WithoutCancel(ctx), task, noCandidateDraft)
+		s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 		return extractionRunView(task, nil), fmt.Errorf("extraction produced no candidates")
 	}
 
 	changeSet, err := revisiondomain.NewChangeSet(
-		s.ids.NewID(), project.ID,
+		s.ids.NewID(), projectID,
 		"导入抽取候选", "由分章抽取合并产生，等待作者逐项确认。",
 		"extraction-task:"+task.ID, specs, s.clock.Now(),
 	)
@@ -463,6 +519,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	if err := store.UpdateTask(context.WithoutCancel(ctx), task, completedDraft); err != nil {
 		return ExtractionRunView{}, err
 	}
+	s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 	completedJob, err := currentJob.MarkExtractionCompleted(s.clock.Now())
 	if err != nil {
 		return ExtractionRunView{}, err

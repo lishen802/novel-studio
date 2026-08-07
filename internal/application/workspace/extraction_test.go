@@ -114,9 +114,17 @@ func TestExtractionRunProducesReviewableChangeSet(t *testing.T) {
 	}
 
 	// Execute the run: fake provider returns one candidate per asset kind.
+	// ExecuteExtractionRun returns immediately with a running view; the
+	// provider pipeline runs in a background goroutine, so wait for the
+	// terminal status and reload the task to inspect the produced change set.
 	run, err = service.ExecuteExtractionRun(ctx, run.Task.ID)
 	if err != nil {
 		t.Fatalf("execute extraction run: %v", err)
+	}
+	waitForExtractionTaskStatus(t, service, run.Task.ID, "completed", 5*time.Second)
+	run, err = service.ExtractionTask(ctx, run.Task.ID)
+	if err != nil {
+		t.Fatalf("reload extraction task: %v", err)
 	}
 	if run.Task.Status != "completed" {
 		t.Fatalf("task status = %q, want completed", run.Task.Status)
@@ -304,6 +312,11 @@ func TestExtractionRunMergesDuplicatesAcrossChapters(t *testing.T) {
 	run, err = service.ExecuteExtractionRun(ctx, run.Task.ID)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+	waitForExtractionTaskStatus(t, service, run.Task.ID, "completed", 5*time.Second)
+	run, err = service.ExtractionTask(ctx, run.Task.ID)
+	if err != nil {
+		t.Fatalf("reload extraction task: %v", err)
 	}
 	if run.ChangeSet == nil {
 		t.Fatalf("no change set produced")
@@ -597,6 +610,11 @@ func TestExtractionRunEditChangeOperation(t *testing.T) {
 	run, err = service.ExecuteExtractionRun(ctx, run.Task.ID)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+	waitForExtractionTaskStatus(t, service, run.Task.ID, "completed", 5*time.Second)
+	run, err = service.ExtractionTask(ctx, run.Task.ID)
+	if err != nil {
+		t.Fatalf("reload extraction task: %v", err)
 	}
 
 	var characterOpID string

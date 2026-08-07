@@ -37,6 +37,7 @@ func TestExecuteAgentRunAppendsContiguousJobEvents(t *testing.T) {
 	if _, err := service.ExecuteAgentRun(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
+	waitForAgentRunStatus(t, service, run.ID, "completed", 5*time.Second)
 
 	agentStore, ok := service.active.store.(ports.AgentStore)
 	if !ok {
@@ -106,9 +107,12 @@ func TestExecuteAgentRunFailureAppendsJobFailedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecuteAgentRun(ctx, run.ID); err == nil {
-		t.Fatal("ExecuteAgentRun expected failure, got nil")
+	// ExecuteAgentRun returns immediately with a running view; the provider
+	// failure is persisted asynchronously by the background goroutine.
+	if _, err := service.ExecuteAgentRun(ctx, run.ID); err != nil {
+		t.Fatal(err)
 	}
+	waitForAgentRunStatus(t, service, run.ID, "failed", 5*time.Second)
 
 	agentStore, ok := service.active.store.(ports.AgentStore)
 	if !ok {
@@ -223,6 +227,10 @@ func TestExecuteExtractionRunAppendsContiguousJobEvents(t *testing.T) {
 	if _, err := service.ExecuteExtractionRun(ctx, taskID); err != nil {
 		t.Fatalf("ExecuteExtractionRun: %v", err)
 	}
+	// ExecuteExtractionRun returns a running view immediately; the contiguous
+	// event feed is appended by the background goroutine, so wait for the
+	// terminal status before asserting the full event sequence.
+	waitForExtractionTaskStatus(t, service, taskID, "completed", 5*time.Second)
 
 	store, ok := service.active.store.(ports.ExtractionStore)
 	if !ok {
@@ -280,9 +288,12 @@ func TestExecuteExtractionRunFailureAppendsJobFailedEvent(t *testing.T) {
 	service, taskID, _ := configuredExtractionService(t, failingModelProviderFactory{})
 	defer service.Close()
 
-	if _, err := service.ExecuteExtractionRun(ctx, taskID); err == nil {
-		t.Fatal("ExecuteExtractionRun expected failure, got nil")
+	if _, err := service.ExecuteExtractionRun(ctx, taskID); err != nil {
+		t.Fatalf("ExecuteExtractionRun: %v", err)
 	}
+	// The provider failure is persisted by the background goroutine, so wait
+	// for the failed terminal state before asserting the job_failed event.
+	waitForExtractionTaskStatus(t, service, taskID, "failed", 5*time.Second)
 
 	store, ok := service.active.store.(ports.ExtractionStore)
 	if !ok {
