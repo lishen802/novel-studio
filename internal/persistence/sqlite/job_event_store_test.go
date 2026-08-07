@@ -281,3 +281,215 @@ func mustJobEvent(
 	}
 	return event
 }
+
+// mustJobEventDraft constructs a validated draft, failing the test on error.
+func mustJobEventDraft(
+	t *testing.T,
+	jobID string,
+	kind agentdomain.JobKind,
+	projectID string,
+	eventType agentdomain.JobEventType,
+	stepID, payload string,
+	now time.Time,
+) agentdomain.JobEventDraft {
+	t.Helper()
+	draft, err := agentdomain.NewJobEventDraft(jobID, kind, projectID, eventType, stepID, payload, now)
+	if err != nil {
+		t.Fatalf("NewJobEventDraft: %v", err)
+	}
+	return draft
+}
+
+// createAgentRunForEvents builds a queued agent run with a single planner step
+// so UpdateAgentRun/UpdateAgentRunStep can emit events against it.
+func createAgentRunForEvents(t *testing.T) (*Store, agentdomain.AgentRun, time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	store, project, chapter := createStoreWithChapter(t)
+	now := time.Unix(100, 0).UTC()
+	connection, err := agentdomain.NewProviderConnection(
+		"provider-events", project.ID, "OpenAI", agentdomain.ProviderOpenAI,
+		"https://api.openai.com/v1", "provider:provider-events", now,
+	)
+	if err != nil {
+		store.Close()
+		t.Fatalf("NewProviderConnection: %v", err)
+	}
+	if err := store.UpsertProviderConnection(ctx, connection); err != nil {
+		store.Close()
+		t.Fatalf("UpsertProviderConnection: %v", err)
+	}
+	profile, err := agentdomain.NewAgentProfile(
+		"profile-events", project.ID, agentdomain.RolePlanner, connection.ID,
+		"gpt-test", 1024, 0.3, true, now,
+	)
+	if err != nil {
+		store.Close()
+		t.Fatalf("NewAgentProfile: %v", err)
+	}
+	if err := store.UpsertAgentProfile(ctx, profile); err != nil {
+		store.Close()
+		t.Fatalf("UpsertAgentProfile: %v", err)
+	}
+	run, err := agentdomain.NewChapterDraftRun(
+		"run-events", project.ID, chapter.ID, chapter.Revision, "续写",
+		[]agentdomain.RunStepSpec{
+			{ID: "step-events-1", Role: agentdomain.RolePlanner, ProfileID: profile.ID},
+			{ID: "step-events-2", Role: agentdomain.RoleWriter, ProfileID: profile.ID},
+			{ID: "step-events-3", Role: agentdomain.RoleContinuityReviewer, ProfileID: profile.ID},
+		},
+		now,
+	)
+	if err != nil {
+		store.Close()
+		t.Fatalf("NewChapterDraftRun: %v", err)
+	}
+	if err := store.CreateAgentRun(ctx, run); err != nil {
+		store.Close()
+		t.Fatalf("CreateAgentRun: %v", err)
+	}
+	return store, run, now
+}
+
+// TestUpdateAgentRunAppendsEventsInSameTransaction asserts that
+// UpdateAgentRun, when passed event drafts, atomically appends the events and
+// upserts the job snapshot alongside the run row update. The snapshot must
+// reflect the run status and the highest assigned sequence.
+func TestUpdateAgentRunAppendsEventsInSameTransaction(t *testing.T) {
+	ctx := context.Background()
+	store, run, now := createAgentRunForEvents(t)
+	defer store.Close()
+
+	runningRun, err := run.Transition(agentdomain.RunRunning, "", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("transition to running: %v", err)
+	}
+	startedDraft := mustJobEventDraft(t, run.ID, agentdomain.JobKindAgent, run.ProjectID,
+		agentdomain.EventJobStarted, "", `{"chapter_id":"`+run.ChapterID+`"}`, now.Add(time.Second))
+	if err := store.UpdateAgentRun(ctx, runningRun, startedDraft); err != nil {
+		t.Fatalf("UpdateAgentRun with job_started draft: %v", err)
+	}
+
+	events, err := store.JobEvents(ctx, run.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("JobEvents after job_started: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != agentdomain.EventJobStarted ||
+		events[0].SequenceNumber != 1 {
+		t.Fatalf("events after job_started = %#v", events)
+	}
+	snapshot, err := store.JobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("JobSnapshot after job_started: %v", err)
+	}
+	if snapshot.Status != string(agentdomain.RunRunning) || snapshot.MaxSequence != 1 ||
+		snapshot.EarliestReplayableSequence != 1 || snapshot.JobKind != agentdomain.JobKindAgent {
+		t.Fatalf("snapshot after job_started = %#v", snapshot)
+	}
+
+	// Step started: sequence advances to 2; run status stays running.
+	step := runningRun.Steps[0]
+	step.Status = agentdomain.StepRunning
+	step.UpdatedAt = now.Add(2 * time.Second)
+	stepStartedDraft := mustJobEventDraft(t, run.ID, agentdomain.JobKindAgent, run.ProjectID,
+		agentdomain.EventStepStarted, step.ID, `{"role":"planner"}`, now.Add(2*time.Second))
+	if err := store.UpdateAgentRunStep(ctx, step, stepStartedDraft); err != nil {
+		t.Fatalf("UpdateAgentRunStep with step_started draft: %v", err)
+	}
+	events, err = store.JobEvents(ctx, run.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("JobEvents after step_started: %v", err)
+	}
+	if len(events) != 2 || events[1].EventType != agentdomain.EventStepStarted ||
+		events[1].StepID != step.ID || events[1].SequenceNumber != 2 {
+		t.Fatalf("events after step_started = %#v", events)
+	}
+	snapshot, err = store.JobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("JobSnapshot after step_started: %v", err)
+	}
+	if snapshot.MaxSequence != 2 || snapshot.Status != string(agentdomain.RunRunning) {
+		t.Fatalf("snapshot after step_started = %#v", snapshot)
+	}
+
+	// Step completed with token usage folded into the run row.
+	step.Status = agentdomain.StepCompleted
+	step.InputTokens = 120
+	step.OutputTokens = 60
+	completedAt := now.Add(3 * time.Second)
+	step.CompletedAt = &completedAt
+	step.UpdatedAt = completedAt
+	runningRun = runningRun.RecordUsage(120, 60)
+	stepCompletedDraft := mustJobEventDraft(t, run.ID, agentdomain.JobKindAgent, run.ProjectID,
+		agentdomain.EventStepCompleted, step.ID,
+		`{"role":"planner","input_tokens":120,"output_tokens":60}`, completedAt)
+	if err := store.UpdateAgentRunStep(ctx, step, stepCompletedDraft); err != nil {
+		t.Fatalf("UpdateAgentRunStep with step_completed draft: %v", err)
+	}
+
+	// Job completed: run transitioned to Completed. The change set is created by
+	// the workspace layer via the project store before being referenced, so this
+	// store-level test leaves ChangeSetID empty and records the terminal status.
+	completedRun, err := runningRun.Transition(agentdomain.RunCompleted, "", now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("transition to completed: %v", err)
+	}
+	jobCompletedDraft := mustJobEventDraft(t, run.ID, agentdomain.JobKindAgent, run.ProjectID,
+		agentdomain.EventJobCompleted, "", `{"status":"completed"}`, now.Add(4*time.Second))
+	if err := store.UpdateAgentRun(ctx, completedRun, jobCompletedDraft); err != nil {
+		t.Fatalf("UpdateAgentRun with job_completed draft: %v", err)
+	}
+
+	events, err = store.JobEvents(ctx, run.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("JobEvents after completion: %v", err)
+	}
+	wantTypes := []agentdomain.JobEventType{
+		agentdomain.EventJobStarted,
+		agentdomain.EventStepStarted,
+		agentdomain.EventStepCompleted,
+		agentdomain.EventJobCompleted,
+	}
+	if len(events) != len(wantTypes) {
+		t.Fatalf("len(events) = %d, want %d", len(events), len(wantTypes))
+	}
+	for i, want := range wantTypes {
+		if events[i].SequenceNumber != uint64(i+1) || events[i].EventType != want {
+			t.Fatalf("event %d = seq %d type %q, want seq %d type %q",
+				i, events[i].SequenceNumber, events[i].EventType, i+1, want)
+		}
+	}
+	snapshot, err = store.JobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("JobSnapshot after completion: %v", err)
+	}
+	if snapshot.Status != string(agentdomain.RunCompleted) || snapshot.MaxSequence != 4 ||
+		snapshot.InputTokens != 120 || snapshot.OutputTokens != 60 {
+		t.Fatalf("snapshot after completion = %#v", snapshot)
+	}
+}
+
+// TestUpdateAgentRunWithoutDraftsLeavesEventFeedUntouched asserts that callers
+// passing no drafts (the variadic default) get the legacy single-statement
+// update behavior with no snapshot mutation.
+func TestUpdateAgentRunWithoutDraftsLeavesEventFeedUntouched(t *testing.T) {
+	ctx := context.Background()
+	store, run, now := createAgentRunForEvents(t)
+	defer store.Close()
+
+	runningRun, err := run.Transition(agentdomain.RunRunning, "", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	if err := store.UpdateAgentRun(ctx, runningRun); err != nil {
+		t.Fatalf("UpdateAgentRun without drafts: %v", err)
+	}
+	if events, err := store.JobEvents(ctx, run.ID, 0, 10); err != nil {
+		t.Fatalf("JobEvents: %v", err)
+	} else if len(events) != 0 {
+		t.Fatalf("events = %#v, want none without drafts", events)
+	}
+	if _, err := store.JobSnapshot(ctx, run.ID); !errors.Is(err, ports.ErrJobSnapshotMissing) {
+		t.Fatalf("JobSnapshot without drafts = %v, want ErrJobSnapshotMissing", err)
+	}
+}

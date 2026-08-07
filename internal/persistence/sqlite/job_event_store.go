@@ -15,10 +15,21 @@ import (
 // (2067). modernc.org/sqlite returns extended codes from (*sqlite.Error).Code().
 const sqliteUniqueViolation = 2067
 
-// AppendJobEvent inserts a single append-only event row. The caller is
-// responsible for assigning SequenceNumber within the persistence transaction
-// (see nextJobEventSequence); this method validates the UNIQUE(job_id,
-// sequence_number) constraint and surfaces a typed conflict error.
+// txExecutor is satisfied by both *sql.DB and *sql.Tx, letting the
+// transactional event-append helpers run against either. The update methods use
+// it to append events and refresh the snapshot inside the same BeginTx that
+// mutates the run/task row.
+type txExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// AppendJobEvent inserts a single append-only event row with a caller-assigned
+// sequence number. It is the low-level primitive used by tests and callers that
+// assign sequences themselves; the transactional update methods
+// (UpdateAgentRun/UpdateAgentRunStep/UpdateTask/UpdateStep) use
+// appendJobEventDrafts instead so the sequence is assigned atomically with the
+// run/task mutation.
 func (s *Store) AppendJobEvent(ctx context.Context, event agentdomain.JobEvent) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO job_events(
@@ -194,4 +205,127 @@ func isUniqueConstraintViolation(err error) bool {
 		return sqliteErr.Code() == sqliteUniqueViolation
 	}
 	return false
+}
+
+// appendJobEventDrafts assigns per-job monotonic sequence numbers to drafts and
+// inserts them within exec (a *sql.Tx or *sql.DB), returning the highest
+// assigned sequence. It is intended to run inside the same transaction that
+// mutates the run/task row so the event feed and the authoritative row commit
+// atomically. Sequence assignment uses SELECT MAX(sequence_number)+1 guarded by
+// the UNIQUE(job_id, sequence_number) constraint; with the single-connection
+// pool this is race-free within the transaction.
+func appendJobEventDrafts(
+	ctx context.Context,
+	exec txExecutor,
+	drafts []agentdomain.JobEventDraft,
+) (uint64, error) {
+	if len(drafts) == 0 {
+		return 0, nil
+	}
+	var currentMax uint64
+	if err := exec.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(sequence_number), 0) FROM job_events WHERE job_id = ?
+	`, drafts[0].JobID).Scan(&currentMax); err != nil {
+		return 0, databaseOperationError("read job event max sequence", err)
+	}
+	for i, draft := range drafts {
+		sequence := currentMax + uint64(i) + 1
+		event, err := agentdomain.NewJobEvent(
+			draft.JobID, draft.JobKind, draft.ProjectID, sequence,
+			draft.EventType, draft.StepID, draft.Payload, draft.CreatedAt,
+		)
+		if err != nil {
+			return 0, err
+		}
+		if _, err := exec.ExecContext(ctx, `
+			INSERT INTO job_events(
+				job_id, job_kind, project_id, sequence_number, event_type, step_id, payload, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			event.JobID, event.JobKind, event.ProjectID, event.SequenceNumber,
+			event.EventType, event.StepID, event.Payload, formatTime(event.CreatedAt),
+		); err != nil {
+			if isUniqueConstraintViolation(err) {
+				return 0, fmt.Errorf("%w: job %s sequence %d", ports.ErrJobEventConflict, event.JobID, event.SequenceNumber)
+			}
+			return 0, databaseOperationError("append job event", err)
+		}
+	}
+	return currentMax + uint64(len(drafts)), nil
+}
+
+// upsertAgentJobSnapshot refreshes the authoritative projection for an agent
+// run by projecting status/tokens/project from the just-updated agent_runs row
+// and advancing max_sequence. earliest_replayable_sequence defaults to 1 for a
+// new snapshot and is preserved (via max()) when a future cleanup advances it.
+// Runs inside the caller's transaction so the snapshot commits atomically with
+// the event append.
+func upsertAgentJobSnapshot(
+	ctx context.Context,
+	exec txExecutor,
+	runID string,
+	maxSequence uint64,
+	updatedAt string,
+) error {
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO job_snapshots(
+			job_id, job_kind, project_id, status, max_sequence, earliest_replayable_sequence,
+			input_tokens, output_tokens, pending_action, terminal_info, updated_at
+		)
+		SELECT ?, 'agent', r.project_id, r.status, ?, 1,
+			r.input_tokens, r.output_tokens, '', '', ?
+		FROM agent_runs r
+		WHERE r.id = ?
+		ON CONFLICT(job_id) DO UPDATE SET
+			job_kind = 'agent',
+			project_id = excluded.project_id,
+			status = excluded.status,
+			max_sequence = excluded.max_sequence,
+			earliest_replayable_sequence = max(excluded.earliest_replayable_sequence, job_snapshots.earliest_replayable_sequence),
+			input_tokens = excluded.input_tokens,
+			output_tokens = excluded.output_tokens,
+			pending_action = excluded.pending_action,
+			terminal_info = excluded.terminal_info,
+			updated_at = excluded.updated_at
+	`, runID, maxSequence, updatedAt, runID)
+	if err != nil {
+		return databaseOperationError("upsert agent job snapshot", err)
+	}
+	return nil
+}
+
+// upsertExtractionJobSnapshot mirrors upsertAgentJobSnapshot for extraction
+// tasks, projecting from the extraction_tasks row.
+func upsertExtractionJobSnapshot(
+	ctx context.Context,
+	exec txExecutor,
+	taskID string,
+	maxSequence uint64,
+	updatedAt string,
+) error {
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO job_snapshots(
+			job_id, job_kind, project_id, status, max_sequence, earliest_replayable_sequence,
+			input_tokens, output_tokens, pending_action, terminal_info, updated_at
+		)
+		SELECT ?, 'extraction', t.project_id, t.status, ?, 1,
+			t.input_tokens, t.output_tokens, '', '', ?
+		FROM extraction_tasks t
+		WHERE t.id = ?
+		ON CONFLICT(job_id) DO UPDATE SET
+			job_kind = 'extraction',
+			project_id = excluded.project_id,
+			status = excluded.status,
+			max_sequence = excluded.max_sequence,
+			earliest_replayable_sequence = max(excluded.earliest_replayable_sequence, job_snapshots.earliest_replayable_sequence),
+			input_tokens = excluded.input_tokens,
+			output_tokens = excluded.output_tokens,
+			pending_action = excluded.pending_action,
+			terminal_info = excluded.terminal_info,
+			updated_at = excluded.updated_at
+	`, taskID, maxSequence, updatedAt, taskID)
+	if err != nil {
+		return databaseOperationError("upsert extraction job snapshot", err)
+	}
+	return nil
 }

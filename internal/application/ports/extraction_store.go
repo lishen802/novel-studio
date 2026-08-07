@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	extractiondomain "github.com/lishen802/novel-studio/internal/domain/extraction"
 )
 
@@ -34,8 +35,10 @@ type ExtractionStore interface {
 	CreateTask(ctx context.Context, task extractiondomain.Task) error
 	// UpdateTask persists lifecycle transitions for the task. Implementations
 	// must enforce that the row exists and that change_set_id/retry_of are
-	// only written once.
-	UpdateTask(ctx context.Context, task extractiondomain.Task) error
+	// only written once. When drafts are provided, the events and an upserted
+	// job snapshot commit atomically with the task row update in the same
+	// transaction.
+	UpdateTask(ctx context.Context, task extractiondomain.Task, drafts ...agentdomain.JobEventDraft) error
 	// Task loads a task and its steps ordered by position.
 	Task(ctx context.Context, id string) (extractiondomain.Task, error)
 	// ListTasks returns the most recent tasks for a project, newest first.
@@ -43,8 +46,10 @@ type ExtractionStore interface {
 	// TasksForImport returns tasks bound to the supplied ImportJob ID, ordered
 	// newest first so callers can find the latest run for retry/continue UX.
 	TasksForImport(ctx context.Context, importJobID string) ([]extractiondomain.Task, error)
-	// UpdateStep persists lifecycle transitions for a single step.
-	UpdateStep(ctx context.Context, step extractiondomain.Step) error
+	// UpdateStep persists lifecycle transitions for a single step. When drafts
+	// are provided, the events and an upserted job snapshot commit atomically
+	// with the step row update.
+	UpdateStep(ctx context.Context, step extractiondomain.Step, drafts ...agentdomain.JobEventDraft) error
 	// CreateArtifact persists an audit snapshot for a task or step.
 	CreateArtifact(ctx context.Context, artifact ExtractionArtifact) error
 	// ListArtifacts returns artifacts for a task ordered by creation time.

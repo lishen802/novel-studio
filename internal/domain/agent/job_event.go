@@ -162,6 +162,56 @@ func NewJobSnapshot(
 	}, nil
 }
 
+// JobEventDraft is a JobEvent whose SequenceNumber has not yet been assigned.
+// Callers that emit events alongside a run/task transition construct drafts
+// from domain context; the persistence layer assigns the per-job monotonic
+// sequence inside the same transaction that mutates the run/task row, then
+// materializes them into JobEvent rows. Splitting the draft from the final
+// event keeps sequence assignment centralized in the store so concurrent
+// transitions cannot race on the next sequence value.
+type JobEventDraft struct {
+	JobID     string
+	JobKind   JobKind
+	ProjectID string
+	EventType JobEventType
+	StepID    string
+	Payload   string
+	CreatedAt time.Time
+}
+
+// NewJobEventDraft constructs a validated draft. jobID/kind/projectID/eventType
+// are required; stepID and payload are optional and trimmed. The sequence
+// number is intentionally absent and assigned by the store on commit.
+func NewJobEventDraft(
+	jobID string,
+	kind JobKind,
+	projectID string,
+	eventType JobEventType,
+	stepID, payload string,
+	now time.Time,
+) (JobEventDraft, error) {
+	jobID = strings.TrimSpace(jobID)
+	projectID = strings.TrimSpace(projectID)
+	if jobID == "" || projectID == "" {
+		return JobEventDraft{}, ErrBlankValue
+	}
+	if !validJobKind(kind) {
+		return JobEventDraft{}, ErrInvalidJobEvent
+	}
+	if !validJobEventType(eventType) {
+		return JobEventDraft{}, ErrInvalidJobEvent
+	}
+	return JobEventDraft{
+		JobID:     jobID,
+		JobKind:   kind,
+		ProjectID: projectID,
+		EventType: eventType,
+		StepID:    strings.TrimSpace(stepID),
+		Payload:   strings.TrimSpace(payload),
+		CreatedAt: now.UTC(),
+	}, nil
+}
+
 // JobSummary is the lightweight recoverable-jobs listing row. It folds agent
 // runs and extraction tasks into a single feed so the UI can present every
 // non-terminal or recoverable job on project open.

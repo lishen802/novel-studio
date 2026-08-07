@@ -477,7 +477,13 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		return AgentRunView{}, err
 	}
 	run, _ = run.Transition(agentdomain.RunRunning, "", s.clock.Now())
-	if err := store.UpdateAgentRun(ctx, run); err != nil {
+	startedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventJobStarted, "",
+		eventJSON(map[string]any{"chapter_id": run.ChapterID}), s.clock.Now())
+	if draftErr != nil {
+		s.mu.Unlock()
+		return AgentRunView{}, draftErr
+	}
+	if err := store.UpdateAgentRun(ctx, run, startedDraft); err != nil {
 		s.mu.Unlock()
 		if ctx.Err() != nil {
 			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
@@ -524,7 +530,15 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		}
 		run.ErrorCode = agentRunErrorCode(cause)
 		run, _ = run.Transition(agentdomain.RunFailed, cause.Error(), s.clock.Now())
-		if updateErr := store.UpdateAgentRun(context.WithoutCancel(ctx), run); updateErr != nil {
+		failedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventJobFailed, "",
+			eventJSON(map[string]any{
+				"error_code":    run.ErrorCode,
+				"error_message": run.ErrorMessage,
+			}), s.clock.Now())
+		if draftErr != nil {
+			return AgentRunView{}, draftErr
+		}
+		if updateErr := store.UpdateAgentRun(context.WithoutCancel(ctx), run, failedDraft); updateErr != nil {
 			return AgentRunView{}, updateErr
 		}
 		return agentRunView(run), cause
@@ -591,7 +605,12 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		if stale() {
 			return failStale()
 		}
-		if err := store.UpdateAgentRunStep(ctx, step); err != nil {
+		stepStartedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventStepStarted, step.ID,
+			eventJSON(map[string]any{"role": string(step.Role)}), now)
+		if draftErr != nil {
+			return failed(draftErr)
+		}
+		if err := store.UpdateAgentRunStep(ctx, step, stepStartedDraft); err != nil {
 			return failed(err)
 		}
 		request := agentRequest(step.Role, profile, run.Prompt, contextJSON, plan, draft)
@@ -610,9 +629,18 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			step.CompletedAt = &completedAt
 			step.UpdatedAt = completedAt
 			if !stale() {
+				stepFailedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventStepFailed, step.ID,
+					eventJSON(map[string]any{
+						"error_code":    step.ErrorCode,
+						"error_message": step.ErrorMessage,
+					}), completedAt)
+				if draftErr != nil {
+					return AgentRunView{}, draftErr
+				}
 				if updateErr := store.UpdateAgentRunStep(
 					context.WithoutCancel(ctx),
 					step,
+					stepFailedDraft,
 				); updateErr != nil {
 					return AgentRunView{}, updateErr
 				}
@@ -633,9 +661,18 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			step.CompletedAt = &completedAt
 			step.UpdatedAt = completedAt
 			if !stale() {
+				stepFailedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventStepFailed, step.ID,
+					eventJSON(map[string]any{
+						"error_code":    step.ErrorCode,
+						"error_message": step.ErrorMessage,
+					}), completedAt)
+				if draftErr != nil {
+					return AgentRunView{}, draftErr
+				}
 				if updateErr := store.UpdateAgentRunStep(
 					context.WithoutCancel(ctx),
 					step,
+					stepFailedDraft,
 				); updateErr != nil {
 					return AgentRunView{}, updateErr
 				}
@@ -652,7 +689,16 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 			return failStale()
 		}
 		persistCtx := context.WithoutCancel(ctx)
-		if err := store.UpdateAgentRunStep(persistCtx, step); err != nil {
+		stepCompletedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventStepCompleted, step.ID,
+			eventJSON(map[string]any{
+				"role":          string(step.Role),
+				"input_tokens":  step.InputTokens,
+				"output_tokens": step.OutputTokens,
+			}), completedAt)
+		if draftErr != nil {
+			return AgentRunView{}, draftErr
+		}
+		if err := store.UpdateAgentRunStep(persistCtx, step, stepCompletedDraft); err != nil {
 			return AgentRunView{}, err
 		}
 		if err := store.UpdateAgentRun(persistCtx, run); err != nil {
@@ -711,7 +757,12 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	if err != nil {
 		return failed(err)
 	}
-	if err := store.UpdateAgentRun(context.WithoutCancel(ctx), run); err != nil {
+	completedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventJobCompleted, "",
+		eventJSON(map[string]any{"change_set_id": run.ChangeSetID}), s.clock.Now())
+	if draftErr != nil {
+		return AgentRunView{}, draftErr
+	}
+	if err := store.UpdateAgentRun(context.WithoutCancel(ctx), run, completedDraft); err != nil {
 		return AgentRunView{}, err
 	}
 	return agentRunView(run), nil
@@ -735,7 +786,12 @@ func (s *Service) persistCancelledRun(
 		step.ErrorMessage = "作者已取消智能创作任务。"
 		step.CompletedAt = &now
 		step.UpdatedAt = now
-		if err := store.UpdateAgentRunStep(ctx, step); err != nil {
+		stepFailedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventStepFailed, step.ID,
+			eventJSON(map[string]any{"reason": "cancelled"}), now)
+		if draftErr != nil {
+			return draftErr
+		}
+		if err := store.UpdateAgentRunStep(ctx, step, stepFailedDraft); err != nil {
 			return err
 		}
 		run.Steps[index] = step
@@ -745,7 +801,12 @@ func (s *Service) persistCancelledRun(
 	if err != nil {
 		return err
 	}
-	return store.UpdateAgentRun(ctx, cancelled)
+	cancelledDraft, draftErr := newAgentJobDraft(cancelled, agentdomain.EventJobCancelled, "",
+		eventJSON(map[string]any{"reason": "cancelled"}), now)
+	if draftErr != nil {
+		return draftErr
+	}
+	return store.UpdateAgentRun(ctx, cancelled, cancelledDraft)
 }
 
 func (s *Service) persistCancelledRunByID(

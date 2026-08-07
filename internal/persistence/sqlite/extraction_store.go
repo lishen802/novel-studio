@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	extractiondomain "github.com/lishen802/novel-studio/internal/domain/extraction"
 )
 
@@ -75,8 +76,43 @@ func insertExtractionStep(ctx context.Context, tx *sql.Tx, step extractiondomain
 	return nil
 }
 
-func (s *Store) UpdateTask(ctx context.Context, task extractiondomain.Task) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *Store) UpdateTask(ctx context.Context, task extractiondomain.Task, drafts ...agentdomain.JobEventDraft) error {
+	if len(drafts) == 0 {
+		result, err := execUpdateTask(ctx, s.db, task)
+		if err != nil {
+			return databaseOperationError("update extraction task", err)
+		}
+		return requireAffected(result, "extraction task", task.ID)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin update extraction task", err)
+	}
+	defer tx.Rollback()
+	result, err := execUpdateTask(ctx, tx, task)
+	if err != nil {
+		return databaseOperationError("update extraction task", err)
+	}
+	if err := requireAffected(result, "extraction task", task.ID); err != nil {
+		return err
+	}
+	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
+	if err != nil {
+		return err
+	}
+	if err := upsertExtractionJobSnapshot(ctx, tx, task.ID, maxSequence, formatTime(task.UpdatedAt)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit update extraction task", err)
+	}
+	return nil
+}
+
+// execUpdateTask runs the task-row UPDATE against exec (a *sql.DB or *sql.Tx)
+// so UpdateTask can reuse it for both code paths.
+func execUpdateTask(ctx context.Context, exec txExecutor, task extractiondomain.Task) (sql.Result, error) {
+	return exec.ExecContext(ctx, `
 		UPDATE extraction_tasks SET
 			status = ?, error_code = ?, error_message = ?,
 			change_set_id = NULLIF(?, ''), retry_of = NULLIF(?, ''),
@@ -92,14 +128,48 @@ func (s *Store) UpdateTask(ctx context.Context, task extractiondomain.Task) erro
 		task.InputTokens, task.OutputTokens,
 		task.ID,
 	)
-	if err != nil {
-		return databaseOperationError("update extraction task", err)
-	}
-	return requireAffected(result, "extraction task", task.ID)
 }
 
-func (s *Store) UpdateStep(ctx context.Context, step extractiondomain.Step) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *Store) UpdateStep(ctx context.Context, step extractiondomain.Step, drafts ...agentdomain.JobEventDraft) error {
+	if len(drafts) == 0 {
+		result, err := execUpdateStep(ctx, s.db, step)
+		if err != nil {
+			return databaseOperationError("update extraction step", err)
+		}
+		return requireAffected(result, "extraction step", step.ID)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin update extraction step", err)
+	}
+	defer tx.Rollback()
+	result, err := execUpdateStep(ctx, tx, step)
+	if err != nil {
+		return databaseOperationError("update extraction step", err)
+	}
+	if err := requireAffected(result, "extraction step", step.ID); err != nil {
+		return err
+	}
+	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
+	if err != nil {
+		return err
+	}
+	// See UpdateAgentRunStep: the snapshot projects from the task row and the
+	// subsequent UpdateTask refreshes status/tokens; this only advances
+	// max_sequence to keep cursor replay aligned with the new events.
+	if err := upsertExtractionJobSnapshot(ctx, tx, step.TaskID, maxSequence, formatTime(step.UpdatedAt)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit update extraction step", err)
+	}
+	return nil
+}
+
+// execUpdateStep runs the step-row UPDATE against exec (a *sql.DB or *sql.Tx)
+// so UpdateStep can reuse it for both code paths.
+func execUpdateStep(ctx context.Context, exec txExecutor, step extractiondomain.Step) (sql.Result, error) {
+	return exec.ExecContext(ctx, `
 		UPDATE extraction_steps SET
 			status = ?, output = ?, error_code = ?, error_message = ?,
 			started_at = ?, completed_at = ?, updated_at = ?,
@@ -110,10 +180,6 @@ func (s *Store) UpdateStep(ctx context.Context, step extractiondomain.Step) erro
 		nullableTime(step.StartedAt), nullableTime(step.CompletedAt), formatTime(step.UpdatedAt),
 		step.ProviderRequestID, step.InputTokens, step.OutputTokens, step.ID,
 	)
-	if err != nil {
-		return databaseOperationError("update extraction step", err)
-	}
-	return requireAffected(result, "extraction step", step.ID)
 }
 
 func (s *Store) Task(ctx context.Context, id string) (extractiondomain.Task, error) {

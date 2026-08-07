@@ -12,6 +12,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	extractiondomain "github.com/lishen802/novel-studio/internal/domain/extraction"
 	importingdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -235,7 +236,13 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		return ExtractionRunView{}, err
 	}
 	task, _ = task.Transition(extractiondomain.StatusRunning, "", s.clock.Now())
-	if err := store.UpdateTask(ctx, task); err != nil {
+	startedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventJobStarted, "",
+		eventJSON(map[string]any{"import_job_id": task.ImportJobID}), s.clock.Now())
+	if draftErr != nil {
+		s.mu.Unlock()
+		return ExtractionRunView{}, draftErr
+	}
+	if err := store.UpdateTask(ctx, task, startedDraft); err != nil {
 		s.mu.Unlock()
 		if ctx.Err() != nil {
 			return s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
@@ -282,7 +289,15 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		}
 		task.ErrorCode = "provider_error"
 		task, _ = task.Transition(extractiondomain.StatusFailed, cause.Error(), s.clock.Now())
-		_ = store.UpdateTask(context.WithoutCancel(ctx), task)
+		failedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventJobFailed, "",
+			eventJSON(map[string]any{
+				"error_code":    task.ErrorCode,
+				"error_message": task.ErrorMessage,
+			}), s.clock.Now())
+		if draftErr != nil {
+			return ExtractionRunView{}, draftErr
+		}
+		_ = store.UpdateTask(context.WithoutCancel(ctx), task, failedDraft)
 		failedJob, _ := currentJob.MarkExtractionFailed(s.clock.Now())
 		_ = importStore.UpdateImportJobExtraction(context.WithoutCancel(ctx), failedJob)
 		return extractionRunView(task, nil), cause
@@ -301,7 +316,15 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		if stale() {
 			return failStale()
 		}
-		if err := store.UpdateStep(ctx, runningStep); err != nil {
+		stepStartedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventStepStarted, runningStep.ID,
+			eventJSON(map[string]any{
+				"chapter_id":    runningStep.CreatedChapterID,
+				"chapter_title": runningStep.ChapterTitle,
+			}), s.clock.Now())
+		if draftErr != nil {
+			return failed(draftErr)
+		}
+		if err := store.UpdateStep(ctx, runningStep, stepStartedDraft); err != nil {
 			return failed(err)
 		}
 
@@ -337,7 +360,15 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 			failedStep.ErrorCode = "provider_error"
 			failedStep.ErrorMessage = err.Error()
 			if !stale() {
-				_ = store.UpdateStep(context.WithoutCancel(ctx), failedStep)
+				stepFailedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventStepFailed, failedStep.ID,
+					eventJSON(map[string]any{
+						"error_code":    failedStep.ErrorCode,
+						"error_message": failedStep.ErrorMessage,
+					}), s.clock.Now())
+				if draftErr != nil {
+					return ExtractionRunView{}, draftErr
+				}
+				_ = store.UpdateStep(context.WithoutCancel(ctx), failedStep, stepFailedDraft)
 			}
 			task.Steps[index] = failedStep
 			return failed(err)
@@ -358,7 +389,16 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 			return failStale()
 		}
 		persistCtx := context.WithoutCancel(ctx)
-		if err := store.UpdateStep(persistCtx, completedStep); err != nil {
+		stepCompletedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventStepCompleted, completedStep.ID,
+			eventJSON(map[string]any{
+				"chapter_id":    completedStep.CreatedChapterID,
+				"input_tokens":  completedStep.InputTokens,
+				"output_tokens": completedStep.OutputTokens,
+			}), s.clock.Now())
+		if draftErr != nil {
+			return ExtractionRunView{}, draftErr
+		}
+		if err := store.UpdateStep(persistCtx, completedStep, stepCompletedDraft); err != nil {
 			return ExtractionRunView{}, err
 		}
 		if err := store.UpdateTask(persistCtx, task); err != nil {
@@ -387,7 +427,15 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	}
 	if len(specs) == 0 {
 		task, _ = task.Transition(extractiondomain.StatusFailed, "抽取未产生任何候选", s.clock.Now())
-		_ = store.UpdateTask(context.WithoutCancel(ctx), task)
+		noCandidateDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventJobFailed, "",
+			eventJSON(map[string]any{
+				"error_code":    "no_candidates",
+				"error_message": "抽取未产生任何候选",
+			}), s.clock.Now())
+		if draftErr != nil {
+			return ExtractionRunView{}, draftErr
+		}
+		_ = store.UpdateTask(context.WithoutCancel(ctx), task, noCandidateDraft)
 		return extractionRunView(task, nil), fmt.Errorf("extraction produced no candidates")
 	}
 
@@ -407,7 +455,12 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	if err != nil {
 		return failed(err)
 	}
-	if err := store.UpdateTask(context.WithoutCancel(ctx), task); err != nil {
+	completedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventJobCompleted, "",
+		eventJSON(map[string]any{"change_set_id": task.ChangeSetID}), s.clock.Now())
+	if draftErr != nil {
+		return ExtractionRunView{}, draftErr
+	}
+	if err := store.UpdateTask(context.WithoutCancel(ctx), task, completedDraft); err != nil {
 		return ExtractionRunView{}, err
 	}
 	completedJob, err := currentJob.MarkExtractionCompleted(s.clock.Now())
@@ -567,14 +620,26 @@ func (s *Service) persistCancelledExtraction(
 		}
 		cancelled, _ := step.Transition(extractiondomain.StepCancelled, "作者已取消抽取任务。", now)
 		task.Steps[index] = cancelled
-		_ = store.UpdateStep(ctx, cancelled)
+		stepFailedDraft, draftErr := newExtractionJobDraft(task, agentdomain.EventStepFailed, cancelled.ID,
+			eventJSON(map[string]any{"reason": "cancelled"}), now)
+		if draftErr != nil {
+			return draftErr
+		}
+		if err := store.UpdateStep(ctx, cancelled, stepFailedDraft); err != nil {
+			return err
+		}
 	}
 	task.ErrorCode = "cancelled"
 	cancelled, err := task.Transition(extractiondomain.StatusCancelled, "作者已取消抽取任务。", now)
 	if err != nil {
 		return err
 	}
-	return store.UpdateTask(ctx, cancelled)
+	cancelledDraft, draftErr := newExtractionJobDraft(cancelled, agentdomain.EventJobCancelled, "",
+		eventJSON(map[string]any{"reason": "cancelled"}), now)
+	if draftErr != nil {
+		return draftErr
+	}
+	return store.UpdateTask(ctx, cancelled, cancelledDraft)
 }
 
 func (s *Service) persistCancelledExtractionByID(

@@ -222,8 +222,45 @@ func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 	return nil
 }
 
-func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun, drafts ...agentdomain.JobEventDraft) error {
+	if len(drafts) == 0 {
+		result, err := execUpdateAgentRun(ctx, s.db, run)
+		if err != nil {
+			return databaseOperationError("update agent run", err)
+		}
+		return requireAffected(result, "agent run", run.ID)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin update agent run", err)
+	}
+	defer tx.Rollback()
+	result, err := execUpdateAgentRun(ctx, tx, run)
+	if err != nil {
+		return databaseOperationError("update agent run", err)
+	}
+	if err := requireAffected(result, "agent run", run.ID); err != nil {
+		return err
+	}
+	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
+	if err != nil {
+		return err
+	}
+	if err := upsertAgentJobSnapshot(ctx, tx, run.ID, maxSequence, formatTime(run.UpdatedAt)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit update agent run", err)
+	}
+	return nil
+}
+
+// execUpdateAgentRun runs the run-row UPDATE against exec (a *sql.DB or *sql.Tx)
+// so UpdateAgentRun can reuse it both for the legacy single-statement path and
+// for the transactional path that also appends events and refreshes the
+// snapshot.
+func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.AgentRun) (sql.Result, error) {
+	return exec.ExecContext(ctx, `
 		UPDATE agent_runs SET
 			status = ?, error_code = ?, error_message = ?,
 			change_set_id = NULLIF(?, ''), retry_of = NULLIF(?, ''),
@@ -238,10 +275,6 @@ func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
 		run.ContextChars, run.ContextTruncated, run.ID,
 	)
-	if err != nil {
-		return databaseOperationError("update agent run", err)
-	}
-	return requireAffected(result, "agent run", run.ID)
 }
 
 func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, error) {
@@ -299,8 +332,47 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Age
 	return result, nil
 }
 
-func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRunStep) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRunStep, drafts ...agentdomain.JobEventDraft) error {
+	if len(drafts) == 0 {
+		result, err := execUpdateAgentRunStep(ctx, s.db, step)
+		if err != nil {
+			return databaseOperationError("update agent run step", err)
+		}
+		return requireAffected(result, "agent run step", step.ID)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin update agent run step", err)
+	}
+	defer tx.Rollback()
+	result, err := execUpdateAgentRunStep(ctx, tx, step)
+	if err != nil {
+		return databaseOperationError("update agent run step", err)
+	}
+	if err := requireAffected(result, "agent run step", step.ID); err != nil {
+		return err
+	}
+	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
+	if err != nil {
+		return err
+	}
+	// The snapshot projects from the run row, which the step update does not
+	// touch; the subsequent UpdateAgentRun (called by the workspace for terminal
+	// and token-refresh transitions) refreshes status/tokens. This advance of
+	// max_sequence keeps cursor replay aligned with the newly appended events.
+	if err := upsertAgentJobSnapshot(ctx, tx, step.RunID, maxSequence, formatTime(step.UpdatedAt)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit update agent run step", err)
+	}
+	return nil
+}
+
+// execUpdateAgentRunStep runs the step-row UPDATE against exec (a *sql.DB or
+// *sql.Tx) so UpdateAgentRunStep can reuse it for both code paths.
+func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdomain.AgentRunStep) (sql.Result, error) {
+	return exec.ExecContext(ctx, `
 		UPDATE agent_run_steps SET
 			status = ?, output = ?, error_code = ?, error_message = ?,
 			started_at = ?, completed_at = ?, updated_at = ?,
@@ -311,10 +383,6 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 		nullableTime(step.StartedAt), nullableTime(step.CompletedAt), formatTime(step.UpdatedAt),
 		step.ProviderRequestID, step.InputTokens, step.OutputTokens, step.ID,
 	)
-	if err != nil {
-		return databaseOperationError("update agent run step", err)
-	}
-	return requireAffected(result, "agent run step", step.ID)
 }
 
 func (s *Store) CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error {
