@@ -29,6 +29,7 @@ type ExtractionArtifact struct {
 }
 
 type ExtractionStore interface {
+	JobEventStore
 	// CreateTask persists a queued task and every step in one transaction.
 	CreateTask(ctx context.Context, task extractiondomain.Task) error
 	// UpdateTask persists lifecycle transitions for the task. Implementations

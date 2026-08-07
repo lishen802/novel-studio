@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -44,7 +45,39 @@ type ModelProviderFactory interface {
 	New(connection agentdomain.ProviderConnection) (ModelProvider, error)
 }
 
+// JobEvent persistence errors shared by the agent and extraction stores.
+// ErrJobEventConflict signals a UNIQUE(job_id, sequence_number) violation;
+// ErrJobSnapshotMissing signals that a job has not yet emitted any event.
+var (
+	ErrJobEventConflict   = errors.New("job event sequence conflict")
+	ErrJobSnapshotMissing = errors.New("job snapshot does not exist")
+)
+
+// JobEventStore persists the append-only job event feed and the authoritative
+// snapshot projection shared by agent runs and extraction tasks. Both
+// AgentStore and ExtractionStore embed it so the same feed serves every job
+// kind.
+type JobEventStore interface {
+	// AppendJobEvent inserts a single append-only event row. Callers that need
+	// atomic sequence assignment should do so within the same transaction as
+	// the run/task mutation (see the store's transactional update path).
+	AppendJobEvent(ctx context.Context, event agentdomain.JobEvent) error
+	// UpsertJobSnapshot inserts or replaces the authoritative projection for a
+	// job, intended to run in the same transaction as the triggering event.
+	UpsertJobSnapshot(ctx context.Context, snapshot agentdomain.JobSnapshot) error
+	// JobEvents returns events with sequence_number > afterSequence in
+	// ascending order for cursor-based replay.
+	JobEvents(ctx context.Context, jobID string, afterSequence uint64, limit int) ([]agentdomain.JobEvent, error)
+	// JobSnapshot loads the authoritative projection for a job, returning
+	// ErrJobSnapshotMissing when no events have been appended yet.
+	JobSnapshot(ctx context.Context, jobID string) (agentdomain.JobSnapshot, error)
+	// ListRecoverableJobs returns non-terminal (queued, running, recoverable)
+	// agent runs and extraction tasks for a project, newest first.
+	ListRecoverableJobs(ctx context.Context, projectID string) ([]agentdomain.JobSummary, error)
+}
+
 type AgentStore interface {
+	JobEventStore
 	SaveAgentRuntimeSettings(ctx context.Context, settings agentdomain.RuntimeSettings) error
 	AgentRuntimeSettings(ctx context.Context, projectID string) (agentdomain.RuntimeSettings, error)
 	UpsertProviderConnection(ctx context.Context, connection agentdomain.ProviderConnection) error
