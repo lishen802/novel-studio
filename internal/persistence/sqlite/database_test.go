@@ -101,8 +101,8 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 14 {
-		t.Fatalf("schema version = %d, want 14", version)
+	if version != currentSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
 	}
 }
 
