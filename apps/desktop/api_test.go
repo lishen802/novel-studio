@@ -802,6 +802,12 @@ type draftCall struct {
 	revision int64
 }
 
+type jobEventsCall struct {
+	jobID          string
+	afterSequence  uint64
+	limit          int
+}
+
 type fakeWorkspace struct {
 	createInput              CreateProjectInput
 	createResult             workspace.ProjectView
@@ -929,6 +935,14 @@ type fakeWorkspace struct {
 	extractionTasksResult    []workspace.ExtractionTaskView
 	extractionTaskID         string
 	extractionTaskResult     workspace.ExtractionRunView
+	jobSnapshotResult       workspace.JobSnapshotView
+	jobSnapshotID           string
+	jobSnapshotErr          error
+	jobEventsResult         workspace.JobEventsPageView
+	jobEventsInput          jobEventsCall
+	jobEventsErr            error
+	recoverableJobsResult   []workspace.JobSummaryView
+	recoverableJobsErr      error
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -1427,3 +1441,111 @@ func (f *fakeWorkspace) ExtractionTask(_ context.Context, id string) (workspace.
 	f.extractionTaskID = id
 	return f.extractionTaskResult, nil
 }
+
+func (f *fakeWorkspace) GetJobSnapshot(_ context.Context, jobID string) (workspace.JobSnapshotView, error) {
+	f.jobSnapshotID = jobID
+	return f.jobSnapshotResult, f.jobSnapshotErr
+}
+
+func (f *fakeWorkspace) GetJobEvents(_ context.Context, jobID string, afterSequence uint64, limit int) (workspace.JobEventsPageView, error) {
+	f.jobEventsInput = jobEventsCall{jobID: jobID, afterSequence: afterSequence, limit: limit}
+	return f.jobEventsResult, f.jobEventsErr
+}
+
+func (f *fakeWorkspace) ListRecoverableJobs(context.Context) ([]workspace.JobSummaryView, error) {
+	return f.recoverableJobsResult, f.recoverableJobsErr
+}
+
+// TestDesktopAPIForwardsJobEventQueries asserts that GetJobSnapshot,
+// GetJobEvents, and ListRecoverableJobs forward their arguments to the
+// workspace service and return its results without transformation.
+func TestDesktopAPIForwardsJobEventQueries(t *testing.T) {
+	snapshot := workspace.JobSnapshotView{
+		JobID:       "run-1",
+		JobKind:     "agent",
+		Status:      "completed",
+		MaxSequence: 8,
+	}
+	page := workspace.JobEventsPageView{
+		Events:     []workspace.JobEventView{{JobID: "run-1", SequenceNumber: 1}},
+		NextCursor: 1,
+		HasMore:    true,
+	}
+	jobs := []workspace.JobSummaryView{
+		{JobID: "run-1", JobKind: "agent", Status: "queued"},
+		{JobID: "task-1", JobKind: "extraction", Status: "running"},
+	}
+	workspaces := &fakeWorkspace{
+		jobSnapshotResult:     snapshot,
+		jobEventsResult:       page,
+		recoverableJobsResult: jobs,
+	}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	gotSnapshot, err := api.GetJobSnapshot(" run-1 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotSnapshot != snapshot {
+		t.Fatalf("GetJobSnapshot = %#v, want %#v", gotSnapshot, snapshot)
+	}
+	if workspaces.jobSnapshotID != " run-1 " {
+		t.Fatalf("forwarded jobID = %q, want %q", workspaces.jobSnapshotID, " run-1 ")
+	}
+
+	gotPage, err := api.GetJobEvents("run-1", 3, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotPage, page) {
+		t.Fatalf("GetJobEvents = %#v, want %#v", gotPage, page)
+	}
+	if workspaces.jobEventsInput != (jobEventsCall{jobID: "run-1", afterSequence: 3, limit: 10}) {
+		t.Fatalf("forwarded job events call = %#v", workspaces.jobEventsInput)
+	}
+
+	gotJobs, err := api.ListRecoverableJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotJobs, jobs) {
+		t.Fatalf("ListRecoverableJobs = %#v, want %#v", gotJobs, jobs)
+	}
+}
+
+// TestWailsJobEventNotifierEmitsPayload asserts that wailsJobEventNotifier
+// calls the injected emit function with the "job:updated" event name and a
+// payload carrying the job identity and latest sequence.
+func TestWailsJobEventNotifierEmitsPayload(t *testing.T) {
+	var capturedName string
+	var capturedData []any
+	notifier := newWailsJobEventNotifier()
+	notifier.emit = func(_ context.Context, name string, data ...any) {
+		capturedName = name
+		capturedData = data
+	}
+
+	notifier.NotifyJobUpdated("run-1", agentdomain.JobKindAgent, 7)
+
+	if capturedName != jobUpdatedEvent {
+		t.Fatalf("event name = %q, want %q", capturedName, jobUpdatedEvent)
+	}
+	if len(capturedData) != 1 {
+		t.Fatalf("data len = %d, want 1", len(capturedData))
+	}
+	payload, ok := capturedData[0].(jobUpdatedPayload)
+	if !ok {
+		t.Fatalf("data[0] type = %T, want jobUpdatedPayload", capturedData[0])
+	}
+	if payload.JobID != "run-1" {
+		t.Fatalf("payload.JobID = %q, want run-1", payload.JobID)
+	}
+	if payload.JobKind != "agent" {
+		t.Fatalf("payload.JobKind = %q, want agent", payload.JobKind)
+	}
+	if payload.LatestSequence != 7 {
+		t.Fatalf("payload.LatestSequence = %d, want 7", payload.LatestSequence)
+	}
+}
+

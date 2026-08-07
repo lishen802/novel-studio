@@ -25,6 +25,7 @@ type App struct {
 	emitBeforeClose func(context.Context)
 	quit            func(context.Context)
 	closeAllowed    atomic.Bool
+	notifier        *wailsJobEventNotifier
 }
 
 func newApp() *App {
@@ -42,12 +43,15 @@ func newApp() *App {
 		providers.NewFactory(http.DefaultClient),
 	)
 	workspaceService.ConfigureImportSourceArchive(projectfs.ImportSourceArchive{})
+	notifier := newWailsJobEventNotifier()
+	workspaceService.SetJobEventNotifier(notifier)
 	app := &App{
 		api: newDesktopAPI(workspaceService, wailsDirectoryPicker{}),
 		emitBeforeClose: func(ctx context.Context) {
 			runtime.EventsEmit(ctx, beforeCloseEvent)
 		},
-		quit: runtime.Quit,
+		quit:     runtime.Quit,
+		notifier: notifier,
 	}
 	app.api.completeClose = app.completeClose
 	return app
@@ -55,6 +59,9 @@ func newApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.api.startup(ctx)
+	if a.notifier != nil {
+		a.notifier.startup(ctx)
+	}
 }
 
 func (a *App) shutdown(context.Context) {

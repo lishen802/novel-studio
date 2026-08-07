@@ -124,6 +124,9 @@ type WorkspaceUseCases interface {
 	RetryExtractionRun(context.Context, string) (workspace.ExtractionRunView, error)
 	ExtractionTasks(context.Context) ([]workspace.ExtractionTaskView, error)
 	ExtractionTask(context.Context, string) (workspace.ExtractionRunView, error)
+	GetJobSnapshot(context.Context, string) (workspace.JobSnapshotView, error)
+	GetJobEvents(context.Context, string, uint64, int) (workspace.JobEventsPageView, error)
+	ListRecoverableJobs(context.Context) ([]workspace.JobSummaryView, error)
 	Close() error
 }
 
@@ -274,6 +277,18 @@ func (a *DesktopAPI) ExtractionTasks() ([]workspace.ExtractionTaskView, error) {
 
 func (a *DesktopAPI) ExtractionTask(id string) (workspace.ExtractionRunView, error) {
 	return safeResult(a.workspace.ExtractionTask(a.ctx, id))
+}
+
+func (a *DesktopAPI) GetJobSnapshot(jobID string) (workspace.JobSnapshotView, error) {
+	return safeResult(a.workspace.GetJobSnapshot(a.ctx, jobID))
+}
+
+func (a *DesktopAPI) GetJobEvents(jobID string, afterSequence uint64, limit int) (workspace.JobEventsPageView, error) {
+	return safeResult(a.workspace.GetJobEvents(a.ctx, jobID, afterSequence, limit))
+}
+
+func (a *DesktopAPI) ListRecoverableJobs() ([]workspace.JobSummaryView, error) {
+	return safeResult(a.workspace.ListRecoverableJobs(a.ctx))
 }
 
 func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectView, error) {
