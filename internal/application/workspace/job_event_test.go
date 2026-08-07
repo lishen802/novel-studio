@@ -13,6 +13,28 @@ import (
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 )
 
+// completedAgentRunWithEvents runs an agent run to completion and returns the
+// run ID. It is a shared helper for cursor-query tests that need a fully
+// populated event feed.
+func completedAgentRunWithEvents(
+	t *testing.T,
+	service *Service,
+	chapter ChapterView,
+	prompt string,
+) string {
+	t.Helper()
+	ctx := context.Background()
+	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecuteAgentRun(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitForAgentRunStatus(t, service, run.ID, "completed", 5*time.Second)
+	return run.ID
+}
+
 // TestExecuteAgentRunAppendsContiguousJobEvents asserts that ExecuteAgentRun
 // emits an append-only JobEvent feed with a per-job monotonic sequence covering
 // the full lifecycle: job_started, then step_started/step_completed for each of
@@ -323,5 +345,263 @@ func TestExecuteExtractionRunFailureAppendsJobFailedEvent(t *testing.T) {
 	}
 	if snapshot.MaxSequence != uint64(len(events)) {
 		t.Fatalf("snapshot max_sequence = %d, want %d", snapshot.MaxSequence, len(events))
+	}
+}
+
+// TestGetJobSnapshotReturnsAuthoritativeProjection asserts that GetJobSnapshot
+// returns the status, max_sequence, earliest_replayable_sequence, and cumulative
+// token usage from the authoritative projection, not from a full event replay.
+func TestGetJobSnapshotReturnsAuthoritativeProjection(t *testing.T) {
+	ctx := context.Background()
+	providerFactory := &fakeModelProviderFactory{
+		outputs: map[string]string{
+			"planner":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
+			"writer":   "夜色压在山门之上，墨老沿着石阶无声而行。",
+			"reviewer": `{"approved":true,"summary":"未发现连续性冲突","issues":[]}`,
+		},
+	}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+
+	runID := completedAgentRunWithEvents(t, service, chapter, "续写这一章。")
+
+	view, err := service.GetJobSnapshot(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetJobSnapshot: %v", err)
+	}
+	if view.JobID != runID {
+		t.Fatalf("snapshot jobID = %q, want %q", view.JobID, runID)
+	}
+	if view.JobKind != "agent" {
+		t.Fatalf("snapshot job_kind = %q, want agent", view.JobKind)
+	}
+	if view.Status != "completed" {
+		t.Fatalf("snapshot status = %q, want completed", view.Status)
+	}
+	// 8 events: job_started + 3×(step_started+step_completed) + job_completed.
+	if view.MaxSequence != 8 {
+		t.Fatalf("snapshot max_sequence = %d, want 8", view.MaxSequence)
+	}
+	if view.EarliestReplayableSequence != 1 {
+		t.Fatalf("snapshot earliest_replayable_sequence = %d, want 1", view.EarliestReplayableSequence)
+	}
+	if view.InputTokens != 30 || view.OutputTokens != 15 {
+		t.Fatalf("snapshot tokens = in %d out %d, want 30/15", view.InputTokens, view.OutputTokens)
+	}
+}
+
+// TestGetJobEventsPaginatesByCursor asserts that GetJobEvents returns events in
+// ascending sequence order with correct paging metadata: the first limited page
+// has hasMore=true and nextCursor at the last event's sequence, and the
+// subsequent page returns the remaining events with hasMore=false.
+func TestGetJobEventsPaginatesByCursor(t *testing.T) {
+	ctx := context.Background()
+	providerFactory := &fakeModelProviderFactory{
+		outputs: map[string]string{
+			"planner":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
+			"writer":   "夜色压在山门之上，墨老沿着石阶无声而行。",
+			"reviewer": `{"approved":true,"summary":"未发现连续性冲突","issues":[]}`,
+		},
+	}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+
+	runID := completedAgentRunWithEvents(t, service, chapter, "续写这一章。")
+
+	// Page 1: first 2 events from the beginning.
+	page, err := service.GetJobEvents(ctx, runID, 0, 2)
+	if err != nil {
+		t.Fatalf("GetJobEvents page 1: %v", err)
+	}
+	if len(page.Events) != 2 {
+		t.Fatalf("page 1 len(events) = %d, want 2", len(page.Events))
+	}
+	if page.Events[0].SequenceNumber != 1 || page.Events[1].SequenceNumber != 2 {
+		t.Fatalf("page 1 sequences = %d, %d, want 1, 2",
+			page.Events[0].SequenceNumber, page.Events[1].SequenceNumber)
+	}
+	if !page.HasMore {
+		t.Fatal("page 1 hasMore = false, want true")
+	}
+	if page.NextCursor != 2 {
+		t.Fatalf("page 1 nextCursor = %d, want 2", page.NextCursor)
+	}
+	if page.SnapshotRequired {
+		t.Fatal("page 1 snapshotRequired = true, want false")
+	}
+
+	// Page 2: remaining 6 events after sequence 2.
+	page, err = service.GetJobEvents(ctx, runID, 2, 100)
+	if err != nil {
+		t.Fatalf("GetJobEvents page 2: %v", err)
+	}
+	if len(page.Events) != 6 {
+		t.Fatalf("page 2 len(events) = %d, want 6", len(page.Events))
+	}
+	if page.Events[0].SequenceNumber != 3 {
+		t.Fatalf("page 2 first sequence = %d, want 3", page.Events[0].SequenceNumber)
+	}
+	if page.Events[5].SequenceNumber != 8 {
+		t.Fatalf("page 2 last sequence = %d, want 8", page.Events[5].SequenceNumber)
+	}
+	if page.HasMore {
+		t.Fatal("page 2 hasMore = true, want false")
+	}
+	if page.SnapshotRequired {
+		t.Fatal("page 2 snapshotRequired = true, want false")
+	}
+	if page.NextCursor != 8 {
+		t.Fatalf("page 2 nextCursor = %d, want 8", page.NextCursor)
+	}
+}
+
+// TestGetJobEventsSignalsSnapshotRequired asserts that when the cursor is
+// earlier than the snapshot's earliest_replayable_sequence (simulating event
+// cleanup), GetJobEvents returns an empty events list with snapshotRequired=true
+// so the frontend rebuilds from GetJobSnapshot.
+func TestGetJobEventsSignalsSnapshotRequired(t *testing.T) {
+	ctx := context.Background()
+	providerFactory := &fakeModelProviderFactory{
+		outputs: map[string]string{
+			"planner":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
+			"writer":   "夜色压在山门之上。",
+			"reviewer": `{"approved":true,"summary":"ok","issues":[]}`,
+		},
+	}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+
+	runID := completedAgentRunWithEvents(t, service, chapter, "续写这一章。")
+
+	// Advance earliest_replayable_sequence to 5, simulating event cleanup.
+	store, ok := service.active.store.(ports.JobEventStore)
+	if !ok {
+		t.Fatalf("active store %T does not implement ports.JobEventStore", service.active.store)
+	}
+	snapshot, err := store.JobSnapshot(ctx, runID)
+	if err != nil {
+		t.Fatalf("JobSnapshot: %v", err)
+	}
+	snapshot.EarliestReplayableSequence = 5
+	if err := store.UpsertJobSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("UpsertJobSnapshot: %v", err)
+	}
+
+	// Cursor 3 < earliest 5 → snapshotRequired=true, empty events.
+	page, err := service.GetJobEvents(ctx, runID, 3, 10)
+	if err != nil {
+		t.Fatalf("GetJobEvents: %v", err)
+	}
+	if !page.SnapshotRequired {
+		t.Fatal("snapshotRequired = false, want true")
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("len(events) = %d, want 0", len(page.Events))
+	}
+	if page.HasMore {
+		t.Fatal("hasMore = true, want false")
+	}
+
+	// Cursor at the lower bound returns events normally.
+	page, err = service.GetJobEvents(ctx, runID, 5, 10)
+	if err != nil {
+		t.Fatalf("GetJobEvents at lower bound: %v", err)
+	}
+	if page.SnapshotRequired {
+		t.Fatal("snapshotRequired = true at lower bound, want false")
+	}
+	if len(page.Events) == 0 {
+		t.Fatal("expected events at lower bound")
+	}
+}
+
+// TestListRecoverableJobsReturnsNonTerminalJobs asserts that ListRecoverableJobs
+// returns queued agent runs and extraction tasks but excludes terminal
+// (completed/failed/cancelled) jobs.
+func TestListRecoverableJobsReturnsNonTerminalJobs(t *testing.T) {
+	ctx := context.Background()
+	providerFactory := &fakeModelProviderFactory{
+		outputs: map[string]string{
+			"planner":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
+			"writer":   "夜色压在山门之上。",
+			"reviewer": `{"approved":true,"summary":"ok","issues":[]}`,
+		},
+	}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+
+	// One queued agent run (not yet executed → recoverable).
+	queuedRun, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章。")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One completed agent run (terminal → excluded).
+	completedRunID := completedAgentRunWithEvents(t, service, chapter, "续写另一章。")
+
+	// One queued extraction task.
+	connection, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
+		Name: "Extraction", Kind: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	importStore, ok := service.active.store.(ports.ImportStore)
+	if !ok {
+		t.Fatal("active store does not implement ImportStore")
+	}
+	project, err := service.active.store.Project(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	importJob, importChapters := seedAppliedImportJob(
+		t, importStore, project.ID, "import-job-rcv", "import-chapter-rcv", "第一章", "正文。",
+	)
+	if _, err := service.ApplyImportJob(ctx, importJob.ID, []string{importChapters[0].ID}); err != nil {
+		t.Fatalf("apply import job: %v", err)
+	}
+	extractionRun, err := service.StartExtractionRun(ctx, ExtractionRunInput{
+		ImportJobID:  importJob.ID,
+		ConnectionID: connection.ID,
+		Model:        "extraction-model",
+		Instruction:  "抽取故事档案。",
+	})
+	if err != nil {
+		t.Fatalf("start extraction run: %v", err)
+	}
+
+	jobs, err := service.ListRecoverableJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListRecoverableJobs: %v", err)
+	}
+
+	var queuedAgent, queuedExtraction int
+	for _, job := range jobs {
+		switch job.JobID {
+		case queuedRun.ID:
+			if job.JobKind != "agent" {
+				t.Fatalf("queued run job_kind = %q, want agent", job.JobKind)
+			}
+			if job.Status != "queued" {
+				t.Fatalf("queued run status = %q, want queued", job.Status)
+			}
+			queuedAgent++
+		case extractionRun.Task.ID:
+			if job.JobKind != "extraction" {
+				t.Fatalf("extraction task job_kind = %q, want extraction", job.JobKind)
+			}
+			if job.Status != "queued" {
+				t.Fatalf("extraction task status = %q, want queued", job.Status)
+			}
+			queuedExtraction++
+		case completedRunID:
+			t.Fatal("completed run should not appear in recoverable jobs")
+		}
+	}
+	if queuedAgent != 1 {
+		t.Fatalf("queued agent count = %d, want 1", queuedAgent)
+	}
+	if queuedExtraction != 1 {
+		t.Fatalf("queued extraction count = %d, want 1", queuedExtraction)
 	}
 }
