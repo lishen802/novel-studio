@@ -322,4 +322,124 @@ describe("useJobEventReplay", () => {
 
     expect(result.current.replayStates["run-1"]).toBeUndefined();
   });
+
+  it("replays a recovered job after Bridge remount via pullJobEvents", async () => {
+    // Simulates an app restart / Bridge remount: the backend reopened the
+    // project, RecoverInterruptedAgentRuns appended job_recovered, and the
+    // workbench calls pullJobEvents for each recoverable job it discovered via
+    // listRecoverableJobs. The hook must pull the events and settle on a
+    // non-terminal recoverable state without firing onJobTerminal.
+    const client = new FakeStudioClient();
+    client.openProjectResult = {
+      id: "project-1",
+      title: "Test",
+      genre: "",
+      summary: "",
+      path: "/tmp/test.zjproject",
+    };
+    client.appendJobEvent("run-1", "agent", 1, "job_started", "");
+    client.appendJobEvent("run-1", "agent", 2, "job_recovered", "");
+    client.upsertJobSnapshot({
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "recoverable",
+      maxSequence: 2,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-07T00:00:00Z",
+    });
+
+    const onJobTerminal = vi.fn();
+    const { result } = renderHook(() =>
+      useJobEventReplay({ client, onJobTerminal }),
+    );
+
+    // The workbench discovered run-1 via listRecoverableJobs and kicks off a
+    // pull directly (no job:updated notification yet).
+    await act(async () => {
+      await result.current.pullJobEvents("run-1", "agent");
+    });
+
+    expect(result.current.replayStates["run-1"]).toMatchObject({
+      cursor: 2,
+      status: "recoverable",
+      terminal: false,
+    });
+    // Recoverable is non-terminal; onJobTerminal must NOT fire so the workbench
+    // doesn't treat recovery as completion.
+    expect(onJobTerminal).not.toHaveBeenCalled();
+  });
+
+  it("tolerates a lost job:updated notification by pulling on the next wake-up", async () => {
+    // The notifier is best-effort and may drop a wake-up. The next time any
+    // notification arrives (even a stale one), the hook re-pulls from its
+    // cursor and catches up to the events that were missed.
+    const client = new FakeStudioClient();
+    client.openProjectResult = {
+      id: "project-1",
+      title: "Test",
+      genre: "",
+      summary: "",
+      path: "/tmp/test.zjproject",
+    };
+    client.appendJobEvent("run-1", "agent", 1, "job_started", "");
+    client.upsertJobSnapshot({
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "running",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-07T00:00:00Z",
+    });
+
+    const { result } = renderHook(() => useJobEventReplay({ client }));
+
+    // First notification delivers event 1.
+    act(() => {
+      client.emitJobUpdated("run-1", "agent", 1);
+    });
+    await waitFor(() => {
+      expect(result.current.replayStates["run-1"]?.cursor).toBe(1);
+    });
+
+    // Backend appends event 2 (step_completed) but the notification is lost.
+    client.appendJobEvent(
+      "run-1",
+      "agent",
+      2,
+      "step_completed",
+      JSON.stringify({ input_tokens: 10, output_tokens: 5 }),
+      "step-1",
+    );
+    client.upsertJobSnapshot({
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "running",
+      maxSequence: 2,
+      earliestReplayableSequence: 1,
+      inputTokens: 10,
+      outputTokens: 5,
+      updatedAt: "2026-08-07T00:00:00Z",
+    });
+
+    // A later (possibly coalesced) notification triggers a re-pull from
+    // cursor=1, which picks up the missed event 2.
+    act(() => {
+      client.emitJobUpdated("run-1", "agent", 2);
+    });
+    await waitFor(() => {
+      expect(result.current.replayStates["run-1"]?.cursor).toBe(2);
+    });
+
+    expect(result.current.replayStates["run-1"]).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+  });
 });

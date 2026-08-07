@@ -427,10 +427,41 @@ func (s *Store) ListAgentArtifacts(ctx context.Context, runID string) ([]agentdo
 func (s *Store) RecoverInterruptedAgentRuns(ctx context.Context, recoveredAt time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, databaseOperationError("begin recover interrupted agent runs", err)
 	}
 	defer tx.Rollback()
 	formatted := formatTime(recoveredAt)
+
+	// Capture the running run IDs before the UPDATE so a job_recovered event
+	// and a refreshed snapshot can be appended for each recovered run in the
+	// same transaction. The event feed must reflect the recovery so the UI can
+	// replay it on remount; otherwise the snapshot would say recoverable while
+	// the event feed stops at job_started.
+	recoveryRows, err := tx.QueryContext(ctx, `
+		SELECT id, project_id FROM agent_runs WHERE status = 'running'
+	`)
+	if err != nil {
+		return 0, databaseOperationError("list running agent runs for recovery", err)
+	}
+	type recoveredJob struct {
+		runID     string
+		projectID string
+	}
+	var recovered []recoveredJob
+	for recoveryRows.Next() {
+		var job recoveredJob
+		if err := recoveryRows.Scan(&job.runID, &job.projectID); err != nil {
+			recoveryRows.Close()
+			return 0, err
+		}
+		recovered = append(recovered, job)
+	}
+	if err := recoveryRows.Err(); err != nil {
+		recoveryRows.Close()
+		return 0, err
+	}
+	recoveryRows.Close()
+
 	result, err := tx.ExecContext(ctx, `
 		UPDATE agent_runs
 		SET status = 'recoverable',
@@ -453,12 +484,36 @@ func (s *Store) RecoverInterruptedAgentRuns(ctx context.Context, recoveredAt tim
 	`, formatted, formatted); err != nil {
 		return 0, databaseOperationError("recover interrupted agent run steps", err)
 	}
+
+	// Append a job_recovered event and refresh the snapshot for each recovered
+	// run. The sequence is assigned atomically within this transaction; the
+	// snapshot projects the now-recoverable status from the just-updated
+	// agent_runs row so the feed and the authoritative row commit together.
+	for _, job := range recovered {
+		draft, draftErr := agentdomain.NewJobEventDraft(
+			job.runID, agentdomain.JobKindAgent, job.projectID,
+			agentdomain.EventJobRecovered, "",
+			recoveryEventPayload("app_interrupted", "应用上次退出时创作任务仍在运行，可重试该任务。"),
+			recoveredAt,
+		)
+		if draftErr != nil {
+			return 0, draftErr
+		}
+		maxSequence, err := appendJobEventDrafts(ctx, tx, []agentdomain.JobEventDraft{draft})
+		if err != nil {
+			return 0, err
+		}
+		if err := upsertAgentJobSnapshot(ctx, tx, job.runID, maxSequence, formatted); err != nil {
+			return 0, err
+		}
+	}
+
 	count, err := result.RowsAffected()
 	if err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, databaseOperationError("commit recover interrupted agent runs", err)
 	}
 	return count, nil
 }

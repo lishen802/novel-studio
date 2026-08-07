@@ -160,6 +160,69 @@ describe("applyEvents", () => {
     expect(result.state.status).toBe("recoverable");
     expect(result.state.terminal).toBe(false);
   });
+
+  it("rebuilds from a recoverable snapshot then applies job_recovered on remount", () => {
+    // Simulates a Bridge remount/app restart: the snapshot says recoverable
+    // (written by RecoverInterruptedAgentRuns) with maxSequence ahead of the
+    // cursor. The reducer rebuilds from the snapshot, then a subsequent pull
+    // delivers the job_recovered event that follows.
+    const snapshot: JobSnapshotView = {
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "recoverable",
+      maxSequence: 2,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-07T00:00:00Z",
+    };
+    let state = rebuildFromSnapshot(snapshot);
+
+    expect(state.cursor).toBe(2);
+    expect(state.status).toBe("recoverable");
+    expect(state.terminal).toBe(false);
+
+    // A late job_recovered notification re-delivers sequence 2; it must be
+    // skipped idempotently (cursor already at 2) without corrupting state.
+    const result = applyEvents(state, [event(2, "job_recovered")]);
+    expect(result.appliedCount).toBe(0);
+    expect(result.state.status).toBe("recoverable");
+    expect(result.state.terminal).toBe(false);
+    state = result.state;
+
+    // A genuinely new event (e.g. a retry's job_started at sequence 3, after
+    // the recovered run is retried) applies normally on top of the rebuilt
+    // state, proving the cursor is not stuck.
+    const retry = applyEvents(state, [event(3, "job_started")]);
+    expect(retry.appliedCount).toBe(1);
+    expect(retry.state.cursor).toBe(3);
+    expect(retry.state.status).toBe("running");
+  });
+
+  it("does not double-count tokens when the same step_completed is re-applied after a snapshot rebuild", () => {
+    // Tokens are authoritative from the snapshot; a re-delivered step_completed
+    // whose sequence is <= the snapshot's maxSequence must be skipped so it
+    // never double-counts.
+    const snapshot: JobSnapshotView = {
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "running",
+      maxSequence: 3,
+      earliestReplayableSequence: 1,
+      inputTokens: 10,
+      outputTokens: 5,
+      updatedAt: "2026-08-07T00:00:00Z",
+    };
+    const state = rebuildFromSnapshot(snapshot);
+    const result = applyEvents(state, [
+      event(3, "step_completed", "step-1", COMPLETED_PAYLOAD),
+    ]);
+    expect(result.appliedCount).toBe(0);
+    expect(result.state.inputTokens).toBe(10);
+    expect(result.state.outputTokens).toBe(5);
+  });
 });
 
 describe("rebuildFromSnapshot", () => {

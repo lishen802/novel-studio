@@ -515,6 +515,280 @@ func TestGetJobEventsSignalsSnapshotRequired(t *testing.T) {
 	}
 }
 
+// TestRecoverInterruptedAgentRunsAppendsJobRecoveredEvent asserts that when a
+// project is reopened after an in-flight agent run was left in the Running
+// state (simulating an app restart or Bridge remount), RecoverInterruptedAgentRuns
+// appends a job_recovered event with the next monotonic sequence and refreshes
+// the snapshot to Recoverable in the same transaction. The event feed must end
+// at job_recovered so the UI can replay the recovery on remount, and
+// ListRecoverableJobs must surface the job for cursor rebuild. This also
+// proves the stale-drain safety net: the background goroutine skips
+// persistence on the closed store, and recovery writes job_recovered to the
+// newly reopened store.
+func TestRecoverInterruptedAgentRunsAppendsJobRecoveredEvent(t *testing.T) {
+	ctx := context.Background()
+	factory := newStickyModelProviderFactory(gatedAuthoringOutputs())
+	service, chapter := configuredAgentService(t, factory)
+	defer service.Close()
+	// A zero drain timeout causes replaceActive to mark remaining leases stale
+	// immediately, simulating a drain that cannot wait for the stuck provider.
+	service.drainTimeout = 0
+	projectPath := service.active.packageInfo.Root
+
+	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecuteAgentRun(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Wait until the sticky provider has started, proving Phase 1 committed
+	// job_started and the goroutine is blocked inside Model IO.
+	waitForStickyProviderStarted(t, factory)
+
+	// Switch to a new project. replaceActive drains (timeout=0 → stale), closes
+	// the old store, and installs a new generation. The goroutine must NOT write
+	// its step result to the now-closed store.
+	if _, err := service.CreateProject(ctx, t.TempDir(), "新项目", "奇幻", "简介"); err != nil {
+		t.Fatal(err)
+	}
+	// Release the stuck provider. The job detects the stale lease/generation and
+	// skips persistence (failStale writes nothing).
+	close(factory.release)
+
+	// Reopen the original project. RecoverInterruptedAgentRuns transitions the
+	// stuck Running run to Recoverable and appends job_recovered to the event
+	// feed in the same transaction.
+	if _, err := service.OpenProject(ctx, projectPath); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+
+	agentStore, ok := service.active.store.(ports.AgentStore)
+	if !ok {
+		t.Fatalf("active store %T does not implement ports.AgentStore", service.active.store)
+	}
+	events, err := agentStore.JobEvents(ctx, run.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("JobEvents: %v", err)
+	}
+	// The goroutine persisted job_started (seq 1) and step_started for the
+	// planner (seq 2) before blocking in the provider. Recovery appends
+	// job_recovered as the next sequence. The feed must be contiguous and
+	// end at job_recovered.
+	if len(events) < 2 {
+		t.Fatalf("len(events) = %d, want at least 2: %#v", len(events), events)
+	}
+	if events[0].EventType != agentdomain.EventJobStarted || events[0].SequenceNumber != 1 {
+		t.Fatalf("event 0 = %#v, want job_started/seq 1", events[0])
+	}
+	for i, evt := range events {
+		if evt.SequenceNumber != uint64(i+1) {
+			t.Fatalf("event %d sequence = %d, want %d (non-contiguous feed)", i, evt.SequenceNumber, i+1)
+		}
+		if evt.JobKind != agentdomain.JobKindAgent || evt.ProjectID == "" {
+			t.Fatalf("event %d missing kind/project: %#v", i, evt)
+		}
+	}
+	last := events[len(events)-1]
+	if last.EventType != agentdomain.EventJobRecovered {
+		t.Fatalf("last event type = %q, want job_recovered", last.EventType)
+	}
+
+	snapshot, err := agentStore.JobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("JobSnapshot: %v", err)
+	}
+	if snapshot.Status != "recoverable" {
+		t.Fatalf("snapshot status = %q, want recoverable", snapshot.Status)
+	}
+	if snapshot.MaxSequence != last.SequenceNumber {
+		t.Fatalf("snapshot max_sequence = %d, want %d", snapshot.MaxSequence, last.SequenceNumber)
+	}
+	if snapshot.EarliestReplayableSequence != 1 {
+		t.Fatalf("snapshot earliest_replayable_sequence = %d, want 1",
+			snapshot.EarliestReplayableSequence)
+	}
+
+	// ListRecoverableJobs must surface the recovered run for cursor rebuild.
+	jobs, err := service.ListRecoverableJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListRecoverableJobs: %v", err)
+	}
+	found := false
+	for _, job := range jobs {
+		if job.JobID == run.ID {
+			if job.JobKind != "agent" {
+				t.Fatalf("recovered job kind = %q, want agent", job.JobKind)
+			}
+			if job.Status != "recoverable" {
+				t.Fatalf("recovered job status = %q, want recoverable", job.Status)
+			}
+			if job.MaxSequence != last.SequenceNumber {
+				t.Fatalf("recovered job max_sequence = %d, want %d", job.MaxSequence, last.SequenceNumber)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("recovered run not found in ListRecoverableJobs")
+	}
+
+	// The cursor rebuild at 0 must see snapshotRequired=false (earliest is still
+	// 1) and return the full feed so the UI can replay the recovery.
+	page, err := service.GetJobEvents(ctx, run.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("GetJobEvents: %v", err)
+	}
+	if page.SnapshotRequired {
+		t.Fatal("snapshotRequired = true, want false (earliest is still 1)")
+	}
+	if len(page.Events) != len(events) {
+		t.Fatalf("GetJobEvents returned %d events, want %d", len(page.Events), len(events))
+	}
+}
+
+// TestRecoverInterruptedTasksAppendsJobRecoveredEvent mirrors
+// TestRecoverInterruptedAgentRunsAppendsJobRecoveredEvent for the extraction
+// pipeline: a task left Running across a project reopen must get a
+// job_recovered event and a Recoverable snapshot so the extraction workbench
+// can rebuild its cursor on remount.
+func TestRecoverInterruptedTasksAppendsJobRecoveredEvent(t *testing.T) {
+	ctx := context.Background()
+	factory := newStickyModelProviderFactory(map[string]string{
+		"extraction-model": extractionEventModelOutput,
+	})
+	service, taskID, _ := configuredExtractionService(t, factory)
+	defer service.Close()
+	service.drainTimeout = 0
+	projectPath := service.active.packageInfo.Root
+
+	if _, err := service.ExecuteExtractionRun(ctx, taskID); err != nil {
+		t.Fatalf("ExecuteExtractionRun: %v", err)
+	}
+	waitForStickyProviderStarted(t, factory)
+
+	// Switch to a new project — the old store is closed and the lease is stale.
+	if _, err := service.CreateProject(ctx, t.TempDir(), "新项目", "奇幻", "简介"); err != nil {
+		t.Fatal(err)
+	}
+	close(factory.release)
+
+	// Reopen the original project. RecoverInterruptedTasks transitions the stuck
+	// Running task to Recoverable and appends job_recovered.
+	if _, err := service.OpenProject(ctx, projectPath); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+
+	store, ok := service.active.store.(ports.ExtractionStore)
+	if !ok {
+		t.Fatalf("active store %T does not implement ports.ExtractionStore", service.active.store)
+	}
+	events, err := store.JobEvents(ctx, taskID, 0, 100)
+	if err != nil {
+		t.Fatalf("JobEvents: %v", err)
+	}
+	// The goroutine persisted job_started (seq 1) and step_started (seq 2)
+	// before blocking in the provider; recovery appends job_recovered next.
+	if len(events) < 2 {
+		t.Fatalf("len(events) = %d, want at least 2: %#v", len(events), events)
+	}
+	if events[0].EventType != agentdomain.EventJobStarted || events[0].SequenceNumber != 1 {
+		t.Fatalf("event 0 = %#v, want job_started/seq 1", events[0])
+	}
+	for i, evt := range events {
+		if evt.SequenceNumber != uint64(i+1) {
+			t.Fatalf("event %d sequence = %d, want %d (non-contiguous feed)", i, evt.SequenceNumber, i+1)
+		}
+		if evt.JobKind != agentdomain.JobKindExtraction || evt.ProjectID == "" {
+			t.Fatalf("event %d missing kind/project: %#v", i, evt)
+		}
+	}
+	last := events[len(events)-1]
+	if last.EventType != agentdomain.EventJobRecovered {
+		t.Fatalf("last event type = %q, want job_recovered", last.EventType)
+	}
+
+	snapshot, err := store.JobSnapshot(ctx, taskID)
+	if err != nil {
+		t.Fatalf("JobSnapshot: %v", err)
+	}
+	if snapshot.Status != "recoverable" {
+		t.Fatalf("snapshot status = %q, want recoverable", snapshot.Status)
+	}
+	if snapshot.MaxSequence != last.SequenceNumber {
+		t.Fatalf("snapshot max_sequence = %d, want %d", snapshot.MaxSequence, last.SequenceNumber)
+	}
+
+	jobs, err := service.ListRecoverableJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListRecoverableJobs: %v", err)
+	}
+	found := false
+	for _, job := range jobs {
+		if job.JobID == taskID {
+			if job.JobKind != "extraction" {
+				t.Fatalf("recovered job kind = %q, want extraction", job.JobKind)
+			}
+			if job.Status != "recoverable" {
+				t.Fatalf("recovered job status = %q, want recoverable", job.Status)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("recovered task not found in ListRecoverableJobs")
+	}
+}
+
+// TestRecoverInterruptedAgentRunsLeavesTerminalJobsUntouched asserts that
+// recovery does not append job_recovered events to already-terminal runs
+// (completed/failed/cancelled). Only Running runs are recovered; terminal runs
+// keep their existing event feed so the UI does not see a spurious recovery.
+func TestRecoverInterruptedAgentRunsLeavesTerminalJobsUntouched(t *testing.T) {
+	ctx := context.Background()
+	providerFactory := &fakeModelProviderFactory{
+		outputs: map[string]string{
+			"planner":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
+			"writer":   "夜色压在山门之上。",
+			"reviewer": `{"approved":true,"summary":"ok","issues":[]}`,
+		},
+	}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+	projectPath := service.active.packageInfo.Root
+
+	// A completed run must not gain a job_recovered event on reopen.
+	completedRunID := completedAgentRunWithEvents(t, service, chapter, "续写这一章。")
+
+	// Reopen the project. RecoverInterruptedAgentRuns finds no Running runs.
+	if _, err := service.OpenProject(ctx, projectPath); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+
+	agentStore, ok := service.active.store.(ports.AgentStore)
+	if !ok {
+		t.Fatalf("active store %T does not implement ports.AgentStore", service.active.store)
+	}
+	events, err := agentStore.JobEvents(ctx, completedRunID, 0, 100)
+	if err != nil {
+		t.Fatalf("JobEvents: %v", err)
+	}
+	for _, evt := range events {
+		if evt.EventType == agentdomain.EventJobRecovered {
+			t.Fatalf("terminal run gained a job_recovered event: %#v", events)
+		}
+	}
+	snapshot, err := agentStore.JobSnapshot(ctx, completedRunID)
+	if err != nil {
+		t.Fatalf("JobSnapshot: %v", err)
+	}
+	if snapshot.Status != "completed" {
+		t.Fatalf("snapshot status = %q, want completed", snapshot.Status)
+	}
+}
+
 // TestListRecoverableJobsReturnsNonTerminalJobs asserts that ListRecoverableJobs
 // returns queued agent runs and extraction tasks but excludes terminal
 // (completed/failed/cancelled) jobs.

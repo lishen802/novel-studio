@@ -137,11 +137,9 @@ func (s *Service) CreateProject(
 	}
 
 	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
-	if agentStore, ok := store.(ports.AgentStore); ok {
-		if _, err := agentStore.RecoverInterruptedAgentRuns(ctx, s.clock.Now()); err != nil {
-			_ = store.Close()
-			return ProjectView{}, fmt.Errorf("recover interrupted agent runs: %w", err)
-		}
+	if err := s.recoverInterruptedJobs(ctx, store); err != nil {
+		_ = store.Close()
+		return ProjectView{}, err
 	}
 	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
 		_ = store.Close()
@@ -149,6 +147,26 @@ func (s *Service) CreateProject(
 	}
 	s.replaceActive(candidate)
 	return projectView(project, packageInfo.Root), nil
+}
+
+// recoverInterruptedJobs transitions agent runs and extraction tasks left in
+// the Running state by a previous process into Recoverable, appending a
+// job_recovered event for each so the UI can replay the recovery on remount.
+// Called during CreateProject/OpenProject after the store is opened but before
+// it becomes the active workspace.
+func (s *Service) recoverInterruptedJobs(ctx context.Context, store ports.ProjectStore) error {
+	now := s.clock.Now()
+	if agentStore, ok := store.(ports.AgentStore); ok {
+		if _, err := agentStore.RecoverInterruptedAgentRuns(ctx, now); err != nil {
+			return fmt.Errorf("recover interrupted agent runs: %w", err)
+		}
+	}
+	if extractionStore, ok := store.(ports.ExtractionStore); ok {
+		if _, err := extractionStore.RecoverInterruptedTasks(ctx, now); err != nil {
+			return fmt.Errorf("recover interrupted extraction tasks: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectView, error) {
@@ -180,11 +198,9 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 	}
 
 	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
-	if agentStore, ok := store.(ports.AgentStore); ok {
-		if _, err := agentStore.RecoverInterruptedAgentRuns(ctx, s.clock.Now()); err != nil {
-			_ = store.Close()
-			return ProjectView{}, fmt.Errorf("recover interrupted agent runs: %w", err)
-		}
+	if err := s.recoverInterruptedJobs(ctx, store); err != nil {
+		_ = store.Close()
+		return ProjectView{}, err
 	}
 	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
 		_ = store.Close()

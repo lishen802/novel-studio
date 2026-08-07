@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -10,6 +11,23 @@ import (
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	sqlitedriver "modernc.org/sqlite"
 )
+
+// recoveryEventPayload marshals a small JSON payload for the job_recovered
+// event appended by RecoverInterruptedAgentRuns/RecoverInterruptedTasks. The
+// store builds it directly (rather than receiving it from the workspace layer)
+// because recovery runs inside store.Open before the service layer is wired.
+// A marshal failure (impossible for this simple map) yields an empty string so
+// the event is still appended with a blank payload.
+func recoveryEventPayload(reason, message string) string {
+	encoded, err := json.Marshal(map[string]string{
+		"reason":        reason,
+		"error_message": message,
+	})
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
 
 // sqliteUniqueViolation is the extended result code for SQLITE_CONSTRAINT_UNIQUE
 // (2067). modernc.org/sqlite returns extended codes from (*sqlite.Error).Code().
