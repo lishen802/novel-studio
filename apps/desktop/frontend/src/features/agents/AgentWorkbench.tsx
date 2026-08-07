@@ -9,7 +9,7 @@ import {
   StopCircle,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type {
   AgentProfileInput,
   AgentProfileView,
@@ -20,6 +20,7 @@ import type {
   ProviderKind,
   StudioClient,
 } from "../../lib/studio-client";
+import { useJobEventReplay } from "./useJobEventReplay";
 
 type AgentWorkbenchProps = {
   client: StudioClient;
@@ -92,6 +93,67 @@ export function AgentWorkbench({
     );
   }, []);
 
+  // refreshCanonicalRun pulls the authoritative AgentRunView for a job that
+  // has just transitioned to terminal in the replay state. The reducer
+  // tracks status/steps/tokens via events; the canonical view supplies the
+  // changeSetId (which lives on the run row, not on job events).
+  const refreshCanonicalRun = useCallback(
+    async (runId: string) => {
+      try {
+        const updated = await client.agentRun(runId);
+        setRuns((current) =>
+          current.map((item) => (item.id === runId ? updated : item)),
+        );
+        if (updated.status === "completed" && updated.changeSetId) {
+          setNotice("草稿已进入候选变更");
+        } else if (["failed", "cancelled", "completed"].includes(updated.status)) {
+          setNotice(`任务状态：${updated.status}`);
+        }
+      } catch {
+        // The run may have been removed; ignore refresh errors.
+      }
+    },
+    [client],
+  );
+
+  // Subscribe to job:updated via the cursor-based replay hook. The hook
+  // pulls events via getJobEvents and applies the reducer; when a job
+  // transitions to terminal we refresh the canonical run view to surface
+  // changeSetId and step artifacts in the UI.
+  const { replayStates, pullJobEvents } = useJobEventReplay({
+    client,
+    jobKindFilter: new Set(["agent"]),
+    onJobTerminal: (jobId) => {
+      void refreshCanonicalRun(jobId);
+    },
+  });
+
+  // When a new run is added (initial load or after startRun), seed its
+  // replay state by pulling from cursor 0. This is idempotent: the hook
+  // skips events already applied.
+  useEffect(() => {
+    for (const run of runs) {
+      if (run.status === "queued" || run.status === "running" || run.status === "recoverable") {
+        void pullJobEvents(run.id, "agent");
+      }
+    }
+  }, [runs, pullJobEvents]);
+
+  // Merge replay state into the rendered run view so the UI reflects the
+  // latest cursor-driven status/steps/tokens even before the canonical
+  // view is refreshed.
+  const mergedRuns = runs.map((run) => {
+    const replay = replayStates[run.id];
+    if (!replay) return run;
+    if (replay.cursor === 0) return run;
+    return {
+      ...run,
+      status: replay.status as AgentRunView["status"],
+      inputTokens: replay.inputTokens || run.inputTokens,
+      outputTokens: replay.outputTokens || run.outputTokens,
+    };
+  });
+
   const saveConnection = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -149,16 +211,16 @@ export function AgentWorkbench({
         queued,
         ...current.filter((item) => item.id !== queued.id),
       ]);
-      const completed = await client.executeAgentRun(queued.id);
+      // ExecuteAgentRun returns immediately with a running view. The
+      // backend goroutine emits job:updated as it progresses; the
+      // useJobEventReplay subscription pulls events via getJobEvents and
+      // applies the reducer, then refreshCanonicalRun surfaces changeSetId.
+      const running = await client.executeAgentRun(queued.id);
       setRuns((current) => [
-        completed,
-        ...current.filter((item) => item.id !== completed.id),
+        running,
+        ...current.filter((item) => item.id !== running.id),
       ]);
-      setNotice(
-        completed.changeSetId
-          ? "草稿已进入候选变更"
-          : `任务状态：${completed.status}`,
-      );
+      void pullJobEvents(running.id, "agent");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "智能创作执行失败");
       await reload().catch(() => undefined);
@@ -207,16 +269,14 @@ export function AgentWorkbench({
         queued,
         ...current.filter((item) => item.id !== queued.id),
       ]);
-      const completed = await client.executeAgentRun(queued.id);
+      // ExecuteAgentRun returns immediately; the replay subscription
+      // drives subsequent state refreshes via getJobEvents + reducer.
+      const running = await client.executeAgentRun(queued.id);
       setRuns((current) => [
-        completed,
-        ...current.filter((item) => item.id !== completed.id),
+        running,
+        ...current.filter((item) => item.id !== running.id),
       ]);
-      setNotice(
-        completed.changeSetId
-          ? "草稿已进入候选变更"
-          : `任务状态：${completed.status}`,
-      );
+      void pullJobEvents(running.id, "agent");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "重试任务失败");
       await reload().catch(() => undefined);
@@ -358,7 +418,7 @@ export function AgentWorkbench({
           </button>
         </div>
         <div className="agent-runs">
-          {runs.map((run) => (
+          {mergedRuns.map((run) => (
             <article key={run.id}>
               <CheckCircle2 size={18} />
               <div>

@@ -87,6 +87,10 @@ import {
   type ExtractionStepView,
   type ExtractionTaskView,
   type EvidenceView,
+  type JobEventView,
+  type JobEventsPage,
+  type JobSnapshotView,
+  type JobSummaryView,
 } from "./studio-client";
 
 const projectSchema = z.object({
@@ -332,6 +336,54 @@ const extractionTaskSchema = z.object({
 const extractionRunSchema = z.object({
   task: extractionTaskSchema,
   changeSet: changeSetSchema.nullable(),
+});
+
+const jobEventSchema = z.object({
+  jobId: z.string(),
+  jobKind: z.enum(["agent", "extraction"]),
+  projectId: z.string(),
+  sequenceNumber: z.number().int().nonnegative(),
+  eventType: z.enum([
+    "job_started",
+    "step_started",
+    "step_delta",
+    "step_completed",
+    "step_failed",
+    "job_completed",
+    "job_failed",
+    "job_cancelled",
+    "job_recovered",
+  ]),
+  stepId: z.string().optional(),
+  payload: z.string().optional(),
+  createdAt: z.string(),
+});
+const jobSnapshotSchema = z.object({
+  jobId: z.string(),
+  jobKind: z.enum(["agent", "extraction"]),
+  projectId: z.string(),
+  status: z.string(),
+  maxSequence: z.number().int().nonnegative(),
+  earliestReplayableSequence: z.number().int().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  pendingAction: z.string().optional(),
+  terminalInfo: z.string().optional(),
+  updatedAt: z.string(),
+});
+const jobEventsPageSchema = z.object({
+  events: z.array(jobEventSchema),
+  nextCursor: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+  snapshotRequired: z.boolean(),
+});
+const jobSummarySchema = z.object({
+  jobId: z.string(),
+  jobKind: z.enum(["agent", "extraction"]),
+  projectId: z.string(),
+  status: z.string(),
+  maxSequence: z.number().int().nonnegative(),
+  updatedAt: z.string(),
 });
 
 const outlineNodeSchema = z.object({
@@ -1138,6 +1190,9 @@ type NativeDesktopAPI = {
   RetryAgentRun(id: string): Promise<unknown>;
   AgentRuns(): Promise<unknown>;
   AgentRun(id: string): Promise<unknown>;
+  GetJobSnapshot(jobId: string): Promise<unknown>;
+  GetJobEvents(jobId: string, afterSequence: number, limit: number): Promise<unknown>;
+  ListRecoverableJobs(): Promise<unknown>;
   CompleteClose(): Promise<void>;
 };
 
@@ -1219,6 +1274,14 @@ const extractionTaskViews = (value: unknown): ExtractionTaskView[] =>
   z.array(extractionTaskSchema).parse(value);
 const extractionRunView = (value: unknown): ExtractionRunView =>
   extractionRunSchema.parse(value);
+const jobEventView = (value: unknown): JobEventView =>
+  jobEventSchema.parse(value);
+const jobEventsPageView = (value: unknown): JobEventsPage =>
+  jobEventsPageSchema.parse(value);
+const jobSnapshotView = (value: unknown): JobSnapshotView =>
+  jobSnapshotSchema.parse(value);
+const jobSummaryViews = (value: unknown): JobSummaryView[] =>
+  z.array(jobSummarySchema).parse(value);
 
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
@@ -1836,6 +1899,38 @@ export const wailsStudioClient: StudioClient = {
   },
   async agentRun(id) {
     return agentRunView(await safeCall(() => nativeAPI().AgentRun(id)));
+  },
+  async getJobSnapshot(jobId) {
+    return jobSnapshotView(await safeCall(() => nativeAPI().GetJobSnapshot(jobId)));
+  },
+  async getJobEvents(jobId, afterSequence, limit) {
+    return jobEventsPageView(
+      await safeCall(() =>
+        nativeAPI().GetJobEvents(jobId, afterSequence, limit),
+      ),
+    );
+  },
+  async listRecoverableJobs() {
+    return jobSummaryViews(await safeCall(() => nativeAPI().ListRecoverableJobs()));
+  },
+  onJobUpdated(handler) {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOnMultiple(
+      "job:updated",
+      (payload: unknown) => {
+        if (typeof payload === "object" && payload !== null) {
+          const p = payload as {
+            jobId?: string;
+            jobKind?: string;
+            latestSequence?: number;
+          };
+          if (typeof p.jobId === "string" && typeof p.jobKind === "string" && typeof p.latestSequence === "number") {
+            handler(p.jobId, p.jobKind, p.latestSequence);
+          }
+        }
+      },
+      -1,
+    );
   },
   onBeforeClose(handler) {
     if (!window.runtime) return () => undefined;

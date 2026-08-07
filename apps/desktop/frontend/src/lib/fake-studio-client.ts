@@ -87,6 +87,10 @@ import type {
   ExtractionStepView,
   ExtractionTaskView,
   EvidenceView,
+  JobEventView,
+  JobEventsPage,
+  JobSnapshotView,
+  JobSummaryView,
 } from "./studio-client";
 
 type ChapterWriteCall = {
@@ -353,6 +357,28 @@ export class FakeStudioClient implements StudioClient {
   retryExtractionRunCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
+  getJobSnapshotCalls: string[] = [];
+  jobSnapshotResult: JobSnapshotView | null = null;
+  getJobEventsCalls: Array<{ jobId: string; afterSequence: number; limit: number }> = [];
+  jobEventsResult: JobEventsPage = { events: [], nextCursor: 0, hasMore: false, snapshotRequired: false };
+  listRecoverableJobsCalls = 0;
+  recoverableJobsResult: JobSummaryView[] = [];
+  jobUpdatedHandlers: Array<(jobId: string, jobKind: string, latestSequence: number) => void> = [];
+  /**
+   * Per-job event log used by getJobEvents to serve cursor-based replay.
+   * Tests can either pre-populate this map or rely on executeAgentRun /
+   * executeExtractionRun to seed events when they transition a job to
+   * running and later to terminal.
+   */
+  jobEventsByJobId: Map<string, JobEventView[]> = new Map();
+  jobSnapshotsByJobId: Map<string, JobSnapshotView> = new Map();
+  /**
+   * When true (default), executeAgentRun / executeExtractionRun schedule an
+   * async emitJobUpdated call after updating internal state, simulating the
+   * real backend's asynchronous progression. Tests that need deterministic
+   * sync behavior can disable this.
+   */
+  emitJobProgressionOnExecute: boolean = true;
 
   static withReadyProject(): FakeStudioClient {
     const client = new FakeStudioClient();
@@ -467,11 +493,87 @@ export class FakeStudioClient implements StudioClient {
     this.executeExtractionRunCalls.push(id);
     if (this.extractionError) throw this.extractionError;
     if (!this.extractionExecuteResult) throw new Error("未配置抽取执行结果");
-    const run = this.extractionExecuteResult;
-    this.extractionTasksResult = this.extractionTasksResult.map((item) =>
-      item.id === id ? run.task : item,
+    const terminalRun = this.extractionExecuteResult;
+    // Phase 1: persist running state and append job_started event in the
+    // same short transaction. Return a running view immediately; the
+    // provider pipeline runs in a background goroutine on the real backend.
+    const existingTask = this.extractionTasksResult.find(
+      (item) => item.id === id,
     );
-    return run;
+    const runningTask: ExtractionTaskView = existingTask
+      ? { ...existingTask, status: "running" }
+      : { ...terminalRun.task, status: "running" };
+    this.extractionTasksResult = this.extractionTasksResult.map((item) =>
+      item.id === id ? runningTask : item,
+    );
+    const projectId = this.openProjectResult.id;
+    this.appendJobEvent(id, "extraction", 1, "job_started", "");
+    this.upsertJobSnapshot({
+      jobId: id,
+      jobKind: "extraction",
+      projectId,
+      status: "running",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-07T00:00:00Z",
+    });
+    if (this.emitJobProgressionOnExecute) {
+      void this.scheduleExtractionRunProgression(id, terminalRun);
+    }
+    return { task: runningTask, changeSet: null };
+  }
+
+  /**
+   * scheduleExtractionRunProgression mirrors scheduleAgentRunProgression:
+   * after executeExtractionRun returns, the fake backend advances the task
+   * to the pre-configured terminal state and emits job:updated.
+   */
+  private scheduleExtractionRunProgression(
+    id: string,
+    terminalRun: ExtractionRunView,
+  ): void {
+    const projectId = this.openProjectResult.id;
+    queueMicrotask(() => {
+      this.extractionTasksResult = this.extractionTasksResult.map((item) =>
+        item.id === id ? terminalRun.task : item,
+      );
+      this.extractionRunResult = terminalRun;
+      const inputTokens = terminalRun.task.steps.reduce(
+        (sum, step) => sum + step.inputTokens,
+        0,
+      );
+      const outputTokens = terminalRun.task.steps.reduce(
+        (sum, step) => sum + step.outputTokens,
+        0,
+      );
+      this.appendJobEvent(
+        id,
+        "extraction",
+        2,
+        "job_completed",
+        terminalRun.task.changeSetId
+          ? JSON.stringify({ change_set_id: terminalRun.task.changeSetId })
+          : "",
+      );
+      this.upsertJobSnapshot({
+        jobId: id,
+        jobKind: "extraction",
+        projectId,
+        status: terminalRun.task.status,
+        maxSequence: 2,
+        earliestReplayableSequence: 1,
+        inputTokens,
+        outputTokens,
+        pendingAction: terminalRun.task.changeSetId ? "review_change_set" : "",
+        terminalInfo: terminalRun.task.changeSetId
+          ? JSON.stringify({ changeSetId: terminalRun.task.changeSetId })
+          : "",
+        updatedAt: "2026-08-07T00:00:00Z",
+      });
+      this.emitJobUpdated(id, "extraction", 2);
+    });
   }
 
   async cancelExtractionRun(id: string): Promise<void> {
@@ -1826,15 +1928,88 @@ export class FakeStudioClient implements StudioClient {
     this.executeAgentRunCalls.push(id);
     const existing = this.agentRunsResult.find((item) => item.id === id);
     if (!existing) throw new Error("运行不存在");
-    const value: AgentRunView = {
+    // Phase 1: persist running state and append job_started event in the
+    // same short transaction. Return the running view immediately; the
+    // provider pipeline runs in a background goroutine on the real backend.
+    const running: AgentRunView = {
       ...existing,
-      status: "completed",
-      changeSetId: "change-set-1",
+      status: "running",
     };
     this.agentRunsResult = this.agentRunsResult.map((item) =>
-      item.id === id ? value : item,
+      item.id === id ? running : item,
     );
-    return value;
+    this.appendJobEvent(id, "agent", 1, "job_started", "");
+    this.upsertJobSnapshot({
+      jobId: id,
+      jobKind: "agent",
+      projectId: this.openProjectResult.id,
+      status: "running",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-07T00:00:00Z",
+    });
+    if (this.emitJobProgressionOnExecute) {
+      // Simulate the background goroutine finishing after the call returns.
+      // Tests can await screen.findByText(...) to observe the terminal state.
+      void this.scheduleAgentRunProgression(id);
+    }
+    return running;
+  }
+
+  /**
+   * scheduleAgentRunProgression simulates the backend goroutine completing
+   * the planner → writer → continuity_reviewer pipeline. It is scheduled
+   * via queueMicrotask so the initial `executeAgentRun` promise resolves
+   * before progression begins. Tests that need to assert intermediate
+   * running state can disable emitJobProgressionOnExecute.
+   */
+  private scheduleAgentRunProgression(id: string): void {
+    const projectId = this.openProjectResult.id;
+    queueMicrotask(() => {
+      const terminal: AgentRunView = {
+        ...(this.agentRunsResult.find((item) => item.id === id) ?? {
+          id,
+          chapterId: "",
+          prompt: "",
+          status: "running",
+          errorCode: "",
+          errorMessage: "",
+          changeSetId: "",
+          retryOf: "",
+          tokenBudget: 0,
+          contextCharBudget: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          contextChars: 0,
+          contextTruncated: false,
+          steps: [],
+          createdAt: "2026-08-07T00:00:00Z",
+          updatedAt: "2026-08-07T00:00:00Z",
+        }),
+        status: "completed",
+        changeSetId: "change-set-1",
+      };
+      this.agentRunsResult = this.agentRunsResult.map((item) =>
+        item.id === id ? terminal : item,
+      );
+      this.appendJobEvent(id, "agent", 2, "job_completed", JSON.stringify({ change_set_id: "change-set-1" }));
+      this.upsertJobSnapshot({
+        jobId: id,
+        jobKind: "agent",
+        projectId,
+        status: "completed",
+        maxSequence: 2,
+        earliestReplayableSequence: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        pendingAction: "review_change_set",
+        terminalInfo: JSON.stringify({ changeSetId: "change-set-1" }),
+        updatedAt: "2026-08-07T00:00:00Z",
+      });
+      this.emitJobUpdated(id, "agent", 2);
+    });
   }
   async cancelAgentRun(id: string): Promise<void> {
     this.cancelAgentRunCalls.push(id);
@@ -1894,5 +2069,138 @@ export class FakeStudioClient implements StudioClient {
 
   async requestNativeClose(): Promise<void> {
     await this.beforeCloseHandler?.();
+  }
+
+  async getJobSnapshot(jobId: string): Promise<JobSnapshotView> {
+    this.getJobSnapshotCalls.push(jobId);
+    const fromMap = this.jobSnapshotsByJobId.get(jobId);
+    if (fromMap) return fromMap;
+    if (!this.jobSnapshotResult) throw new Error("作业快照不存在");
+    return this.jobSnapshotResult;
+  }
+
+  async getJobEvents(
+    jobId: string,
+    afterSequence: number,
+    limit: number,
+  ): Promise<JobEventsPage> {
+    this.getJobEventsCalls.push({ jobId, afterSequence, limit });
+    // Prefer per-job event log when available so cursor-based replay works.
+    const fromMap = this.jobEventsByJobId.get(jobId);
+    if (fromMap) {
+      const filtered = fromMap.filter(
+        (evt) => evt.sequenceNumber > afterSequence,
+      );
+      const sorted = [...filtered].sort(
+        (a, b) => a.sequenceNumber - b.sequenceNumber,
+      );
+      const slice = sorted.slice(0, Math.max(1, limit));
+      const snapshot = this.jobSnapshotsByJobId.get(jobId);
+      const earliest = snapshot?.earliestReplayableSequence ?? 1;
+      if (afterSequence + 1 < earliest) {
+        return {
+          events: [],
+          nextCursor: afterSequence,
+          hasMore: false,
+          snapshotRequired: true,
+        };
+      }
+      const nextCursor = slice.length > 0 ? slice[slice.length - 1].sequenceNumber : afterSequence;
+      const maxSequence = snapshot?.maxSequence ?? nextCursor;
+      return {
+        events: slice,
+        nextCursor,
+        hasMore: nextCursor < maxSequence,
+        snapshotRequired: false,
+      };
+    }
+    return this.jobEventsResult;
+  }
+
+  async listRecoverableJobs(): Promise<JobSummaryView[]> {
+    this.listRecoverableJobsCalls++;
+    if (this.recoverableJobsResult.length > 0) return this.recoverableJobsResult;
+    // Derive recoverable jobs from non-terminal agent runs and extraction tasks.
+    const summaries: JobSummaryView[] = [];
+    const projectId = this.openProjectResult.id;
+    for (const run of this.agentRunsResult) {
+      if (["queued", "running", "recoverable"].includes(run.status)) {
+        const snapshot = this.jobSnapshotsByJobId.get(run.id);
+        summaries.push({
+          jobId: run.id,
+          jobKind: "agent",
+          projectId,
+          status: run.status,
+          maxSequence: snapshot?.maxSequence ?? 0,
+          updatedAt: run.updatedAt,
+        });
+      }
+    }
+    for (const task of this.extractionTasksResult) {
+      if (["queued", "running", "recoverable"].includes(task.status)) {
+        const snapshot = this.jobSnapshotsByJobId.get(task.id);
+        summaries.push({
+          jobId: task.id,
+          jobKind: "extraction",
+          projectId,
+          status: task.status,
+          maxSequence: snapshot?.maxSequence ?? 0,
+          updatedAt: task.updatedAt,
+        });
+      }
+    }
+    return summaries;
+  }
+
+  onJobUpdated(
+    handler: (jobId: string, jobKind: string, latestSequence: number) => void,
+  ): () => void {
+    this.jobUpdatedHandlers.push(handler);
+    return () => {
+      this.jobUpdatedHandlers = this.jobUpdatedHandlers.filter(
+        (h) => h !== handler,
+      );
+    };
+  }
+
+  emitJobUpdated(jobId: string, jobKind: string, latestSequence: number): void {
+    for (const handler of this.jobUpdatedHandlers) {
+      handler(jobId, jobKind, latestSequence);
+    }
+  }
+
+  /**
+   * appendJobEvent records an event in the per-job log and is used by the
+   * fake's internal async progression helpers. Tests can also call this
+   * directly to seed custom event sequences for cursor replay scenarios.
+   */
+  appendJobEvent(
+    jobId: string,
+    jobKind: "agent" | "extraction",
+    sequence: number,
+    eventType: string,
+    payload: string,
+    stepId: string = "",
+  ): void {
+    const events = this.jobEventsByJobId.get(jobId) ?? [];
+    events.push({
+      jobId,
+      jobKind,
+      projectId: this.openProjectResult.id,
+      sequenceNumber: sequence,
+      eventType: eventType as JobEventView["eventType"],
+      stepId,
+      payload,
+      createdAt: "2026-08-07T00:00:00Z",
+    });
+    this.jobEventsByJobId.set(jobId, events);
+  }
+
+  /**
+   * upsertJobSnapshot stores or replaces the snapshot for a job. The fake
+   * uses this to expose cursor lower-bound semantics via getJobEvents.
+   */
+  upsertJobSnapshot(snapshot: JobSnapshotView): void {
+    this.jobSnapshotsByJobId.set(snapshot.jobId, snapshot);
   }
 }

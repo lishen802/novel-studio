@@ -8,7 +8,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeOperationView,
   ChangeSetView,
@@ -21,6 +21,7 @@ import type {
   ProviderConnectionView,
   StudioClient,
 } from "../../lib/studio-client";
+import { useJobEventReplay } from "../agents/useJobEventReplay";
 
 type ExtractionWorkbenchProps = {
   client: StudioClient;
@@ -338,11 +339,6 @@ export function ExtractionWorkbench({
     [jobs],
   );
 
-  const selectedTask = useMemo(
-    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
-    [tasks, selectedTaskId],
-  );
-
   const reloadAll = async () => {
     setLoading(true);
     setError(null);
@@ -386,6 +382,80 @@ export function ExtractionWorkbench({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
+
+  // refreshCanonicalTask pulls the authoritative ExtractionRunView for a
+  // task that has just transitioned to terminal in the replay state. The
+  // reducer tracks status via events; the canonical view supplies the
+  // changeSet and step artifacts.
+  const refreshCanonicalTask = useCallback(
+    async (taskId: string) => {
+      try {
+        const detail = await client.extractionTask(taskId);
+        if (!mountedRef.current) return;
+        setTasks((current) =>
+          current.map((task) =>
+            task.id === detail.task.id ? detail.task : task,
+          ),
+        );
+        setSelectedTaskId((current) => {
+          if (current === taskId) setRun(detail);
+          return current;
+        });
+        if (detail.task.status === "completed") {
+          setNotice("抽取完成，可在下方审阅候选变更。");
+        } else if (detail.task.status === "failed") {
+          setNotice("抽取失败，可修正后重试。");
+        }
+      } catch {
+        // Task may have been removed; ignore refresh errors.
+      }
+    },
+    [client],
+  );
+
+  // Subscribe to job:updated via the cursor-based replay hook. The hook
+  // pulls events via getJobEvents and applies the reducer; when a task
+  // transitions to terminal we refresh the canonical task view to surface
+  // the changeSet and step artifacts.
+  const { replayStates, pullJobEvents } = useJobEventReplay({
+    client,
+    jobKindFilter: new Set(["extraction"]),
+    onJobTerminal: (jobId) => {
+      void refreshCanonicalTask(jobId);
+    },
+  });
+
+  // When tasks are loaded or a new one is created, seed its replay state.
+  useEffect(() => {
+    for (const task of tasks) {
+      if (
+        task.status === "queued" ||
+        task.status === "running" ||
+        task.status === "recoverable"
+      ) {
+        void pullJobEvents(task.id, "extraction");
+      }
+    }
+  }, [tasks, pullJobEvents]);
+
+  // Merge replay state into the rendered task list so the UI reflects the
+  // latest cursor-driven status even before the canonical view is refreshed.
+  const mergedTasks = tasks.map((task) => {
+    const replay = replayStates[task.id];
+    if (!replay) return task;
+    if (replay.cursor === 0) return task;
+    return {
+      ...task,
+      status: replay.status as ExtractionTaskView["status"],
+      inputTokens: replay.inputTokens || task.inputTokens,
+      outputTokens: replay.outputTokens || task.outputTokens,
+    };
+  });
+
+  const selectedTask = useMemo(
+    () => mergedTasks.find((task) => task.id === selectedTaskId) ?? null,
+    [mergedTasks, selectedTaskId],
+  );
 
   useEffect(() => {
     if (!selectedTaskId) {
@@ -450,6 +520,10 @@ export function ExtractionWorkbench({
     setError(null);
     setNotice(null);
     try {
+      // ExecuteExtractionRun returns immediately with a running view. The
+      // backend goroutine emits job:updated as it progresses; the
+      // useJobEventReplay subscription pulls events via getJobEvents and
+      // applies the reducer, then refreshCanonicalTask surfaces changeSet.
       const result = await client.executeExtractionRun(selectedTaskId);
       if (!mountedRef.current) return;
       setTasks((current) =>
@@ -458,11 +532,8 @@ export function ExtractionWorkbench({
         ),
       );
       setRun(result);
-      if (result.task.status === "completed") {
-        setNotice("抽取完成，可在下方审阅候选变更。");
-      } else if (result.task.status === "failed") {
-        setNotice("抽取失败，可修正后重试。");
-      }
+      setNotice("抽取任务已启动，完成后将自动更新。");
+      void pullJobEvents(result.task.id, "extraction");
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -622,7 +693,7 @@ export function ExtractionWorkbench({
           <Loader2 size={28} aria-hidden="true" className="spin" />
           <p>正在读取抽取任务…</p>
         </div>
-      ) : tasks.length === 0 ? (
+      ) : mergedTasks.length === 0 ? (
         <div className="extraction-state">
           <Sparkles size={28} aria-hidden="true" />
           <h3>暂无抽取任务</h3>
@@ -631,7 +702,7 @@ export function ExtractionWorkbench({
       ) : (
         <div className="extraction-layout">
           <aside className="extraction-task-list" aria-label="抽取任务">
-            {tasks.map((task) => (
+            {mergedTasks.map((task) => (
               <button
                 type="button"
                 key={task.id}

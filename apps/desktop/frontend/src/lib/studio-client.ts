@@ -1,3 +1,12 @@
+import type {
+  JobEventView,
+  JobEventsPage,
+  JobSnapshotView,
+  JobSummaryView,
+} from "../features/agents/jobEventReducer";
+
+export type { JobEventView, JobEventsPage, JobSnapshotView, JobSummaryView };
+
 export type ProjectView = {
   id: string;
   title: string;
@@ -873,6 +882,14 @@ export interface StudioClient {
   retryAgentRun(id: string): Promise<AgentRunView>;
   agentRuns(): Promise<AgentRunView[]>;
   agentRun(id: string): Promise<AgentRunView>;
+  getJobSnapshot(jobId: string): Promise<JobSnapshotView>;
+  getJobEvents(
+    jobId: string,
+    afterSequence: number,
+    limit: number,
+  ): Promise<JobEventsPage>;
+  listRecoverableJobs(): Promise<JobSummaryView[]>;
+  onJobUpdated(handler: (jobId: string, jobKind: string, latestSequence: number) => void): () => void;
   onBeforeClose(handler: () => Promise<void>): () => void;
   completeClose(): Promise<void>;
 }
