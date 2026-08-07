@@ -82,6 +82,27 @@ R1 引入“Model IO 不持有工作区全局锁”与“作业不向已关闭 s
 
 这些测试位于 `internal/application/workspace`，由本地 `go test -race -shuffle=on` 与 Ubuntu Foundation CI Job 覆盖；失败按并发缺陷处理，不得关闭 `-race` 或从 package pattern 排除。契约背后由 `workspace.Service` 的单调 `storeGeneration` 与 `leaseRegistry` 实现，详见 [R1 实施计划](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)。
 
+## JobEvent cursor 补拉与 snapshot 重建
+
+R1.2 引入 append-only `JobEvent` 事件源与权威 `JobSnapshot` 投影：作业状态变化与事件在同一短事务提交，Wails 只发送 `job_id + latest_sequence` 轻量通知，React 按 cursor 增量补拉、检测缺口并幂等更新。以下门禁保证漏推、重复通知、Bridge 重挂载、应用重启和事件清理后的状态一致性，普通提交必须保持。
+
+| 契约 | 自动证据 |
+| --- | --- |
+| 作业生命周期 emit 连续单调的 JobEvent 且 snapshot 同事务刷新 | `TestExecuteAgentRunAppendsContiguousJobEvents`、`TestExecuteExtractionRunAppendsContiguousJobEvents` |
+| Provider 失败 append `job_failed` 而非停在 `job_started` | `TestExecuteAgentRunFailureAppendsJobFailedEvent`、`TestExecuteExtractionRunFailureAppendsJobFailedEvent` |
+| cursor 分页补拉返回 `has_more`/`next_cursor` | `TestGetJobEventsPaginatesByCursor` |
+| cursor 早于 `earliest_replayable_sequence` 时返回 `snapshot_required` | `TestGetJobEventsSignalsSnapshotRequired` |
+| `ListRecoverableJobs` 返回非终态作业（agent + extraction 合并） | `TestListRecoverableJobsReturnsNonTerminalJobs` |
+| 项目重开时恢复 running 作业并 append `job_recovered` 事件 | `TestRecoverInterruptedAgentRunsAppendsJobRecoveredEvent`、`TestRecoverInterruptedTasksAppendsJobRecoveredEvent` |
+| 恢复不向已终态作业追加 `job_recovered` | `TestRecoverInterruptedAgentRunsLeavesTerminalJobsUntouched` |
+| reducer 按 sequence 幂等应用、检测缺口并停止 | `apps/desktop/frontend/src/features/agents/jobEventReducer.test.ts` |
+| snapshot 重建后重投递事件不累计 token | `apps/desktop/frontend/src/features/agents/jobEventReducer.test.ts`（snapshot rebuild + 幂等） |
+| `job:updated` 触发 cursor 补拉、snapshot 重建与分页 | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx` |
+| 漏推通知后下一次唤醒能补齐缺失事件 | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx`（lost notification） |
+| Bridge 重挂载后 `pullJobEvents` 恢复 `recoverable` 状态且不触发终态回调 | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx`（remount recovery） |
+
+Go 侧测试位于 `internal/application/workspace`（`job_event_test.go`），React 侧测试位于 `apps/desktop/frontend/src/features/agents`。前者由本地 `go test -race -shuffle=on` 与 Ubuntu Foundation CI Job 覆盖，后者由本地 `npm test -- --run` 与 Ubuntu Foundation CI Job 覆盖；失败按数据一致性缺陷处理，不得关闭 `-race` 或跳过 reducer 用例。实现详见 [R1.2 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
+
 ## 隐私与 fixture 规则
 
 - 不提交 `.zjproject`、SQLite 数据库、WAL/SHM、API Key、私钥或签名证书；
@@ -108,4 +129,5 @@ R1 引入“Model IO 不持有工作区全局锁”与“作业不向已关闭 s
 3. Go race tests 和 vet 通过；
 4. 原型测试、typecheck 和 build 通过；
 5. 并发与作业恢复契约测试通过（见上文表格）；
-6. GitHub Foundation CI 的相关 Job 通过。
+6. JobEvent cursor 补拉与 snapshot 重建契约测试通过（见上文表格）；
+7. GitHub Foundation CI 的相关 Job 通过。

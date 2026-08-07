@@ -153,7 +153,7 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 
 R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race/vet、macOS 生产构建、Windows 完整 Go tests 与生产构建）。Agent 与抽取作业的 Provider 调用不再持有工作区全局锁，作者可在模型 IO 期间保存草稿与新建章节；项目切换/关闭先 drain job lease 再关闭 store，generation 安全网保证作业不向已关闭 store 回写，超时作业转入 `recoverable` 供作者重试。R1.2–R1.5 按其退出标准依次创建。
 
-R1.2（可恢复 JobEvent）已开始实施：建立 append-only `JobEvent` 事件源与 `JobSnapshot` 投影，状态变化与事件同事务提交；`ExecuteAgentRun`/`ExecuteExtractionRun` 改为异步返回 running，Wails 只发送 `job_id + latest_sequence` 轻量通知；React 按 cursor 增量补拉、检测缺口并幂等更新，覆盖重挂载、漏推与应用重启后的 snapshot 重建。详见 [R1 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
+R1.2（可恢复 JobEvent）已开始实施：建立 append-only `JobEvent` 事件源与 `JobSnapshot` 投影，状态变化与事件同事务提交；`ExecuteAgentRun`/`ExecuteExtractionRun` 改为异步返回 running，Wails 只发送 `job_id + latest_sequence` 轻量通知；React 按 cursor 增量补拉、检测缺口并幂等更新，覆盖重挂载、漏推与应用重启后的 snapshot 重建。项目重开时 `RecoverInterruptedAgentRuns`/`RecoverInterruptedTasks` 在同一事务内 append `job_recovered` 事件并刷新 `JobSnapshot`，使事件流水终点与权威投影一致；恢复与边界测试（漏推/重复/乱序、Bridge 重挂载、cursor 早于清理下界、drain 超时后安全退出）已在 Go 与 React 两侧覆盖。详见 [R1.2 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
 
 ## 7. R2：正式资产写入与导入正确性
 

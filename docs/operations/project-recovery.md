@@ -44,6 +44,21 @@
 - 重试在新活动 store 上执行，不写旧 generation 的已关闭数据库。
 - 作业退出只记录 run/step 状态，不会让 canonical 正文或已确认资产进入不一致状态。
 
+## JobEvent 事件源与 cursor 恢复
+
+续写、审校和抽取作业的每一次状态变化（启动、步骤开始/完成/失败、作业完成/失败/取消/恢复）都作为 append-only `JobEvent` 写入 `job_events` 表，每个作业按 `(job_id, sequence_number)` 单调递增。同一事务还会刷新 `job_snapshots` 表中的权威投影（状态、`max_sequence`、`earliest_replayable_sequence`、累计 token 用量、待确认动作和终态信息）。事件只携带轻量 JSON 摘要，生成的大文本进 artifact，不复制正文。
+
+应用重启或 Bridge 重挂载时，UI 不重放整条事件流水线，而是按 cursor 增量补拉：
+
+1. 作业面板通过 `ListRecoverableJobs` 发现非终态（running/queued/recoverable）及待确认作业；
+2. 对每个作业调用 `GetJobEvents(jobID, afterSequence, limit)`，按 sequence 升序返回一页事件，附带 `next_cursor`、`has_more` 与 `snapshot_required`；
+3. React reducer 按 `(job_id, sequence_number)` 幂等应用事件——已应用的事件跳过，遇到 `sequence > cursor + 1` 的缺口时停止并从缺口前一条补拉，保证重复通知或漏推不会导致状态不一致；
+4. 当 cursor 早于 `earliest_replayable_sequence`（事件已被清理）时 `snapshot_required` 为 true，前端先用 `GetJobSnapshot` 重建状态并把 cursor 重置为 `max_sequence`，再继续补拉。
+
+项目重开时，`RecoverInterruptedAgentRuns` 与 `RecoverInterruptedTasks` 会把仍处于 running 的作业转入 `recoverable`，并在同一事务内为每个被恢复的作业 append 一条 `job_recovered` 事件、刷新 `JobSnapshot`。这样事件流水的终点与权威投影一致：作者重开项目后，作业面板会看到“可恢复”状态和完整的恢复事件链。已终态（completed/failed/cancelled）的作业不会获得 `job_recovered` 事件。
+
+Wails `job:updated` 通知只发送 `job_id + latest_sequence`，允许丢失、合并或重复——正确性由 cursor 补拉保证，不依赖通知到达次数。累计 token、费用或章节数只来自 `JobSnapshot` 或事件 payload 中的权威字段，不会根据通知次数累计。
+
 ## 版本历史与项目快照
 
 “版本历史”页面提供两种恢复粒度：
