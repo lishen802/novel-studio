@@ -1,7 +1,7 @@
 # 织境 Story Studio 总体开发路线图
 
 - 状态：已批准
-- 更新日期：2026-08-06（R1.1 完成）
+- 更新日期：2026-08-07（R1.2 进行中）
 - 适用范围：当前商业发布底线与完整 V1
 - 上游依据：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 实施计划规范：[实施计划目录说明](../plans/README.md)
@@ -146,12 +146,14 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 ### 待建立实施计划
 
 1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`completed`）
-2. `R1 JobEvent 持久化与应用 API`
+2. [R1 JobEvent 持久化与应用 API](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)（`in_progress`）
 3. `R1 React JobEvent replay`
 4. `R1 项目 OS lease 与只读 store`
 5. `R1 Windows 文件锁与路径边界`
 
 R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race/vet、macOS 生产构建、Windows 完整 Go tests 与生产构建）。Agent 与抽取作业的 Provider 调用不再持有工作区全局锁，作者可在模型 IO 期间保存草稿与新建章节；项目切换/关闭先 drain job lease 再关闭 store，generation 安全网保证作业不向已关闭 store 回写，超时作业转入 `recoverable` 供作者重试。R1.2–R1.5 按其退出标准依次创建。
+
+R1.2（可恢复 JobEvent）已开始实施：建立 append-only `JobEvent` 事件源与 `JobSnapshot` 投影，状态变化与事件同事务提交；`ExecuteAgentRun`/`ExecuteExtractionRun` 改为异步返回 running，Wails 只发送 `job_id + latest_sequence` 轻量通知；React 按 cursor 增量补拉、检测缺口并幂等更新，覆盖重挂载、漏推与应用重启后的 snapshot 重建。详见 [R1 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
 
 ## 7. R2：正式资产写入与导入正确性
 
