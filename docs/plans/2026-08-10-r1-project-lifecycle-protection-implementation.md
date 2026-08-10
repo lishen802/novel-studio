@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让同一 `.zjproject` 在任意时刻最多只有一个可编辑进程；争锁时提供可理解的重试、真正只读打开和安全恢复副本路径，并保证只读模式不会迁移、恢复、checkpoint、重建索引、启动后台任务或修改项目文件。
+**Goal:** 让同一 `.zjproject` 在任意时刻最多只有一个可编辑进程；争锁时提供可理解的重试、真正只读打开和安全恢复副本路径，并保证只读模式不会迁移、恢复、checkpoint、重建索引、启动后台任务或修改 canonical/业务项目数据。
 
 **Architecture:** 在 `projectfs` 提供纯只读包检查、固定短名 `project.lease` 的跨平台 OS lease 和恢复副本装配；在 `sqlite` 增加 `mode=ro` 的当前 Schema 只读入口；`workspace.activeWorkspace` 同时持有 access mode、store generation 与可选项目 lease，并以应用层写屏障和 SQLite 只读连接双重阻止写入。可编辑打开必须先取得 lease，再执行恢复/迁移及其他可变准备；只读打开不取得 lease，且只做只读预检。Wails 通过结构化打开结果呈现 lease conflict，React 用对话卡提供重试、只读、创建恢复副本和取消。
 
@@ -103,6 +103,8 @@ const (
 - 验证 SQLite header、`quick_check`、唯一 project 和 Schema 恰好为当前版本；
 - 旧 Schema 返回稳定的 `ErrDatabaseMigrationRequired`，未来 Schema沿用 `ErrDatabaseTooNew`；
 - 检测数据库、快照或分支的待恢复 journal 时返回 `ErrProjectRecoveryRequired`，仅报告，不执行恢复。
+
+SQLite 为读取活跃 WAL 可能更新 `project.db-shm`，并在 WAL 协调文件不存在时创建空的 `-wal/-shm`。这些 SQLite 读取协调工件不属于 canonical 或业务数据，允许发生该受限变化；只读验证仍必须证明 `project.db`、已有 `project.db-wal` 的内容、`recovery/` 与其他项目文件集合和哈希不变。不得使用 `immutable=1` 规避该行为，因为它会忽略活跃 WAL。
 
 ### 3.5 恢复副本是新项目包，不覆盖源项目
 
@@ -206,7 +208,7 @@ GOOS=windows GOARCH=amd64 go test -c -o /tmp/novel-studio-projectfs-windows.test
 - Create: `internal/persistence/sqlite/readonly_test.go`
 - Modify: `internal/persistence/sqlite/migration_test.go`
 
-- [ ] 先写失败测试：当前 Schema 可读；写方法返回 readonly；只读打开前后数据库、WAL/SHM、`recovery/` 文件集合与哈希不变；旧 Schema 返回 migration-required；未来 Schema不变；活跃 WAL 中已提交章节可见。
+- [ ] 先写失败测试：当前 Schema 可读；写方法返回 readonly；只读打开前后 `project.db`、已有 WAL 内容、`recovery/` 与其他业务项目文件集合和哈希不变；允许 SQLite 为活跃 WAL 读取更新 `-shm` 或创建空的 WAL 协调文件；旧 Schema 返回 migration-required；未来 Schema不变；活跃 WAL 中已提交章节可见。
 - [ ] 用正确转义的 SQLite file URI 加 `mode=ro`；不要使用 `immutable=1`（它会忽略活跃 WAL 语义）。
 - [ ] 配置只读 PRAGMA，不调用 `configureRuntimeDatabase`、Goose、migration recovery 或 checkpoint；验证当前 Schema、`quick_check` 和唯一项目。
 - [ ] `Factory.OpenReadOnly` 返回同一 `Store` 读接口，SQLite 权限作为应用层写屏障后的第二道防线。
@@ -384,7 +386,7 @@ git status --short
 | 跨进程互斥 | 第二进程在 macOS/Windows 都不能取得 editable lease |
 | 残留元数据 | OS lock 释放后可以重新打开；不依赖删除 lease 文件 |
 | 关闭顺序 | jobs 已 drain，DB 已 close，最后 release project lease |
-| 真正只读 | 项目包前后文件集合与哈希不变，无迁移/恢复/后台事件 |
+| 真正只读 | `project.db`、已有 WAL 内容、`recovery/` 与业务项目文件不变，无迁移/恢复/后台事件；仅允许 SQLite 的 `-shm`/空 WAL 协调文件变化 |
 | 双重写保护 | UI 无写入口；绕过 UI 的应用写用例返回 `ErrWorkspaceReadOnly`；SQLite 仍拒写 |
 | WAL 一致性 | 只读能看到已提交 WAL；恢复副本通过 quick_check 且含该 revision |
 | 恢复副本 | 不覆盖源/目标；源变化或故障不发布半成品 |

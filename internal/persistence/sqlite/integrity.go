@@ -11,11 +11,12 @@ import (
 )
 
 var (
-	ErrDatabaseMissing    = errors.New("database does not exist")
-	ErrDatabasePermission = errors.New("database permission denied")
-	ErrDatabaseCorrupt    = errors.New("database is corrupt")
-	ErrDatabaseTooNew     = errors.New("database schema is newer than this application")
-	ErrDatabaseWrite      = errors.New("database write failed")
+	ErrDatabaseMissing           = errors.New("database does not exist")
+	ErrDatabasePermission        = errors.New("database permission denied")
+	ErrDatabaseCorrupt           = errors.New("database is corrupt")
+	ErrDatabaseMigrationRequired = errors.New("database migration required")
+	ErrDatabaseTooNew            = errors.New("database schema is newer than this application")
+	ErrDatabaseWrite             = errors.New("database write failed")
 )
 
 const (

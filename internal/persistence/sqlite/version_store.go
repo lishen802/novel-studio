@@ -158,8 +158,5 @@ func (s *Store) Backup(ctx context.Context, targetPath string) error {
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("create snapshot directory: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, targetPath); err != nil {
-		return databaseOperationError("create consistent database snapshot", err)
-	}
-	return nil
+	return backupDatabase(ctx, s.db, targetPath)
 }

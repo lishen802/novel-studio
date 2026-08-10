@@ -62,6 +62,17 @@ func (Factory) Open(ctx context.Context, databasePath string) (ports.ProjectStor
 	return store, nil
 }
 
+// OpenReadOnly opens an already-current project database without migration or
+// recovery. The returned Store has the same read API as an editable store;
+// SQLite mode=ro and query_only reject any accidental write attempt.
+func (Factory) OpenReadOnly(ctx context.Context, databasePath string) (ports.ProjectStore, error) {
+	db, err := OpenReadOnlyDatabase(ctx, databasePath)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
 type Store struct {
 	db                              *sql.DB
 	importJobReadHook               func()

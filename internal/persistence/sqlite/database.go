@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pressly/goose/v3"
@@ -35,6 +37,35 @@ func OpenDatabase(ctx context.Context, path string) (*sql.DB, error) {
 // current schema version with runtime PRAGMAs configured.
 func OpenExistingDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	return openExistingDatabase(ctx, path, migrationHooks{})
+}
+
+// OpenReadOnlyDatabase opens an existing, current-schema database without
+// changing canonical or business project data. It deliberately avoids
+// migration recovery, Goose, WAL configuration, and checkpointing.
+func OpenReadOnlyDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	if err := probeExistingDatabase(path); err != nil {
+		return nil, err
+	}
+
+	uri, err := readOnlySQLiteURI(path)
+	if err != nil {
+		return nil, err
+	}
+	db, err := openSQLite(ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+	closeWithError := func(err error) (*sql.DB, error) {
+		_ = db.Close()
+		return nil, classifyDatabaseError(err)
+	}
+	if err := configureReadOnlyDatabase(ctx, db); err != nil {
+		return closeWithError(err)
+	}
+	if err := validateReadOnlyDatabase(ctx, db); err != nil {
+		return closeWithError(err)
+	}
+	return db, nil
 }
 
 // openDatabase opens a database and runs migrations directly. It is shared by
@@ -81,6 +112,26 @@ func openSQLite(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
+func readOnlySQLiteURI(path string) (string, error) {
+	return sqliteFileURI(path, "mode=ro")
+}
+
+func sqliteFileURI(path, rawQuery string) (string, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve database path: %w", err)
+	}
+	uriPath := filepath.ToSlash(absolutePath)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	return (&url.URL{
+		Scheme:   "file",
+		Path:     uriPath,
+		RawQuery: rawQuery,
+	}).String(), nil
+}
+
 // configureRuntimeDatabase sets the PRAGMAs every open application database
 // must have: foreign keys, busy timeout, and WAL journal mode. These PRAGMAs
 // are safe to apply to a database that is already at the current schema.
@@ -95,6 +146,39 @@ func configureRuntimeDatabase(ctx context.Context, db *sql.DB) error {
 		return classifyDatabaseError(err)
 	}
 	return nil
+}
+
+// configureReadOnlyDatabase applies only per-connection settings that do not
+// modify the project database. query_only is the SQLite-side write barrier.
+func configureReadOnlyDatabase(ctx context.Context, db *sql.DB) error {
+	for _, pragma := range []string{
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA query_only = ON",
+	} {
+		if _, err := db.ExecContext(ctx, pragma); err != nil {
+			return classifyDatabaseError(err)
+		}
+	}
+	return nil
+}
+
+func validateReadOnlyDatabase(ctx context.Context, db *sql.DB) error {
+	version, err := schemaVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	switch {
+	case version < currentSchemaVersion:
+		return fmt.Errorf("%w: found version %d, require %d", ErrDatabaseMigrationRequired, version, currentSchemaVersion)
+	case version > currentSchemaVersion:
+		return fmt.Errorf("%w: found version %d, support through %d", ErrDatabaseTooNew, version, currentSchemaVersion)
+	}
+	if err := quickCheck(ctx, db); err != nil {
+		return err
+	}
+	_, err = readUniqueProjectID(ctx, db)
+	return err
 }
 
 // migrateDatabase runs all embedded Goose migrations to the current version.

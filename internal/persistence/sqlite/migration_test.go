@@ -328,6 +328,24 @@ func TestOpenExistingDatabaseDoesNotMigrateOrCreateBackupForCurrentSchema(t *tes
 	assertFileMissing(t, paths.journal)
 }
 
+func TestOpenReadOnlyReturnsMigrationRequiredForLegacySchemaWithoutChanges(t *testing.T) {
+	ctx := context.Background()
+	fixture := legacyproject.Build(t, t.TempDir())
+	before := collectReadOnlyProtectedFiles(t, filepath.Dir(fixture.DatabasePath), fixture.DatabasePath)
+
+	_, err := (Factory{}).OpenReadOnly(ctx, fixture.DatabasePath)
+	if !errors.Is(err, ErrDatabaseMigrationRequired) {
+		t.Fatalf("OpenReadOnly error = %v, want ErrDatabaseMigrationRequired", err)
+	}
+	after := collectReadOnlyProtectedFiles(t, filepath.Dir(fixture.DatabasePath), fixture.DatabasePath)
+	if !sameFileHashes(before.hashes, after.hashes) {
+		t.Fatalf("legacy project protected files changed during read-only open\nbefore: %#v\nafter: %#v", before.hashes, after.hashes)
+	}
+	if err := assertReadOnlyWAL(t, before, after); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenExistingDatabaseRejectsFutureSchemaWithoutCreatingRecoveryFiles(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "project.db")
