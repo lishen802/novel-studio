@@ -11,8 +11,8 @@ var ErrNoActiveProject = errors.New("no active project")
 var (
 	ErrProjectLeaseHeld          = ports.ErrProjectLeaseHeld
 	ErrWorkspaceReadOnly         = errors.New("active project is read-only")
-	ErrProjectRecoveryRequired   = errors.New("project recovery is required")
-	ErrRecoveryCopySourceChanged = errors.New("project changed while recovery copy was being created")
+	ErrProjectRecoveryRequired   = ports.ErrProjectRecoveryRequired
+	ErrRecoveryCopySourceChanged = ports.ErrRecoveryCopySourceChanged
 )
 
 var (

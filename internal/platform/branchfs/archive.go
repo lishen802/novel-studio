@@ -166,6 +166,59 @@ func (a Archive) Load(directory string) (revisiondomain.BranchCatalog, error) {
 	return catalog, nil
 }
 
+// ValidateReadOnly validates a copied branch archive without invoking the
+// writable catalog-recovery routine. It additionally verifies every recorded
+// head digest, so a catalog cannot silently point at a swapped or truncated
+// head file. ErrNotInitialized is returned for packages that have not yet
+// created their first branch catalog.
+func (a Archive) ValidateReadOnly(directory string) (revisiondomain.BranchCatalog, error) {
+	body, err := os.ReadFile(catalogPath(directory))
+	if errors.Is(err, os.ErrNotExist) {
+		return revisiondomain.BranchCatalog{}, ErrNotInitialized
+	}
+	if err != nil {
+		return revisiondomain.BranchCatalog{}, fmt.Errorf("read branch catalog: %w", err)
+	}
+	var stored catalogFile
+	if err := json.Unmarshal(body, &stored); err != nil {
+		return revisiondomain.BranchCatalog{}, fmt.Errorf("decode branch catalog: %w", err)
+	}
+	if stored.Version != catalogVersion || stored.Revision < 1 ||
+		strings.TrimSpace(stored.ProjectID) == "" || len(stored.Branches) == 0 {
+		return revisiondomain.BranchCatalog{}, errors.New("invalid branch catalog")
+	}
+	catalog := revisiondomain.BranchCatalog{
+		Revision:       stored.Revision,
+		ProjectID:      stored.ProjectID,
+		ActiveBranchID: stored.ActiveBranchID,
+		Branches:       stored.Branches,
+	}
+	if _, found := catalog.Find(catalog.ActiveBranchID); !found {
+		return revisiondomain.BranchCatalog{}, errors.New("branch catalog has no active branch")
+	}
+	for _, branch := range catalog.Branches {
+		if err := validateBranchID(branch.ID); err != nil || branch.ProjectID != catalog.ProjectID || branch.HeadDigest == "" {
+			return revisiondomain.BranchCatalog{}, errors.New("branch catalog contains invalid branch metadata")
+		}
+		head := a.HeadPath(directory, branch.ID)
+		info, err := os.Stat(head)
+		if err != nil {
+			return revisiondomain.BranchCatalog{}, fmt.Errorf("inspect branch head %s: %w", branch.ID, err)
+		}
+		if !info.Mode().IsRegular() {
+			return revisiondomain.BranchCatalog{}, fmt.Errorf("branch head is not a regular file: %s", branch.ID)
+		}
+		digest, err := digestFile(head)
+		if err != nil {
+			return revisiondomain.BranchCatalog{}, fmt.Errorf("digest branch head %s: %w", branch.ID, err)
+		}
+		if digest != branch.HeadDigest {
+			return revisiondomain.BranchCatalog{}, ErrBranchHeadChanged
+		}
+	}
+	return catalog, nil
+}
+
 func (a Archive) HeadPath(directory, branchID string) string {
 	return filepath.Join(headsDirectory(directory), branchID+".sqlite")
 }

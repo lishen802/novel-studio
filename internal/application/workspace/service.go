@@ -223,7 +223,13 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 		return ProjectView{}, err
 	}
 	defer s.endLifecycleOperation()
+	return s.openProjectEditable(ctx, packagePath)
+}
 
+// openProjectEditable is the editable half of OpenProject. lifecycleMu must
+// already be held by the caller so recovery-copy publication can open its new
+// package without trying to acquire the same non-reentrant lifecycle lock.
+func (s *Service) openProjectEditable(ctx context.Context, packagePath string) (ProjectView, error) {
 	packageInfo, err := s.packages.Inspect(packagePath)
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("inspect project package: %w", err)

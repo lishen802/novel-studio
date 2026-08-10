@@ -2,7 +2,11 @@ package projectfs
 
 import "github.com/lishen802/novel-studio/internal/application/ports"
 
-type Manager struct{}
+type Manager struct {
+	// recoveryCopyHooks is test-only dependency injection. Production callers
+	// use the zero value and therefore the durable filesystem operations below.
+	recoveryCopyHooks *recoveryCopyHooks
+}
 
 func (Manager) Create(parentDirectory, projectTitle string) (ports.ProjectPackage, error) {
 	layout, err := NewLayout(parentDirectory, projectTitle)

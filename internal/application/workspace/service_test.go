@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -693,6 +694,9 @@ type fakePackageManager struct {
 	createErr     error
 	openPackage   ports.ProjectPackage
 	openErr       error
+	copyPackage   ports.ProjectPackage
+	copyErr       error
+	copyCalls     int
 	openStarted   chan struct{}
 	events        *[]string
 }
@@ -702,11 +706,14 @@ func (f *fakePackageManager) Create(string, string) (ports.ProjectPackage, error
 	return f.createPackage, f.createErr
 }
 
-func (f *fakePackageManager) Inspect(string) (ports.ProjectPackage, error) {
+func (f *fakePackageManager) Inspect(path string) (ports.ProjectPackage, error) {
 	appendEvent(f.events, "open-package")
 	if f.openStarted != nil {
 		close(f.openStarted)
 		f.openStarted = nil
+	}
+	if path == f.copyPackage.Root && f.copyPackage.Root != "" {
+		return f.copyPackage, f.openErr
 	}
 	return f.openPackage, f.openErr
 }
@@ -714,6 +721,24 @@ func (f *fakePackageManager) Inspect(string) (ports.ProjectPackage, error) {
 func (f *fakePackageManager) PrepareEditable(ports.ProjectPackage) error {
 	appendEvent(f.events, "prepare-editable")
 	return nil
+}
+
+func (f *fakePackageManager) CreateRecoveryCopy(
+	ctx context.Context,
+	_ ports.ProjectPackage,
+	_ string,
+	snapshot ports.DatabaseSnapshot,
+) (ports.ProjectPackage, error) {
+	f.copyCalls++
+	if f.copyErr != nil {
+		return ports.ProjectPackage{}, f.copyErr
+	}
+	if snapshot != nil {
+		if err := snapshot(ctx, filepath.Join(f.copyPackage.Root, ".temporary.zjproject", "project.db")); err != nil {
+			return ports.ProjectPackage{}, err
+		}
+	}
+	return f.copyPackage, nil
 }
 
 type fakeStoreFactory struct {
@@ -725,6 +750,7 @@ type fakeStoreFactory struct {
 	openCalls        int
 	readOnlyStore    ports.ProjectStore
 	readOnlyErr      error
+	readOnlyCalls    int
 	recoveryRequired bool
 	recoveryErr      error
 	events           *[]string
@@ -747,6 +773,7 @@ func (f *fakeStoreFactory) Open(context.Context, string) (ports.ProjectStore, er
 }
 
 func (f *fakeStoreFactory) OpenReadOnly(context.Context, string) (ports.ProjectStore, error) {
+	f.readOnlyCalls++
 	return f.readOnlyStore, f.readOnlyErr
 }
 
@@ -1609,15 +1636,17 @@ type fakeProjectLeaseManager struct {
 	releaseErr error
 	lease      *fakeProjectLease
 	leases     []*fakeProjectLease
+	acquired   []string
 }
 
-func (f *fakeProjectLeaseManager) Acquire(_ ports.ProjectPackage, _ ports.ProjectLeaseMetadata) (ports.ProjectLease, error) {
+func (f *fakeProjectLeaseManager) Acquire(packageInfo ports.ProjectPackage, _ ports.ProjectLeaseMetadata) (ports.ProjectLease, error) {
 	appendEvent(f.events, "acquire-lease")
 	if f.acquireErr != nil {
 		return nil, f.acquireErr
 	}
 	f.lease = &fakeProjectLease{events: f.events, releaseErr: f.releaseErr}
 	f.leases = append(f.leases, f.lease)
+	f.acquired = append(f.acquired, packageInfo.Root)
 	return f.lease, nil
 }
 
