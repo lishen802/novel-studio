@@ -18,5 +18,6 @@ type BranchArchive interface {
 	PlanMerge(directory, sourceID, targetID string) (revisiondomain.BranchMergePlan, error)
 	Merge(directory, databasePath string, plan revisiondomain.BranchMergePlan, currentSnapshotPath string, now time.Time) (revisiondomain.BranchCatalog, error)
 	Delete(directory, id string) error
+	RecoveryRequired(directory, databasePath string) (bool, error)
 	RecoverInterruptedOperation(directory, databasePath string) error
 }

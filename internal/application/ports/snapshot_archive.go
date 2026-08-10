@@ -11,5 +11,6 @@ type SnapshotArchive interface {
 	BeginRestore(databasePath string, snapshotPath string) error
 	CommitRestore(databasePath string) error
 	RollbackRestore(databasePath string) error
+	RecoveryRequired(databasePath string) (bool, error)
 	RecoverInterruptedRestore(databasePath string) error
 }

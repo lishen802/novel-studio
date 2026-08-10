@@ -251,7 +251,10 @@ type fakeSnapshotArchive struct {
 	beganRestore       bool
 	committedRestore   bool
 	rolledBackRestore  bool
+	rollbackErr        error
 	recoveredDatabases []string
+	recoveryRequired   bool
+	events             *[]string
 }
 
 func (f *fakeSnapshotArchive) Prepare(directory string, id string) (string, error) {
@@ -291,10 +294,15 @@ func (f *fakeSnapshotArchive) CommitRestore(string) error {
 
 func (f *fakeSnapshotArchive) RollbackRestore(string) error {
 	f.rolledBackRestore = true
-	return nil
+	return f.rollbackErr
 }
 
 func (f *fakeSnapshotArchive) RecoverInterruptedRestore(databasePath string) error {
+	appendEvent(f.events, "recover-snapshot")
 	f.recoveredDatabases = append(f.recoveredDatabases, databasePath)
 	return nil
+}
+
+func (f *fakeSnapshotArchive) RecoveryRequired(string) (bool, error) {
+	return f.recoveryRequired, nil
 }

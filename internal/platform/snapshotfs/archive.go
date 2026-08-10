@@ -258,6 +258,23 @@ func (a Archive) RecoverInterruptedRestore(databasePath string) error {
 	return a.RollbackRestore(databasePath)
 }
 
+// RecoveryRequired reports whether a snapshot restore left artifacts that
+// require writable recovery. It intentionally only inspects paths: read-only
+// opens must never call the recovery routine, because it renames and removes
+// these files.
+func (Archive) RecoveryRequired(databasePath string) (bool, error) {
+	for _, suffix := range []string{".restore-staged", ".restore-backup"} {
+		_, err := os.Stat(databasePath + suffix)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("inspect snapshot restore artifact: %w", err)
+		}
+	}
+	return false, nil
+}
+
 func validateSnapshotID(id string) error {
 	if id == "" {
 		return errors.New("snapshot id must not be blank")

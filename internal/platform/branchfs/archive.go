@@ -463,6 +463,58 @@ func (a Archive) RecoverInterruptedOperation(directory, databasePath string) err
 	return syncDirectory(directory)
 }
 
+// RecoveryRequired reports whether branch-operation artifacts are present
+// without repairing or deleting them. The writable recovery routine has side
+// effects, so it must never be used as a read-only preflight check.
+func (Archive) RecoveryRequired(directory, databasePath string) (bool, error) {
+	paths := []string{
+		journalPath(directory),
+		catalogPath(directory) + ".backup",
+		catalogPath(directory) + ".tmp",
+	}
+	if databasePath != "" {
+		paths = append(paths,
+			databasePath+".branch-backup",
+			databasePath+".branch-staged",
+		)
+	}
+	for _, path := range paths {
+		found, err := branchRecoveryArtifactExists(path)
+		if err != nil {
+			return false, err
+		}
+		if found {
+			return true, nil
+		}
+	}
+
+	headDirectory := headsDirectory(directory)
+	entries, err := os.ReadDir(headDirectory)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect branch heads for recovery artifacts: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".branch-backup") || strings.HasSuffix(entry.Name(), ".branch-staged") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func branchRecoveryArtifactExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect branch recovery artifact: %w", err)
+}
+
 func (a Archive) replaceHeadAndCatalog(
 	directory, headPath, sourcePath string,
 	oldCatalog, newCatalog revisiondomain.BranchCatalog,

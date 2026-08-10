@@ -183,7 +183,13 @@ func (s *Service) RestoreSnapshot(
 		_ = restoredStore.Close()
 		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, err)
 	}
-	s.active = &activeWorkspace{packageInfo: active.packageInfo, store: restoredStore}
+	s.active = &activeWorkspace{
+		packageInfo:  active.packageInfo,
+		store:        restoredStore,
+		mode:         active.mode,
+		projectLease: active.projectLease,
+		generation:   active.generation,
+	}
 	chapterViews := make([]ChapterView, 0, len(chapters))
 	for _, chapter := range chapters {
 		chapterViews = append(chapterViews, chapterView(chapter))
@@ -234,19 +240,44 @@ func (s *Service) rollbackSnapshotRestoreLocked(
 	projectPackage ports.ProjectPackage,
 	cause error,
 ) error {
+	active := s.active
 	rollbackErr := s.snapshots.RollbackRestore(projectPackage.Database)
 	reopened, reopenErr := s.stores.Open(ctx, projectPackage.Database)
 	if reopenErr == nil {
-		s.active = &activeWorkspace{packageInfo: projectPackage, store: reopened}
+		if active == nil {
+			s.active = &activeWorkspace{packageInfo: projectPackage, store: reopened}
+		} else {
+			s.active = &activeWorkspace{
+				packageInfo:  projectPackage,
+				store:        reopened,
+				mode:         active.mode,
+				projectLease: active.projectLease,
+				generation:   active.generation,
+			}
+		}
 	} else {
 		s.active = nil
 	}
 	if rollbackErr != nil || reopenErr != nil {
-		return fmt.Errorf(
-			"snapshot restore failed: %v; rollback: %v; reopen original: %v",
-			cause,
-			rollbackErr,
-			reopenErr,
+		var releaseErr error
+		if reopenErr != nil && active != nil {
+			releaseErr = releaseProjectLease(active.projectLease)
+		}
+		var rollbackContext, reopenContext, releaseContext error
+		if rollbackErr != nil {
+			rollbackContext = fmt.Errorf("rollback snapshot restore: %w", rollbackErr)
+		}
+		if reopenErr != nil {
+			reopenContext = fmt.Errorf("reopen original project: %w", reopenErr)
+		}
+		if releaseErr != nil {
+			releaseContext = fmt.Errorf("release project lease: %w", releaseErr)
+		}
+		return errors.Join(
+			fmt.Errorf("snapshot restore failed: %w", cause),
+			rollbackContext,
+			reopenContext,
+			releaseContext,
 		)
 	}
 	return fmt.Errorf("snapshot restore failed and original project was reopened: %w", cause)

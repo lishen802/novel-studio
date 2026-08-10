@@ -19,6 +19,7 @@ import (
 	timelinedomain "github.com/lishen802/novel-studio/internal/domain/timeline"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
+	"github.com/lishen802/novel-studio/internal/platform/branchfs"
 )
 
 func TestCreateProjectChecksLicenseBeforeCreatingPackage(t *testing.T) {
@@ -101,7 +102,7 @@ func TestOpenProjectClosesPreviousStoreAfterNewStoreIsReady(t *testing.T) {
 	if view.ID != secondProject.ID || view.Path != packages.openPackage.Root || view.AccessMode != ports.ProjectAccessEditable {
 		t.Fatalf("view = %#v", view)
 	}
-	if !reflect.DeepEqual(events, []string{"open-package", "open-store", "close-old"}) {
+	if !reflect.DeepEqual(events, []string{"open-package", "prepare-editable", "open-store", "close-old"}) {
 		t.Fatalf("events = %v", events)
 	}
 }
@@ -138,6 +139,284 @@ func TestOpenProjectFailureKeepsCurrentWorkspaceActive(t *testing.T) {
 	}
 	if len(chapters) != 1 || chapters[0].ID != chapter.ID {
 		t.Fatalf("active workspace changed after failed open: %#v", chapters)
+	}
+}
+
+func TestOpenProjectAcquiresLeaseBeforeEditableRecoveryAndUpdatesProjectMetadata(t *testing.T) {
+	events := make([]string, 0)
+	project := mustProject(t, "project-2", "第二本书")
+	store := newFakeStore(project)
+	packages := &fakePackageManager{
+		openPackage: testPackage("/books/second.zjproject"),
+		events:      &events,
+	}
+	leaseManager := &fakeProjectLeaseManager{events: &events}
+	service := NewService(
+		packages,
+		&fakeStoreFactory{openStore: store, events: &events},
+		&fakeLicense{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{},
+		&fakeSnapshotArchive{events: &events},
+	)
+	service.ConfigureProjectLease(leaseManager, ports.ProjectLeaseMetadata{PID: 42})
+
+	if _, err := service.OpenProject(context.Background(), packages.openPackage.Root); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(events, []string{"open-package", "acquire-lease", "prepare-editable", "recover-snapshot", "open-store", "update-lease"}) {
+		t.Fatalf("events = %v", events)
+	}
+	if leaseManager.lease.metadata.ProjectID != project.ID {
+		t.Fatalf("lease ProjectID = %q, want %q", leaseManager.lease.metadata.ProjectID, project.ID)
+	}
+}
+
+func TestOpenProjectReadOnlyReportsRecoveryBeforeOpeningStoreWithoutMutatingWorkspace(t *testing.T) {
+	firstProject := mustProject(t, "project-1", "第一本书")
+	firstStore := newFakeStore(firstProject)
+	readOnlyStore := newFakeStore(mustProject(t, "project-2", "第二本书"))
+	snapshots := &fakeSnapshotArchive{recoveryRequired: true}
+	service := NewService(
+		&fakePackageManager{createPackage: testPackage("/books/first.zjproject"), openPackage: testPackage("/books/second.zjproject")},
+		&fakeStoreFactory{createStore: firstStore, readOnlyStore: readOnlyStore},
+		&fakeLicense{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"project-1"}},
+		snapshots,
+	)
+	if _, err := service.CreateProject(context.Background(), "/books", "第一本书", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := service.OpenProjectReadOnly(context.Background(), "/books/second.zjproject")
+	if !errors.Is(err, ErrProjectRecoveryRequired) {
+		t.Fatalf("OpenProjectReadOnly() error = %v, want ErrProjectRecoveryRequired", err)
+	}
+	if len(snapshots.recoveredDatabases) != 0 {
+		t.Fatalf("read-only preflight ran recovery: %v", snapshots.recoveredDatabases)
+	}
+	if readOnlyStore.closeCalls != 0 {
+		t.Fatalf("read-only store was opened despite recovery preflight: %d", readOnlyStore.closeCalls)
+	}
+	active, err := service.ListChapters(context.Background())
+	if err != nil || active == nil {
+		t.Fatalf("prior workspace was not retained: chapters=%#v err=%v", active, err)
+	}
+}
+
+func TestOpenProjectReadOnlyReportsDatabaseRecoveryBeforeOpeningStore(t *testing.T) {
+	project := mustProject(t, "project-2", "第二本书")
+	store := newFakeStore(project)
+	service := NewService(
+		&fakePackageManager{openPackage: testPackage("/books/second.zjproject")},
+		&fakeStoreFactory{readOnlyStore: store, recoveryRequired: true},
+		&fakeLicense{}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{},
+		&fakeSnapshotArchive{},
+	)
+
+	_, err := service.OpenProjectReadOnly(context.Background(), "/books/second.zjproject")
+	if !errors.Is(err, ErrProjectRecoveryRequired) {
+		t.Fatalf("OpenProjectReadOnly() error = %v, want ErrProjectRecoveryRequired", err)
+	}
+	if store.closeCalls != 0 {
+		t.Fatalf("read-only store was opened despite database recovery preflight: %d", store.closeCalls)
+	}
+}
+
+func TestOpenProjectReadOnlySkipsRecoveryWritersAndInstallsReadOnlyCandidate(t *testing.T) {
+	project := mustProject(t, "project-2", "第二本书")
+	snapshots := &fakeSnapshotArchive{}
+	service := NewService(
+		&fakePackageManager{openPackage: testPackage("/books/second.zjproject")},
+		&fakeStoreFactory{readOnlyStore: newFakeStore(project)},
+		&fakeLicense{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{},
+		snapshots,
+	)
+
+	view, err := service.OpenProjectReadOnly(context.Background(), "/books/second.zjproject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.AccessMode != ports.ProjectAccessReadOnly {
+		t.Fatalf("AccessMode = %q, want read_only", view.AccessMode)
+	}
+	if len(snapshots.recoveredDatabases) != 0 {
+		t.Fatalf("read-only open ran snapshot recovery: %v", snapshots.recoveredDatabases)
+	}
+}
+
+func TestOpenProjectReadOnlySkipsBranchCatalogInitialization(t *testing.T) {
+	root := t.TempDir()
+	project := mustProject(t, "project-2", "第二本书")
+	packageInfo := ports.ProjectPackage{
+		Root: root, Database: root + "/project.db", Branches: root + "/branches",
+	}
+	service := NewService(
+		&fakePackageManager{openPackage: packageInfo},
+		&fakeStoreFactory{readOnlyStore: newFakeStore(project)},
+		&fakeLicense{}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{},
+		&fakeSnapshotArchive{}, branchfs.Archive{},
+	)
+
+	if _, err := service.OpenProjectReadOnly(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(packageInfo.Branches); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only open initialized branch catalog: %v", err)
+	}
+}
+
+func TestCloseReleasesProjectLeaseAfterClosingStoreAndJoinsFailures(t *testing.T) {
+	closeFailure := errors.New("close failure")
+	releaseFailure := errors.New("release failure")
+	events := make([]string, 0)
+	project := mustProject(t, "project-1", "第一本书")
+	store := newFakeStore(project)
+	store.closeEvent = "close-store"
+	store.closeErr = closeFailure
+	store.events = &events
+	leaseManager := &fakeProjectLeaseManager{events: &events, releaseErr: releaseFailure}
+	service := NewService(
+		&fakePackageManager{createPackage: testPackage("/books/first.zjproject")},
+		&fakeStoreFactory{createStore: store},
+		&fakeLicense{}, fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"project-1"}}, &fakeSnapshotArchive{},
+	)
+	service.ConfigureProjectLease(leaseManager, ports.ProjectLeaseMetadata{})
+	if _, err := service.CreateProject(context.Background(), "/books", "第一本书", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	events = events[:0]
+
+	err := service.Close()
+	if !errors.Is(err, closeFailure) || !errors.Is(err, releaseFailure) {
+		t.Fatalf("Close() error = %v, want joined close and release failures", err)
+	}
+	if !reflect.DeepEqual(events, []string{"close-store", "release-lease"}) {
+		t.Fatalf("close/release order = %v", events)
+	}
+}
+
+func TestOpenProjectClosesAndReleasesPreviousWorkspaceInOrder(t *testing.T) {
+	events := make([]string, 0)
+	firstProject := mustProject(t, "project-1", "第一本书")
+	secondProject := mustProject(t, "project-2", "第二本书")
+	firstStore := newFakeStore(firstProject)
+	firstStore.closeEvent = "close-old-store"
+	firstStore.events = &events
+	secondStore := newFakeStore(secondProject)
+	packages := &fakePackageManager{
+		createPackage: testPackage("/books/first.zjproject"),
+		openPackage:   testPackage("/books/second.zjproject"),
+		events:        &events,
+	}
+	leaseManager := &fakeProjectLeaseManager{events: &events}
+	service := NewService(
+		packages,
+		&fakeStoreFactory{createStore: firstStore, openStore: secondStore, events: &events},
+		&fakeLicense{}, fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"project-1"}}, &fakeSnapshotArchive{},
+	)
+	service.ConfigureProjectLease(leaseManager, ports.ProjectLeaseMetadata{})
+	if _, err := service.CreateProject(context.Background(), "/books", "第一本书", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	events = events[:0]
+
+	if _, err := service.OpenProject(context.Background(), packages.openPackage.Root); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(events, []string{
+		"open-package", "acquire-lease", "prepare-editable", "open-store", "update-lease",
+		"close-old-store", "release-lease",
+	}) {
+		t.Fatalf("switch order = %v", events)
+	}
+	if len(leaseManager.leases) != 2 {
+		t.Fatalf("lease acquisitions = %d, want 2", len(leaseManager.leases))
+	}
+}
+
+func TestReopenAfterBranchFailureReleasesLeaseWhenOriginalProjectCannotReopen(t *testing.T) {
+	project := mustProject(t, "project-1", "第一本书")
+	packageInfo := testPackage("/books/first.zjproject")
+	leaseManager := &exclusiveFakeProjectLeaseManager{}
+	lease, err := leaseManager.Acquire(packageInfo, ports.ProjectLeaseMetadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(
+		&fakePackageManager{}, &fakeStoreFactory{openErr: errors.New("reopen failed")},
+		&fakeLicense{}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{}, &fakeSnapshotArchive{},
+	)
+	service.active = &activeWorkspace{packageInfo: packageInfo, store: newFakeStore(project), mode: ports.ProjectAccessEditable, projectLease: lease}
+
+	service.mu.Lock()
+	_ = service.reopenAfterBranchFailureLocked(context.Background(), packageInfo, errors.New("branch failure"))
+	service.mu.Unlock()
+
+	if leaseManager.releases != 1 {
+		t.Fatalf("lease releases = %d, want 1", leaseManager.releases)
+	}
+	if _, err := leaseManager.Acquire(packageInfo, ports.ProjectLeaseMetadata{}); err != nil {
+		t.Fatalf("second lease acquisition after failed reopen: %v", err)
+	}
+}
+
+func TestRollbackSnapshotRestoreReleasesLeaseWhenOriginalProjectCannotReopen(t *testing.T) {
+	project := mustProject(t, "project-1", "第一本书")
+	packageInfo := testPackage("/books/first.zjproject")
+	leaseManager := &exclusiveFakeProjectLeaseManager{}
+	lease, err := leaseManager.Acquire(packageInfo, ports.ProjectLeaseMetadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(
+		&fakePackageManager{}, &fakeStoreFactory{openErr: errors.New("reopen failed")},
+		&fakeLicense{}, fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{},
+		&fakeSnapshotArchive{rollbackErr: errors.New("rollback failed")},
+	)
+	service.active = &activeWorkspace{packageInfo: packageInfo, store: newFakeStore(project), mode: ports.ProjectAccessEditable, projectLease: lease}
+
+	service.mu.Lock()
+	_ = service.rollbackSnapshotRestoreLocked(context.Background(), packageInfo, errors.New("restore failure"))
+	service.mu.Unlock()
+
+	if leaseManager.releases != 1 {
+		t.Fatalf("lease releases = %d, want 1", leaseManager.releases)
+	}
+	if _, err := leaseManager.Acquire(packageInfo, ports.ProjectLeaseMetadata{}); err != nil {
+		t.Fatalf("second lease acquisition after failed rollback reopen: %v", err)
+	}
+}
+
+func TestRollbackBranchSwitchReleasesLeaseWhenCompensatingSwitchFails(t *testing.T) {
+	project := mustProject(t, "project-1", "第一本书")
+	root := t.TempDir()
+	packageInfo := ports.ProjectPackage{Root: root, Database: root + "/project.db", Branches: root + "/branches"}
+	leaseManager := &exclusiveFakeProjectLeaseManager{}
+	lease, err := leaseManager.Acquire(packageInfo, ports.ProjectLeaseMetadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(
+		&fakePackageManager{}, &fakeStoreFactory{}, &fakeLicense{},
+		fixedClock{now: time.Unix(100, 0)}, &sequenceIDs{}, &fakeSnapshotArchive{}, branchfs.Archive{},
+	)
+	service.active = &activeWorkspace{packageInfo: packageInfo, store: newFakeStore(project), mode: ports.ProjectAccessEditable, projectLease: lease}
+
+	service.mu.Lock()
+	_ = service.rollbackBranchSwitchLocked(context.Background(), packageInfo, "main", "child", errors.New("switch failure"))
+	service.mu.Unlock()
+
+	if leaseManager.releases != 1 {
+		t.Fatalf("lease releases = %d, want 1", leaseManager.releases)
+	}
+	if _, err := leaseManager.Acquire(packageInfo, ports.ProjectLeaseMetadata{}); err != nil {
+		t.Fatalf("second lease acquisition after failed rollback switch: %v", err)
 	}
 }
 
@@ -209,7 +488,7 @@ func TestReplaceActiveWorkspaceInvalidatesBranchMergePreviews(t *testing.T) {
 			"old-preview": {},
 		},
 		leases:       newLeaseRegistry(),
-		drainTimeout:  drainTimeoutDefault,
+		drainTimeout: drainTimeoutDefault,
 	}
 
 	service.replaceActive(activeWorkspace{})
@@ -432,16 +711,23 @@ func (f *fakePackageManager) Inspect(string) (ports.ProjectPackage, error) {
 	return f.openPackage, f.openErr
 }
 
-func (f *fakePackageManager) PrepareEditable(ports.ProjectPackage) error { return nil }
+func (f *fakePackageManager) PrepareEditable(ports.ProjectPackage) error {
+	appendEvent(f.events, "prepare-editable")
+	return nil
+}
 
 type fakeStoreFactory struct {
-	createStore ports.ProjectStore
-	createErr   error
-	openStore   ports.ProjectStore
-	openStores  []ports.ProjectStore
-	openErr     error
-	openCalls   int
-	events      *[]string
+	createStore      ports.ProjectStore
+	createErr        error
+	openStore        ports.ProjectStore
+	openStores       []ports.ProjectStore
+	openErr          error
+	openCalls        int
+	readOnlyStore    ports.ProjectStore
+	readOnlyErr      error
+	recoveryRequired bool
+	recoveryErr      error
+	events           *[]string
 }
 
 func (f *fakeStoreFactory) Create(context.Context, string, projectdomain.Project) (ports.ProjectStore, error) {
@@ -461,7 +747,11 @@ func (f *fakeStoreFactory) Open(context.Context, string) (ports.ProjectStore, er
 }
 
 func (f *fakeStoreFactory) OpenReadOnly(context.Context, string) (ports.ProjectStore, error) {
-	return nil, errors.New("read-only project store is not implemented")
+	return f.readOnlyStore, f.readOnlyErr
+}
+
+func (f *fakeStoreFactory) RecoveryRequired(string) (bool, error) {
+	return f.recoveryRequired, f.recoveryErr
 }
 
 type draftRecord struct {
@@ -512,6 +802,7 @@ type fakeStore struct {
 	closeCalls          int
 	closeStarted        chan struct{}
 	closeRelease        chan struct{}
+	closeErr            error
 }
 
 func newFakeStore(project projectdomain.Project) *fakeStore {
@@ -1309,6 +1600,71 @@ func (f *fakeStore) Close() error {
 	if f.closeRelease != nil {
 		<-f.closeRelease
 	}
+	return f.closeErr
+}
+
+type fakeProjectLeaseManager struct {
+	events     *[]string
+	acquireErr error
+	releaseErr error
+	lease      *fakeProjectLease
+	leases     []*fakeProjectLease
+}
+
+func (f *fakeProjectLeaseManager) Acquire(_ ports.ProjectPackage, _ ports.ProjectLeaseMetadata) (ports.ProjectLease, error) {
+	appendEvent(f.events, "acquire-lease")
+	if f.acquireErr != nil {
+		return nil, f.acquireErr
+	}
+	f.lease = &fakeProjectLease{events: f.events, releaseErr: f.releaseErr}
+	f.leases = append(f.leases, f.lease)
+	return f.lease, nil
+}
+
+type fakeProjectLease struct {
+	events     *[]string
+	metadata   ports.ProjectLeaseMetadata
+	releaseErr error
+}
+
+func (f *fakeProjectLease) UpdateMetadata(metadata ports.ProjectLeaseMetadata) error {
+	appendEvent(f.events, "update-lease")
+	f.metadata = metadata
+	return nil
+}
+
+func (f *fakeProjectLease) Release() error {
+	appendEvent(f.events, "release-lease")
+	return f.releaseErr
+}
+
+type exclusiveFakeProjectLeaseManager struct {
+	held     bool
+	releases int
+}
+
+func (f *exclusiveFakeProjectLeaseManager) Acquire(_ ports.ProjectPackage, _ ports.ProjectLeaseMetadata) (ports.ProjectLease, error) {
+	if f.held {
+		return nil, ports.ErrProjectLeaseHeld
+	}
+	f.held = true
+	return &exclusiveFakeProjectLease{manager: f}, nil
+}
+
+type exclusiveFakeProjectLease struct {
+	manager  *exclusiveFakeProjectLeaseManager
+	released bool
+}
+
+func (f *exclusiveFakeProjectLease) UpdateMetadata(ports.ProjectLeaseMetadata) error { return nil }
+
+func (f *exclusiveFakeProjectLease) Release() error {
+	if f.released {
+		return nil
+	}
+	f.released = true
+	f.manager.releases++
+	f.manager.held = false
 	return nil
 }
 

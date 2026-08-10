@@ -63,6 +63,24 @@ func newMigrationPaths(databasePath string) migrationPaths {
 	}
 }
 
+// migrationRecoveryRequired reports recovery artifacts without invoking the
+// writable migration coordinator. A read-only caller must stop before opening
+// SQLite when any artifact that could describe a prepared or activated
+// migration is present.
+func migrationRecoveryRequired(databasePath string) (bool, error) {
+	paths := newMigrationPaths(databasePath)
+	for _, path := range []string{paths.journal, paths.stage, paths.original} {
+		_, err := os.Stat(path)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("inspect migration recovery artifact: %w", err)
+		}
+	}
+	return false, nil
+}
+
 // migrationBackupName returns the fixed backup filename for a from -> to
 // migration. R0 only contemplates v9 -> v14; the parameterized form keeps
 // future versions from colliding with the v9 backup.

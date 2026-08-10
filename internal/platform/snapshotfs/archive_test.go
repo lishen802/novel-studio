@@ -112,6 +112,29 @@ func TestRecoverInterruptedRestorePrefersOriginalDatabase(t *testing.T) {
 	assertFileBody(t, databasePath, "original")
 }
 
+func TestRecoveryRequiredReportsRestoreArtifactsWithoutMutatingThem(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "project.db")
+	stagedPath := databasePath + ".restore-staged"
+	backupPath := databasePath + ".restore-backup"
+	if err := os.WriteFile(stagedPath, []byte("staged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backupPath, []byte("backup"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	required, err := (Archive{}).RecoveryRequired(databasePath)
+	if err != nil {
+		t.Fatalf("RecoveryRequired() error = %v", err)
+	}
+	if !required {
+		t.Fatal("RecoveryRequired() = false, want true")
+	}
+	assertFileBody(t, stagedPath, "staged")
+	assertFileBody(t, backupPath, "backup")
+}
+
 func assertFileBody(t *testing.T, path, want string) {
 	t.Helper()
 	body, err := os.ReadFile(path)

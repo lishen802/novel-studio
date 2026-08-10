@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,16 +13,18 @@ import (
 )
 
 type Service struct {
-	packages    ports.ProjectPackageManager
-	stores      ports.ProjectStoreFactory
-	license     license.Service
-	clock       ports.Clock
-	ids         ports.IDGenerator
-	snapshots   ports.SnapshotArchive
-	branches    ports.BranchArchive
-	imports     ports.ImportSourceArchive
-	credentials ports.CredentialStore
-	providers   ports.ModelProviderFactory
+	packages      ports.ProjectPackageManager
+	stores        ports.ProjectStoreFactory
+	license       license.Service
+	clock         ports.Clock
+	ids           ports.IDGenerator
+	snapshots     ports.SnapshotArchive
+	branches      ports.BranchArchive
+	imports       ports.ImportSourceArchive
+	credentials   ports.CredentialStore
+	providers     ports.ModelProviderFactory
+	leaseManager  ports.ProjectLeaseManager
+	leaseMetadata ports.ProjectLeaseMetadata
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -57,9 +60,11 @@ type Service struct {
 }
 
 type activeWorkspace struct {
-	packageInfo ports.ProjectPackage
-	store       ports.ProjectStore
-	generation  uint64
+	packageInfo  ports.ProjectPackage
+	store        ports.ProjectStore
+	mode         ports.ProjectAccessMode
+	projectLease ports.ProjectLease
+	generation   uint64
 }
 
 func NewService(
@@ -111,6 +116,17 @@ func (s *Service) ConfigureImportSourceArchive(archive ports.ImportSourceArchive
 	s.imports = archive
 }
 
+// ConfigureProjectLease installs the process-scoped lease dependencies used
+// for editable project lifecycles. The application supplies the OS-backed
+// manager; application tests use a fake and therefore do not depend on OS
+// lock semantics.
+func (s *Service) ConfigureProjectLease(manager ports.ProjectLeaseManager, metadata ports.ProjectLeaseMetadata) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.leaseManager = manager
+	s.leaseMetadata = metadata
+}
+
 func (s *Service) CreateProject(
 	ctx context.Context,
 	parentDirectory, title, genre, summary string,
@@ -131,21 +147,32 @@ func (s *Service) CreateProject(
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("create project package: %w", err)
 	}
+	projectLease, err := s.acquireProjectLease(packageInfo)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("acquire project lease: %w", err)
+	}
 	store, err := s.stores.Create(ctx, packageInfo.Database, project)
 	if err != nil {
+		_ = releaseProjectLease(projectLease)
 		return ProjectView{}, fmt.Errorf("create project store: %w", err)
 	}
 
-	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease}
+	if err := s.updateProjectLeaseMetadata(ctx, &candidate); err != nil {
+		_ = closeWorkspaceResources(candidate)
+		return ProjectView{}, err
+	}
 	if err := s.recoverInterruptedJobs(ctx, store); err != nil {
-		_ = store.Close()
+		_ = closeWorkspaceResources(candidate)
 		return ProjectView{}, err
 	}
 	if err := s.ensureBranchCatalog(ctx, &candidate); err != nil {
-		_ = store.Close()
+		_ = closeWorkspaceResources(candidate)
 		return ProjectView{}, err
 	}
-	s.replaceActive(candidate)
+	if err := s.replaceActive(candidate); err != nil {
+		return ProjectView{}, err
+	}
 	return projectView(project, packageInfo.Root), nil
 }
 
@@ -179,6 +206,16 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("inspect project package: %w", err)
 	}
+	projectLease, err := s.acquireProjectLease(packageInfo)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("acquire project lease: %w", err)
+	}
+	cleanupLease := true
+	defer func() {
+		if cleanupLease {
+			_ = releaseProjectLease(projectLease)
+		}
+	}()
 	if err := s.packages.PrepareEditable(packageInfo); err != nil {
 		return ProjectView{}, fmt.Errorf("prepare project package for editing: %w", err)
 	}
@@ -200,7 +237,11 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 		return ProjectView{}, fmt.Errorf("read project: %w", err)
 	}
 
-	candidate := activeWorkspace{packageInfo: packageInfo, store: store}
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease}
+	if err := s.updateProjectLeaseMetadata(ctx, &candidate); err != nil {
+		_ = store.Close()
+		return ProjectView{}, err
+	}
 	if err := s.recoverInterruptedJobs(ctx, store); err != nil {
 		_ = store.Close()
 		return ProjectView{}, err
@@ -209,8 +250,66 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 		_ = store.Close()
 		return ProjectView{}, err
 	}
-	s.replaceActive(candidate)
+	replaceErr := s.replaceActive(candidate)
+	cleanupLease = false
+	if replaceErr != nil {
+		return ProjectView{}, replaceErr
+	}
 	return projectView(project, packageInfo.Root), nil
+}
+
+// OpenProjectReadOnly opens a current-schema project without acquiring the
+// editable OS lease or running any recovery writers. Pending recovery is
+// reported to the caller instead of being silently repaired.
+func (s *Service) OpenProjectReadOnly(ctx context.Context, packagePath string) (ProjectView, error) {
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ProjectView{}, err
+	}
+	defer s.endLifecycleOperation()
+
+	packageInfo, err := s.packages.Inspect(packagePath)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("inspect project package: %w", err)
+	}
+	recoveryRequired, err := s.snapshots.RecoveryRequired(packageInfo.Database)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("inspect snapshot recovery state: %w", err)
+	}
+	if recoveryRequired {
+		return ProjectView{}, ErrProjectRecoveryRequired
+	}
+	recoveryRequired, err = s.stores.RecoveryRequired(packageInfo.Database)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("inspect database recovery state: %w", err)
+	}
+	if recoveryRequired {
+		return ProjectView{}, ErrProjectRecoveryRequired
+	}
+	if s.branches != nil {
+		recoveryRequired, err = s.branches.RecoveryRequired(packageInfo.Branches, packageInfo.Database)
+		if err != nil {
+			return ProjectView{}, fmt.Errorf("inspect branch recovery state: %w", err)
+		}
+		if recoveryRequired {
+			return ProjectView{}, ErrProjectRecoveryRequired
+		}
+	}
+	store, err := s.stores.OpenReadOnly(ctx, packageInfo.Database)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("open read-only project store: %w", err)
+	}
+	project, err := store.Project(ctx)
+	if err != nil {
+		_ = store.Close()
+		return ProjectView{}, fmt.Errorf("read project: %w", err)
+	}
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessReadOnly}
+	if err := s.replaceActive(candidate); err != nil {
+		return ProjectView{}, err
+	}
+	view := projectView(project, packageInfo.Root)
+	view.AccessMode = ports.ProjectAccessReadOnly
+	return view, nil
 }
 
 func (s *Service) ListChapters(ctx context.Context) ([]ChapterView, error) {
@@ -374,13 +473,14 @@ func (s *Service) Close() error {
 	s.mu.Lock()
 	active := s.active
 	s.active = nil
+	s.storeGeneration++
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
 	s.leases.endDraining()
 	if active == nil {
 		return nil
 	}
-	return active.store.Close()
+	return closeWorkspaceResources(*active)
 }
 
 func (s *Service) beginLifecycleOperation() error {
@@ -399,7 +499,7 @@ func (s *Service) endLifecycleOperation() {
 // replaceActive must be called while lifecycleMu is held. It drains in-flight
 // job leases before swapping the active workspace so jobs don't write to the
 // closed store.
-func (s *Service) replaceActive(next activeWorkspace) {
+func (s *Service) replaceActive(next activeWorkspace) error {
 	// Reject new jobs, then signal in-flight jobs to exit.
 	s.leases.beginDraining()
 	s.cancelAllAgentJobs()
@@ -416,9 +516,54 @@ func (s *Service) replaceActive(next activeWorkspace) {
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	s.mu.Unlock()
 	s.leases.endDraining()
-	if previous != nil {
-		_ = previous.store.Close()
+	if previous == nil {
+		return nil
 	}
+	return closeWorkspaceResources(*previous)
+}
+
+func (s *Service) acquireProjectLease(packageInfo ports.ProjectPackage) (ports.ProjectLease, error) {
+	s.mu.RLock()
+	manager := s.leaseManager
+	metadata := s.leaseMetadata
+	s.mu.RUnlock()
+	if manager == nil {
+		return nil, nil
+	}
+	return manager.Acquire(packageInfo, metadata)
+}
+
+func (s *Service) updateProjectLeaseMetadata(ctx context.Context, active *activeWorkspace) error {
+	if active.projectLease == nil {
+		return nil
+	}
+	project, err := active.store.Project(ctx)
+	if err != nil {
+		return fmt.Errorf("read project for lease metadata: %w", err)
+	}
+	s.mu.RLock()
+	metadata := s.leaseMetadata
+	s.mu.RUnlock()
+	metadata.ProjectID = project.ID
+	if err := active.projectLease.UpdateMetadata(metadata); err != nil {
+		return fmt.Errorf("update project lease metadata: %w", err)
+	}
+	return nil
+}
+
+func closeWorkspaceResources(active activeWorkspace) error {
+	var closeErr error
+	if active.store != nil {
+		closeErr = active.store.Close()
+	}
+	return errors.Join(closeErr, releaseProjectLease(active.projectLease))
+}
+
+func releaseProjectLease(projectLease ports.ProjectLease) error {
+	if projectLease == nil {
+		return nil
+	}
+	return projectLease.Release()
 }
 
 // currentGeneration returns the store generation of the active workspace, or 0

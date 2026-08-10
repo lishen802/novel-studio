@@ -134,5 +134,6 @@ type ChangeSetApplyResult struct {
 type ProjectStoreFactory interface {
 	Create(ctx context.Context, databasePath string, project projectdomain.Project) (ProjectStore, error)
 	Open(ctx context.Context, databasePath string) (ProjectStore, error)
+	RecoveryRequired(databasePath string) (bool, error)
 	OpenReadOnly(ctx context.Context, databasePath string) (ProjectStore, error)
 }

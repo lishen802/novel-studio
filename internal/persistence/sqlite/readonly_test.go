@@ -279,6 +279,45 @@ func TestOpenReadOnlySeesCommittedChapterInActiveWAL(t *testing.T) {
 	}
 }
 
+func TestReadOnlyMigrationRecoveryPreflightReportsArtifactsWithoutMutating(t *testing.T) {
+	for _, artifact := range []string{
+		"migration.json",
+		"migration-stage.sqlite",
+		"migration-original.sqlite",
+	} {
+		t.Run(artifact, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "project.db")
+			if err := os.WriteFile(path, []byte("SQLite format 3\x00"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			recovery := filepath.Join(root, "recovery")
+			if err := os.Mkdir(recovery, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(recovery, artifact), []byte("interrupted"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			before := collectFileHashes(t, root)
+
+			required, err := (Factory{}).RecoveryRequired(path)
+			if err != nil {
+				t.Fatalf("RecoveryRequired() error = %v", err)
+			}
+			if !required {
+				t.Fatal("RecoveryRequired() = false, want true")
+			}
+			if _, err := (Factory{}).OpenReadOnly(context.Background(), path); !errors.Is(err, ErrDatabaseMigrationRecovery) {
+				t.Fatalf("OpenReadOnly() error = %v, want ErrDatabaseMigrationRecovery", err)
+			}
+			after := collectFileHashes(t, root)
+			if !sameFileHashes(before, after) {
+				t.Fatalf("migration recovery preflight modified files\nbefore: %#v\nafter: %#v", before, after)
+			}
+		})
+	}
+}
+
 func newReadOnlyTestProject() (project projectdomain.Project, err error) {
 	return projectdomain.NewProject("project-1", "长夜织境", "东方奇幻", "简介", time.Unix(100, 0))
 }

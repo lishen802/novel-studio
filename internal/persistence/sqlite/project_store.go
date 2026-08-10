@@ -62,6 +62,13 @@ func (Factory) Open(ctx context.Context, databasePath string) (ports.ProjectStor
 	return store, nil
 }
 
+// RecoveryRequired performs the migration-recovery portion of a read-only
+// workspace preflight. It only stats fixed recovery artifacts and never
+// invokes migration recovery or opens a writable SQLite connection.
+func (Factory) RecoveryRequired(databasePath string) (bool, error) {
+	return migrationRecoveryRequired(databasePath)
+}
+
 // OpenReadOnly opens an already-current project database without migration or
 // recovery. The returned Store has the same read API as an editable store;
 // SQLite mode=ro and query_only reject any accidental write attempt.

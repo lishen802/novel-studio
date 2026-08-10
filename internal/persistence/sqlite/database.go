@@ -43,6 +43,13 @@ func OpenExistingDatabase(ctx context.Context, path string) (*sql.DB, error) {
 // changing canonical or business project data. It deliberately avoids
 // migration recovery, Goose, WAL configuration, and checkpointing.
 func OpenReadOnlyDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	recoveryRequired, err := migrationRecoveryRequired(path)
+	if err != nil {
+		return nil, err
+	}
+	if recoveryRequired {
+		return nil, ErrDatabaseMigrationRecovery
+	}
 	if err := probeExistingDatabase(path); err != nil {
 		return nil, err
 	}

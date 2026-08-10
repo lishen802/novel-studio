@@ -176,6 +176,26 @@ func TestRecoverInterruptedSwitchUsesCommittedCatalogAsDecisionPoint(t *testing.
 	assertTestFile(t, databasePath, "current")
 }
 
+func TestRecoveryRequiredReportsOperationArtifactsWithoutMutatingThem(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "branches")
+	databasePath := filepath.Join(root, "project.db")
+	writeTestFile(t, databasePath+".branch-backup", "original")
+	writeTestFile(t, journalPath(directory), `{"version":1,"database":"`+databasePath+`"}`)
+
+	required, err := (Archive{}).RecoveryRequired(directory, databasePath)
+	if err != nil {
+		t.Fatalf("RecoveryRequired() error = %v", err)
+	}
+	if !required {
+		t.Fatal("RecoveryRequired() = false, want true")
+	}
+	assertTestFile(t, databasePath+".branch-backup", "original")
+	if _, err := os.Stat(journalPath(directory)); err != nil {
+		t.Fatalf("operation journal was modified: %v", err)
+	}
+}
+
 func TestRecoverInterruptedOperationKeepsDatabaseAndHeadWhenCatalogCommitted(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "project.db")

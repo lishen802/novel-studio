@@ -208,7 +208,13 @@ func (s *Service) SwitchBranch(
 			err,
 		)
 	}
-	s.active = &activeWorkspace{packageInfo: active.packageInfo, store: store}
+	s.active = &activeWorkspace{
+		packageInfo:  active.packageInfo,
+		store:        store,
+		mode:         active.mode,
+		projectLease: active.projectLease,
+		generation:   active.generation,
+	}
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	return s.branchWorkspaceViewLocked(ctx, nextCatalog.ActiveBranchID)
 }
@@ -345,7 +351,13 @@ func (s *Service) ConfirmBranchMerge(
 	if err != nil {
 		return BranchSwitchView{}, s.reopenAfterBranchFailureLocked(ctx, active.packageInfo, err)
 	}
-	s.active = &activeWorkspace{packageInfo: active.packageInfo, store: store}
+	s.active = &activeWorkspace{
+		packageInfo:  active.packageInfo,
+		store:        store,
+		mode:         active.mode,
+		projectLease: active.projectLease,
+		generation:   active.generation,
+	}
 	return s.branchWorkspaceViewLocked(ctx, catalog.ActiveBranchID)
 }
 
@@ -462,14 +474,37 @@ func (s *Service) reopenAfterBranchFailureLocked(
 	projectPackage ports.ProjectPackage,
 	cause error,
 ) error {
+	active := s.active
 	store, reopenErr := s.stores.Open(ctx, projectPackage.Database)
 	if reopenErr == nil {
-		s.active = &activeWorkspace{packageInfo: projectPackage, store: store}
+		if active == nil {
+			s.active = &activeWorkspace{packageInfo: projectPackage, store: store}
+		} else {
+			s.active = &activeWorkspace{
+				packageInfo:  projectPackage,
+				store:        store,
+				mode:         active.mode,
+				projectLease: active.projectLease,
+				generation:   active.generation,
+			}
+		}
 	} else {
 		s.active = nil
 	}
 	if reopenErr != nil {
-		return fmt.Errorf("branch operation failed: %v; reopen project: %v", cause, reopenErr)
+		var releaseErr error
+		if active != nil {
+			releaseErr = releaseProjectLease(active.projectLease)
+		}
+		var releaseContext error
+		if releaseErr != nil {
+			releaseContext = fmt.Errorf("release project lease: %w", releaseErr)
+		}
+		return errors.Join(
+			fmt.Errorf("branch operation failed: %w", cause),
+			fmt.Errorf("reopen project: %w", reopenErr),
+			releaseContext,
+		)
 	}
 	return fmt.Errorf("branch operation failed and project was reopened: %w", cause)
 }
@@ -480,6 +515,7 @@ func (s *Service) rollbackBranchSwitchLocked(
 	previousID, currentID string,
 	cause error,
 ) error {
+	active := s.active
 	_, switchErr := s.branches.Switch(
 		projectPackage.Branches,
 		projectPackage.Database,
@@ -489,7 +525,17 @@ func (s *Service) rollbackBranchSwitchLocked(
 	)
 	if switchErr != nil {
 		s.active = nil
-		return fmt.Errorf("branch switch verification failed: %v; rollback: %v", cause, switchErr)
+		var releaseContext error
+		if active != nil {
+			if releaseErr := releaseProjectLease(active.projectLease); releaseErr != nil {
+				releaseContext = fmt.Errorf("release project lease: %w", releaseErr)
+			}
+		}
+		return errors.Join(
+			fmt.Errorf("branch switch verification failed: %w", cause),
+			fmt.Errorf("rollback branch switch: %w", switchErr),
+			releaseContext,
+		)
 	}
 	return s.reopenAfterBranchFailureLocked(ctx, projectPackage, cause)
 }
