@@ -18,6 +18,7 @@ const project = {
   genre: "东方奇幻",
   summary: "",
   path: "/books/长夜织境.zjproject",
+  accessMode: "editable",
 };
 
 function nativeImportJob(overrides: Record<string, unknown> = {}) {
@@ -63,6 +64,7 @@ function installNative(overrides: Record<string, unknown> = {}) {
     ChooseManuscriptToImport: vi.fn(async () => ""),
     CreateProject: vi.fn(async () => project),
     OpenProject: vi.fn(async () => project),
+    CreateProjectRecoveryCopy: vi.fn(),
     ListChapters: vi.fn(async () => []),
     CreateChapter: vi.fn(),
     OpenChapter: vi.fn(),
@@ -645,6 +647,86 @@ describe("wailsStudioClient", () => {
       project,
     );
     expect(api.CreateProject).toHaveBeenCalledWith(input);
+  });
+
+  it("forwards an explicit project access mode and parses opened results", async () => {
+    const readOnlyProject = { ...project, accessMode: "read_only" };
+    const api = installNative({
+      OpenProject: vi.fn(async () => ({
+        outcome: "opened",
+        project: readOnlyProject,
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.openProject("/books/长夜织境.zjproject", "read_only"),
+    ).resolves.toEqual({ outcome: "opened", project: readOnlyProject });
+    expect(api.OpenProject).toHaveBeenCalledWith({
+      path: "/books/长夜织境.zjproject",
+      mode: "read_only",
+    });
+  });
+
+  it("parses lease conflicts without treating them as desktop errors", async () => {
+    installNative({
+      OpenProject: vi.fn(async () => ({
+        outcome: "lease_conflict",
+        conflict: {
+          path: "/books/长夜织境.zjproject",
+          retryable: true,
+          holder: {
+            pid: 42,
+            hostname: "author-mac",
+            applicationVersion: "1.0.0",
+            startedAt: "2026-08-10T08:30:00Z",
+            projectId: "project-1",
+          },
+        },
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.openProject("/books/长夜织境.zjproject", "editable"),
+    ).resolves.toMatchObject({
+      outcome: "lease_conflict",
+      conflict: { holder: { hostname: "author-mac" } },
+    });
+  });
+
+  it.each([
+    ["unknown project access mode", { outcome: "opened", project: { ...project, accessMode: "preview" } }],
+    ["unknown open outcome", { outcome: "opened_elsewhere", project }],
+    ["opened result without project", { outcome: "opened" }],
+    ["conflict result without retryability", { outcome: "lease_conflict", conflict: { path: project.path } }],
+  ])("rejects malformed project open result: %s", async (_name, result) => {
+    installNative({ OpenProject: vi.fn(async () => result) });
+
+    await expect(
+      wailsStudioClient.openProject("/books/长夜织境.zjproject", "editable"),
+    ).rejects.toThrow();
+  });
+
+  it("parses recovery copies that were published but could not be opened", async () => {
+    const api = installNative({
+      CreateProjectRecoveryCopy: vi.fn(async () => ({
+        outcome: "published",
+        path: "/copies/长夜织境-恢复.zjproject",
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.createProjectRecoveryCopy({
+        sourcePath: "/books/长夜织境.zjproject",
+        parentDirectory: "/copies",
+      }),
+    ).resolves.toEqual({
+      outcome: "published",
+      path: "/copies/长夜织境-恢复.zjproject",
+    });
+    expect(api.CreateProjectRecoveryCopy).toHaveBeenCalledWith({
+      sourcePath: "/books/长夜织境.zjproject",
+      parentDirectory: "/copies",
+    });
   });
 
   it("rejects an invalid native DTO", async () => {

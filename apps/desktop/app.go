@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"net/http"
+	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
@@ -19,6 +22,11 @@ import (
 )
 
 const beforeCloseEvent = "app:before-close"
+
+// applicationVersion can be set through -ldflags at release time. Development
+// and local test builds intentionally expose the stable non-empty fallback in
+// lease diagnostics rather than attempting to inspect other processes.
+var applicationVersion = "dev/unknown"
 
 type App struct {
 	api             *DesktopAPI
@@ -43,6 +51,7 @@ func newApp() *App {
 		providers.NewFactory(http.DefaultClient),
 	)
 	workspaceService.ConfigureImportSourceArchive(projectfs.ImportSourceArchive{})
+	workspaceService.ConfigureProjectLease(projectfs.LeaseManager{}, processLeaseMetadata())
 	notifier := newWailsJobEventNotifier()
 	workspaceService.SetJobEventNotifier(notifier)
 	app := &App{
@@ -55,6 +64,23 @@ func newApp() *App {
 	}
 	app.api.completeClose = app.completeClose
 	return app
+}
+
+func processLeaseMetadata() ports.ProjectLeaseMetadata {
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "unknown"
+	}
+	version := applicationVersion
+	if version == "" {
+		version = "dev/unknown"
+	}
+	return ports.ProjectLeaseMetadata{
+		PID:                os.Getpid(),
+		Hostname:           hostname,
+		ApplicationVersion: version,
+		StartedAt:          time.Now().UTC(),
+	}
 }
 
 func (a *App) startup(ctx context.Context) {

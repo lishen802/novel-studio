@@ -31,6 +31,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     // Seed events for run-1 directly via the fake's helper.
     client.appendJobEvent("run-1", "agent", 1, "job_started", "");
@@ -97,6 +98,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     // Seed a snapshot with earliest_replayable_sequence=5 so a cursor at 0
     // triggers snapshotRequired. Then add events after the snapshot.
@@ -145,6 +147,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     client.appendJobEvent("run-1", "agent", 1, "job_started", "");
     client.upsertJobSnapshot({
@@ -189,6 +192,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     client.appendJobEvent("run-agent", "agent", 1, "job_started", "");
     client.appendJobEvent("run-extraction", "extraction", 1, "job_started", "");
@@ -243,6 +247,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     // Seed 3 events; with pageSize=2, the hook should paginate to fetch all.
     client.appendJobEvent("run-1", "agent", 1, "job_started", "");
@@ -294,6 +299,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     client.appendJobEvent("run-1", "agent", 1, "job_started", "");
     client.upsertJobSnapshot({
@@ -338,6 +344,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     client.appendJobEvent("run-1", "agent", 1, "job_started", "");
     client.appendJobEvent("run-1", "agent", 2, "job_recovered", "");
@@ -385,6 +392,7 @@ describe("useJobEventReplay", () => {
       genre: "",
       summary: "",
       path: "/tmp/test.zjproject",
+      accessMode: "editable",
     };
     client.appendJobEvent("run-1", "agent", 1, "job_started", "");
     client.upsertJobSnapshot({

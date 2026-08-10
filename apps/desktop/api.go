@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -10,6 +12,8 @@ import (
 type WorkspaceUseCases interface {
 	CreateProject(context.Context, string, string, string, string) (workspace.ProjectView, error)
 	OpenProject(context.Context, string) (workspace.ProjectView, error)
+	OpenProjectReadOnly(context.Context, string) (workspace.ProjectView, error)
+	CreateProjectRecoveryCopy(context.Context, string, string) (workspace.RecoveryCopyResult, error)
 	ListChapters(context.Context) ([]workspace.ChapterView, error)
 	CreateChapter(context.Context, string) (workspace.ChapterView, error)
 	OpenChapter(context.Context, string) (workspace.ChapterView, error)
@@ -141,6 +145,58 @@ type CreateProjectInput struct {
 	Title           string `json:"title"`
 	Genre           string `json:"genre"`
 	Summary         string `json:"summary"`
+}
+
+type ProjectOpenMode string
+
+const (
+	ProjectOpenModeEditable ProjectOpenMode = "editable"
+	ProjectOpenModeReadOnly ProjectOpenMode = "read_only"
+)
+
+type ProjectOpenInput struct {
+	Path string          `json:"path"`
+	Mode ProjectOpenMode `json:"mode"`
+}
+
+type projectOpenOutcome string
+
+const (
+	projectOpenOutcomeOpened        projectOpenOutcome = "opened"
+	projectOpenOutcomeLeaseConflict projectOpenOutcome = "lease_conflict"
+)
+
+type ProjectLeaseConflictView struct {
+	// Path echoes the user-selected package path. The platform conflict's
+	// package path is deliberately not forwarded because it can contain an
+	// internal or otherwise sensitive absolute path.
+	Path      string                      `json:"path"`
+	Holder    *ports.ProjectLeaseMetadata `json:"holder,omitempty"`
+	Retryable bool                        `json:"retryable"`
+}
+
+type ProjectOpenResultView struct {
+	Outcome  projectOpenOutcome        `json:"outcome"`
+	Project  *workspace.ProjectView    `json:"project,omitempty"`
+	Conflict *ProjectLeaseConflictView `json:"conflict,omitempty"`
+}
+
+type RecoveryCopyInput struct {
+	SourcePath      string `json:"sourcePath"`
+	ParentDirectory string `json:"parentDirectory"`
+}
+
+type recoveryCopyOutcome string
+
+const (
+	recoveryCopyOutcomeOpened    recoveryCopyOutcome = "opened"
+	recoveryCopyOutcomePublished recoveryCopyOutcome = "published"
+)
+
+type RecoveryCopyResultView struct {
+	Outcome recoveryCopyOutcome    `json:"outcome"`
+	Path    string                 `json:"path"`
+	Project *workspace.ProjectView `json:"project,omitempty"`
 }
 
 type CreateBranchInput struct {
@@ -301,8 +357,56 @@ func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectV
 	))
 }
 
-func (a *DesktopAPI) OpenProject(path string) (workspace.ProjectView, error) {
-	return safeResult(a.workspace.OpenProject(a.ctx, path))
+func (a *DesktopAPI) OpenProject(input ProjectOpenInput) (ProjectOpenResultView, error) {
+	var (
+		project workspace.ProjectView
+		err     error
+	)
+	switch input.Mode {
+	case ProjectOpenModeEditable:
+		project, err = a.workspace.OpenProject(a.ctx, input.Path)
+	case ProjectOpenModeReadOnly:
+		project, err = a.workspace.OpenProjectReadOnly(a.ctx, input.Path)
+	default:
+		return ProjectOpenResultView{}, safeDesktopError(errInvalidProjectOpenMode)
+	}
+	if err == nil {
+		return ProjectOpenResultView{
+			Outcome: projectOpenOutcomeOpened,
+			Project: &project,
+		}, nil
+	}
+	var conflict *ports.ProjectLeaseConflict
+	if input.Mode == ProjectOpenModeEditable && errors.As(err, &conflict) {
+		return ProjectOpenResultView{
+			Outcome: projectOpenOutcomeLeaseConflict,
+			Conflict: &ProjectLeaseConflictView{
+				Path:      input.Path,
+				Holder:    conflict.Holder,
+				Retryable: conflict.Retryable,
+			},
+		}, nil
+	}
+	return ProjectOpenResultView{}, safeDesktopError(err)
+}
+
+func (a *DesktopAPI) CreateProjectRecoveryCopy(input RecoveryCopyInput) (RecoveryCopyResultView, error) {
+	result, err := a.workspace.CreateProjectRecoveryCopy(a.ctx, input.SourcePath, input.ParentDirectory)
+	if result.Path != "" {
+		outcome := recoveryCopyOutcomePublished
+		if result.Project != nil {
+			outcome = recoveryCopyOutcomeOpened
+		}
+		return RecoveryCopyResultView{
+			Outcome: outcome,
+			Path:    result.Path,
+			Project: result.Project,
+		}, nil
+	}
+	if err != nil {
+		return RecoveryCopyResultView{}, safeDesktopError(err)
+	}
+	return RecoveryCopyResultView{}, safeDesktopError(ErrRecoveryCopyResultMissing)
 }
 
 func (a *DesktopAPI) ListChapters() ([]workspace.ChapterView, error) {

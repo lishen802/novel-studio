@@ -23,6 +23,12 @@ npm run build
 cd ..
 /Users/shenlee/go/bin/wails dev
 /Users/shenlee/go/bin/wails build -clean
+
+# API 签名变更后：重新生成被忽略的本地 Wails 绑定并核验关键契约
+/Users/shenlee/go/bin/wails generate module
+node ../../scripts/ci/verify-wails-bindings.mjs
 ```
+
+`frontend/wailsjs/` 是由 Wails 生成的本地产物，不纳入版本控制。macOS 与 Windows CI 会使用 `WAILS_VERSION` 生成它，并通过 `verify-wails-bindings.mjs` 验证 `OpenProject`、恢复副本和项目访问模式的生成表面；不得手写或复制这些文件。
 
 不要提交 API key、用户稿件、`.zjproject` 项目包、本地数据库或 `build/bin/`。

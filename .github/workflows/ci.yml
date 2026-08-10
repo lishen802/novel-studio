@@ -111,6 +111,12 @@ jobs:
       - name: Diagnose Wails toolchain
         run: wails doctor
 
+      - name: Generate and verify Wails bindings
+        run: |
+          wails generate module
+          node ../../scripts/ci/verify-wails-bindings.mjs
+        working-directory: apps/desktop
+
       - name: Test legacy project migration on macOS
         run: go test -count=1 ./internal/testsupport/legacyproject ./internal/platform/projectfs ./internal/persistence/sqlite ./internal/application/workspace
 
@@ -179,6 +185,12 @@ jobs:
       - name: Diagnose Wails toolchain
         run: wails doctor
 
+      - name: Generate and verify Wails bindings
+        run: |
+          wails generate module
+          node ../../scripts/ci/verify-wails-bindings.mjs
+        working-directory: apps/desktop
+
       - name: Build Windows application
         run: wails build -clean -m
         working-directory: apps/desktop
@@ -218,4 +230,3 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
-

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
@@ -44,6 +45,136 @@ func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
 	}
 	if workspaces.createInput != input {
 		t.Fatalf("forwarded input = %#v, want %#v", workspaces.createInput, input)
+	}
+}
+
+func TestDesktopAPIOpenProjectUsesStructuredAccessContract(t *testing.T) {
+	editable := workspace.ProjectView{
+		ID:         "project-1",
+		Title:      "长夜织境",
+		Path:       "/books/长夜织境.zjproject",
+		AccessMode: ports.ProjectAccessEditable,
+	}
+	readOnly := editable
+	readOnly.AccessMode = ports.ProjectAccessReadOnly
+	workspaces := &fakeWorkspace{openResult: editable, openReadOnlyResult: readOnly}
+	api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	opened, err := api.OpenProject(ProjectOpenInput{
+		Path: "/books/长夜织境.zjproject",
+		Mode: ProjectOpenModeEditable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Outcome != projectOpenOutcomeOpened || opened.Project == nil || *opened.Project != editable {
+		t.Fatalf("editable open result = %#v", opened)
+	}
+	if workspaces.openPath != "/books/长夜织境.zjproject" {
+		t.Fatalf("editable path = %q", workspaces.openPath)
+	}
+
+	opened, err = api.OpenProject(ProjectOpenInput{
+		Path: "/books/长夜织境.zjproject",
+		Mode: ProjectOpenModeReadOnly,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Outcome != projectOpenOutcomeOpened || opened.Project == nil || *opened.Project != readOnly {
+		t.Fatalf("read-only open result = %#v", opened)
+	}
+	if workspaces.openReadOnlyPath != "/books/长夜织境.zjproject" {
+		t.Fatalf("read-only path = %q", workspaces.openReadOnlyPath)
+	}
+}
+
+func TestDesktopAPIOpenProjectReturnsLeaseConflictInsteadOfAnError(t *testing.T) {
+	startedAt := time.Date(2026, time.August, 10, 8, 30, 0, 0, time.UTC)
+	for _, holder := range []*ports.ProjectLeaseMetadata{
+		{
+			PID:                42,
+			Hostname:           "author-mac",
+			ApplicationVersion: "1.0.0",
+			StartedAt:          startedAt,
+			ProjectID:          "project-1",
+		},
+		nil,
+	} {
+		t.Run("holder", func(t *testing.T) {
+			workspaces := &fakeWorkspace{openErr: &ports.ProjectLeaseConflict{
+				PackagePath: "/private/secret/books/长夜织境.zjproject",
+				Holder:      holder,
+				Retryable:   true,
+			}}
+			api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+			api.startup(context.Background())
+
+			result, err := api.OpenProject(ProjectOpenInput{
+				Path: "/books/长夜织境.zjproject",
+				Mode: ProjectOpenModeEditable,
+			})
+			if err != nil {
+				t.Fatalf("OpenProject() error = %v", err)
+			}
+			if result.Outcome != projectOpenOutcomeLeaseConflict || result.Conflict == nil {
+				t.Fatalf("result = %#v", result)
+			}
+			if result.Conflict.Path != "/books/长夜织境.zjproject" || result.Conflict.Retryable != true {
+				t.Fatalf("conflict = %#v", result.Conflict)
+			}
+			if !reflect.DeepEqual(result.Conflict.Holder, holder) {
+				t.Fatalf("holder = %#v, want %#v", result.Conflict.Holder, holder)
+			}
+		})
+	}
+}
+
+func TestDesktopAPIOpenProjectRejectsUnknownAccessMode(t *testing.T) {
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	_, err := api.OpenProject(ProjectOpenInput{Path: "/books/长夜织境.zjproject", Mode: "preview"})
+	var safe *desktopError
+	if !errors.As(err, &safe) || safe.Code != errorValidationFailed {
+		t.Fatalf("OpenProject() error = %#v, want validation error", err)
+	}
+}
+
+func TestDesktopAPICreatesRecoveryCopyWithPartialSuccessContract(t *testing.T) {
+	project := workspace.ProjectView{ID: "copy-1", Path: "/copies/长夜-恢复.zjproject", AccessMode: ports.ProjectAccessEditable}
+	for _, test := range []struct {
+		name   string
+		result workspace.RecoveryCopyResult
+		err    error
+		want   recoveryCopyOutcome
+	}{
+		{name: "opened", result: workspace.RecoveryCopyResult{Path: project.Path, Project: &project}, want: recoveryCopyOutcomeOpened},
+		{name: "published but open failed", result: workspace.RecoveryCopyResult{Path: project.Path}, err: errors.New("open published recovery copy: internal failure"), want: recoveryCopyOutcomePublished},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workspaces := &fakeWorkspace{recoveryCopyResult: test.result, recoveryCopyErr: test.err}
+			api := newDesktopAPI(workspaces, &fakeDirectoryPicker{})
+			api.startup(context.Background())
+
+			got, err := api.CreateProjectRecoveryCopy(RecoveryCopyInput{
+				SourcePath:      "/books/长夜织境.zjproject",
+				ParentDirectory: "/copies",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Outcome != test.want || got.Path != project.Path {
+				t.Fatalf("result = %#v", got)
+			}
+			if test.want == recoveryCopyOutcomeOpened && (got.Project == nil || *got.Project != project) {
+				t.Fatalf("opened project = %#v", got.Project)
+			}
+			if workspaces.recoveryCopyInput != (recoveryCopyCall{sourcePath: "/books/长夜织境.zjproject", parentDirectory: "/copies"}) {
+				t.Fatalf("recovery copy input = %#v", workspaces.recoveryCopyInput)
+			}
+		})
 	}
 }
 
@@ -526,7 +657,10 @@ func TestDesktopAPIMapsWorkspaceErrorToSafeDesktopError(t *testing.T) {
 	)
 	api.startup(context.Background())
 
-	_, err := api.OpenProject("/books/broken.zjproject")
+	_, err := api.OpenProject(ProjectOpenInput{
+		Path: "/books/broken.zjproject",
+		Mode: ProjectOpenModeEditable,
+	})
 	var safe *desktopError
 	if !errors.As(err, &safe) || safe.Code != errorOperationFailed {
 		t.Fatalf("error = %#v, want safe operation error", err)
@@ -626,6 +760,32 @@ func TestSafeDesktopErrorClassifiesRecoveryFailures(t *testing.T) {
 			var safe *desktopError
 			if err := safeDesktopError(test.err); !errors.As(err, &safe) || safe.Code != test.code {
 				t.Fatalf("error = %#v, want code %q", err, test.code)
+			}
+		})
+	}
+}
+
+func TestSafeDesktopErrorClassifiesProjectLifecycleFailuresWithoutLeakingDetails(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code desktopErrorCode
+	}{
+		{name: "read only", err: workspace.ErrWorkspaceReadOnly, code: errorProjectReadOnly},
+		{name: "migration", err: sqlite.ErrDatabaseMigrationRequired, code: errorProjectMigration},
+		{name: "recovery", err: workspace.ErrProjectRecoveryRequired, code: errorProjectRecovery},
+		{name: "source changed", err: workspace.ErrRecoveryCopySourceChanged, code: errorRecoveryCopyChanged},
+		{name: "copy failed", err: errors.New("create recovery copy: /Users/author/private manuscript"), code: errorRecoveryCopyFailed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var safe *desktopError
+			err := safeDesktopError(test.err)
+			if !errors.As(err, &safe) || safe.Code != test.code {
+				t.Fatalf("safeDesktopError(%v) = %#v, want %s", test.err, safe, test.code)
+			}
+			if containsAny(safe.Message, "private", "/Users", "recovery copy:") {
+				t.Fatalf("unsafe lifecycle message: %q", safe.Message)
 			}
 		})
 	}
@@ -743,6 +903,19 @@ func TestAppShutdownClosesWorkspace(t *testing.T) {
 	}
 }
 
+func TestProcessLeaseMetadataDescribesOnlyThisApplication(t *testing.T) {
+	metadata := processLeaseMetadata()
+	if metadata.PID != os.Getpid() {
+		t.Fatalf("PID = %d, want %d", metadata.PID, os.Getpid())
+	}
+	if metadata.Hostname == "" || metadata.ApplicationVersion == "" {
+		t.Fatalf("incomplete metadata = %#v", metadata)
+	}
+	if metadata.StartedAt.IsZero() || metadata.StartedAt.Location() != time.UTC {
+		t.Fatalf("startedAt = %s, want non-zero UTC time", metadata.StartedAt)
+	}
+}
+
 func TestAppWaitsForFrontendFlushBeforeClosing(t *testing.T) {
 	workspaces := &fakeWorkspace{}
 	emitCalls := 0
@@ -814,6 +987,13 @@ type fakeWorkspace struct {
 	createErr                error
 	openResult               workspace.ProjectView
 	openErr                  error
+	openPath                 string
+	openReadOnlyResult       workspace.ProjectView
+	openReadOnlyErr          error
+	openReadOnlyPath         string
+	recoveryCopyInput        recoveryCopyCall
+	recoveryCopyResult       workspace.RecoveryCopyResult
+	recoveryCopyErr          error
 	listResult               []workspace.ChapterView
 	listErr                  error
 	createChapterResult      workspace.ChapterView
@@ -958,8 +1138,24 @@ func (f *fakeWorkspace) CreateProject(
 	return f.createResult, f.createErr
 }
 
-func (f *fakeWorkspace) OpenProject(context.Context, string) (workspace.ProjectView, error) {
+type recoveryCopyCall struct {
+	sourcePath      string
+	parentDirectory string
+}
+
+func (f *fakeWorkspace) OpenProject(_ context.Context, path string) (workspace.ProjectView, error) {
+	f.openPath = path
 	return f.openResult, f.openErr
+}
+
+func (f *fakeWorkspace) OpenProjectReadOnly(_ context.Context, path string) (workspace.ProjectView, error) {
+	f.openReadOnlyPath = path
+	return f.openReadOnlyResult, f.openReadOnlyErr
+}
+
+func (f *fakeWorkspace) CreateProjectRecoveryCopy(_ context.Context, sourcePath, parentDirectory string) (workspace.RecoveryCopyResult, error) {
+	f.recoveryCopyInput = recoveryCopyCall{sourcePath: sourcePath, parentDirectory: parentDirectory}
+	return f.recoveryCopyResult, f.recoveryCopyErr
 }
 
 func (f *fakeWorkspace) ListChapters(context.Context) ([]workspace.ChapterView, error) {

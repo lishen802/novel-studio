@@ -24,11 +24,21 @@ import (
 
 type desktopErrorCode string
 
+var (
+	errInvalidProjectOpenMode    = errors.New("project open mode is invalid")
+	ErrRecoveryCopyResultMissing = errors.New("recovery copy completed without a published path")
+)
+
 const (
 	errorProjectNotFound      desktopErrorCode = "PROJECT_NOT_FOUND"
 	errorPermissionDenied     desktopErrorCode = "PERMISSION_DENIED"
 	errorProjectCorrupt       desktopErrorCode = "PROJECT_CORRUPT"
 	errorProjectTooNew        desktopErrorCode = "PROJECT_TOO_NEW"
+	errorProjectReadOnly      desktopErrorCode = "PROJECT_READ_ONLY"
+	errorProjectMigration     desktopErrorCode = "PROJECT_MIGRATION_REQUIRED"
+	errorProjectRecovery      desktopErrorCode = "PROJECT_RECOVERY_REQUIRED"
+	errorRecoveryCopyChanged  desktopErrorCode = "RECOVERY_COPY_SOURCE_CHANGED"
+	errorRecoveryCopyFailed   desktopErrorCode = "RECOVERY_COPY_FAILED"
 	errorRevisionConflict     desktopErrorCode = "REVISION_CONFLICT"
 	errorWriteFailed          desktopErrorCode = "WRITE_FAILED"
 	errorDatabaseBusy         desktopErrorCode = "DATABASE_BUSY"
@@ -85,6 +95,8 @@ func safeDesktopError(err error) error {
 		code, message = errorOperationCancelled, "操作已取消。"
 	case errors.Is(err, context.DeadlineExceeded):
 		code, message = errorOperationTimeout, "操作超时，请重试。"
+	case errors.Is(err, errInvalidProjectOpenMode):
+		code, message = errorValidationFailed, "项目打开模式无效。"
 	case errors.Is(err, ports.ErrUnsupportedImportFormat):
 		code, message = errorImportFormat, "仅支持 TXT、MD 或 MARKDOWN 小说文件。"
 	case errors.Is(err, ports.ErrEmptyImportSource), errors.Is(err, importdomain.ErrEmptyManuscript):
@@ -150,6 +162,16 @@ func safeDesktopError(err error) error {
 		code, message = errorProjectCorrupt, "剧情分支文件已被外部修改或损坏，请从完整项目备份恢复。"
 	case errors.Is(err, sqlite.ErrDatabaseTooNew):
 		code, message = errorProjectTooNew, "该项目由更新版本创建，请升级应用后再打开。"
+	case errors.Is(err, workspace.ErrWorkspaceReadOnly):
+		code, message = errorProjectReadOnly, "项目已以只读模式打开，无法保存更改。"
+	case errors.Is(err, sqlite.ErrDatabaseMigrationRequired):
+		code, message = errorProjectMigration, "该项目需要升级，请以可编辑模式打开后完成升级。"
+	case errors.Is(err, workspace.ErrProjectRecoveryRequired):
+		code, message = errorProjectRecovery, "项目需要恢复，请以可编辑模式打开后完成恢复。"
+	case errors.Is(err, workspace.ErrRecoveryCopySourceChanged):
+		code, message = errorRecoveryCopyChanged, "源项目在创建恢复副本时发生变化，请重试。"
+	case errors.Is(err, ErrRecoveryCopyResultMissing), strings.Contains(lowerMessage, "recovery copy"):
+		code, message = errorRecoveryCopyFailed, "无法创建恢复副本，请检查目标位置后重试。"
 	case errors.Is(err, projectdomain.ErrRevisionConflict):
 		code, message = errorRevisionConflict, "章节已在其他位置更新，本地文本已保留。"
 	case errors.Is(err, revisiondomain.ErrBranchDiverged):

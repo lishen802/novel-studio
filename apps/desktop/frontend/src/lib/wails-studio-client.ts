@@ -18,6 +18,11 @@ import {
   type CharacterView,
   type CreateOutlineNodeInput,
   type CreateProjectInput,
+  type ProjectAccessMode,
+  type ProjectOpenInput,
+  type ProjectOpenResultView,
+  type RecoveryCopyInput,
+  type RecoveryCopyResultView,
   type CreateBranchInput,
   type CreateSceneCardInput,
   type CreateStoryLineInput,
@@ -99,7 +104,41 @@ const projectSchema = z.object({
   genre: z.string(),
   summary: z.string(),
   path: z.string(),
-});
+  accessMode: z.enum(["editable", "read_only"]),
+}).strict();
+const projectLeaseHolderSchema = z.object({
+  pid: z.number().int().nonnegative(),
+  hostname: z.string(),
+  applicationVersion: z.string(),
+  startedAt: z.string(),
+  projectId: z.string().optional(),
+}).strict();
+const projectLeaseConflictSchema = z.object({
+  path: z.string(),
+  holder: projectLeaseHolderSchema.optional(),
+  retryable: z.boolean(),
+}).strict();
+const projectOpenResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("opened"),
+    project: projectSchema,
+  }).strict(),
+  z.object({
+    outcome: z.literal("lease_conflict"),
+    conflict: projectLeaseConflictSchema,
+  }).strict(),
+]);
+const recoveryCopyResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("opened"),
+    path: z.string().min(1),
+    project: projectSchema,
+  }).strict(),
+  z.object({
+    outcome: z.literal("published"),
+    path: z.string().min(1),
+  }).strict(),
+]);
 
 const chapterSchema = z.object({
   id: z.string(),
@@ -1068,7 +1107,8 @@ type NativeDesktopAPI = {
   CancelExtractionRun(id: string): Promise<void>;
   RetryExtractionRun(id: string): Promise<unknown>;
   CreateProject(input: CreateProjectInput): Promise<unknown>;
-  OpenProject(path: string): Promise<unknown>;
+  OpenProject(input: ProjectOpenInput): Promise<unknown>;
+  CreateProjectRecoveryCopy(input: RecoveryCopyInput): Promise<unknown>;
   ListChapters(): Promise<unknown>;
   CreateChapter(title: string): Promise<unknown>;
   OpenChapter(id: string): Promise<unknown>;
@@ -1235,6 +1275,14 @@ function nativeAPI(): NativeDesktopAPI {
 
 function projectView(value: unknown): ProjectView {
   return projectSchema.parse(value);
+}
+
+function projectOpenResultView(value: unknown): ProjectOpenResultView {
+  return projectOpenResultSchema.parse(value);
+}
+
+function recoveryCopyResultView(value: unknown): RecoveryCopyResultView {
+  return recoveryCopyResultSchema.parse(value);
 }
 
 function chapterView(value: unknown): ChapterView {
@@ -1482,8 +1530,15 @@ export const wailsStudioClient: StudioClient = {
   async createProject(input) {
     return projectView(await safeCall(() => nativeAPI().CreateProject(input)));
   },
-  async openProject(path) {
-    return projectView(await safeCall(() => nativeAPI().OpenProject(path)));
+  async openProject(path, mode: ProjectAccessMode = "editable") {
+    return projectOpenResultView(
+      await safeCall(() => nativeAPI().OpenProject({ path, mode })),
+    );
+  },
+  async createProjectRecoveryCopy(input) {
+    return recoveryCopyResultView(
+      await safeCall(() => nativeAPI().CreateProjectRecoveryCopy(input)),
+    );
   },
   async listChapters() {
     return chapterViews(await safeCall(() => nativeAPI().ListChapters()));

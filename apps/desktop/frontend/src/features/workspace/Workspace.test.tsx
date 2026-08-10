@@ -21,6 +21,7 @@ describe("Workspace", () => {
       genre: "东方奇幻",
       summary: "失落城邦与梦境交叠。",
       path: "/books/长夜织境.zjproject",
+      accessMode: "editable",
     };
     const user = userEvent.setup();
     render(<App client={client} />);

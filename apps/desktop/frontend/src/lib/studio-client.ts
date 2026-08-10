@@ -13,7 +13,36 @@ export type ProjectView = {
   genre: string;
   summary: string;
   path: string;
+  accessMode: ProjectAccessMode;
 };
+
+export type ProjectAccessMode = "editable" | "read_only";
+export type ProjectOpenInput = {
+  path: string;
+  mode: ProjectAccessMode;
+};
+export type ProjectLeaseHolderView = {
+  pid: number;
+  hostname: string;
+  applicationVersion: string;
+  startedAt: string;
+  projectId?: string;
+};
+export type ProjectLeaseConflictView = {
+  path: string;
+  holder?: ProjectLeaseHolderView;
+  retryable: boolean;
+};
+export type ProjectOpenResultView =
+  | { outcome: "opened"; project: ProjectView }
+  | { outcome: "lease_conflict"; conflict: ProjectLeaseConflictView };
+export type RecoveryCopyInput = {
+  sourcePath: string;
+  parentDirectory: string;
+};
+export type RecoveryCopyResultView =
+  | { outcome: "opened"; path: string; project: ProjectView }
+  | { outcome: "published"; path: string };
 
 export type ChapterView = {
   id: string;
@@ -724,7 +753,13 @@ export interface StudioClient {
   cancelExtractionRun(id: string): Promise<void>;
   retryExtractionRun(id: string): Promise<ExtractionRunView>;
   createProject(input: CreateProjectInput): Promise<ProjectView>;
-  openProject(path: string): Promise<ProjectView>;
+  openProject(
+    path: string,
+    mode?: ProjectAccessMode,
+  ): Promise<ProjectOpenResultView>;
+  createProjectRecoveryCopy(
+    input: RecoveryCopyInput,
+  ): Promise<RecoveryCopyResultView>;
   listChapters(): Promise<ChapterView[]>;
   createChapter(title: string): Promise<ChapterView>;
   openChapter(chapterId: string): Promise<ChapterView>;

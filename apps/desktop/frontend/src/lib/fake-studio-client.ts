@@ -38,6 +38,10 @@ import type {
   MembershipView,
   OutlineNodeView,
   ProjectView,
+  ProjectAccessMode,
+  ProjectOpenResultView,
+  RecoveryCopyInput,
+  RecoveryCopyResultView,
   RelationshipInput,
   RelationshipView,
   RegionAdjacencyInput,
@@ -125,6 +129,7 @@ export class FakeStudioClient implements StudioClient {
     genre: "东方奇幻",
     summary: "",
     path: "/books/长夜织境.zjproject",
+    accessMode: "editable",
   };
   openProjectResult: ProjectView = this.createProjectResult;
   chaptersResult: ChapterView[] = [];
@@ -625,10 +630,23 @@ export class FakeStudioClient implements StudioClient {
     return this.createProjectResult;
   }
 
-  async openProject(path: string): Promise<ProjectView> {
+  async openProject(
+    path: string,
+    _mode: ProjectAccessMode = "editable",
+  ): Promise<ProjectOpenResultView> {
     this.openProjectCalls.push(path);
     if (this.openProjectError) throw this.openProjectError;
-    return this.openProjectResult;
+    return { outcome: "opened", project: this.openProjectResult };
+  }
+
+  async createProjectRecoveryCopy(
+    _input: RecoveryCopyInput,
+  ): Promise<RecoveryCopyResultView> {
+    return {
+      outcome: "opened",
+      path: this.openProjectResult.path,
+      project: this.openProjectResult,
+    };
   }
 
   async listChapters(): Promise<ChapterView[]> {

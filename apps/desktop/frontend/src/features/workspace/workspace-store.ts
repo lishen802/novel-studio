@@ -102,8 +102,11 @@ export function createWorkspaceStore(
           set({ status: { kind: "welcome" } });
           return;
         }
-        const project = await client.openProject(path);
-        await get().loadProject(project);
+        const result = await client.openProject(path, "editable");
+        if (result.outcome !== "opened") {
+          throw new Error("项目正在由另一个应用实例编辑。");
+        }
+        await get().loadProject(result.project);
       } catch (error) {
         set({ status: { kind: "error", message: errorMessage(error) } });
       }
