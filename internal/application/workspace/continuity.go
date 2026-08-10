@@ -218,8 +218,8 @@ func (s *Service) UpdateStoryEvent(ctx context.Context, id string, input StoryEv
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return StoryEventView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return StoryEventView{}, err
 	}
 	event, err := s.active.store.StoryEvent(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -245,8 +245,8 @@ func (s *Service) LinkStoryEvent(ctx context.Context, input StoryEventLinkInput)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return StoryEventLinkView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return StoryEventLinkView{}, err
 	}
 	event, err := s.active.store.StoryEvent(ctx, strings.TrimSpace(input.EventID))
 	if err != nil {
@@ -301,8 +301,8 @@ func (s *Service) UpdateFact(ctx context.Context, id string, input FactInput) (F
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactView{}, err
 	}
 	fact, err := s.active.store.Fact(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -327,8 +327,8 @@ func (s *Service) ConfirmFact(ctx context.Context, id string) (FactView, error) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactView{}, err
 	}
 	fact, err := s.active.store.Fact(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -420,8 +420,8 @@ func (s *Service) AddFactEvidence(ctx context.Context, input FactEvidenceInput) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactEvidenceView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactEvidenceView{}, err
 	}
 	fact, err := s.active.store.Fact(ctx, strings.TrimSpace(input.FactID))
 	if err != nil {
@@ -455,8 +455,8 @@ func (s *Service) AddFactScope(ctx context.Context, input FactScopeInput) (FactS
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactScopeView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactScopeView{}, err
 	}
 	fact, err := s.active.store.Fact(ctx, strings.TrimSpace(input.FactID))
 	if err != nil {
@@ -485,8 +485,8 @@ func (s *Service) CreateFactConflict(ctx context.Context, input FactConflictInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactConflictView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactConflictView{}, err
 	}
 	fact, err := s.active.store.Fact(ctx, strings.TrimSpace(input.FactID))
 	if err != nil {
@@ -512,8 +512,8 @@ func (s *Service) ResolveFactConflict(ctx context.Context, id string) (FactConfl
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactConflictView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactConflictView{}, err
 	}
 	conflicts, err := s.active.store.ListFactConflicts(ctx)
 	if err != nil {

@@ -43,6 +43,17 @@ func OpenExistingDatabase(ctx context.Context, path string) (*sql.DB, error) {
 // changing canonical or business project data. It deliberately avoids
 // migration recovery, Goose, WAL configuration, and checkpointing.
 func OpenReadOnlyDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	return openReadOnlyDatabase(ctx, path, false)
+}
+
+// OpenReadOnlyImmutableDatabase opens a stable database snapshot without
+// allowing SQLite to create or update WAL coordination files. Branch heads are
+// immutable backup databases, so they do not need active-WAL visibility.
+func OpenReadOnlyImmutableDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	return openReadOnlyDatabase(ctx, path, true)
+}
+
+func openReadOnlyDatabase(ctx context.Context, path string, immutable bool) (*sql.DB, error) {
 	recoveryRequired, err := migrationRecoveryRequired(path)
 	if err != nil {
 		return nil, err
@@ -54,7 +65,7 @@ func OpenReadOnlyDatabase(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	uri, err := readOnlySQLiteURI(path)
+	uri, err := readOnlySQLiteURI(path, immutable)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +130,12 @@ func openSQLite(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func readOnlySQLiteURI(path string) (string, error) {
-	return sqliteFileURI(path, "mode=ro")
+func readOnlySQLiteURI(path string, immutable bool) (string, error) {
+	query := "mode=ro"
+	if immutable {
+		query += "&immutable=1"
+	}
+	return sqliteFileURI(path, query)
 }
 
 func sqliteFileURI(path, rawQuery string) (string, error) {

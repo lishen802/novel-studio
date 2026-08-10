@@ -67,6 +67,28 @@ type activeWorkspace struct {
 	generation   uint64
 }
 
+// requireEditableLocked is the application-level write barrier. Callers must
+// hold s.mu before invoking it, and must do so before touching a store,
+// archive, credential store, or model provider.
+func (s *Service) requireEditableLocked() error {
+	if s.active == nil {
+		return ErrNoActiveProject
+	}
+	if s.active.mode != ports.ProjectAccessEditable {
+		return ErrWorkspaceReadOnly
+	}
+	return nil
+}
+
+// requireEditable is for operation registries that run before their callers
+// take s.mu. It prevents read-only workspaces from registering jobs or other
+// in-memory write operations.
+func (s *Service) requireEditable() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.requireEditableLocked()
+}
+
 func NewService(
 	packages ports.ProjectPackageManager,
 	stores ports.ProjectStoreFactory,
@@ -337,8 +359,8 @@ func (s *Service) CreateChapter(ctx context.Context, title string) (ChapterView,
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ChapterView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ChapterView{}, err
 	}
 
 	project, err := s.active.store.Project(ctx)
@@ -402,8 +424,8 @@ func (s *Service) SaveDraft(ctx context.Context, chapterID, body string, baseRev
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	if err := s.active.store.SaveDraft(ctx, chapterID, body, baseRevision); err != nil {
 		return fmt.Errorf("save draft: %w", err)
@@ -418,8 +440,8 @@ func (s *Service) DiscardDraft(ctx context.Context, chapterID string, baseRevisi
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	if err := s.active.store.DeleteDraft(ctx, chapterID, baseRevision); err != nil {
 		return fmt.Errorf("discard recovery draft: %w", err)
@@ -438,8 +460,8 @@ func (s *Service) CommitChapter(
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.active == nil {
-		return ChapterView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ChapterView{}, err
 	}
 	previous, err := s.active.store.Chapter(ctx, chapterID)
 	if err != nil {

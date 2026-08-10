@@ -68,8 +68,8 @@ func (s *Service) RestoreChapterRevision(
 ) (ChapterView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ChapterView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ChapterView{}, err
 	}
 	chapter, err := s.active.store.RestoreChapterRevision(
 		ctx,
@@ -117,8 +117,8 @@ func (s *Service) Snapshots(ctx context.Context) ([]SnapshotView, error) {
 func (s *Service) CreateSnapshot(ctx context.Context, name string) (SnapshotView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return SnapshotView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return SnapshotView{}, err
 	}
 	snapshot, err := s.createSnapshotLocked(ctx, name, revisiondomain.SnapshotNamed)
 	if err != nil {
@@ -137,8 +137,8 @@ func (s *Service) RestoreSnapshot(
 	defer s.endVersionOperation()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return SnapshotRestoreView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return SnapshotRestoreView{}, err
 	}
 	active := s.active
 	currentProject, err := active.store.Project(ctx)

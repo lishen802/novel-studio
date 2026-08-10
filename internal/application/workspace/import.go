@@ -82,8 +82,8 @@ func (s *Service) PrepareManuscriptImport(
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ImportPrepareResult{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ImportPrepareResult{}, err
 	}
 	if s.imports == nil {
 		return ImportPrepareResult{}, ErrImportSourceArchive
@@ -245,8 +245,8 @@ func (s *Service) DeleteImportJob(ctx context.Context, id string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	store, project, err := s.importStoreAndProjectLocked(ctx)
 	if err != nil {
@@ -280,6 +280,9 @@ func (s *Service) ApplyImportJob(
 	if err := s.license.Require(ctx, license.ImportManuscript); err != nil {
 		return ImportApplyView{}, err
 	}
+	if err := s.requireEditable(); err != nil {
+		return ImportApplyView{}, err
+	}
 	if len(selectedIDs) == 0 {
 		return ImportApplyView{}, ports.ErrNoImportChaptersSelected
 	}
@@ -294,8 +297,8 @@ func (s *Service) ApplyImportJob(
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ImportApplyView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ImportApplyView{}, err
 	}
 	store, project, err := s.importStoreAndProjectLocked(ctx)
 	if err != nil {

@@ -128,8 +128,8 @@ func (s *Service) CreateOutlineNode(ctx context.Context, input CreateOutlineNode
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return OutlineNodeView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return OutlineNodeView{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
@@ -178,8 +178,8 @@ func (s *Service) CreateStoryLine(ctx context.Context, input CreateStoryLineInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return StoryLineView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return StoryLineView{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
@@ -201,8 +201,8 @@ func (s *Service) LinkStoryLine(ctx context.Context, input LinkStoryLineInput) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return StoryLineLinkView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return StoryLineLinkView{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
@@ -252,8 +252,8 @@ func (s *Service) CreateSceneCard(ctx context.Context, input CreateSceneCardInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return SceneCardView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return SceneCardView{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
@@ -305,8 +305,8 @@ func (s *Service) ArchiveOutlineNode(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	if err := s.active.store.ArchiveOutlineNode(ctx, id, s.clock.Now()); err != nil {
 		return fmt.Errorf("archive outline node: %w", err)
@@ -323,8 +323,8 @@ func (s *Service) MoveOutlineNode(ctx context.Context, id, direction string) err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	nodes, err := s.active.store.ListOutlineNodes(ctx)
 	if err != nil {

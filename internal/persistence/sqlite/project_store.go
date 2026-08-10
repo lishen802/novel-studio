@@ -80,6 +80,18 @@ func (Factory) OpenReadOnly(ctx context.Context, databasePath string) (ports.Pro
 	return &Store{db: db}, nil
 }
 
+// OpenReadOnlyImmutable opens an immutable branch-head snapshot. It is kept
+// separate from OpenReadOnly because an active project must still be able to
+// read a live WAL, while branch heads must not gain WAL/SHM coordination files
+// during a read-only comparison.
+func (Factory) OpenReadOnlyImmutable(ctx context.Context, databasePath string) (ports.ProjectStore, error) {
+	db, err := OpenReadOnlyImmutableDatabase(ctx, databasePath)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
 type Store struct {
 	db                              *sql.DB
 	importJobReadHook               func()

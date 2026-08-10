@@ -80,7 +80,7 @@ func (s *Service) StartExtractionRun(ctx context.Context, input ExtractionRunInp
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.extractionStoreLocked()
+	store, err := s.editableExtractionStoreLocked()
 	if err != nil {
 		return ExtractionRunView{}, err
 	}
@@ -155,6 +155,9 @@ func (s *Service) StartExtractionRun(ctx context.Context, input ExtractionRunInp
 }
 
 func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (ExtractionRunView, error) {
+	if err := s.requireEditable(); err != nil {
+		return ExtractionRunView{}, err
+	}
 	taskID := strings.TrimSpace(id)
 	// Detach the job context from the request so the provider pipeline
 	// survives after ExecuteExtractionRun returns. CancelExtractionRun and
@@ -177,7 +180,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	// captured generation matches the active store; the job releases the lease
 	// (via endExtractionJob) only after all persistence is done.
 	s.mu.Lock()
-	store, err := s.extractionStoreLocked()
+	store, err := s.editableExtractionStoreLocked()
 	if err != nil {
 		s.mu.Unlock()
 		return ExtractionRunView{}, err
@@ -571,7 +574,7 @@ func (s *Service) runExtractionPipeline(
 func (s *Service) RetryExtractionRun(ctx context.Context, id string) (ExtractionRunView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.extractionStoreLocked()
+	store, err := s.editableExtractionStoreLocked()
 	if err != nil {
 		return ExtractionRunView{}, err
 	}
@@ -618,6 +621,9 @@ func (s *Service) RetryExtractionRun(ctx context.Context, id string) (Extraction
 }
 
 func (s *Service) CancelExtractionRun(ctx context.Context, id string) error {
+	if err := s.requireEditable(); err != nil {
+		return err
+	}
 	id = strings.TrimSpace(id)
 	s.extractionJobsMu.Lock()
 	cancel := s.extractionJobs[id]
@@ -626,9 +632,18 @@ func (s *Service) CancelExtractionRun(ctx context.Context, id string) error {
 		cancel()
 		return nil
 	}
+	return s.cancelExtractionRunFallback(ctx, id)
+}
 
+// cancelExtractionRunFallback handles cancellation for a queued/recoverable
+// task that has no in-memory job. Re-checking after taking s.mu prevents a
+// workspace transition to read-only from reaching the persistence fallback.
+func (s *Service) cancelExtractionRunFallback(ctx context.Context, id string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.requireEditableLocked(); err != nil {
+		return err
+	}
 	store, err := s.extractionStoreLocked()
 	if err != nil {
 		return err
@@ -696,6 +711,13 @@ func (s *Service) extractionStoreLocked() (ports.ExtractionStore, error) {
 		return nil, ErrExtractionStoreUnavailable
 	}
 	return store, nil
+}
+
+func (s *Service) editableExtractionStoreLocked() (ports.ExtractionStore, error) {
+	if err := s.requireEditableLocked(); err != nil {
+		return nil, err
+	}
+	return s.extractionStoreLocked()
 }
 
 func (s *Service) persistCancelledExtraction(

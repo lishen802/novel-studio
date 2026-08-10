@@ -122,7 +122,7 @@ func (s *Service) SaveAgentRuntimeSettings(
 ) (AgentRuntimeSettingsView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		return AgentRuntimeSettingsView{}, err
 	}
@@ -151,7 +151,7 @@ func (s *Service) SaveProviderConnection(
 ) (ProviderConnectionView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		return ProviderConnectionView{}, err
 	}
@@ -224,7 +224,7 @@ func (s *Service) ProviderConnections(ctx context.Context) ([]ProviderConnection
 func (s *Service) DeleteProviderConnection(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		return err
 	}
@@ -246,6 +246,9 @@ func (s *Service) DeleteProviderConnection(ctx context.Context, id string) error
 func (s *Service) TestProviderConnection(ctx context.Context, id string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.requireEditableLocked(); err != nil {
+		return err
+	}
 	store, err := s.agentStoreLocked()
 	if err != nil {
 		return err
@@ -292,7 +295,7 @@ func (s *Service) SaveAgentProfile(
 ) (AgentProfileView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		return AgentProfileView{}, err
 	}
@@ -361,7 +364,7 @@ func (s *Service) createChapterAgentRunLocked(
 	ctx context.Context,
 	chapterID, prompt, retryOf string,
 ) (AgentRunView, error) {
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		return AgentRunView{}, err
 	}
@@ -430,6 +433,9 @@ func (s *Service) createChapterAgentRunLocked(
 }
 
 func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView, error) {
+	if err := s.requireEditable(); err != nil {
+		return AgentRunView{}, err
+	}
 	runID := strings.TrimSpace(id)
 	// Detach the job context from the request so the provider pipeline
 	// survives after ExecuteAgentRun returns. CancelAgentRun and Close/
@@ -452,7 +458,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	// the lock so the captured generation matches the active store; the job
 	// releases the lease (via endAgentJob) only after all persistence is done.
 	s.mu.Lock()
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		s.mu.Unlock()
 		return AgentRunView{}, err
@@ -914,6 +920,13 @@ func (s *Service) agentStoreLocked() (ports.AgentStore, error) {
 		return nil, ErrAgentStoreUnavailable
 	}
 	return store, nil
+}
+
+func (s *Service) editableAgentStoreLocked() (ports.AgentStore, error) {
+	if err := s.requireEditableLocked(); err != nil {
+		return nil, err
+	}
+	return s.agentStoreLocked()
 }
 
 func (s *Service) assembleAuthoringContext(

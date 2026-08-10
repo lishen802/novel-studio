@@ -161,8 +161,8 @@ func (s *Service) CreateCharacter(ctx context.Context, input CharacterInput) (Ch
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return CharacterView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return CharacterView{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
@@ -192,8 +192,8 @@ func (s *Service) UpdateCharacter(ctx context.Context, id string, input Characte
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return CharacterView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return CharacterView{}, err
 	}
 	character, err := s.active.store.Character(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -228,8 +228,8 @@ func (s *Service) CreateFaction(ctx context.Context, input FactionInput) (Factio
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactionView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactionView{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {
@@ -259,8 +259,8 @@ func (s *Service) UpdateFaction(ctx context.Context, id string, input FactionInp
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return FactionView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return FactionView{}, err
 	}
 	faction, err := s.active.store.Faction(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -295,8 +295,8 @@ func (s *Service) UpsertMembership(ctx context.Context, input MembershipInput) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return MembershipView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return MembershipView{}, err
 	}
 	character, err := s.active.store.Character(ctx, strings.TrimSpace(input.CharacterID))
 	if err != nil {
@@ -335,8 +335,8 @@ func (s *Service) CreateRelationship(ctx context.Context, input RelationshipInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return RelationshipView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return RelationshipView{}, err
 	}
 	source, err := s.active.store.Character(ctx, strings.TrimSpace(input.SourceCharacterID))
 	if err != nil {
@@ -371,8 +371,8 @@ func (s *Service) LinkCharacterToChapter(ctx context.Context, input AppearanceIn
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	character, err := s.active.store.Character(ctx, strings.TrimSpace(input.CharacterID))
 	if err != nil {
@@ -407,8 +407,8 @@ func (s *Service) LinkCharacterToScene(ctx context.Context, input AppearanceInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	character, err := s.active.store.Character(ctx, strings.TrimSpace(input.CharacterID))
 	if err != nil {
@@ -446,8 +446,8 @@ func (s *Service) withStoryWrite(ctx context.Context, operation func() error) er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	return operation()
 }

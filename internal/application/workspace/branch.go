@@ -79,6 +79,10 @@ type branchDomainState struct {
 	fingerprint string
 }
 
+type immutableReadOnlyStoreFactory interface {
+	OpenReadOnlyImmutable(context.Context, string) (ports.ProjectStore, error)
+}
+
 func (s *Service) Branches(ctx context.Context) ([]BranchView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,7 +92,13 @@ func (s *Service) Branches(ctx context.Context) ([]BranchView, error) {
 	if s.branches == nil {
 		return nil, ErrBranchFeatureUnavailable
 	}
-	catalog, err := s.checkpointActiveBranchLocked(ctx)
+	var catalog revisiondomain.BranchCatalog
+	var err error
+	if s.active.mode == ports.ProjectAccessReadOnly {
+		catalog, err = s.branches.Load(s.active.packageInfo.Branches)
+	} else {
+		catalog, err = s.checkpointActiveBranchLocked(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +114,8 @@ func (s *Service) CreateBranch(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return BranchView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return BranchView{}, err
 	}
 	if s.branches == nil {
 		return BranchView{}, ErrBranchFeatureUnavailable
@@ -147,8 +157,8 @@ func (s *Service) SwitchBranch(
 	defer s.endVersionOperation()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return BranchSwitchView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return BranchSwitchView{}, err
 	}
 	if s.branches == nil {
 		return BranchSwitchView{}, ErrBranchFeatureUnavailable
@@ -231,8 +241,10 @@ func (s *Service) CompareBranches(
 	if s.branches == nil {
 		return BranchComparisonView{}, ErrBranchFeatureUnavailable
 	}
-	if _, err := s.checkpointActiveBranchLocked(ctx); err != nil {
-		return BranchComparisonView{}, err
+	if s.active.mode != ports.ProjectAccessReadOnly {
+		if _, err := s.checkpointActiveBranchLocked(ctx); err != nil {
+			return BranchComparisonView{}, err
+		}
 	}
 	return s.compareBranchesLocked(ctx, strings.TrimSpace(sourceID), strings.TrimSpace(targetID))
 }
@@ -246,8 +258,8 @@ func (s *Service) PreviewBranchMerge(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return BranchMergePreviewView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return BranchMergePreviewView{}, err
 	}
 	if s.branches == nil {
 		return BranchMergePreviewView{}, ErrBranchFeatureUnavailable
@@ -291,8 +303,8 @@ func (s *Service) ConfirmBranchMerge(
 	defer s.endVersionOperation()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return BranchSwitchView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return BranchSwitchView{}, err
 	}
 	if s.branches == nil {
 		return BranchSwitchView{}, ErrBranchFeatureUnavailable
@@ -367,8 +379,8 @@ func (s *Service) DeleteBranch(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	if s.branches == nil {
 		return ErrBranchFeatureUnavailable
@@ -556,12 +568,19 @@ func (s *Service) compareBranchesLocked(
 	if !found {
 		return BranchComparisonView{}, fmt.Errorf("target branch does not exist: %s", targetID)
 	}
-	sourceStore, err := s.stores.Open(ctx, s.branches.HeadPath(s.active.packageInfo.Branches, sourceID))
+	openStore := s.stores.Open
+	if s.active.mode == ports.ProjectAccessReadOnly {
+		openStore = s.stores.OpenReadOnly
+		if immutableFactory, ok := s.stores.(immutableReadOnlyStoreFactory); ok {
+			openStore = immutableFactory.OpenReadOnlyImmutable
+		}
+	}
+	sourceStore, err := openStore(ctx, s.branches.HeadPath(s.active.packageInfo.Branches, sourceID))
 	if err != nil {
 		return BranchComparisonView{}, fmt.Errorf("open source branch: %w", err)
 	}
 	defer sourceStore.Close()
-	targetStore, err := s.stores.Open(ctx, s.branches.HeadPath(s.active.packageInfo.Branches, targetID))
+	targetStore, err := openStore(ctx, s.branches.HeadPath(s.active.packageInfo.Branches, targetID))
 	if err != nil {
 		return BranchComparisonView{}, fmt.Errorf("open target branch: %w", err)
 	}

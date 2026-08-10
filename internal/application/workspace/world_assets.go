@@ -239,8 +239,8 @@ func (s *Service) UpdateWorldRegion(ctx context.Context, id string, input WorldR
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return WorldRegionView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return WorldRegionView{}, err
 	}
 	region, err := s.active.store.WorldRegion(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -363,8 +363,8 @@ func (s *Service) UpdateLocation(ctx context.Context, id string, input LocationI
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return LocationView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return LocationView{}, err
 	}
 	location, err := s.active.store.Location(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -398,8 +398,8 @@ func (s *Service) LinkLocation(ctx context.Context, input LocationLinkInput) (Lo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return LocationLinkView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return LocationLinkView{}, err
 	}
 	location, err := s.active.store.Location(ctx, strings.TrimSpace(input.LocationID))
 	if err != nil {
@@ -459,8 +459,8 @@ func (s *Service) UpdateItem(ctx context.Context, id string, input ItemInput) (I
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ItemView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ItemView{}, err
 	}
 	item, err := s.active.store.Item(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -486,8 +486,8 @@ func (s *Service) TransferItem(ctx context.Context, input ItemTransferInput) (It
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ItemTransferView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ItemTransferView{}, err
 	}
 	item, err := s.active.store.Item(ctx, strings.TrimSpace(input.ItemID))
 	if err != nil {
@@ -554,8 +554,8 @@ func (s *Service) UpdateWorldRule(ctx context.Context, id string, input WorldRul
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return WorldRuleView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return WorldRuleView{}, err
 	}
 	rule, err := s.active.store.WorldRule(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -619,8 +619,8 @@ func (s *Service) UpdateForeshadowingHook(ctx context.Context, id string, input 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ForeshadowingHookView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ForeshadowingHookView{}, err
 	}
 	hook, err := s.active.store.ForeshadowingHook(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -650,8 +650,8 @@ func (s *Service) ArchiveForeshadowingHook(ctx context.Context, id string) error
 }
 
 func (s *Service) activeProjectLocked(ctx context.Context) (projectdomain.Project, error) {
-	if s.active == nil {
-		return projectdomain.Project{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return projectdomain.Project{}, err
 	}
 	project, err := s.active.store.Project(ctx)
 	if err != nil {

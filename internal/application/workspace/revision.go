@@ -207,8 +207,8 @@ func (s *Service) EditChangeOperation(ctx context.Context, input ChangeOperation
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ChangeSetView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ChangeSetView{}, err
 	}
 	changeSet, err := s.active.store.ChangeSet(ctx, strings.TrimSpace(input.ChangeSetID))
 	if err != nil {
@@ -243,8 +243,8 @@ func (s *Service) ApplyChangeSet(ctx context.Context, id string) (ChangeSetApply
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ChangeSetApplyView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ChangeSetApplyView{}, err
 	}
 	changeSet, err := s.active.store.ChangeSet(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -275,8 +275,8 @@ func (s *Service) ApplyChangeOperation(ctx context.Context, changeSetID, operati
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ChangeSetApplyView{}, ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return ChangeSetApplyView{}, err
 	}
 	result, err := s.active.store.ApplyChangeOperation(
 		ctx, strings.TrimSpace(changeSetID), strings.TrimSpace(operationID), s.clock.Now(),
@@ -293,8 +293,8 @@ func (s *Service) RejectChangeOperation(ctx context.Context, changeSetID, operat
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	if err := s.active.store.RejectChangeOperation(
 		ctx, strings.TrimSpace(changeSetID), strings.TrimSpace(operationID), s.clock.Now(),
@@ -310,8 +310,8 @@ func (s *Service) RejectChangeSet(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil {
-		return ErrNoActiveProject
+	if err := s.requireEditableLocked(); err != nil {
+		return err
 	}
 	if err := s.active.store.RejectChangeSet(ctx, strings.TrimSpace(id), s.clock.Now()); err != nil {
 		return fmt.Errorf("reject change set: %w", err)

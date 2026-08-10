@@ -9,6 +9,9 @@ import (
 )
 
 func (s *Service) beginAgentJob(parent context.Context, runID string) (context.Context, error) {
+	if err := s.requireEditable(); err != nil {
+		return nil, err
+	}
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()
 	if s.versionOperation {
@@ -53,6 +56,9 @@ func (s *Service) cancelAllAgentJobs() {
 // It mirrors beginAgentJob so CancelExtractionRun can interrupt a long-running
 // model call, while preventing two concurrent runs on the same task.
 func (s *Service) beginExtractionJob(parent context.Context, taskID string) (context.Context, error) {
+	if err := s.requireEditable(); err != nil {
+		return nil, err
+	}
 	s.extractionJobsMu.Lock()
 	defer s.extractionJobsMu.Unlock()
 	if _, exists := s.extractionJobs[taskID]; exists {
@@ -89,6 +95,9 @@ func (s *Service) cancelAllExtractionJobs() {
 }
 
 func (s *Service) beginVersionOperation() error {
+	if err := s.requireEditable(); err != nil {
+		return err
+	}
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()
 	if s.importOperation {
@@ -102,6 +111,9 @@ func (s *Service) beginVersionOperation() error {
 }
 
 func (s *Service) beginImportOperation() error {
+	if err := s.requireEditable(); err != nil {
+		return err
+	}
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()
 	if s.importOperation || s.versionOperation {
@@ -124,6 +136,9 @@ func (s *Service) endVersionOperation() {
 }
 
 func (s *Service) CancelAgentRun(ctx context.Context, id string) error {
+	if err := s.requireEditable(); err != nil {
+		return err
+	}
 	id = strings.TrimSpace(id)
 	s.agentJobsMu.Lock()
 	cancel := s.agentJobs[id]
@@ -132,9 +147,19 @@ func (s *Service) CancelAgentRun(ctx context.Context, id string) error {
 		cancel()
 		return nil
 	}
+	return s.cancelAgentRunFallback(ctx, id)
+}
 
+// cancelAgentRunFallback handles cancellation for a queued/recoverable run
+// that has no in-memory job. The active workspace can change after the
+// caller's initial editable check, so this path must re-check under s.mu
+// before it reads or persists through the store.
+func (s *Service) cancelAgentRunFallback(ctx context.Context, id string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.requireEditableLocked(); err != nil {
+		return err
+	}
 	store, err := s.agentStoreLocked()
 	if err != nil {
 		return err
@@ -152,7 +177,7 @@ func (s *Service) CancelAgentRun(ctx context.Context, id string) error {
 func (s *Service) RetryAgentRun(ctx context.Context, id string) (AgentRunView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	store, err := s.agentStoreLocked()
+	store, err := s.editableAgentStoreLocked()
 	if err != nil {
 		return AgentRunView{}, err
 	}
