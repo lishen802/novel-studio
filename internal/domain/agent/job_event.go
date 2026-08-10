@@ -29,15 +29,16 @@ const (
 type JobEventType string
 
 const (
-	EventJobStarted     JobEventType = "job_started"
-	EventStepStarted    JobEventType = "step_started"
-	EventStepDelta      JobEventType = "step_delta"
-	EventStepCompleted  JobEventType = "step_completed"
-	EventStepFailed     JobEventType = "step_failed"
-	EventJobCompleted   JobEventType = "job_completed"
-	EventJobFailed      JobEventType = "job_failed"
-	EventJobCancelled   JobEventType = "job_cancelled"
-	EventJobRecovered   JobEventType = "job_recovered"
+	EventJobQueued     JobEventType = "job_queued"
+	EventJobStarted    JobEventType = "job_started"
+	EventStepStarted   JobEventType = "step_started"
+	EventStepDelta     JobEventType = "step_delta"
+	EventStepCompleted JobEventType = "step_completed"
+	EventStepFailed    JobEventType = "step_failed"
+	EventJobCompleted  JobEventType = "job_completed"
+	EventJobFailed     JobEventType = "job_failed"
+	EventJobCancelled  JobEventType = "job_cancelled"
+	EventJobRecovered  JobEventType = "job_recovered"
 )
 
 // JobEvent is an append-only record of a single state change for a job. Events
@@ -114,12 +115,21 @@ type JobSnapshot struct {
 	OutputTokens               int
 	PendingAction              string
 	TerminalInfo               string
+	StepStates                 []JobStepState
 	UpdatedAt                  time.Time
 }
 
+// JobStepState is the compact provider-neutral step projection persisted in a
+// JobSnapshot, so a remount can rebuild an in-progress job without replaying
+// every historical event.
+type JobStepState struct {
+	StepID string `json:"stepId"`
+	Status string `json:"status"`
+}
+
 // NewJobSnapshot constructs a validated JobSnapshot. maxSequence must be >=
-// earliestReplayableSequence >= 1: every job has at least the job_started
-// event, so the lower bound never drops below 1.
+// earliestReplayableSequence >= 1: every persisted job has an initial
+// job_queued event, so the lower bound never drops below 1.
 func NewJobSnapshot(
 	jobID string,
 	kind JobKind,
@@ -259,7 +269,8 @@ func validJobKind(kind JobKind) bool {
 
 func validJobEventType(eventType JobEventType) bool {
 	switch eventType {
-	case EventJobStarted,
+	case EventJobQueued,
+		EventJobStarted,
 		EventStepStarted,
 		EventStepDelta,
 		EventStepCompleted,

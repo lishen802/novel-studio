@@ -120,7 +120,9 @@ describe("useJobEventReplay", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.replayStates["run-1"]?.cursor).toBeGreaterThanOrEqual(5);
+      expect(
+        result.current.replayStates["run-1"]?.cursor,
+      ).toBeGreaterThanOrEqual(5);
     });
 
     // Snapshot rebuild should set status to running and tokens to 100/50.
@@ -441,5 +443,74 @@ describe("useJobEventReplay", () => {
       inputTokens: 10,
       outputTokens: 5,
     });
+  });
+
+  it("catches an update that arrives while a pull is in flight", async () => {
+    const client = new FakeStudioClient();
+    client.appendJobEvent("run-1", "agent", 1, "job_started", "");
+    client.upsertJobSnapshot({
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "running",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-10T00:00:00Z",
+    });
+
+    let releaseFirstPull: (() => void) | undefined;
+    const firstPull = new Promise<void>((resolve) => {
+      releaseFirstPull = resolve;
+    });
+    const getJobEvents = vi.spyOn(client, "getJobEvents");
+    let blockFirstCall = true;
+    getJobEvents.mockImplementation(async (jobId, afterSequence, limit) => {
+      if (blockFirstCall) {
+        blockFirstCall = false;
+        // Capture the first page before the later event exists, then delay
+        // delivery. This recreates the exact notifier race: event 2 arrives
+        // while replay is still applying a stale page for event 1.
+        const firstPage = await FakeStudioClient.prototype.getJobEvents.call(
+          client,
+          jobId,
+          afterSequence,
+          limit,
+        );
+        await firstPull;
+        return firstPage;
+      }
+      return FakeStudioClient.prototype.getJobEvents.call(
+        client,
+        jobId,
+        afterSequence,
+        limit,
+      );
+    });
+
+    const { result } = renderHook(() => useJobEventReplay({ client }));
+    act(() => client.emitJobUpdated("run-1", "agent", 1));
+    await waitFor(() => expect(getJobEvents).toHaveBeenCalledTimes(1));
+
+    client.appendJobEvent("run-1", "agent", 2, "job_completed", "");
+    client.upsertJobSnapshot({
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "completed",
+      maxSequence: 2,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: "2026-08-10T00:00:01Z",
+    });
+    act(() => client.emitJobUpdated("run-1", "agent", 2));
+    releaseFirstPull?.();
+
+    await waitFor(() =>
+      expect(result.current.replayStates["run-1"]?.cursor).toBe(2),
+    );
+    expect(result.current.replayStates["run-1"]?.status).toBe("completed");
   });
 });

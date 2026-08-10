@@ -216,6 +216,20 @@ func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 			return err
 		}
 	}
+	queuedDraft, err := agentdomain.NewJobEventDraft(
+		run.ID, agentdomain.JobKindAgent, run.ProjectID, agentdomain.EventJobQueued,
+		"", "", run.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	maxSequence, err := appendJobEventDrafts(ctx, tx, []agentdomain.JobEventDraft{queuedDraft})
+	if err != nil {
+		return err
+	}
+	if err := upsertAgentJobSnapshot(ctx, tx, run.ID, maxSequence, formatTime(run.UpdatedAt)); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return databaseOperationError("commit create agent run", err)
 	}
@@ -352,6 +366,9 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 	if err := requireAffected(result, "agent run step", step.ID); err != nil {
 		return err
 	}
+	if err := refreshAgentRunUsageFromSteps(ctx, tx, step.RunID, formatTime(step.UpdatedAt)); err != nil {
+		return err
+	}
 	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
 	if err != nil {
 		return err
@@ -365,6 +382,24 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 	}
 	if err := tx.Commit(); err != nil {
 		return databaseOperationError("commit update agent run step", err)
+	}
+	return nil
+}
+
+// refreshAgentRunUsageFromSteps keeps the parent run's cumulative usage in
+// sync with its step rows before the JobSnapshot is projected. This makes the
+// event and snapshot atomic even when the caller persists the parent run's
+// other fields in a later transition.
+func refreshAgentRunUsageFromSteps(ctx context.Context, exec txExecutor, runID, updatedAt string) error {
+	_, err := exec.ExecContext(ctx, `
+		UPDATE agent_runs
+		SET input_tokens = COALESCE((SELECT SUM(input_tokens) FROM agent_run_steps WHERE run_id = ?), 0),
+			output_tokens = COALESCE((SELECT SUM(output_tokens) FROM agent_run_steps WHERE run_id = ?), 0),
+			updated_at = ?
+		WHERE id = ?
+	`, runID, runID, updatedAt, runID)
+	if err != nil {
+		return databaseOperationError("refresh agent run usage", err)
 	}
 	return nil
 }

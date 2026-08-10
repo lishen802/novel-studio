@@ -374,20 +374,21 @@ func TestUpdateAgentRunAppendsEventsInSameTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JobEvents after job_started: %v", err)
 	}
-	if len(events) != 1 || events[0].EventType != agentdomain.EventJobStarted ||
-		events[0].SequenceNumber != 1 {
+	if len(events) != 2 || events[0].EventType != agentdomain.EventJobQueued ||
+		events[0].SequenceNumber != 1 || events[1].EventType != agentdomain.EventJobStarted ||
+		events[1].SequenceNumber != 2 {
 		t.Fatalf("events after job_started = %#v", events)
 	}
 	snapshot, err := store.JobSnapshot(ctx, run.ID)
 	if err != nil {
 		t.Fatalf("JobSnapshot after job_started: %v", err)
 	}
-	if snapshot.Status != string(agentdomain.RunRunning) || snapshot.MaxSequence != 1 ||
+	if snapshot.Status != string(agentdomain.RunRunning) || snapshot.MaxSequence != 2 ||
 		snapshot.EarliestReplayableSequence != 1 || snapshot.JobKind != agentdomain.JobKindAgent {
 		t.Fatalf("snapshot after job_started = %#v", snapshot)
 	}
 
-	// Step started: sequence advances to 2; run status stays running.
+	// Step started: sequence advances to 3; run status stays running.
 	step := runningRun.Steps[0]
 	step.Status = agentdomain.StepRunning
 	step.UpdatedAt = now.Add(2 * time.Second)
@@ -400,16 +401,19 @@ func TestUpdateAgentRunAppendsEventsInSameTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JobEvents after step_started: %v", err)
 	}
-	if len(events) != 2 || events[1].EventType != agentdomain.EventStepStarted ||
-		events[1].StepID != step.ID || events[1].SequenceNumber != 2 {
+	if len(events) != 3 || events[2].EventType != agentdomain.EventStepStarted ||
+		events[2].StepID != step.ID || events[2].SequenceNumber != 3 {
 		t.Fatalf("events after step_started = %#v", events)
 	}
 	snapshot, err = store.JobSnapshot(ctx, run.ID)
 	if err != nil {
 		t.Fatalf("JobSnapshot after step_started: %v", err)
 	}
-	if snapshot.MaxSequence != 2 || snapshot.Status != string(agentdomain.RunRunning) {
+	if snapshot.MaxSequence != 3 || snapshot.Status != string(agentdomain.RunRunning) {
 		t.Fatalf("snapshot after step_started = %#v", snapshot)
+	}
+	if len(snapshot.StepStates) != len(run.Steps) || snapshot.StepStates[0].Status != string(agentdomain.StepRunning) {
+		t.Fatalf("snapshot step states after step_started = %#v", snapshot.StepStates)
 	}
 
 	// Step completed with token usage folded into the run row.
@@ -445,6 +449,7 @@ func TestUpdateAgentRunAppendsEventsInSameTransaction(t *testing.T) {
 		t.Fatalf("JobEvents after completion: %v", err)
 	}
 	wantTypes := []agentdomain.JobEventType{
+		agentdomain.EventJobQueued,
 		agentdomain.EventJobStarted,
 		agentdomain.EventStepStarted,
 		agentdomain.EventStepCompleted,
@@ -463,15 +468,19 @@ func TestUpdateAgentRunAppendsEventsInSameTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JobSnapshot after completion: %v", err)
 	}
-	if snapshot.Status != string(agentdomain.RunCompleted) || snapshot.MaxSequence != 4 ||
+	if snapshot.Status != string(agentdomain.RunCompleted) || snapshot.MaxSequence != 5 ||
 		snapshot.InputTokens != 120 || snapshot.OutputTokens != 60 {
 		t.Fatalf("snapshot after completion = %#v", snapshot)
+	}
+	if snapshot.StepStates[0].Status != string(agentdomain.StepCompleted) {
+		t.Fatalf("snapshot completion step states = %#v", snapshot.StepStates)
 	}
 }
 
 // TestUpdateAgentRunWithoutDraftsLeavesEventFeedUntouched asserts that callers
 // passing no drafts (the variadic default) get the legacy single-statement
-// update behavior with no snapshot mutation.
+// update behavior without adding a second event or replacing the initial
+// queued snapshot.
 func TestUpdateAgentRunWithoutDraftsLeavesEventFeedUntouched(t *testing.T) {
 	ctx := context.Background()
 	store, run, now := createAgentRunForEvents(t)
@@ -486,10 +495,14 @@ func TestUpdateAgentRunWithoutDraftsLeavesEventFeedUntouched(t *testing.T) {
 	}
 	if events, err := store.JobEvents(ctx, run.ID, 0, 10); err != nil {
 		t.Fatalf("JobEvents: %v", err)
-	} else if len(events) != 0 {
-		t.Fatalf("events = %#v, want none without drafts", events)
+	} else if len(events) != 1 || events[0].EventType != agentdomain.EventJobQueued {
+		t.Fatalf("events = %#v, want only the initial job_queued event", events)
 	}
-	if _, err := store.JobSnapshot(ctx, run.ID); !errors.Is(err, ports.ErrJobSnapshotMissing) {
-		t.Fatalf("JobSnapshot without drafts = %v, want ErrJobSnapshotMissing", err)
+	snapshot, err := store.JobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("JobSnapshot without drafts = %v", err)
+	}
+	if snapshot.Status != string(agentdomain.RunQueued) || snapshot.MaxSequence != 1 {
+		t.Fatalf("queued snapshot = %#v", snapshot)
 	}
 }

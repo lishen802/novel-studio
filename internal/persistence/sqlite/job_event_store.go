@@ -70,11 +70,15 @@ func (s *Store) AppendJobEvent(ctx context.Context, event agentdomain.JobEvent) 
 // It is intended to be called in the same transaction that appends the
 // triggering JobEvent and mutates the run/task row.
 func (s *Store) UpsertJobSnapshot(ctx context.Context, snapshot agentdomain.JobSnapshot) error {
-	_, err := s.db.ExecContext(ctx, `
+	stepStates, err := json.Marshal(snapshot.StepStates)
+	if err != nil {
+		return fmt.Errorf("marshal job snapshot step states: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO job_snapshots(
 			job_id, job_kind, project_id, status, max_sequence, earliest_replayable_sequence,
-			input_tokens, output_tokens, pending_action, terminal_info, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			input_tokens, output_tokens, pending_action, terminal_info, updated_at, step_states
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(job_id) DO UPDATE SET
 			job_kind = excluded.job_kind,
 			project_id = excluded.project_id,
@@ -85,12 +89,13 @@ func (s *Store) UpsertJobSnapshot(ctx context.Context, snapshot agentdomain.JobS
 			output_tokens = excluded.output_tokens,
 			pending_action = excluded.pending_action,
 			terminal_info = excluded.terminal_info,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			step_states = excluded.step_states
 	`,
 		snapshot.JobID, snapshot.JobKind, snapshot.ProjectID, snapshot.Status,
 		snapshot.MaxSequence, snapshot.EarliestReplayableSequence,
 		snapshot.InputTokens, snapshot.OutputTokens,
-		snapshot.PendingAction, snapshot.TerminalInfo, formatTime(snapshot.UpdatedAt),
+		snapshot.PendingAction, snapshot.TerminalInfo, formatTime(snapshot.UpdatedAt), string(stepStates),
 	)
 	if err != nil {
 		return databaseOperationError("upsert job snapshot", err)
@@ -129,22 +134,24 @@ func (s *Store) JobEvents(ctx context.Context, jobID string, afterSequence uint6
 }
 
 // JobSnapshot loads the authoritative projection for a job. Returns
-// ErrJobSnapshotMissing when no events have been appended for the job yet.
+// ErrJobSnapshotMissing only for an unknown/corrupt legacy job: new jobs write
+// their initial job_queued event and snapshot atomically at creation time.
 func (s *Store) JobSnapshot(ctx context.Context, jobID string) (agentdomain.JobSnapshot, error) {
 	var (
 		snapshot   agentdomain.JobSnapshot
 		updatedAt  string
+		stepStates string
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT job_id, job_kind, project_id, status, max_sequence, earliest_replayable_sequence,
-			input_tokens, output_tokens, pending_action, terminal_info, updated_at
+			input_tokens, output_tokens, pending_action, terminal_info, updated_at, step_states
 		FROM job_snapshots
 		WHERE job_id = ?
 	`, jobID).Scan(
 		&snapshot.JobID, &snapshot.JobKind, &snapshot.ProjectID, &snapshot.Status,
 		&snapshot.MaxSequence, &snapshot.EarliestReplayableSequence,
 		&snapshot.InputTokens, &snapshot.OutputTokens,
-		&snapshot.PendingAction, &snapshot.TerminalInfo, &updatedAt,
+		&snapshot.PendingAction, &snapshot.TerminalInfo, &updatedAt, &stepStates,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return agentdomain.JobSnapshot{}, fmt.Errorf("%w: %s", ports.ErrJobSnapshotMissing, jobID)
@@ -153,7 +160,13 @@ func (s *Store) JobSnapshot(ctx context.Context, jobID string) (agentdomain.JobS
 		return agentdomain.JobSnapshot{}, databaseOperationError("read job snapshot", err)
 	}
 	snapshot.UpdatedAt, err = parseTime(updatedAt)
-	return snapshot, err
+	if err != nil {
+		return snapshot, err
+	}
+	if err := json.Unmarshal([]byte(stepStates), &snapshot.StepStates); err != nil {
+		return agentdomain.JobSnapshot{}, fmt.Errorf("decode job snapshot step states: %w", err)
+	}
+	return snapshot, nil
 }
 
 // ListRecoverableJobs returns non-terminal (queued, running, recoverable) agent
@@ -288,10 +301,14 @@ func upsertAgentJobSnapshot(
 	_, err := exec.ExecContext(ctx, `
 		INSERT INTO job_snapshots(
 			job_id, job_kind, project_id, status, max_sequence, earliest_replayable_sequence,
-			input_tokens, output_tokens, pending_action, terminal_info, updated_at
+			input_tokens, output_tokens, pending_action, terminal_info, updated_at, step_states
 		)
 		SELECT ?, 'agent', r.project_id, r.status, ?, 1,
-			r.input_tokens, r.output_tokens, '', '', ?
+			r.input_tokens, r.output_tokens, '', '', ?,
+			COALESCE((
+				SELECT json_group_array(json_object('stepId', st.id, 'status', st.status))
+				FROM agent_run_steps st WHERE st.run_id = r.id
+			), '[]')
 		FROM agent_runs r
 		WHERE r.id = ?
 		ON CONFLICT(job_id) DO UPDATE SET
@@ -304,7 +321,8 @@ func upsertAgentJobSnapshot(
 			output_tokens = excluded.output_tokens,
 			pending_action = excluded.pending_action,
 			terminal_info = excluded.terminal_info,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			step_states = excluded.step_states
 	`, runID, maxSequence, updatedAt, runID)
 	if err != nil {
 		return databaseOperationError("upsert agent job snapshot", err)
@@ -324,10 +342,14 @@ func upsertExtractionJobSnapshot(
 	_, err := exec.ExecContext(ctx, `
 		INSERT INTO job_snapshots(
 			job_id, job_kind, project_id, status, max_sequence, earliest_replayable_sequence,
-			input_tokens, output_tokens, pending_action, terminal_info, updated_at
+			input_tokens, output_tokens, pending_action, terminal_info, updated_at, step_states
 		)
 		SELECT ?, 'extraction', t.project_id, t.status, ?, 1,
-			t.input_tokens, t.output_tokens, '', '', ?
+			t.input_tokens, t.output_tokens, '', '', ?,
+			COALESCE((
+				SELECT json_group_array(json_object('stepId', st.id, 'status', st.status))
+				FROM extraction_steps st WHERE st.task_id = t.id
+			), '[]')
 		FROM extraction_tasks t
 		WHERE t.id = ?
 		ON CONFLICT(job_id) DO UPDATE SET
@@ -340,7 +362,8 @@ func upsertExtractionJobSnapshot(
 			output_tokens = excluded.output_tokens,
 			pending_action = excluded.pending_action,
 			terminal_info = excluded.terminal_info,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			step_states = excluded.step_states
 	`, taskID, maxSequence, updatedAt, taskID)
 	if err != nil {
 		return databaseOperationError("upsert extraction job snapshot", err)

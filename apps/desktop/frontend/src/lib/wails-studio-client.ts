@@ -165,12 +165,7 @@ const changeSetApplySchema = z.object({
   changeSet: changeSetSchema,
   chapters: z.array(chapterSchema),
 });
-const revisionSourceSchema = z.enum([
-  "initial",
-  "author",
-  "agent",
-  "restore",
-]);
+const revisionSourceSchema = z.enum(["initial", "author", "agent", "restore"]);
 const chapterRevisionSchema = z.object({
   chapterId: z.string(),
   revision: z.number(),
@@ -277,7 +272,14 @@ const agentRunSchema = z.object({
   id: z.string(),
   chapterId: z.string(),
   prompt: z.string(),
-  status: z.enum(["queued", "running", "completed", "failed", "cancelled", "recoverable"]),
+  status: z.enum([
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "recoverable",
+  ]),
   errorCode: z.string(),
   errorMessage: z.string(),
   changeSetId: z.string(),
@@ -344,6 +346,7 @@ const jobEventSchema = z.object({
   projectId: z.string(),
   sequenceNumber: z.number().int().nonnegative(),
   eventType: z.enum([
+    "job_queued",
     "job_started",
     "step_started",
     "step_delta",
@@ -369,6 +372,21 @@ const jobSnapshotSchema = z.object({
   outputTokens: z.number().int().nonnegative(),
   pendingAction: z.string().optional(),
   terminalInfo: z.string().optional(),
+  steps: z
+    .array(
+      z.object({
+        stepId: z.string(),
+        status: z.enum([
+          "queued",
+          "running",
+          "started",
+          "completed",
+          "failed",
+          "cancelled",
+        ]),
+      }),
+    )
+    .optional(),
   updatedAt: z.string(),
 });
 const jobEventsPageSchema = z.object({
@@ -948,9 +966,7 @@ function validateImportJob(
 }
 
 const importJobSchema = rawImportJobSchema
-  .superRefine((value, context) =>
-    validateImportJob(value, context, false),
-  )
+  .superRefine((value, context) => validateImportJob(value, context, false))
   .transform(({ archivedRelativePath: _archive, ...value }) => ({
     ...value,
     errorCode: value.errorCode ?? "",
@@ -960,9 +976,7 @@ const importJobSchema = rawImportJobSchema
     extractionRunId: value.extractionRunId ?? "",
   }));
 const importJobDetailSchema = rawImportJobSchema
-  .superRefine((value, context) =>
-    validateImportJob(value, context, true),
-  )
+  .superRefine((value, context) => validateImportJob(value, context, true))
   .transform(({ archivedRelativePath: _archive, ...value }) => ({
     ...value,
     errorCode: value.errorCode ?? "",
@@ -971,9 +985,7 @@ const importJobDetailSchema = rawImportJobSchema
     extractionStatus: value.extractionStatus ?? "none",
     extractionRunId: value.extractionRunId ?? "",
   }));
-const importPrepareSchema = z
-  .object({ job: importJobDetailSchema })
-  .strict();
+const importPrepareSchema = z.object({ job: importJobDetailSchema }).strict();
 const importApplySchema = z
   .object({
     job: importJobDetailSchema,
@@ -1030,10 +1042,7 @@ const importApplySchema = z
       }
     }
     for (const candidate of value.job.chapters) {
-      if (
-        candidate.selected &&
-        !chapterIDs.has(candidate.createdChapterId)
-      ) {
+      if (candidate.selected && !chapterIDs.has(candidate.createdChapterId)) {
         addImportInvariantIssue(
           context,
           ["job", "chapters"],
@@ -1129,7 +1138,10 @@ type NativeDesktopAPI = {
   UpdateWorldRegion(id: string, input: WorldRegionInput): Promise<unknown>;
   ArchiveWorldRegion(id: string): Promise<void>;
   UpsertRegionAdjacency(input: RegionAdjacencyInput): Promise<unknown>;
-  DeleteRegionAdjacency(firstRegionId: string, secondRegionId: string): Promise<void>;
+  DeleteRegionAdjacency(
+    firstRegionId: string,
+    secondRegionId: string,
+  ): Promise<void>;
   CreateLocation(input: LocationInput): Promise<unknown>;
   UpdateLocation(id: string, input: LocationInput): Promise<unknown>;
   ArchiveLocation(id: string): Promise<void>;
@@ -1191,7 +1203,11 @@ type NativeDesktopAPI = {
   AgentRuns(): Promise<unknown>;
   AgentRun(id: string): Promise<unknown>;
   GetJobSnapshot(jobId: string): Promise<unknown>;
-  GetJobEvents(jobId: string, afterSequence: number, limit: number): Promise<unknown>;
+  GetJobEvents(
+    jobId: string,
+    afterSequence: number,
+    limit: number,
+  ): Promise<unknown>;
   ListRecoverableJobs(): Promise<unknown>;
   CompleteClose(): Promise<void>;
 };
@@ -1532,11 +1548,7 @@ export const wailsStudioClient: StudioClient = {
       await safeCall(() => nativeAPI().ChapterHistory(chapterId)),
     );
   },
-  async restoreChapterRevision(
-    chapterId,
-    targetRevision,
-    expectedRevision,
-  ) {
+  async restoreChapterRevision(chapterId, targetRevision, expectedRevision) {
     return chapterView(
       await safeCall(() =>
         nativeAPI().RestoreChapterRevision(
@@ -1551,9 +1563,7 @@ export const wailsStudioClient: StudioClient = {
     return snapshotViews(await safeCall(() => nativeAPI().Snapshots()));
   },
   async createSnapshot(name) {
-    return snapshotView(
-      await safeCall(() => nativeAPI().CreateSnapshot(name)),
-    );
+    return snapshotView(await safeCall(() => nativeAPI().CreateSnapshot(name)));
   },
   async restoreSnapshot(id) {
     return snapshotRestoreView(
@@ -1567,9 +1577,7 @@ export const wailsStudioClient: StudioClient = {
     return branchView(await safeCall(() => nativeAPI().CreateBranch(input)));
   },
   async switchBranch(id) {
-    return branchSwitchView(
-      await safeCall(() => nativeAPI().SwitchBranch(id)),
-    );
+    return branchSwitchView(await safeCall(() => nativeAPI().SwitchBranch(id)));
   },
   async compareBranches(sourceId, targetId) {
     return branchComparisonView(
@@ -1882,7 +1890,9 @@ export const wailsStudioClient: StudioClient = {
   },
   async createChapterAgentRun(chapterId, prompt) {
     return agentRunView(
-      await safeCall(() => nativeAPI().CreateChapterAgentRun(chapterId, prompt)),
+      await safeCall(() =>
+        nativeAPI().CreateChapterAgentRun(chapterId, prompt),
+      ),
     );
   },
   async executeAgentRun(id) {
@@ -1901,7 +1911,9 @@ export const wailsStudioClient: StudioClient = {
     return agentRunView(await safeCall(() => nativeAPI().AgentRun(id)));
   },
   async getJobSnapshot(jobId) {
-    return jobSnapshotView(await safeCall(() => nativeAPI().GetJobSnapshot(jobId)));
+    return jobSnapshotView(
+      await safeCall(() => nativeAPI().GetJobSnapshot(jobId)),
+    );
   },
   async getJobEvents(jobId, afterSequence, limit) {
     return jobEventsPageView(
@@ -1911,7 +1923,9 @@ export const wailsStudioClient: StudioClient = {
     );
   },
   async listRecoverableJobs() {
-    return jobSummaryViews(await safeCall(() => nativeAPI().ListRecoverableJobs()));
+    return jobSummaryViews(
+      await safeCall(() => nativeAPI().ListRecoverableJobs()),
+    );
   },
   onJobUpdated(handler) {
     if (!window.runtime) return () => undefined;
@@ -1924,7 +1938,11 @@ export const wailsStudioClient: StudioClient = {
             jobKind?: string;
             latestSequence?: number;
           };
-          if (typeof p.jobId === "string" && typeof p.jobKind === "string" && typeof p.latestSequence === "number") {
+          if (
+            typeof p.jobId === "string" &&
+            typeof p.jobKind === "string" &&
+            typeof p.latestSequence === "number"
+          ) {
             handler(p.jobId, p.jobKind, p.latestSequence);
           }
         }

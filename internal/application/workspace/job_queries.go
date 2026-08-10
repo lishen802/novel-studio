@@ -28,17 +28,24 @@ type JobEventView struct {
 // GetJobEvents signals snapshotRequired so it can rebuild without replaying the
 // full event history.
 type JobSnapshotView struct {
-	JobID                      string `json:"jobId"`
-	JobKind                    string `json:"jobKind"`
-	ProjectID                  string `json:"projectId"`
-	Status                     string `json:"status"`
-	MaxSequence                uint64 `json:"maxSequence"`
-	EarliestReplayableSequence uint64 `json:"earliestReplayableSequence"`
-	InputTokens                int    `json:"inputTokens"`
-	OutputTokens               int    `json:"outputTokens"`
-	PendingAction              string `json:"pendingAction,omitempty"`
-	TerminalInfo               string `json:"terminalInfo,omitempty"`
-	UpdatedAt                  string `json:"updatedAt"`
+	JobID                      string             `json:"jobId"`
+	JobKind                    string             `json:"jobKind"`
+	ProjectID                  string             `json:"projectId"`
+	Status                     string             `json:"status"`
+	MaxSequence                uint64             `json:"maxSequence"`
+	EarliestReplayableSequence uint64             `json:"earliestReplayableSequence"`
+	InputTokens                int                `json:"inputTokens"`
+	OutputTokens               int                `json:"outputTokens"`
+	PendingAction              string             `json:"pendingAction,omitempty"`
+	TerminalInfo               string             `json:"terminalInfo,omitempty"`
+	Steps                      []JobStepStateView `json:"steps"`
+	UpdatedAt                  string             `json:"updatedAt"`
+}
+
+// JobStepStateView is the JSON-safe snapshot projection of a job step.
+type JobStepStateView struct {
+	StepID string `json:"stepId"`
+	Status string `json:"status"`
 }
 
 // JobEventsPageView wraps a page of JobEvent rows with cursor paging metadata.
@@ -193,7 +200,7 @@ func jobEventView(event agentdomain.JobEvent) JobEventView {
 }
 
 func jobSnapshotView(snapshot agentdomain.JobSnapshot) JobSnapshotView {
-	return JobSnapshotView{
+	view := JobSnapshotView{
 		JobID:                      snapshot.JobID,
 		JobKind:                    string(snapshot.JobKind),
 		ProjectID:                  snapshot.ProjectID,
@@ -204,8 +211,13 @@ func jobSnapshotView(snapshot agentdomain.JobSnapshot) JobSnapshotView {
 		OutputTokens:               snapshot.OutputTokens,
 		PendingAction:              snapshot.PendingAction,
 		TerminalInfo:               snapshot.TerminalInfo,
+		Steps:                      make([]JobStepStateView, 0, len(snapshot.StepStates)),
 		UpdatedAt:                  snapshot.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
+	for _, step := range snapshot.StepStates {
+		view.Steps = append(view.Steps, JobStepStateView{StepID: step.StepID, Status: step.Status})
+	}
+	return view
 }
 
 func jobSummaryView(summary agentdomain.JobSummary) JobSummaryView {

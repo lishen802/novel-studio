@@ -803,9 +803,9 @@ type draftCall struct {
 }
 
 type jobEventsCall struct {
-	jobID          string
-	afterSequence  uint64
-	limit          int
+	jobID         string
+	afterSequence uint64
+	limit         int
 }
 
 type fakeWorkspace struct {
@@ -935,14 +935,14 @@ type fakeWorkspace struct {
 	extractionTasksResult    []workspace.ExtractionTaskView
 	extractionTaskID         string
 	extractionTaskResult     workspace.ExtractionRunView
-	jobSnapshotResult       workspace.JobSnapshotView
-	jobSnapshotID           string
-	jobSnapshotErr          error
-	jobEventsResult         workspace.JobEventsPageView
-	jobEventsInput          jobEventsCall
-	jobEventsErr            error
-	recoverableJobsResult   []workspace.JobSummaryView
-	recoverableJobsErr      error
+	jobSnapshotResult        workspace.JobSnapshotView
+	jobSnapshotID            string
+	jobSnapshotErr           error
+	jobEventsResult          workspace.JobEventsPageView
+	jobEventsInput           jobEventsCall
+	jobEventsErr             error
+	recoverableJobsResult    []workspace.JobSummaryView
+	recoverableJobsErr       error
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -1487,7 +1487,7 @@ func TestDesktopAPIForwardsJobEventQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotSnapshot != snapshot {
+	if !reflect.DeepEqual(gotSnapshot, snapshot) {
 		t.Fatalf("GetJobSnapshot = %#v, want %#v", gotSnapshot, snapshot)
 	}
 	if workspaces.jobSnapshotID != " run-1 " {
@@ -1548,4 +1548,3 @@ func TestWailsJobEventNotifierEmitsPayload(t *testing.T) {
 		t.Fatalf("payload.LatestSequence = %d, want 7", payload.LatestSequence)
 	}
 }
-

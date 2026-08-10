@@ -16,6 +16,7 @@
  */
 
 export type JobEventType =
+  | "job_queued"
   | "job_started"
   | "step_started"
   | "step_delta"
@@ -50,6 +51,7 @@ export interface JobSnapshotView {
   outputTokens: number;
   pendingAction?: string;
   terminalInfo?: string;
+  steps?: JobStepState[];
   updatedAt: string;
 }
 
@@ -69,7 +71,8 @@ export interface JobSummaryView {
   updatedAt: string;
 }
 
-export type StepStatus = "started" | "completed" | "failed";
+export type StepStatus =
+  "queued" | "running" | "started" | "completed" | "failed" | "cancelled";
 
 export interface JobStepState {
   stepId: string;
@@ -154,6 +157,9 @@ export function applyEvents(
     appliedCount++;
 
     switch (evt.eventType) {
+      case "job_queued":
+        status = "queued";
+        break;
       case "job_started":
         status = "running";
         break;
@@ -162,7 +168,9 @@ export function applyEvents(
         break;
       case "step_completed":
         steps = steps.map((s) =>
-          s.stepId === evt.stepId ? { ...s, status: "completed" as StepStatus } : s,
+          s.stepId === evt.stepId
+            ? { ...s, status: "completed" as StepStatus }
+            : s,
         );
         {
           const tokens = parseTokenPayload(evt.payload);
@@ -172,7 +180,9 @@ export function applyEvents(
         break;
       case "step_failed":
         steps = steps.map((s) =>
-          s.stepId === evt.stepId ? { ...s, status: "failed" as StepStatus } : s,
+          s.stepId === evt.stepId
+            ? { ...s, status: "failed" as StepStatus }
+            : s,
         );
         break;
       case "job_completed":
@@ -216,7 +226,7 @@ export function rebuildFromSnapshot(snapshot: JobSnapshotView): JobReplayState {
     status: snapshot.status,
     inputTokens: snapshot.inputTokens,
     outputTokens: snapshot.outputTokens,
-    steps: [],
+    steps: snapshot.steps ?? [],
     terminal: TERMINAL_STATUSES.has(snapshot.status),
   };
 }

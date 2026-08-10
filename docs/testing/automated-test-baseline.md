@@ -88,7 +88,9 @@ R1.2 引入 append-only `JobEvent` 事件源与权威 `JobSnapshot` 投影：作
 
 | 契约 | 自动证据 |
 | --- | --- |
+| 新建 queued 作业立即拥有 `job_queued` 事件和可重建 snapshot | `TestCreatedQueuedAgentRunHasReplayableSnapshot` |
 | 作业生命周期 emit 连续单调的 JobEvent 且 snapshot 同事务刷新 | `TestExecuteAgentRunAppendsContiguousJobEvents`、`TestExecuteExtractionRunAppendsContiguousJobEvents` |
+| snapshot 同时投影累计 Token 与步骤状态 | `TestUpdateAgentRunAppendsEventsInSameTransaction`、`jobEventReducer.test.ts`（snapshot steps） |
 | Provider 失败 append `job_failed` 而非停在 `job_started` | `TestExecuteAgentRunFailureAppendsJobFailedEvent`、`TestExecuteExtractionRunFailureAppendsJobFailedEvent` |
 | cursor 分页补拉返回 `has_more`/`next_cursor` | `TestGetJobEventsPaginatesByCursor` |
 | cursor 早于 `earliest_replayable_sequence` 时返回 `snapshot_required` | `TestGetJobEventsSignalsSnapshotRequired` |
@@ -99,7 +101,9 @@ R1.2 引入 append-only `JobEvent` 事件源与权威 `JobSnapshot` 投影：作
 | snapshot 重建后重投递事件不累计 token | `apps/desktop/frontend/src/features/agents/jobEventReducer.test.ts`（snapshot rebuild + 幂等） |
 | `job:updated` 触发 cursor 补拉、snapshot 重建与分页 | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx` |
 | 漏推通知后下一次唤醒能补齐缺失事件 | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx`（lost notification） |
+| 通知在补拉进行中抵达时仍追至最新 sequence | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx`（in-flight update） |
 | Bridge 重挂载后 `pullJobEvents` 恢复 `recoverable` 状态且不触发终态回调 | `apps/desktop/frontend/src/features/agents/useJobEventReplay.test.tsx`（remount recovery） |
+| 抽取启动后的导入状态写入失败不会遗留孤立 running task | `TestFailExtractionStartCompensatesRunningTask` |
 
 Go 侧测试位于 `internal/application/workspace`（`job_event_test.go`），React 侧测试位于 `apps/desktop/frontend/src/features/agents`。前者由本地 `go test -race -shuffle=on` 与 Ubuntu Foundation CI Job 覆盖，后者由本地 `npm test -- --run` 与 Ubuntu Foundation CI Job 覆盖；失败按数据一致性缺陷处理，不得关闭 `-race` 或跳过 reducer 用例。实现详见 [R1.2 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
 

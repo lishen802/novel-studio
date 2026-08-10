@@ -46,7 +46,7 @@
 
 ## JobEvent 事件源与 cursor 恢复
 
-续写、审校和抽取作业的每一次状态变化（启动、步骤开始/完成/失败、作业完成/失败/取消/恢复）都作为 append-only `JobEvent` 写入 `job_events` 表，每个作业按 `(job_id, sequence_number)` 单调递增。同一事务还会刷新 `job_snapshots` 表中的权威投影（状态、`max_sequence`、`earliest_replayable_sequence`、累计 token 用量、待确认动作和终态信息）。事件只携带轻量 JSON 摘要，生成的大文本进 artifact，不复制正文。
+续写、审校和抽取作业从创建时就写入 `job_queued`，随后每一次状态变化（启动、步骤开始/完成/失败、作业完成/失败/取消/恢复）都作为 append-only `JobEvent` 写入 `job_events` 表，每个作业按 `(job_id, sequence_number)` 单调递增。同一事务还会刷新 `job_snapshots` 表中的权威投影（状态、`max_sequence`、`earliest_replayable_sequence`、累计 token 用量、步骤状态、待确认动作和终态信息）。事件只携带轻量 JSON 摘要，生成的大文本进 artifact，不复制正文。
 
 应用重启或 Bridge 重挂载时，UI 不重放整条事件流水线，而是按 cursor 增量补拉：
 

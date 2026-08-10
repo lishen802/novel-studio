@@ -106,6 +106,51 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	}
 }
 
+func TestJobSnapshotConsistencyMigrationBackfillsQueuedRuns(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 15); err != nil {
+		t.Fatalf("migrate to version fifteen: %v", err)
+	}
+	now := formatTime(time.Unix(100, 0))
+	for _, statement := range []string{
+		`INSERT INTO projects(id, title, created_at, updated_at) VALUES ('project-1', '旧项目', ?, ?)`,
+		`INSERT INTO chapters(id, project_id, title, position, revision, created_at, updated_at) VALUES ('chapter-1', 'project-1', '第一章', 1, 1, ?, ?)`,
+		`INSERT INTO agent_runs(id, project_id, chapter_id, chapter_base_revision, prompt, status, created_at, updated_at) VALUES ('queued-run', 'project-1', 'chapter-1', 1, '续写', 'queued', ?, ?)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement, now, now); err != nil {
+			t.Fatalf("seed v15 queued run: %v", err)
+		}
+	}
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("migrate to current: %v", err)
+	}
+	var eventType, status, stepStates string
+	var sequence, maxSequence int
+	if err := db.QueryRowContext(ctx, `
+		SELECT e.event_type, e.sequence_number, s.status, s.max_sequence, s.step_states
+		FROM job_events e JOIN job_snapshots s ON s.job_id = e.job_id
+		WHERE e.job_id = 'queued-run'
+	`).Scan(&eventType, &sequence, &status, &maxSequence, &stepStates); err != nil {
+		t.Fatalf("read backfilled queued job: %v", err)
+	}
+	if eventType != "job_queued" || sequence != 1 || status != "queued" || maxSequence != 1 || stepStates != "[]" {
+		t.Fatalf("backfilled queued job = (%q, %d, %q, %d, %q)", eventType, sequence, status, maxSequence, stepStates)
+	}
+}
+
 func TestChangeSetSchemaSupportsStructuredPartialReview(t *testing.T) {
 	ctx := context.Background()
 	store, project := createTestStore(t)
