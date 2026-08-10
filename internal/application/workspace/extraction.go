@@ -263,11 +263,11 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	currentJob, err := importDetails.Job.MarkExtractionStarted(task.ID, s.clock.Now())
 	if err != nil {
 		s.mu.Unlock()
-		return ExtractionRunView{}, err
+		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, err)
 	}
 	if err := importStore.UpdateImportJobExtraction(ctx, currentJob); err != nil {
 		s.mu.Unlock()
-		return ExtractionRunView{}, stableImportStoreError(err)
+		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, stableImportStoreError(err))
 	}
 	s.mu.Unlock()
 
@@ -282,6 +282,36 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		currentJob, provider, apiKey, project.ID, lease, generation)
 
 	return extractionRunView(task, nil), nil
+}
+
+// failExtractionStart compensates for a failure after the task's running
+// transition has committed but before its import job can be registered as
+// running. Leaving that task in running would create an orphaned job with no
+// pipeline/lease, so persist a terminal event before returning the root cause.
+func (s *Service) failExtractionStart(
+	ctx context.Context,
+	store ports.ExtractionStore,
+	task extractiondomain.Task,
+	cause error,
+) (ExtractionRunView, error) {
+	task.ErrorCode = "extraction_start_state_failed"
+	failed, transitionErr := task.Transition(extractiondomain.StatusFailed, cause.Error(), s.clock.Now())
+	if transitionErr != nil {
+		return ExtractionRunView{}, errors.Join(cause, transitionErr)
+	}
+	failedDraft, draftErr := newExtractionJobDraft(failed, agentdomain.EventJobFailed, "",
+		eventJSON(map[string]any{
+			"error_code":    failed.ErrorCode,
+			"error_message": failed.ErrorMessage,
+		}), s.clock.Now())
+	if draftErr != nil {
+		return ExtractionRunView{}, errors.Join(cause, draftErr)
+	}
+	if persistErr := store.UpdateTask(ctx, failed, failedDraft); persistErr != nil {
+		return ExtractionRunView{}, errors.Join(cause, persistErr)
+	}
+	s.notifyJobUpdated(ctx, store, failed.ID, agentdomain.JobKindExtraction)
+	return extractionRunView(failed, nil), cause
 }
 
 // runExtractionPipeline executes the lock-free provider pipeline and terminal
@@ -349,10 +379,14 @@ func (s *Service) runExtractionPipeline(
 		if draftErr != nil {
 			return ExtractionRunView{}, draftErr
 		}
-		_ = store.UpdateTask(context.WithoutCancel(ctx), task, failedDraft)
+		if persistErr := store.UpdateTask(context.WithoutCancel(ctx), task, failedDraft); persistErr != nil {
+			return ExtractionRunView{}, errors.Join(cause, persistErr)
+		}
 		s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 		failedJob, _ := currentJob.MarkExtractionFailed(s.clock.Now())
-		_ = importStore.UpdateImportJobExtraction(context.WithoutCancel(ctx), failedJob)
+		if importErr := importStore.UpdateImportJobExtraction(context.WithoutCancel(ctx), failedJob); importErr != nil {
+			return ExtractionRunView{}, errors.Join(cause, stableImportStoreError(importErr))
+		}
 		return extractionRunView(task, nil), cause
 	}
 
@@ -422,7 +456,9 @@ func (s *Service) runExtractionPipeline(
 				if draftErr != nil {
 					return ExtractionRunView{}, draftErr
 				}
-				_ = store.UpdateStep(context.WithoutCancel(ctx), failedStep, stepFailedDraft)
+				if updateErr := store.UpdateStep(context.WithoutCancel(ctx), failedStep, stepFailedDraft); updateErr != nil {
+					return failed(errors.Join(err, updateErr))
+				}
 			}
 			task.Steps[index] = failedStep
 			return failed(err)

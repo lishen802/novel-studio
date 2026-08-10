@@ -36,7 +36,11 @@ export interface UseJobEventReplayOptions {
    * workbench uses this to refresh the canonical view (for changeSetId)
    * and surface a notice.
    */
-  onJobTerminal?: (jobId: string, jobKind: JobKind, state: JobReplayState) => void;
+  onJobTerminal?: (
+    jobId: string,
+    jobKind: JobKind,
+    state: JobReplayState,
+  ) => void;
   /**
    * Filter notifications by job kind. Default: handle both agent and
    * extraction jobs.
@@ -69,15 +73,20 @@ export function useJobEventReplay({
   pageSize = DEFAULT_PAGE_SIZE,
   maxIterations = DEFAULT_MAX_ITERATIONS,
 }: UseJobEventReplayOptions): UseJobEventReplayResult {
-  const [replayStates, setReplayStates] = useState<Record<string, JobReplayState>>({});
+  const [replayStates, setReplayStates] = useState<
+    Record<string, JobReplayState>
+  >({});
   // Ref mirror so the async pull sees the latest state without re-subscribing
   // to onJobUpdated whenever replayStates changes.
   const replayStatesRef = useRef<Record<string, JobReplayState>>({});
   useEffect(() => {
     replayStatesRef.current = replayStates;
   }, [replayStates]);
-  // Per-job pulling guard: dedupes concurrent pulls for the same job.
+  // Per-job pulling guard dedupes concurrent reads. pendingTargetSequence keeps
+  // the greatest notification observed while that read is in flight, so a
+  // best-effort Wails wake-up can never be discarded by the guard.
   const pullingRef = useRef<Set<string>>(new Set());
+  const pendingTargetSequenceRef = useRef<Map<string, number>>(new Map());
   // Track terminal transitions so onJobTerminal fires once per job.
   const terminalNotifiedRef = useRef<Set<string>>(new Set());
   // Keep latest onJobTerminal in a ref so the onJobUpdated subscription
@@ -92,10 +101,20 @@ export function useJobEventReplay({
   }, [client]);
 
   const pullJobEvents = useCallback(
-    async (jobId: string, jobKind: JobKind): Promise<void> => {
+    async (
+      jobId: string,
+      jobKind: JobKind,
+      latestSequence = 0,
+    ): Promise<void> => {
       if (!jobId) return;
+      const priorTarget = pendingTargetSequenceRef.current.get(jobId) ?? 0;
+      pendingTargetSequenceRef.current.set(
+        jobId,
+        Math.max(priorTarget, latestSequence),
+      );
       if (pullingRef.current.has(jobId)) return;
       pullingRef.current.add(jobId);
+      let finalCursor = replayStatesRef.current[jobId]?.cursor ?? 0;
       try {
         let state = replayStatesRef.current[jobId] ?? initialState();
         let cursor = state.cursor;
@@ -103,7 +122,11 @@ export function useJobEventReplay({
 
         while (iteration < maxIterations) {
           iteration++;
-          const page = await clientRef.current.getJobEvents(jobId, cursor, pageSize);
+          const page = await clientRef.current.getJobEvents(
+            jobId,
+            cursor,
+            pageSize,
+          );
 
           if (page.snapshotRequired) {
             const snapshot = await clientRef.current.getJobSnapshot(jobId);
@@ -117,6 +140,7 @@ export function useJobEventReplay({
           const result = applyEvents(state, page.events);
           state = result.state;
           cursor = result.state.cursor;
+          finalCursor = cursor;
 
           if (result.needsPull) {
             // Gap detected: re-pull from the last applied sequence.
@@ -128,13 +152,24 @@ export function useJobEventReplay({
             continue;
           }
 
+          // A later Wails notification may have arrived while this request
+          // was pending. Do not settle until this replay reaches its reported
+          // sequence; the next page is fetched from the cursor we just applied.
+          if (cursor < (pendingTargetSequenceRef.current.get(jobId) ?? 0)) {
+            continue;
+          }
+
           break;
         }
 
         const wasTerminal = replayStatesRef.current[jobId]?.terminal ?? false;
         setReplayStates((current) => ({ ...current, [jobId]: state }));
 
-        if (state.terminal && !wasTerminal && !terminalNotifiedRef.current.has(jobId)) {
+        if (
+          state.terminal &&
+          !wasTerminal &&
+          !terminalNotifiedRef.current.has(jobId)
+        ) {
           terminalNotifiedRef.current.add(jobId);
           onJobTerminalRef.current?.(jobId, jobKind, state);
         } else if (!state.terminal) {
@@ -143,6 +178,16 @@ export function useJobEventReplay({
         }
       } finally {
         pullingRef.current.delete(jobId);
+        const target = pendingTargetSequenceRef.current.get(jobId) ?? 0;
+        if (target <= finalCursor) {
+          pendingTargetSequenceRef.current.delete(jobId);
+        } else {
+          // Cover the narrow window where a notification arrives after the
+          // loop's target check but before the pulling guard is released.
+          queueMicrotask(() => {
+            void pullJobEvents(jobId, jobKind);
+          });
+        }
       }
     },
     [pageSize, maxIterations],
@@ -156,15 +201,18 @@ export function useJobEventReplay({
       return next;
     });
     terminalNotifiedRef.current.delete(jobId);
+    pendingTargetSequenceRef.current.delete(jobId);
   }, []);
 
   // Subscribe to onJobUpdated once. The handler reads from refs so it does
   // not capture stale state.
   useEffect(() => {
-    const unsubscribe = client.onJobUpdated((jobId, jobKindStr, _latestSequence) => {
-      if (jobKindFilter && !jobKindFilter.has(jobKindStr as JobKind)) return;
-      void pullJobEvents(jobId, jobKindStr as JobKind);
-    });
+    const unsubscribe = client.onJobUpdated(
+      (jobId, jobKindStr, latestSequence) => {
+        if (jobKindFilter && !jobKindFilter.has(jobKindStr as JobKind)) return;
+        void pullJobEvents(jobId, jobKindStr as JobKind, latestSequence);
+      },
+    );
     return unsubscribe;
     // We intentionally only re-subscribe when the client identity changes.
     // pullJobEvents reads from refs internally.

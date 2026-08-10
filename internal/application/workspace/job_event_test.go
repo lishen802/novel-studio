@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -71,6 +72,7 @@ func TestExecuteAgentRunAppendsContiguousJobEvents(t *testing.T) {
 	}
 
 	wantTypes := []agentdomain.JobEventType{
+		agentdomain.EventJobQueued,
 		agentdomain.EventJobStarted,
 		// Planner step.
 		agentdomain.EventStepStarted,
@@ -117,6 +119,81 @@ func TestExecuteAgentRunAppendsContiguousJobEvents(t *testing.T) {
 	}
 }
 
+// TestCreatedQueuedAgentRunHasReplayableSnapshot protects project-open
+// recovery: ListRecoverableJobs includes queued runs, so creation must already
+// have persisted a sequence-1 snapshot before execution starts.
+func TestCreatedQueuedAgentRunHasReplayableSnapshot(t *testing.T) {
+	ctx := context.Background()
+	service, chapter := configuredAgentService(t, &fakeModelProviderFactory{})
+	defer service.Close()
+
+	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "等待作者执行。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := service.GetJobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetJobSnapshot for queued run: %v", err)
+	}
+	if snapshot.Status != "queued" || snapshot.MaxSequence != 1 {
+		t.Fatalf("queued snapshot = %#v, want status queued and sequence 1", snapshot)
+	}
+	page, err := service.GetJobEvents(ctx, run.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("GetJobEvents for queued run: %v", err)
+	}
+	if len(page.Events) != 1 || page.Events[0].EventType != string(agentdomain.EventJobQueued) {
+		t.Fatalf("queued events = %#v, want one job_queued event", page.Events)
+	}
+}
+
+// TestFailExtractionStartCompensatesRunningTask ensures the post-running
+// startup failure path cannot strand a task without a background pipeline.
+func TestFailExtractionStartCompensatesRunningTask(t *testing.T) {
+	ctx := context.Background()
+	service, taskID, _ := configuredExtractionService(t, &fakeModelProviderFactory{})
+	defer service.Close()
+
+	store, ok := service.active.store.(ports.ExtractionStore)
+	if !ok {
+		t.Fatalf("active store %T does not implement ports.ExtractionStore", service.active.store)
+	}
+	task, err := store.Task(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = task.Transition("running", "", service.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedDraft, err := newExtractionJobDraft(task, agentdomain.EventJobStarted, "", "", service.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateTask(ctx, task, startedDraft); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.failExtractionStart(ctx, store, task, errors.New("import lifecycle write failed"))
+	if err == nil {
+		t.Fatal("failExtractionStart returned nil error")
+	}
+	persisted, err := store.Task(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != "failed" || persisted.ErrorCode != "extraction_start_state_failed" {
+		t.Fatalf("compensated task = %#v", persisted)
+	}
+	events, err := store.JobEvents(ctx, taskID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 3 || events[len(events)-1].EventType != agentdomain.EventJobFailed {
+		t.Fatalf("compensation events = %#v", events)
+	}
+}
+
 // TestExecuteAgentRunFailureAppendsJobFailedEvent asserts that a provider
 // failure during ExecuteAgentRun emits a job_failed event rather than leaving
 // the feed at job_started with no terminal marker.
@@ -151,8 +228,8 @@ func TestExecuteAgentRunFailureAppendsJobFailedEvent(t *testing.T) {
 	if last.EventType != agentdomain.EventJobFailed {
 		t.Fatalf("last event type = %q, want job_failed", last.EventType)
 	}
-	if events[0].EventType != agentdomain.EventJobStarted {
-		t.Fatalf("first event type = %q, want job_started", events[0].EventType)
+	if events[0].EventType != agentdomain.EventJobQueued {
+		t.Fatalf("first event type = %q, want job_queued", events[0].EventType)
 	}
 
 	snapshot, err := agentStore.JobSnapshot(ctx, run.ID)
@@ -264,6 +341,7 @@ func TestExecuteExtractionRunAppendsContiguousJobEvents(t *testing.T) {
 	}
 
 	wantTypes := []agentdomain.JobEventType{
+		agentdomain.EventJobQueued,
 		agentdomain.EventJobStarted,
 		agentdomain.EventStepStarted,
 		agentdomain.EventStepCompleted,
@@ -328,8 +406,8 @@ func TestExecuteExtractionRunFailureAppendsJobFailedEvent(t *testing.T) {
 	if len(events) < 2 {
 		t.Fatal("expected at least job_started and job_failed events")
 	}
-	if events[0].EventType != agentdomain.EventJobStarted {
-		t.Fatalf("first event type = %q, want job_started", events[0].EventType)
+	if events[0].EventType != agentdomain.EventJobQueued {
+		t.Fatalf("first event type = %q, want job_queued", events[0].EventType)
 	}
 	last := events[len(events)-1]
 	if last.EventType != agentdomain.EventJobFailed {
@@ -378,9 +456,9 @@ func TestGetJobSnapshotReturnsAuthoritativeProjection(t *testing.T) {
 	if view.Status != "completed" {
 		t.Fatalf("snapshot status = %q, want completed", view.Status)
 	}
-	// 8 events: job_started + 3×(step_started+step_completed) + job_completed.
-	if view.MaxSequence != 8 {
-		t.Fatalf("snapshot max_sequence = %d, want 8", view.MaxSequence)
+	// 9 events: job_queued + job_started + 3×(step_started+step_completed) + job_completed.
+	if view.MaxSequence != 9 {
+		t.Fatalf("snapshot max_sequence = %d, want 9", view.MaxSequence)
 	}
 	if view.EarliestReplayableSequence != 1 {
 		t.Fatalf("snapshot earliest_replayable_sequence = %d, want 1", view.EarliestReplayableSequence)
@@ -430,19 +508,19 @@ func TestGetJobEventsPaginatesByCursor(t *testing.T) {
 		t.Fatal("page 1 snapshotRequired = true, want false")
 	}
 
-	// Page 2: remaining 6 events after sequence 2.
+	// Page 2: remaining 7 events after sequence 2.
 	page, err = service.GetJobEvents(ctx, runID, 2, 100)
 	if err != nil {
 		t.Fatalf("GetJobEvents page 2: %v", err)
 	}
-	if len(page.Events) != 6 {
-		t.Fatalf("page 2 len(events) = %d, want 6", len(page.Events))
+	if len(page.Events) != 7 {
+		t.Fatalf("page 2 len(events) = %d, want 7", len(page.Events))
 	}
 	if page.Events[0].SequenceNumber != 3 {
 		t.Fatalf("page 2 first sequence = %d, want 3", page.Events[0].SequenceNumber)
 	}
-	if page.Events[5].SequenceNumber != 8 {
-		t.Fatalf("page 2 last sequence = %d, want 8", page.Events[5].SequenceNumber)
+	if page.Events[6].SequenceNumber != 9 {
+		t.Fatalf("page 2 last sequence = %d, want 9", page.Events[6].SequenceNumber)
 	}
 	if page.HasMore {
 		t.Fatal("page 2 hasMore = true, want false")
@@ -450,8 +528,8 @@ func TestGetJobEventsPaginatesByCursor(t *testing.T) {
 	if page.SnapshotRequired {
 		t.Fatal("page 2 snapshotRequired = true, want false")
 	}
-	if page.NextCursor != 8 {
-		t.Fatalf("page 2 nextCursor = %d, want 8", page.NextCursor)
+	if page.NextCursor != 9 {
+		t.Fatalf("page 2 nextCursor = %d, want 9", page.NextCursor)
 	}
 }
 
@@ -571,15 +649,15 @@ func TestRecoverInterruptedAgentRunsAppendsJobRecoveredEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JobEvents: %v", err)
 	}
-	// The goroutine persisted job_started (seq 1) and step_started for the
-	// planner (seq 2) before blocking in the provider. Recovery appends
+	// The goroutine persisted job_queued (seq 1), job_started and step_started
+	// for the planner before blocking in the provider. Recovery appends
 	// job_recovered as the next sequence. The feed must be contiguous and
 	// end at job_recovered.
 	if len(events) < 2 {
 		t.Fatalf("len(events) = %d, want at least 2: %#v", len(events), events)
 	}
-	if events[0].EventType != agentdomain.EventJobStarted || events[0].SequenceNumber != 1 {
-		t.Fatalf("event 0 = %#v, want job_started/seq 1", events[0])
+	if events[0].EventType != agentdomain.EventJobQueued || events[0].SequenceNumber != 1 {
+		t.Fatalf("event 0 = %#v, want job_queued/seq 1", events[0])
 	}
 	for i, evt := range events {
 		if evt.SequenceNumber != uint64(i+1) {
@@ -688,13 +766,13 @@ func TestRecoverInterruptedTasksAppendsJobRecoveredEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JobEvents: %v", err)
 	}
-	// The goroutine persisted job_started (seq 1) and step_started (seq 2)
+	// The goroutine persisted job_queued (seq 1), job_started and step_started
 	// before blocking in the provider; recovery appends job_recovered next.
 	if len(events) < 2 {
 		t.Fatalf("len(events) = %d, want at least 2: %#v", len(events), events)
 	}
-	if events[0].EventType != agentdomain.EventJobStarted || events[0].SequenceNumber != 1 {
-		t.Fatalf("event 0 = %#v, want job_started/seq 1", events[0])
+	if events[0].EventType != agentdomain.EventJobQueued || events[0].SequenceNumber != 1 {
+		t.Fatalf("event 0 = %#v, want job_queued/seq 1", events[0])
 	}
 	for i, evt := range events {
 		if evt.SequenceNumber != uint64(i+1) {

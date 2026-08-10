@@ -32,6 +32,29 @@ const COMPLETED_PAYLOAD = JSON.stringify({
 });
 
 describe("applyEvents", () => {
+  it("rebuilds step states from the authoritative snapshot", () => {
+    const state = rebuildFromSnapshot({
+      jobId: "run-1",
+      jobKind: "agent",
+      projectId: "project-1",
+      status: "running",
+      maxSequence: 4,
+      earliestReplayableSequence: 1,
+      inputTokens: 12,
+      outputTokens: 8,
+      steps: [
+        { stepId: "planner", status: "completed" },
+        { stepId: "writer", status: "started" },
+      ],
+      updatedAt: "2026-08-10T00:00:00Z",
+    });
+
+    expect(state.steps).toEqual([
+      { stepId: "planner", status: "completed" },
+      { stepId: "writer", status: "started" },
+    ]);
+  });
+
   it("applies events in ascending sequence order", () => {
     const state = initialState();
     const events = [
@@ -84,9 +107,7 @@ describe("applyEvents", () => {
     ]).state;
 
     // Cursor is 2; next expected is 3, but we receive 4 → gap.
-    const result = applyEvents(state, [
-      event(4, "step_completed", "step-1"),
-    ]);
+    const result = applyEvents(state, [event(4, "step_completed", "step-1")]);
 
     expect(result.appliedCount).toBe(0);
     expect(result.needsPull).toBe(true);
@@ -112,11 +133,16 @@ describe("applyEvents", () => {
       event(2, "step_started", "step-1"),
       event(3, "step_completed", "step-1", COMPLETED_PAYLOAD),
       event(4, "step_started", "step-2"),
-      event(5, "step_completed", "step-2", JSON.stringify({
-        role: "planner",
-        input_tokens: 20,
-        output_tokens: 10,
-      })),
+      event(
+        5,
+        "step_completed",
+        "step-2",
+        JSON.stringify({
+          role: "planner",
+          input_tokens: 20,
+          output_tokens: 10,
+        }),
+      ),
       event(6, "job_completed"),
     ];
     const result = applyEvents(initialState(), events);
@@ -140,10 +166,7 @@ describe("applyEvents", () => {
   });
 
   it("handles job_cancelled terminal event", () => {
-    const events = [
-      event(1, "job_started"),
-      event(2, "job_cancelled"),
-    ];
+    const events = [event(1, "job_started"), event(2, "job_cancelled")];
     const result = applyEvents(initialState(), events);
 
     expect(result.state.status).toBe("cancelled");
@@ -151,10 +174,7 @@ describe("applyEvents", () => {
   });
 
   it("handles job_recovered event", () => {
-    const events = [
-      event(1, "job_started"),
-      event(2, "job_recovered"),
-    ];
+    const events = [event(1, "job_started"), event(2, "job_recovered")];
     const result = applyEvents(initialState(), events);
 
     expect(result.state.status).toBe("recoverable");

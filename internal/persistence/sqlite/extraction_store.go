@@ -45,6 +45,20 @@ func (s *Store) CreateTask(ctx context.Context, task extractiondomain.Task) erro
 			return err
 		}
 	}
+	queuedDraft, err := agentdomain.NewJobEventDraft(
+		task.ID, agentdomain.JobKindExtraction, task.ProjectID, agentdomain.EventJobQueued,
+		"", "", task.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	maxSequence, err := appendJobEventDrafts(ctx, tx, []agentdomain.JobEventDraft{queuedDraft})
+	if err != nil {
+		return err
+	}
+	if err := upsertExtractionJobSnapshot(ctx, tx, task.ID, maxSequence, formatTime(task.UpdatedAt)); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return databaseOperationError("commit create extraction task", err)
 	}
@@ -150,6 +164,9 @@ func (s *Store) UpdateStep(ctx context.Context, step extractiondomain.Step, draf
 	if err := requireAffected(result, "extraction step", step.ID); err != nil {
 		return err
 	}
+	if err := refreshExtractionTaskUsageFromSteps(ctx, tx, step.TaskID, formatTime(step.UpdatedAt)); err != nil {
+		return err
+	}
 	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
 	if err != nil {
 		return err
@@ -162,6 +179,22 @@ func (s *Store) UpdateStep(ctx context.Context, step extractiondomain.Step, draf
 	}
 	if err := tx.Commit(); err != nil {
 		return databaseOperationError("commit update extraction step", err)
+	}
+	return nil
+}
+
+// refreshExtractionTaskUsageFromSteps mirrors the agent-side aggregation so a
+// step event and its authoritative snapshot always carry the same usage.
+func refreshExtractionTaskUsageFromSteps(ctx context.Context, exec txExecutor, taskID, updatedAt string) error {
+	_, err := exec.ExecContext(ctx, `
+		UPDATE extraction_tasks
+		SET input_tokens = COALESCE((SELECT SUM(input_tokens) FROM extraction_steps WHERE task_id = ?), 0),
+			output_tokens = COALESCE((SELECT SUM(output_tokens) FROM extraction_steps WHERE task_id = ?), 0),
+			updated_at = ?
+		WHERE id = ?
+	`, taskID, taskID, updatedAt, taskID)
+	if err != nil {
+		return databaseOperationError("refresh extraction task usage", err)
 	}
 	return nil
 }

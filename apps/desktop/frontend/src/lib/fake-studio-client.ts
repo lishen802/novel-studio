@@ -243,8 +243,10 @@ export class FakeStudioClient implements StudioClient {
   proposeStructuredChangeCalls: StructuredChangeInput[] = [];
   editChangeOperationCalls: ChangeOperationEditInput[] = [];
   applyChangeSetCalls: string[] = [];
-  applyChangeOperationCalls: Array<{ changeSetId: string; operationId: string }> =
-    [];
+  applyChangeOperationCalls: Array<{
+    changeSetId: string;
+    operationId: string;
+  }> = [];
   rejectChangeSetCalls: string[] = [];
   rejectChangeOperationCalls: Array<{
     changeSetId: string;
@@ -287,7 +289,10 @@ export class FakeStudioClient implements StudioClient {
   updateWorldRegionCalls: Array<{ id: string; input: WorldRegionInput }> = [];
   archiveWorldRegionCalls: string[] = [];
   upsertRegionAdjacencyCalls: RegionAdjacencyInput[] = [];
-  deleteRegionAdjacencyCalls: Array<{ firstRegionId: string; secondRegionId: string }> = [];
+  deleteRegionAdjacencyCalls: Array<{
+    firstRegionId: string;
+    secondRegionId: string;
+  }> = [];
   createLocationCalls: LocationInput[] = [];
   updateLocationCalls: Array<{ id: string; input: LocationInput }> = [];
   archiveLocationCalls: string[] = [];
@@ -359,11 +364,22 @@ export class FakeStudioClient implements StudioClient {
   beforeCloseHandler: (() => Promise<void>) | null = null;
   getJobSnapshotCalls: string[] = [];
   jobSnapshotResult: JobSnapshotView | null = null;
-  getJobEventsCalls: Array<{ jobId: string; afterSequence: number; limit: number }> = [];
-  jobEventsResult: JobEventsPage = { events: [], nextCursor: 0, hasMore: false, snapshotRequired: false };
+  getJobEventsCalls: Array<{
+    jobId: string;
+    afterSequence: number;
+    limit: number;
+  }> = [];
+  jobEventsResult: JobEventsPage = {
+    events: [],
+    nextCursor: 0,
+    hasMore: false,
+    snapshotRequired: false,
+  };
   listRecoverableJobsCalls = 0;
   recoverableJobsResult: JobSummaryView[] = [];
-  jobUpdatedHandlers: Array<(jobId: string, jobKind: string, latestSequence: number) => void> = [];
+  jobUpdatedHandlers: Array<
+    (jobId: string, jobKind: string, latestSequence: number) => void
+  > = [];
   /**
    * Per-job event log used by getJobEvents to serve cursor-based replay.
    * Tests can either pre-populate this map or rely on executeAgentRun /
@@ -466,9 +482,7 @@ export class FakeStudioClient implements StudioClient {
     this.extractionTaskCalls.push(id);
     if (this.extractionError) throw this.extractionError;
     if (this.extractionRunResult) return this.extractionRunResult;
-    const task = this.extractionTasksResult.find(
-      (item) => item.id === id,
-    );
+    const task = this.extractionTasksResult.find((item) => item.id === id);
     if (!task) throw new Error("抽取任务不存在");
     return { task, changeSet: null };
   }
@@ -482,10 +496,20 @@ export class FakeStudioClient implements StudioClient {
     const run = this.extractionStartResult;
     this.extractionTasksResult = [
       run.task,
-      ...this.extractionTasksResult.filter(
-        (item) => item.id !== run.task.id,
-      ),
+      ...this.extractionTasksResult.filter((item) => item.id !== run.task.id),
     ];
+    this.appendJobEvent(run.task.id, "extraction", 1, "job_queued", "");
+    this.upsertJobSnapshot({
+      jobId: run.task.id,
+      jobKind: "extraction",
+      projectId: this.openProjectResult.id,
+      status: "queued",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: run.task.updatedAt,
+    });
     return run;
   }
 
@@ -507,13 +531,13 @@ export class FakeStudioClient implements StudioClient {
       item.id === id ? runningTask : item,
     );
     const projectId = this.openProjectResult.id;
-    this.appendJobEvent(id, "extraction", 1, "job_started", "");
+    this.appendJobEvent(id, "extraction", 2, "job_started", "");
     this.upsertJobSnapshot({
       jobId: id,
       jobKind: "extraction",
       projectId,
       status: "running",
-      maxSequence: 1,
+      maxSequence: 2,
       earliestReplayableSequence: 1,
       inputTokens: 0,
       outputTokens: 0,
@@ -551,7 +575,7 @@ export class FakeStudioClient implements StudioClient {
       this.appendJobEvent(
         id,
         "extraction",
-        2,
+        3,
         "job_completed",
         terminalRun.task.changeSetId
           ? JSON.stringify({ change_set_id: terminalRun.task.changeSetId })
@@ -562,7 +586,7 @@ export class FakeStudioClient implements StudioClient {
         jobKind: "extraction",
         projectId,
         status: terminalRun.task.status,
-        maxSequence: 2,
+        maxSequence: 3,
         earliestReplayableSequence: 1,
         inputTokens,
         outputTokens,
@@ -572,7 +596,7 @@ export class FakeStudioClient implements StudioClient {
           : "",
         updatedAt: "2026-08-07T00:00:00Z",
       });
-      this.emitJobUpdated(id, "extraction", 2);
+      this.emitJobUpdated(id, "extraction", 3);
     });
   }
 
@@ -1350,12 +1374,14 @@ export class FakeStudioClient implements StudioClient {
   ): Promise<RegionAdjacencyView> {
     this.upsertRegionAdjacencyCalls.push(input);
     if (this.worldAssetMutationError) throw this.worldAssetMutationError;
-    const firstRegionId = input.firstRegionId < input.secondRegionId
-      ? input.firstRegionId
-      : input.secondRegionId;
-    const secondRegionId = input.firstRegionId < input.secondRegionId
-      ? input.secondRegionId
-      : input.firstRegionId;
+    const firstRegionId =
+      input.firstRegionId < input.secondRegionId
+        ? input.firstRegionId
+        : input.secondRegionId;
+    const secondRegionId =
+      input.firstRegionId < input.secondRegionId
+        ? input.secondRegionId
+        : input.firstRegionId;
     const adjacency = { ...input, firstRegionId, secondRegionId };
     this.worldAssetsResult = {
       ...this.worldAssetsResult,
@@ -1377,12 +1403,15 @@ export class FakeStudioClient implements StudioClient {
   ): Promise<void> {
     this.deleteRegionAdjacencyCalls.push({ firstRegionId, secondRegionId });
     if (this.worldAssetMutationError) throw this.worldAssetMutationError;
-    const first = firstRegionId < secondRegionId ? firstRegionId : secondRegionId;
-    const second = firstRegionId < secondRegionId ? secondRegionId : firstRegionId;
+    const first =
+      firstRegionId < secondRegionId ? firstRegionId : secondRegionId;
+    const second =
+      firstRegionId < secondRegionId ? secondRegionId : firstRegionId;
     this.worldAssetsResult = {
       ...this.worldAssetsResult,
       regionAdjacencies: this.worldAssetsResult.regionAdjacencies.filter(
-        (item) => item.firstRegionId !== first || item.secondRegionId !== second,
+        (item) =>
+          item.firstRegionId !== first || item.secondRegionId !== second,
       ),
     };
   }
@@ -1922,6 +1951,18 @@ export class FakeStudioClient implements StudioClient {
       updatedAt: "2026-07-29T10:00:00Z",
     };
     this.agentRunsResult = [value, ...this.agentRunsResult];
+    this.appendJobEvent(value.id, "agent", 1, "job_queued", "");
+    this.upsertJobSnapshot({
+      jobId: value.id,
+      jobKind: "agent",
+      projectId: this.openProjectResult.id,
+      status: "queued",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: value.updatedAt,
+    });
     return value;
   }
   async executeAgentRun(id: string): Promise<AgentRunView> {
@@ -1938,13 +1979,13 @@ export class FakeStudioClient implements StudioClient {
     this.agentRunsResult = this.agentRunsResult.map((item) =>
       item.id === id ? running : item,
     );
-    this.appendJobEvent(id, "agent", 1, "job_started", "");
+    this.appendJobEvent(id, "agent", 2, "job_started", "");
     this.upsertJobSnapshot({
       jobId: id,
       jobKind: "agent",
       projectId: this.openProjectResult.id,
       status: "running",
-      maxSequence: 1,
+      maxSequence: 2,
       earliestReplayableSequence: 1,
       inputTokens: 0,
       outputTokens: 0,
@@ -1994,13 +2035,19 @@ export class FakeStudioClient implements StudioClient {
       this.agentRunsResult = this.agentRunsResult.map((item) =>
         item.id === id ? terminal : item,
       );
-      this.appendJobEvent(id, "agent", 2, "job_completed", JSON.stringify({ change_set_id: "change-set-1" }));
+      this.appendJobEvent(
+        id,
+        "agent",
+        3,
+        "job_completed",
+        JSON.stringify({ change_set_id: "change-set-1" }),
+      );
       this.upsertJobSnapshot({
         jobId: id,
         jobKind: "agent",
         projectId,
         status: "completed",
-        maxSequence: 2,
+        maxSequence: 3,
         earliestReplayableSequence: 1,
         inputTokens: 0,
         outputTokens: 0,
@@ -2008,7 +2055,7 @@ export class FakeStudioClient implements StudioClient {
         terminalInfo: JSON.stringify({ changeSetId: "change-set-1" }),
         updatedAt: "2026-08-07T00:00:00Z",
       });
-      this.emitJobUpdated(id, "agent", 2);
+      this.emitJobUpdated(id, "agent", 3);
     });
   }
   async cancelAgentRun(id: string): Promise<void> {
@@ -2045,6 +2092,18 @@ export class FakeStudioClient implements StudioClient {
       })),
     };
     this.agentRunsResult = [value, ...this.agentRunsResult];
+    this.appendJobEvent(value.id, "agent", 1, "job_queued", "");
+    this.upsertJobSnapshot({
+      jobId: value.id,
+      jobKind: "agent",
+      projectId: this.openProjectResult.id,
+      status: "queued",
+      maxSequence: 1,
+      earliestReplayableSequence: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: value.updatedAt,
+    });
     return value;
   }
   async agentRuns(): Promise<AgentRunView[]> {
@@ -2105,7 +2164,10 @@ export class FakeStudioClient implements StudioClient {
           snapshotRequired: true,
         };
       }
-      const nextCursor = slice.length > 0 ? slice[slice.length - 1].sequenceNumber : afterSequence;
+      const nextCursor =
+        slice.length > 0
+          ? slice[slice.length - 1].sequenceNumber
+          : afterSequence;
       const maxSequence = snapshot?.maxSequence ?? nextCursor;
       return {
         events: slice,
@@ -2119,7 +2181,8 @@ export class FakeStudioClient implements StudioClient {
 
   async listRecoverableJobs(): Promise<JobSummaryView[]> {
     this.listRecoverableJobsCalls++;
-    if (this.recoverableJobsResult.length > 0) return this.recoverableJobsResult;
+    if (this.recoverableJobsResult.length > 0)
+      return this.recoverableJobsResult;
     // Derive recoverable jobs from non-terminal agent runs and extraction tasks.
     const summaries: JobSummaryView[] = [];
     const projectId = this.openProjectResult.id;
