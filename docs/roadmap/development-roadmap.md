@@ -1,7 +1,7 @@
 # 织境 Story Studio 总体开发路线图
 
 - 状态：已批准
-- 更新日期：2026-08-07（R1.2 进行中）
+- 更新日期：2026-08-10（R1.3 计划已批准）
 - 适用范围：当前商业发布底线与完整 V1
 - 上游依据：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 实施计划规范：[实施计划目录说明](../plans/README.md)
@@ -133,7 +133,14 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 - 第二实例禁止并发写入；
 - 建立不会迁移、checkpoint 或启动后台任务的只读 store；
 - 提供重试、只读打开和恢复副本；
-- 覆盖 WAL/SHM、同步目录、原子替换、路径长度和残留锁元数据。
+- 覆盖活跃 WAL 只读、恢复副本一致性和残留锁元数据。
+
+#### R1.4 Windows 文件锁、写入探针与路径边界
+
+- 建立包目录、SQLite 短写入/回滚、WAL/SHM、checkpoint 与同目录原子替换探针；
+- 对同步盘和网络映射目录提供非阻断风险提示，并分类处理运行期 sharing violation；
+- 完成 Windows 默认 MAX_PATH 环境下的路径预算、保留名、短 ID 和可操作错误；
+- 验证同步目录锁定、原子替换失败和长根路径不会损坏 canonical 内容。
 
 ### 退出标准
 
@@ -147,13 +154,14 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 
 1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`completed`）
 2. [R1 可恢复 JobEvent feed](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)（`completed`）
-3. `R1 React JobEvent replay`
-4. `R1 项目 OS lease 与只读 store`
-5. `R1 Windows 文件锁与路径边界`
+3. [R1.3 项目生命周期保护](../plans/2026-08-10-r1-project-lifecycle-protection-implementation.md)（`approved`）
+4. `R1.4 Windows 文件锁、写入探针与路径边界`
 
-R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race/vet、macOS 生产构建、Windows 完整 Go tests 与生产构建）。Agent 与抽取作业的 Provider 调用不再持有工作区全局锁，作者可在模型 IO 期间保存草稿与新建章节；项目切换/关闭先 drain job lease 再关闭 store，generation 安全网保证作业不向已关闭 store 回写，超时作业转入 `recoverable` 供作者重试。R1.2–R1.5 按其退出标准依次创建。
+R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race/vet、macOS 生产构建、Windows 完整 Go tests 与生产构建）。Agent 与抽取作业的 Provider 调用不再持有工作区全局锁，作者可在模型 IO 期间保存草稿与新建章节；项目切换/关闭先 drain job lease 再关闭 store，generation 安全网保证作业不向已关闭 store 回写，超时作业转入 `recoverable` 供作者重试。R1.2–R1.4 按其退出标准依次推进。
 
 R1.2（可恢复 JobEvent）已完成并通过三平台 Foundation CI（run `31155638906`：Ubuntu race/vet/shuffle=on、macOS 生产构建、Windows 完整 Go tests 与生产构建）。建立 append-only `JobEvent` 事件源与 `JobSnapshot` 投影，状态变化与事件同事务提交；`ExecuteAgentRun`/`ExecuteExtractionRun` 改为异步返回 running，Wails 只发送 `job_id + latest_sequence` 轻量通知；React 按 cursor 增量补拉、检测缺口并幂等更新，覆盖重挂载、漏推与应用重启后的 snapshot 重建。项目重开时 `RecoverInterruptedAgentRuns`/`RecoverInterruptedTasks` 在同一事务内 append `job_recovered` 事件并刷新 `JobSnapshot`，使事件流水终点与权威投影一致；恢复与边界测试（漏推/重复/乱序、Bridge 重挂载、cursor 早于清理下界、drain 超时后安全退出）已在 Go 与 React 两侧覆盖。详见 [R1.2 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
+
+R1.2 已包含原路线图中单列的“React JobEvent replay”，不再重复建立第二份计划。R1.3 已批准，先完成 OS lease、真正只读、争锁救局和恢复副本；同步目录运行期冲突、完整写入探针与 Windows 路径预算作为 R1.4 单独规划，R1.4 完成前不宣告 R1 整体退出。
 
 ## 7. R2：正式资产写入与导入正确性
 
