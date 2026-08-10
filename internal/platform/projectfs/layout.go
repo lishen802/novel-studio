@@ -31,11 +31,12 @@ type Layout struct {
 	Imports     string
 	// Recovery is the internal short-path directory used by the safe database
 	// migration coordinator (backup, stage, journal, atomic activation). It
-	// is created by Create and ensured by OpenLayout exactly like Imports; it
-	// is not surfaced in the UI and React/Wails must never read or write it.
+	// is created by Create and ensured by PrepareEditableLayout like Imports;
+	// it is not surfaced in the UI and React/Wails must never read or write it.
 	Recovery  string
 	Snapshots string
 	Branches  string
+	Lease     string
 }
 
 func NewLayout(parentDirectory, projectTitle string) (Layout, error) {
@@ -64,7 +65,10 @@ func (l Layout) Create() error {
 	return nil
 }
 
-func OpenLayout(packagePath string) (Layout, error) {
+// InspectLayout validates that packagePath is an existing project-package
+// directory and derives its fixed paths. It never writes to the package, so it
+// is safe to use before a read-only open or before an editable lease is held.
+func InspectLayout(packagePath string) (Layout, error) {
 	packagePath = filepath.Clean(strings.TrimSpace(packagePath))
 	if !strings.EqualFold(filepath.Ext(packagePath), packageExtension) {
 		return Layout{}, fmt.Errorf("%w: package must end in %s", ErrInvalidPackage, packageExtension)
@@ -81,17 +85,28 @@ func OpenLayout(packagePath string) (Layout, error) {
 		return Layout{}, fmt.Errorf("%w: package is not a directory", ErrInvalidPackage)
 	}
 
-	layout := layoutForRoot(packagePath)
+	return layoutForRoot(packagePath), nil
+}
+
+// PrepareEditableLayout performs compatibility housekeeping that is permitted
+// only for an editable project. The layout is always re-derived from Root so
+// callers cannot redirect individual package paths.
+func PrepareEditableLayout(layout Layout) error {
+	inspected, err := InspectLayout(layout.Root)
+	if err != nil {
+		return err
+	}
+	layout = layoutForRoot(inspected.Root)
 	if err := os.MkdirAll(layout.Imports, 0o755); err != nil {
-		return Layout{}, fmt.Errorf("create imports directory: %w", err)
+		return fmt.Errorf("create imports directory: %w", err)
 	}
 	if err := cleanupOrphanImportTemporaryFilesForLayout(layout); err != nil {
-		return Layout{}, err
+		return err
 	}
 	if err := os.MkdirAll(layout.Recovery, 0o755); err != nil {
-		return Layout{}, fmt.Errorf("create recovery directory: %w", err)
+		return fmt.Errorf("create recovery directory: %w", err)
 	}
-	return layout, nil
+	return nil
 }
 
 func layoutForRoot(root string) Layout {
@@ -104,6 +119,7 @@ func layoutForRoot(root string) Layout {
 		Recovery:    filepath.Join(root, "recovery"),
 		Snapshots:   filepath.Join(root, "snapshots"),
 		Branches:    filepath.Join(root, "branches"),
+		Lease:       filepath.Join(root, "project.lease"),
 	}
 }
 

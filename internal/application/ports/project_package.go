@@ -6,11 +6,14 @@ type ProjectPackage struct {
 	Attachments string
 	Exports     string
 	Imports     string
+	Recovery    string
 	Snapshots   string
 	Branches    string
+	Lease       string
 }
 
 type ProjectPackageManager interface {
 	Create(parentDirectory, projectTitle string) (ProjectPackage, error)
-	Open(packagePath string) (ProjectPackage, error)
+	Inspect(packagePath string) (ProjectPackage, error)
+	PrepareEditable(packageInfo ProjectPackage) error
 }

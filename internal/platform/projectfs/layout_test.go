@@ -126,7 +126,35 @@ func TestLayoutCreateIncludesRecoveryDirectory(t *testing.T) {
 	}
 }
 
-func TestOpenLayoutCreatesMissingRecoveryDirectoryForLegacyPackage(t *testing.T) {
+func TestInspectLayoutDoesNotCreateMissingCompatibilityDirectories(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "旧作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{layout.Imports, layout.Recovery} {
+		if err := os.Remove(directory); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opened, err := InspectLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Imports != layout.Imports || opened.Recovery != layout.Recovery {
+		t.Fatalf("opened = %#v, want paths from %#v", opened, layout)
+	}
+	for _, directory := range []string{layout.Imports, layout.Recovery} {
+		if _, err := os.Stat(directory); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("InspectLayout created %q: %v", directory, err)
+		}
+	}
+}
+
+func TestPrepareEditableLayoutCreatesMissingRecoveryDirectoryForLegacyPackage(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "旧作品")
 	if err != nil {
 		t.Fatal(err)
@@ -138,8 +166,11 @@ func TestOpenLayoutCreatesMissingRecoveryDirectoryForLegacyPackage(t *testing.T)
 		t.Fatal(err)
 	}
 
-	opened, err := OpenLayout(layout.Root)
+	opened, err := InspectLayout(layout.Root)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEditableLayout(opened); err != nil {
 		t.Fatal(err)
 	}
 	if opened.Recovery != layout.Recovery {
@@ -154,7 +185,7 @@ func TestOpenLayoutCreatesMissingRecoveryDirectoryForLegacyPackage(t *testing.T)
 	}
 }
 
-func TestOpenLayoutRecoveryDirectoryFailureDoesNotTouchDatabase(t *testing.T) {
+func TestPrepareEditableLayoutRecoveryDirectoryFailureDoesNotTouchDatabase(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "损坏的旧项目")
 	if err != nil {
 		t.Fatal(err)
@@ -177,9 +208,12 @@ func TestOpenLayoutRecoveryDirectoryFailureDoesNotTouchDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = OpenLayout(layout.Root)
-	if err == nil {
-		t.Fatal("OpenLayout accepted a non-directory recovery path")
+	inspected, err := InspectLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEditableLayout(inspected); err == nil {
+		t.Fatal("PrepareEditableLayout accepted a non-directory recovery path")
 	}
 
 	gotDatabase, err := os.ReadFile(layout.Database)
@@ -191,15 +225,15 @@ func TestOpenLayoutRecoveryDirectoryFailureDoesNotTouchDatabase(t *testing.T) {
 	}
 }
 
-func TestOpenLayoutRejectsOrdinaryDirectory(t *testing.T) {
-	_, err := OpenLayout(t.TempDir())
+func TestInspectLayoutRejectsOrdinaryDirectory(t *testing.T) {
+	_, err := InspectLayout(t.TempDir())
 
 	if !errors.Is(err, ErrInvalidPackage) {
 		t.Fatalf("error = %v, want ErrInvalidPackage", err)
 	}
 }
 
-func TestOpenLayoutReturnsPathsForExistingPackage(t *testing.T) {
+func TestInspectLayoutReturnsPathsForExistingPackage(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "长夜织境")
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +242,7 @@ func TestOpenLayoutReturnsPathsForExistingPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opened, err := OpenLayout(layout.Root)
+	opened, err := InspectLayout(layout.Root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +251,7 @@ func TestOpenLayoutReturnsPathsForExistingPackage(t *testing.T) {
 	}
 }
 
-func TestOpenLayoutCreatesImportsDirectoryForLegacyPackage(t *testing.T) {
+func TestInspectLayoutDoesNotCreateImportsDirectoryForLegacyPackage(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "旧作品")
 	if err != nil {
 		t.Fatal(err)
@@ -229,21 +263,17 @@ func TestOpenLayoutCreatesImportsDirectoryForLegacyPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opened, err := OpenLayout(layout.Root)
+	opened, err := InspectLayout(layout.Root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	info, err := os.Stat(opened.Imports)
-	if err != nil {
-		t.Fatalf("Stat(%q): %v", opened.Imports, err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("%q is not a directory", opened.Imports)
+	if _, err := os.Stat(opened.Imports); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("InspectLayout created %q: %v", opened.Imports, err)
 	}
 }
 
-func TestOpenLayoutCleansOnlyOwnedOrphanImportTemporaryFiles(t *testing.T) {
+func TestInspectLayoutDoesNotCleanOrphanImportTemporaryFiles(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "旧作品")
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +298,50 @@ func TestOpenLayoutCleansOnlyOwnedOrphanImportTemporaryFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := OpenLayout(layout.Root); err != nil {
+	if _, err := InspectLayout(layout.Root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(layout.Imports, orphanName)); err != nil {
+		t.Fatalf("InspectLayout removed orphan import temporary: %v", err)
+	}
+	for _, name := range []string{otherHiddenName, directoryName} {
+		if _, err := os.Stat(filepath.Join(layout.Imports, name)); err != nil {
+			t.Fatalf("unrelated hidden entry %q was removed: %v", name, err)
+		}
+	}
+}
+
+func TestPrepareEditableLayoutCleansOnlyOwnedOrphanImportTemporaryFiles(t *testing.T) {
+	layout, err := NewLayout(t.TempDir(), "旧作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	orphanName := ".import-source-" + strings.Repeat("a", 32)
+	otherHiddenName := ".import-source-keep"
+	directoryName := ".import-source-" + strings.Repeat("b", 32)
+	if err := os.WriteFile(filepath.Join(layout.Imports, orphanName), []byte("orphan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-importTemporaryOrphanAge - time.Hour)
+	if err := os.Chtimes(filepath.Join(layout.Imports, orphanName), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.Imports, otherHiddenName), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(layout.Imports, directoryName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	inspected, err := InspectLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEditableLayout(inspected); err != nil {
 		t.Fatal(err)
 	}
 
@@ -282,7 +355,7 @@ func TestOpenLayoutCleansOnlyOwnedOrphanImportTemporaryFiles(t *testing.T) {
 	}
 }
 
-func TestOpenLayoutLeavesRecentOwnedImportTemporaryFile(t *testing.T) {
+func TestPrepareEditableLayoutLeavesRecentOwnedImportTemporaryFile(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "进行中的作品")
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +368,11 @@ func TestOpenLayoutLeavesRecentOwnedImportTemporaryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := OpenLayout(layout.Root); err != nil {
+	inspected, err := InspectLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEditableLayout(inspected); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(layout.Imports, recentName)); err != nil {
@@ -303,7 +380,7 @@ func TestOpenLayoutLeavesRecentOwnedImportTemporaryFile(t *testing.T) {
 	}
 }
 
-func TestOpenLayoutIgnoresFailureToRemoveOneOldImportTemporary(t *testing.T) {
+func TestPrepareEditableLayoutIgnoresFailureToRemoveOneOldImportTemporary(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("directory mode bits do not reliably deny deletion on Windows")
 	}
@@ -330,15 +407,19 @@ func TestOpenLayoutIgnoresFailureToRemoveOneOldImportTemporary(t *testing.T) {
 		_ = os.Chmod(layout.Imports, 0o700)
 	})
 
-	if _, err := OpenLayout(layout.Root); err != nil {
-		t.Fatalf("OpenLayout failed because one orphan could not be removed: %v", err)
+	inspected, err := InspectLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEditableLayout(inspected); err != nil {
+		t.Fatalf("PrepareEditableLayout failed because one orphan could not be removed: %v", err)
 	}
 	if _, err := os.Stat(orphanPath); err != nil {
 		t.Fatalf("unremovable orphan should remain for a later cleanup: %v", err)
 	}
 }
 
-func TestOpenLayoutStillRejectsUnusableImportsDirectory(t *testing.T) {
+func TestPrepareEditableLayoutStillRejectsUnusableImportsDirectory(t *testing.T) {
 	layout, err := NewLayout(t.TempDir(), "损坏的旧项目")
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +434,11 @@ func TestOpenLayoutStillRejectsUnusableImportsDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := OpenLayout(layout.Root); err == nil {
-		t.Fatal("OpenLayout accepted a non-directory imports path")
+	inspected, err := InspectLayout(layout.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEditableLayout(inspected); err == nil {
+		t.Fatal("PrepareEditableLayout accepted a non-directory imports path")
 	}
 }

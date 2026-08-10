@@ -98,7 +98,7 @@ func TestOpenProjectClosesPreviousStoreAfterNewStoreIsReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.ID != secondProject.ID || view.Path != packages.openPackage.Root {
+	if view.ID != secondProject.ID || view.Path != packages.openPackage.Root || view.AccessMode != ports.ProjectAccessEditable {
 		t.Fatalf("view = %#v", view)
 	}
 	if !reflect.DeepEqual(events, []string{"open-package", "open-store", "close-old"}) {
@@ -358,7 +358,11 @@ func testPackage(root string) ports.ProjectPackage {
 		Database:    root + "/project.db",
 		Attachments: root + "/attachments",
 		Exports:     root + "/exports",
+		Imports:     root + "/imports",
+		Recovery:    root + "/recovery",
 		Snapshots:   root + "/snapshots",
+		Branches:    root + "/branches",
+		Lease:       root + "/project.lease",
 	}
 }
 
@@ -419,7 +423,7 @@ func (f *fakePackageManager) Create(string, string) (ports.ProjectPackage, error
 	return f.createPackage, f.createErr
 }
 
-func (f *fakePackageManager) Open(string) (ports.ProjectPackage, error) {
+func (f *fakePackageManager) Inspect(string) (ports.ProjectPackage, error) {
 	appendEvent(f.events, "open-package")
 	if f.openStarted != nil {
 		close(f.openStarted)
@@ -427,6 +431,8 @@ func (f *fakePackageManager) Open(string) (ports.ProjectPackage, error) {
 	}
 	return f.openPackage, f.openErr
 }
+
+func (f *fakePackageManager) PrepareEditable(ports.ProjectPackage) error { return nil }
 
 type fakeStoreFactory struct {
 	createStore ports.ProjectStore
@@ -452,6 +458,10 @@ func (f *fakeStoreFactory) Open(context.Context, string) (ports.ProjectStore, er
 		return store, f.openErr
 	}
 	return f.openStore, f.openErr
+}
+
+func (f *fakeStoreFactory) OpenReadOnly(context.Context, string) (ports.ProjectStore, error) {
+	return nil, errors.New("read-only project store is not implemented")
 }
 
 type draftRecord struct {

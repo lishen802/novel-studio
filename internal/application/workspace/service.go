@@ -175,9 +175,12 @@ func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectV
 	}
 	defer s.endLifecycleOperation()
 
-	packageInfo, err := s.packages.Open(packagePath)
+	packageInfo, err := s.packages.Inspect(packagePath)
 	if err != nil {
-		return ProjectView{}, fmt.Errorf("open project package: %w", err)
+		return ProjectView{}, fmt.Errorf("inspect project package: %w", err)
+	}
+	if err := s.packages.PrepareEditable(packageInfo); err != nil {
+		return ProjectView{}, fmt.Errorf("prepare project package for editing: %w", err)
 	}
 	if err := s.snapshots.RecoverInterruptedRestore(packageInfo.Database); err != nil {
 		return ProjectView{}, fmt.Errorf("recover interrupted project restore: %w", err)

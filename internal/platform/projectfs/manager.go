@@ -15,12 +15,16 @@ func (Manager) Create(parentDirectory, projectTitle string) (ports.ProjectPackag
 	return packageFromLayout(layout), nil
 }
 
-func (Manager) Open(packagePath string) (ports.ProjectPackage, error) {
-	layout, err := OpenLayout(packagePath)
+func (Manager) Inspect(packagePath string) (ports.ProjectPackage, error) {
+	layout, err := InspectLayout(packagePath)
 	if err != nil {
 		return ports.ProjectPackage{}, err
 	}
 	return packageFromLayout(layout), nil
+}
+
+func (Manager) PrepareEditable(packageInfo ports.ProjectPackage) error {
+	return PrepareEditableLayout(layoutForRoot(packageInfo.Root))
 }
 
 func packageFromLayout(layout Layout) ports.ProjectPackage {
@@ -30,8 +34,10 @@ func packageFromLayout(layout Layout) ports.ProjectPackage {
 		Attachments: layout.Attachments,
 		Exports:     layout.Exports,
 		Imports:     layout.Imports,
+		Recovery:    layout.Recovery,
 		Snapshots:   layout.Snapshots,
 		Branches:    layout.Branches,
+		Lease:       layout.Lease,
 	}
 }
 

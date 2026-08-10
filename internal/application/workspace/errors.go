@@ -1,8 +1,19 @@
 package workspace
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/lishen802/novel-studio/internal/application/ports"
+)
 
 var ErrNoActiveProject = errors.New("no active project")
+
+var (
+	ErrProjectLeaseHeld          = ports.ErrProjectLeaseHeld
+	ErrWorkspaceReadOnly         = errors.New("active project is read-only")
+	ErrProjectRecoveryRequired   = errors.New("project recovery is required")
+	ErrRecoveryCopySourceChanged = errors.New("project changed while recovery copy was being created")
+)
 
 var (
 	ErrAgentRuntimeUnavailable    = errors.New("agent runtime is unavailable")
