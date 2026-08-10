@@ -2,6 +2,8 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type {
   ChapterView,
   CreateProjectInput,
+  ProjectAccessMode,
+  ProjectLeaseConflictView,
   ProjectView,
   SnapshotRestoreView,
   StudioClient,
@@ -18,7 +20,12 @@ export type WorkspaceStatus =
       chapters: ChapterView[];
       activeChapterId: string | null;
     }
-  | { kind: "error"; message: string };
+  | {
+      kind: "lease_conflict";
+      conflict: ProjectLeaseConflictView;
+      busy?: boolean;
+    }
+  | { kind: "error"; message: string; publishedRecoveryPath?: string };
 
 export type WorkspaceState = {
   status: WorkspaceStatus;
@@ -28,6 +35,10 @@ export type WorkspaceState = {
   cancelCreate(): void;
   createProject(input: Omit<CreateProjectInput, "parentDirectory">): Promise<void>;
   openProject(): Promise<void>;
+  retryProjectOpen(): Promise<void>;
+  openProjectReadOnly(): Promise<void>;
+  createRecoveryCopy(): Promise<void>;
+  cancelProjectOpen(): void;
   loadProject(project: ProjectView): Promise<void>;
   createChapter(title: string): Promise<boolean>;
   selectChapter(id: string): Promise<void>;
@@ -45,7 +56,26 @@ export function createWorkspaceStore(
   client: StudioClient,
 ): StoreApi<WorkspaceState> {
   let selectionRequest = 0;
-  return createStore<WorkspaceState>((set, get) => ({
+  return createStore<WorkspaceState>((set, get) => {
+    const openProjectAtPath = async (path: string, mode: ProjectAccessMode) => {
+      const request = ++selectionRequest;
+      set({ status: { kind: "opening" } });
+      try {
+        const result = await client.openProject(path, mode);
+        if (request !== selectionRequest) return;
+        if (result.outcome === "lease_conflict") {
+          set({ status: { kind: "lease_conflict", conflict: result.conflict } });
+          return;
+        }
+        await get().loadProject(result.project);
+      } catch (error) {
+        if (request === selectionRequest) {
+          set({ status: { kind: "error", message: errorMessage(error) } });
+        }
+      }
+    };
+
+    return {
     status: { kind: "welcome" },
     pendingParentDirectory: null,
     workspaceError: null,
@@ -94,22 +124,66 @@ export function createWorkspaceStore(
     },
 
     async openProject() {
-      selectionRequest++;
+      const request = ++selectionRequest;
       set({ status: { kind: "opening" } });
       try {
         const path = await client.chooseProjectToOpen();
         if (!path) {
-          set({ status: { kind: "welcome" } });
+          if (request === selectionRequest) set({ status: { kind: "welcome" } });
           return;
         }
-        const result = await client.openProject(path, "editable");
-        if (result.outcome !== "opened") {
-          throw new Error("项目正在由另一个应用实例编辑。");
-        }
-        await get().loadProject(result.project);
+        await openProjectAtPath(path, "editable");
       } catch (error) {
         set({ status: { kind: "error", message: errorMessage(error) } });
       }
+    },
+
+    async retryProjectOpen() {
+      const current = get().status;
+      if (current.kind !== "lease_conflict") return;
+      await openProjectAtPath(current.conflict.path, "editable");
+    },
+
+    async openProjectReadOnly() {
+      const current = get().status;
+      if (current.kind !== "lease_conflict") return;
+      await openProjectAtPath(current.conflict.path, "read_only");
+    },
+
+    async createRecoveryCopy() {
+      const current = get().status;
+      if (current.kind !== "lease_conflict" || current.busy) return;
+      try {
+        set({ status: { ...current, busy: true } });
+        const parentDirectory = await client.chooseProjectParent();
+        if (!parentDirectory) {
+          set({ status: { ...current, busy: false } });
+          return;
+        }
+        set({ status: { kind: "opening" } });
+        const result = await client.createProjectRecoveryCopy({
+          sourcePath: current.conflict.path,
+          parentDirectory,
+        });
+        if (result.outcome === "opened") {
+          await get().loadProject(result.project);
+          return;
+        }
+        set({
+          status: {
+            kind: "error",
+            message: "恢复副本已创建，但无法自动打开。请重新打开该副本。",
+            publishedRecoveryPath: result.path,
+          },
+        });
+      } catch (error) {
+        set({ status: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    cancelProjectOpen() {
+      selectionRequest++;
+      set({ status: { kind: "welcome" } });
     },
 
     async loadProject(project) {
@@ -133,7 +207,9 @@ export function createWorkspaceStore(
 
     async createChapter(title) {
       const current = get().status;
-      if (current.kind !== "ready") return false;
+      if (current.kind !== "ready" || current.project.accessMode !== "editable") {
+        return false;
+      }
       const projectID = current.project.id;
       selectionRequest++;
       set({ workspaceError: null });
@@ -198,7 +274,12 @@ export function createWorkspaceStore(
 
     updateChapter(chapter) {
       set((latest) => {
-        if (latest.status.kind !== "ready") return {};
+        if (
+          latest.status.kind !== "ready" ||
+          latest.status.project.accessMode !== "editable"
+        ) {
+          return {};
+        }
         return {
           status: {
             ...latest.status,
@@ -212,7 +293,9 @@ export function createWorkspaceStore(
 
     replaceChapters(chapters) {
       const current = get().status;
-      if (current.kind !== "ready") return;
+      if (current.kind !== "ready" || current.project.accessMode !== "editable") {
+        return;
+      }
       const ids = new Set<string>();
       const positions = new Set<number>();
       const invalid = chapters.some((chapter) => {
@@ -259,6 +342,10 @@ export function createWorkspaceStore(
     },
 
     restoreWorkspace(result) {
+      const current = get().status;
+      if (current.kind === "ready" && current.project.accessMode !== "editable") {
+        return;
+      }
       selectionRequest++;
       set((latest) => {
         const previousChapterID =
@@ -286,5 +373,6 @@ export function createWorkspaceStore(
     clearWorkspaceError() {
       set({ workspaceError: null });
     },
-  }));
+  };
+  });
 }

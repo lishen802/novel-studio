@@ -428,6 +428,51 @@ button:disabled {
     box-shadow 160ms ease;
 }
 
+.project-lease-conflict {
+  width: min(100% - 32px, 620px);
+  padding: 34px;
+  border: 1px solid rgba(224, 178, 109, 0.34);
+  border-radius: 18px;
+  color: #282a32;
+  background: #fffaf2;
+  box-shadow: 0 24px 70px rgba(22, 25, 38, 0.28);
+}
+
+.project-lease-conflict h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1.55rem;
+}
+
+.project-lease-conflict > p:not(.eyebrow):not(.dialog-path) {
+  color: #66615b;
+  line-height: 1.7;
+}
+
+.project-lease-conflict__holder {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.project-lease-conflict__holder div {
+  padding: 10px;
+  border-radius: 9px;
+  background: #f3ecdf;
+}
+
+.project-lease-conflict__holder dt {
+  color: #847b70;
+  font-size: 0.72rem;
+}
+
+.project-lease-conflict__holder dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+}
+
 .welcome-actions button:hover {
   transform: translateY(-1px);
 }
@@ -619,6 +664,32 @@ button:disabled {
   margin: 0;
   color: #9198aa;
   font-size: 0.8rem;
+}
+
+.workspace-read-only-notice {
+  margin: 0 16px 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(233, 189, 134, 0.24);
+  border-radius: 9px;
+  color: #e9bd86;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  background: rgba(233, 189, 134, 0.08);
+}
+
+.workspace-main--read-only::before {
+  display: block;
+  margin: 16px 24px -6px;
+  color: #75685c;
+  font-size: 0.78rem;
+  content: "只读模式：编辑、导入、变更与版本写入操作已禁用。";
+}
+
+.workspace-main__content {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .workspace-sections {

@@ -120,6 +120,12 @@ jobs:
       - name: Test legacy project migration on macOS
         run: go test -count=1 ./internal/testsupport/legacyproject ./internal/platform/projectfs ./internal/persistence/sqlite ./internal/application/workspace
 
+      - name: Gate project lifecycle protection on macOS
+        run: |
+          go test -count=1 -run 'TestProjectLease' ./internal/platform/projectfs
+          go test -count=1 -run 'Test(OpenReadOnly|ReadOnly)' ./internal/persistence/sqlite
+          go test -count=1 -run 'Test(OpenProject.*|CreateRecoveryCopy|ReadOnlyWorkspace)' ./internal/application/workspace
+
       - name: Build macOS application
         run: wails build -clean -m
         working-directory: apps/desktop
@@ -206,6 +212,12 @@ jobs:
 
       - name: Run Go tests on Windows
         run: go test -count=1 ./apps/desktop ./internal/...
+
+      - name: Gate project lifecycle protection on Windows
+        run: |
+          go test -count=1 -run 'TestProjectLease' ./internal/platform/projectfs
+          go test -count=1 -run 'Test(OpenReadOnly|ReadOnly)' ./internal/persistence/sqlite
+          go test -count=1 -run 'Test(OpenProject.*|CreateRecoveryCopy|ReadOnlyWorkspace)' ./internal/application/workspace
 
       - name: Package Windows inspection artifact
         shell: pwsh

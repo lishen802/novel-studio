@@ -76,14 +76,16 @@ export function Workspace({
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
   );
+  const readOnly = workspace.project.accessMode === "read_only";
   const openNewChapter = () => {
+    if (readOnly) return;
     onDismissError();
     setShowNewChapter(true);
   };
 
   const submitChapter = async (event: FormEvent) => {
     event.preventDefault();
-    if (!chapterTitle.trim()) return;
+    if (readOnly || !chapterTitle.trim()) return;
     setCreatingChapter(true);
     try {
       const created = await onCreateChapter(chapterTitle);
@@ -113,6 +115,12 @@ export function Workspace({
           <h1>{workspace.project.title}</h1>
           <p>{workspace.project.genre || "未设置类型"}</p>
         </section>
+
+        {readOnly && (
+          <p className="workspace-read-only-notice" role="status">
+            只读模式：可查看，不会写入或更新恢复数据。
+          </p>
+        )}
 
         <nav className="workspace-sections" aria-label="作品功能">
           <button
@@ -196,6 +204,7 @@ export function Workspace({
               <button
                 type="button"
                 aria-label="新建章节"
+                disabled={readOnly}
                 onClick={openNewChapter}
               >
                 <FilePlus2 size={17} />
@@ -207,7 +216,7 @@ export function Workspace({
                 <div className="chapter-empty">
                   <LibraryBig size={24} aria-hidden="true" />
                   <p>还没有章节</p>
-                  <button type="button" onClick={openNewChapter}>
+                  <button type="button" disabled={readOnly} onClick={openNewChapter}>
                     新建第一章
                   </button>
                 </div>
@@ -233,7 +242,10 @@ export function Workspace({
         )}
       </aside>
 
-      <section className="workspace-main">
+      <section
+        className={`workspace-main${readOnly ? " workspace-main--read-only" : ""}`}
+        aria-readonly={readOnly || undefined}
+      >
         {error && !showNewChapter && (
           <div className="workspace-alert" role="alert">
             <span>{error}</span>
@@ -242,62 +254,65 @@ export function Workspace({
             </button>
           </div>
         )}
-        {activeView === "imports" ? (
-          <ImportWorkbench
-            client={client}
-            onChaptersImported={onChaptersImported}
-          />
-        ) : activeView === "story" ? (
-          <StoryArchitecture
-            client={client}
-            chapters={workspace.chapters}
-            onOpenChapter={(id) => {
-              setActiveView("manuscript");
-              void onSelectChapter(id);
-            }}
-          />
-        ) : activeView === "world" ? (
-          <StoryWorldWorkbench client={client} chapters={workspace.chapters} />
-        ) : activeView === "assets" ? (
-          <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
-        ) : activeView === "continuity" ? (
-          <ContinuityWorkbench client={client} chapters={workspace.chapters} />
-        ) : activeView === "changes" ? (
-          <ChangeReviewWorkbench
-            client={client}
-            chapters={workspace.chapters}
-            onChapterUpdated={onChapterUpdated}
-          />
-        ) : activeView === "agents" ? (
-          <AgentWorkbench
-            client={client}
-            chapters={workspace.chapters}
-            onOpenChanges={() => setActiveView("changes")}
-          />
-        ) : activeView === "versions" ? (
-          <VersionHistoryWorkbench
-            client={client}
-            project={workspace.project}
-            chapters={workspace.chapters}
-            onChapterUpdated={onChapterUpdated}
-            onWorkspaceRestored={onWorkspaceRestored}
-            onBeforeVersionOperation={onBeforeVersionOperation}
-          />
-        ) : activeChapter ? (
-          <ChapterEditor
-            key={activeChapter.id}
-            chapter={activeChapter}
-            client={client}
-            onChapterUpdated={onChapterUpdated}
-            onFlushAvailable={onFlushAvailable}
-          />
-        ) : (
-          <div className="editor-empty">
-            <Feather size={36} aria-hidden="true" />
-            <h2>选择一个章节开始创作</h2>
-            <p>章节的短周期草稿会自动保存，正式正文仍由版本提交保护。</p>
-          </div>
-        )}
+        <fieldset className="workspace-main__content" disabled={readOnly}>
+          {activeView === "imports" ? (
+            <ImportWorkbench
+              client={client}
+              onChaptersImported={onChaptersImported}
+            />
+          ) : activeView === "story" ? (
+            <StoryArchitecture
+              client={client}
+              chapters={workspace.chapters}
+              onOpenChapter={(id) => {
+                setActiveView("manuscript");
+                void onSelectChapter(id);
+              }}
+            />
+          ) : activeView === "world" ? (
+            <StoryWorldWorkbench client={client} chapters={workspace.chapters} />
+          ) : activeView === "assets" ? (
+            <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
+          ) : activeView === "continuity" ? (
+            <ContinuityWorkbench client={client} chapters={workspace.chapters} />
+          ) : activeView === "changes" ? (
+            <ChangeReviewWorkbench
+              client={client}
+              chapters={workspace.chapters}
+              onChapterUpdated={onChapterUpdated}
+            />
+          ) : activeView === "agents" ? (
+            <AgentWorkbench
+              client={client}
+              chapters={workspace.chapters}
+              onOpenChanges={() => setActiveView("changes")}
+            />
+          ) : activeView === "versions" ? (
+            <VersionHistoryWorkbench
+              client={client}
+              project={workspace.project}
+              chapters={workspace.chapters}
+              onChapterUpdated={onChapterUpdated}
+              onWorkspaceRestored={onWorkspaceRestored}
+              onBeforeVersionOperation={onBeforeVersionOperation}
+            />
+          ) : activeChapter ? (
+            <ChapterEditor
+              key={activeChapter.id}
+              chapter={activeChapter}
+              client={client}
+              onChapterUpdated={onChapterUpdated}
+              onFlushAvailable={onFlushAvailable}
+              readOnly={readOnly}
+            />
+          ) : (
+            <div className="editor-empty">
+              <Feather size={36} aria-hidden="true" />
+              <h2>选择一个章节开始创作</h2>
+              <p>章节的短周期草稿会自动保存，正式正文仍由版本提交保护。</p>
+            </div>
+          )}
+        </fieldset>
       </section>
 
       {showNewChapter && (

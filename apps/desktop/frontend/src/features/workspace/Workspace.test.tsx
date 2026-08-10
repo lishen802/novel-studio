@@ -12,6 +12,21 @@ import { App } from "../../app/App";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 
 describe("Workspace", () => {
+  it("renders a read-only workspace without author save controls", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = { ...client.createChapterResult, body: "只读正文" };
+    client.openProjectResult = { ...client.openProjectResult, accessMode: "read_only" };
+    client.chaptersResult = [chapter];
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: /第一章/ }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("只读模式");
+    expect(screen.getByRole("button", { name: "新建章节" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveAttribute("readonly");
+  });
+
   it("creates a project once and enters an empty workspace", async () => {
     const client = new FakeStudioClient();
     client.projectParent = "/books";

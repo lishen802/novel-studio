@@ -132,6 +132,8 @@ export class FakeStudioClient implements StudioClient {
     accessMode: "editable",
   };
   openProjectResult: ProjectView = this.createProjectResult;
+  projectOpenResponse: ProjectOpenResultView | null = null;
+  recoveryCopyResponse: RecoveryCopyResultView | null = null;
   chaptersResult: ChapterView[] = [];
   createChapterResult: ChapterView = {
     id: "chapter-1",
@@ -239,6 +241,8 @@ export class FakeStudioClient implements StudioClient {
 
   createProjectCalls: CreateProjectInput[] = [];
   openProjectCalls: string[] = [];
+  openProjectInputs: Array<{ path: string; mode: ProjectAccessMode }> = [];
+  createProjectRecoveryCopyCalls: RecoveryCopyInput[] = [];
   createChapterCalls: string[] = [];
   openChapterCalls: string[] = [];
   saveDraftCalls: ChapterWriteCall[] = [];
@@ -632,17 +636,22 @@ export class FakeStudioClient implements StudioClient {
 
   async openProject(
     path: string,
-    _mode: ProjectAccessMode = "editable",
+    mode: ProjectAccessMode = "editable",
   ): Promise<ProjectOpenResultView> {
     this.openProjectCalls.push(path);
+    this.openProjectInputs.push({ path, mode });
     if (this.openProjectError) throw this.openProjectError;
-    return { outcome: "opened", project: this.openProjectResult };
+    return this.projectOpenResponse ?? {
+      outcome: "opened",
+      project: this.openProjectResult,
+    };
   }
 
   async createProjectRecoveryCopy(
-    _input: RecoveryCopyInput,
+    input: RecoveryCopyInput,
   ): Promise<RecoveryCopyResultView> {
-    return {
+    this.createProjectRecoveryCopyCalls.push(input);
+    return this.recoveryCopyResponse ?? {
       outcome: "opened",
       path: this.openProjectResult.path,
       project: this.openProjectResult,

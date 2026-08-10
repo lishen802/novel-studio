@@ -2,6 +2,7 @@ import { BookOpenText, FolderOpen, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { Workspace } from "../features/workspace/Workspace";
+import { ProjectLeaseConflictCard } from "../features/workspace/ProjectLeaseConflictCard";
 import { createWorkspaceStore } from "../features/workspace/workspace-store";
 import type { ProjectView, StudioClient } from "../lib/studio-client";
 import { wailsStudioClient } from "../lib/wails-studio-client";
@@ -88,6 +89,12 @@ export function App({
 
   const isOpening = state.status.kind === "opening";
   const error = state.status.kind === "error" ? state.status.message : null;
+  const leaseConflict =
+    state.status.kind === "lease_conflict" ? state.status.conflict : null;
+  const leaseConflictBusy =
+    state.status.kind === "lease_conflict" ? state.status.busy ?? false : false;
+  const publishedRecoveryPath =
+    state.status.kind === "error" ? state.status.publishedRecoveryPath : null;
 
   return (
     <main className="app-shell">
@@ -104,6 +111,9 @@ export function App({
           从故事工程开始，让智能体参与规划、写作与审阅，同时由作者掌握最终决定。
         </p>
         {error && !state.pendingParentDirectory && <p role="alert" className="entry-error">{error}</p>}
+        {publishedRecoveryPath && (
+          <p className="dialog-path">恢复副本：{publishedRecoveryPath}</p>
+        )}
         <div className="welcome-actions">
           <button
             type="button"
@@ -128,6 +138,19 @@ export function App({
           {isOpening ? "正在准备本地创作空间…" : "作品默认保存在本地，未经确认不会覆盖正文。"}
         </p>
       </section>
+
+      {leaseConflict && (
+        <div className="dialog-backdrop">
+          <ProjectLeaseConflictCard
+            conflict={leaseConflict}
+            busy={isOpening || leaseConflictBusy}
+            onRetry={() => void state.retryProjectOpen()}
+            onOpenReadOnly={() => void state.openProjectReadOnly()}
+            onCreateRecoveryCopy={() => void state.createRecoveryCopy()}
+            onCancel={state.cancelProjectOpen}
+          />
+        </div>
+      )}
 
       {state.pendingParentDirectory && (
         <div className="dialog-backdrop">

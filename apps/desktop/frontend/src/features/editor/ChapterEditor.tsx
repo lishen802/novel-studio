@@ -11,6 +11,7 @@ type ChapterEditorProps = {
   client: StudioClient;
   onChapterUpdated?: (chapter: ChapterView) => void;
   onFlushAvailable?: (flush: (() => Promise<void>) | null) => void;
+  readOnly?: boolean;
 };
 
 type SaveState = "committed" | "drafting" | "drafted" | "conflict" | "error";
@@ -20,6 +21,7 @@ export function ChapterEditor({
   client,
   onChapterUpdated,
   onFlushAvailable,
+  readOnly = false,
 }: ChapterEditorProps) {
   const [body, setBody] = useState(chapter.body);
   const [revision, setRevision] = useState(chapter.revision);
@@ -49,6 +51,7 @@ export function ChapterEditor({
   };
 
   const scheduleSaves = (nextBody: string) => {
+    if (readOnly) return;
     clearTimers();
     editVersion.current++;
     dirtyRef.current = true;
@@ -75,6 +78,7 @@ export function ChapterEditor({
   };
 
   commitNow.current = () => {
+    if (readOnly) return Promise.resolve();
     if (committing.current) {
       commitQueued.current = true;
       return activeCommit.current;
@@ -123,6 +127,7 @@ export function ChapterEditor({
   };
 
   flushDraft.current = async () => {
+    if (readOnly) return;
     clearTimers();
     while (committing.current) {
       await activeCommit.current;
@@ -150,18 +155,18 @@ export function ChapterEditor({
     revisionRef.current = chapter.revision;
     dirtyRef.current = false;
     setSaveState("committed");
-    setShowRecovery(chapter.hasRecoveryDraft);
+    setShowRecovery(!readOnly && chapter.hasRecoveryDraft);
     setRecoveryDeferred(false);
 
     return () => {
       clearTimers();
-      if (dirtyRef.current && !onFlushAvailable) {
+      if (!readOnly && dirtyRef.current && !onFlushAvailable) {
         void flushDraft.current().catch(() => undefined);
       }
     };
     // A changed ID means the author switched chapters. Same-chapter commits must
     // not replace newer local input when the parent updates its revision.
-  }, [chapter.id, client]);
+  }, [chapter.id, client, readOnly]);
 
   useEffect(() => {
     const registeredFlush = flushDraft.current;
@@ -261,8 +266,9 @@ export function ChapterEditor({
         aria-label="章节正文"
         className="chapter-editor__textarea"
         value={body}
-        readOnly={showRecovery || recoveryDeferred}
+        readOnly={readOnly || showRecovery || recoveryDeferred}
         onChange={(event) => {
+          if (readOnly) return;
           const nextBody = event.target.value;
           setBody(nextBody);
           bodyRef.current = nextBody;

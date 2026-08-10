@@ -1,10 +1,12 @@
 # 织境 Story Studio 交接指南
 
-## 当前状态（2026-08-04）
+## 当前状态（2026-08-10）
 
 本仓库正在从早期“写作资产管理/辅助创作”原型，转向 AI 主创作的长篇小说桌面产品。当前基础代码已具备 P0–P4 的部分纵切：正文编辑、revision 与恢复；结构化故事资产；变更集/快照/分支；OpenAI/Anthropic API 与 Agent Run；TXT/Markdown 导入和基础资产抽取。它们是实现基线，不代表完整新产品已完成。
 
 生产基线为 Go + Wails v2 + React/TypeScript + Vite + SQLite。`prototype/web` 是 UX 参考，不得成为生产层间依赖。
+
+R1.1 与 R1.2 已完成。R1.3 的实现已覆盖项目级 OS lease、真正只读 store、结构化争锁救局和恢复副本；提交/合并前仍需按其实施计划记录 macOS/Windows CI 与手工验收证据。R1.4（同步盘/运行期文件锁、写入探针与 Windows 路径边界）尚未开始，不能把 R1.3 的完成误报为整个 R1 退出。
 
 ## 必读文档
 

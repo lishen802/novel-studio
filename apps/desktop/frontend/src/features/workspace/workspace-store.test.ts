@@ -2,11 +2,79 @@ import { describe, expect, it } from "vitest";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 import type {
   ChapterView,
+  ProjectOpenResultView,
   SnapshotRestoreView,
 } from "../../lib/studio-client";
 import { createWorkspaceStore } from "./workspace-store";
 
 describe("workspace store", () => {
+  it("keeps a lease conflict actionable so the author can retry or open read-only", async () => {
+    const client = new FakeStudioClient();
+    client.projectToOpen = "/books/长夜织境.zjproject";
+    client.projectOpenResponse = {
+      outcome: "lease_conflict",
+      conflict: {
+        path: client.projectToOpen,
+        retryable: true,
+        holder: {
+          pid: 42,
+          hostname: "author-mac",
+          applicationVersion: "0.1.0",
+          startedAt: "2026-08-10T09:00:00Z",
+        },
+      },
+    } satisfies ProjectOpenResultView;
+    const store = createWorkspaceStore(client);
+
+    await store.getState().openProject();
+
+    expect(store.getState().status).toMatchObject({
+      kind: "lease_conflict",
+      conflict: { path: client.projectToOpen, holder: { hostname: "author-mac" } },
+    });
+
+    client.projectOpenResponse = {
+      outcome: "opened",
+      project: { ...client.openProjectResult, accessMode: "read_only" },
+    };
+    await store.getState().openProjectReadOnly();
+
+    expect(store.getState().status).toMatchObject({
+      kind: "ready",
+      project: { accessMode: "read_only" },
+    });
+    expect(client.openProjectInputs).toEqual([
+      { path: "/books/长夜织境.zjproject", mode: "editable" },
+      { path: "/books/长夜织境.zjproject", mode: "read_only" },
+    ]);
+  });
+
+  it("opens the published recovery copy and retains the published path on a partial result", async () => {
+    const client = new FakeStudioClient();
+    client.projectToOpen = "/books/长夜织境.zjproject";
+    client.projectOpenResponse = {
+      outcome: "lease_conflict",
+      conflict: { path: client.projectToOpen, retryable: true },
+    };
+    client.projectParent = "/copies";
+    client.recoveryCopyResponse = {
+      outcome: "published",
+      path: "/copies/长夜织境-恢复副本.zjproject",
+    };
+    const store = createWorkspaceStore(client);
+
+    await store.getState().openProject();
+    await store.getState().createRecoveryCopy();
+
+    expect(client.createProjectRecoveryCopyCalls).toEqual([
+      { sourcePath: "/books/长夜织境.zjproject", parentDirectory: "/copies" },
+    ]);
+    expect(store.getState().status).toMatchObject({
+      kind: "error",
+      publishedRecoveryPath: "/copies/长夜织境-恢复副本.zjproject",
+    });
+  });
+
   it("does not lose a concurrent chapter update when selection finishes", async () => {
     const client = FakeStudioClient.withReadyProject();
     const first = client.createChapterResult;

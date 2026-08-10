@@ -107,6 +107,19 @@ R1.2 引入 append-only `JobEvent` 事件源与权威 `JobSnapshot` 投影：作
 
 Go 侧测试位于 `internal/application/workspace`（`job_event_test.go`），React 侧测试位于 `apps/desktop/frontend/src/features/agents`。前者由本地 `go test -race -shuffle=on` 与 Ubuntu Foundation CI Job 覆盖，后者由本地 `npm test -- --run` 与 Ubuntu Foundation CI Job 覆盖；失败按数据一致性缺陷处理，不得关闭 `-race` 或跳过 reducer 用例。实现详见 [R1.2 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
 
+## R1.3 项目生命周期保护
+
+项目 lease、真正只读打开和恢复副本是作者数据保护门禁。Ubuntu 的 race 套件覆盖应用并发；macOS 与 Windows 原生 Runner 还显式运行以下测试，不能用交叉编译或跳过替代原生锁语义。
+
+| 契约 | 自动证据 |
+| --- | --- |
+| 第二进程不能取得 editable lease，释放后可重试；残留或损坏元数据不代表锁 | `TestProjectLease*`（helper subprocess） |
+| 只读可看到活跃 WAL 的已提交内容，但不迁移、恢复或写 canonical/业务文件 | `TestOpenReadOnly*`、`TestReadOnly*` |
+| 只读工作区的正文、资产、导入、Agent、快照和分支写用例均被拒绝 | `TestReadOnlyWorkspace*` |
+| 恢复副本使用一致数据库快照，源项目不被覆盖，发布后可作为新项目打开 | `TestCreateRecoveryCopy*` |
+
+本地完整 Go 命令仍使用 `go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`。平台 job 另外运行上述聚焦命令，是为了在失败时明确标出生命周期保护边界。只读读取活跃 WAL 时 SQLite 可能维护 `project.db-shm` 或建立空协调文件；该受限协调工件不等同于业务写入，测试会分别校验 `project.db`、已有 WAL 内容、`recovery/` 与其他业务文件保持不变。
+
 ## 隐私与 fixture 规则
 
 - 不提交 `.zjproject`、SQLite 数据库、WAL/SHM、API Key、私钥或签名证书；

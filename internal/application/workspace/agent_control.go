@@ -95,9 +95,6 @@ func (s *Service) cancelAllExtractionJobs() {
 }
 
 func (s *Service) beginVersionOperation() error {
-	if err := s.requireEditable(); err != nil {
-		return err
-	}
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()
 	if s.importOperation {
@@ -106,18 +103,21 @@ func (s *Service) beginVersionOperation() error {
 	if len(s.agentJobs) > 0 || s.versionOperation {
 		return ErrAgentRunActive
 	}
+	if err := s.requireEditable(); err != nil {
+		return err
+	}
 	s.versionOperation = true
 	return nil
 }
 
 func (s *Service) beginImportOperation() error {
-	if err := s.requireEditable(); err != nil {
-		return err
-	}
 	s.agentJobsMu.Lock()
 	defer s.agentJobsMu.Unlock()
 	if s.importOperation || s.versionOperation {
 		return ErrImportOperationActive
+	}
+	if err := s.requireEditable(); err != nil {
+		return err
 	}
 	s.importOperation = true
 	return nil

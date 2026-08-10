@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`approved`
+- 状态：`implementation_complete_pending_native_ci`
 - 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
 - 上游依据：[产品需求 5.1.7–5.1.8、7.5、9.1.13](../product/requirements.md)、[产品设计 8/10.15](../product/design.md)、[系统设计 3、5、13、14](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 前置计划：[R1.1 Agent job lease 与工作区锁隔离](2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)、[R1.2 可恢复 JobEvent feed](2026-08-06-r1-recoverable-job-event-feed-implementation.md)（均 `completed`）
@@ -401,3 +401,12 @@ git status --short
 - 恢复副本失败只清理本次随机临时目录；已经校验并原子发布的副本不自动删除。
 - 只读打开遇到旧 Schema 或待恢复 journal 时停止并报告；不能为提高成功率绕过完整性检查或调用 writable open。
 - R1.4 实现前，同步目录、sharing violation、完整写入探针和 Windows 长路径仍是明确遗留项，必须保留现有通用安全错误和人工恢复指引。
+
+## 8. 实施记录与交付门槛
+
+- 实现提交：`411a098`、`9c67a2c`、`206ecce`、`61ce14a`、`5d3da6a`、`a70175b`、`435fde9`，以及本计划 Task 8/9 的后续提交；
+- 本地证据：React 测试、typecheck、production build；聚焦 SQLite、workspace、lease 与恢复副本 Go 测试；完整 Go race/vet 与 prototype 验证见最终验证记录；
+- 待补充的发布证据：本提交推送后的 GitHub Foundation CI run URL/ID、macOS/Windows 生命周期 gate 结果，以及 `foundation-acceptance.md` F-12 至 F-14 的两平台人工记录；
+- 遗留风险：R1.4 仍负责同步盘/运行期 sharing violation、完整 WAL/SHM/checkpoint 写入探针与 Windows 默认 MAX_PATH 路径边界。
+
+在上述 CI 和人工证据记录完成前，状态不得改为 `completed`；这避免将本地实现完成误报为 R1 阶段完全退出。
