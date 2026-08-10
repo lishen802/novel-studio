@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
 - 上游依据：[产品需求 7.1](../product/requirements.md)、[产品与交互设计：运行画布与恢复](../product/design.md)、[系统设计 4.3/12](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)
 - 前置计划：[R1 Agent job lease 与工作区锁隔离](2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`completed`）
