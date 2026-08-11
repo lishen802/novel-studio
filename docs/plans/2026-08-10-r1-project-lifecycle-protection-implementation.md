@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`implementation_complete_pending_native_ci`
+- 状态：`completed`
 - 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
 - 上游依据：[产品需求 5.1.7–5.1.8、7.5、9.1.13](../product/requirements.md)、[产品设计 8/10.15](../product/design.md)、[系统设计 3、5、13、14](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 前置计划：[R1.1 Agent job lease 与工作区锁隔离](2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)、[R1.2 可恢复 JobEvent feed](2026-08-06-r1-recoverable-job-event-feed-implementation.md)（均 `completed`）
@@ -358,11 +358,11 @@ cd apps/desktop/frontend && npm test -- --run && npm run typecheck && npm run bu
 - Modify: `docs/roadmap/development-roadmap.md`
 - Modify: this plan
 
-- [ ] macOS/Windows 原生 job 显式运行 projectfs lease helper-process、SQLite read-only/WAL、workspace conflict/recovery-copy tests；Ubuntu race 继续覆盖应用并发，不能用跳过代替平台修复。前端 build 顺序修正后的 [run 31450873891](https://github.com/lishen802/novel-studio/actions/runs/31450873891) 已使 Ubuntu 与 macOS 通过，但 Windows 在这些门禁的运行时文件语义测试失败；修复待重跑。
+- [x] macOS/Windows 原生 job 显式运行 projectfs lease helper-process、SQLite read-only/WAL、workspace conflict/recovery-copy tests；Ubuntu race 继续覆盖应用并发，不能用跳过代替平台修复。[run 31451705510](https://github.com/lishen802/novel-studio/actions/runs/31451705510) 的 Ubuntu、macOS 与 Windows job 均通过。
 - [x] 手工验收记录：第二实例冲突、占用来源、重试、真正只读、从只读退出、恢复副本、应用退出释放锁、残留元数据、活跃 WAL。Windows 与 macOS 的 F-12 至 F-14 于 2026-08-11 通过，记录见 [`foundation-acceptance.md`](../testing/foundation-acceptance.md)。
 - [x] 更新恢复手册，明确不能手删有效 lease、只读不会升级旧项目、恢复副本是新包且原件不变。
-- [ ] 将计划状态改为 `completed` 之前记录 commit、CI run URL/ID、macOS/Windows 结果和遗留 R1.4 风险。提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 已推送；手工验收通过，但 CI 尚未通过，因此状态保持 `implementation_complete_pending_native_ci`。
-- [ ] Commit：`git commit -m "test: gate project lifecycle protection on native platforms"`
+- [x] 将计划状态改为 `completed` 之前记录 commit、CI run URL/ID、macOS/Windows 结果和遗留 R1.4 风险。提交 `ee008c36d703b56c7adf9310f854347c7ec81afc` 已推送；[run 31451705510](https://github.com/lishen802/novel-studio/actions/runs/31451705510) 与两平台手工验收均通过，因此计划状态为 `completed`。
+- [x] Commit：`ee008c3 fix: harden Windows project lifecycle tests`
 
 ## 6. 最终验证
 
@@ -404,10 +404,10 @@ git status --short
 
 ## 8. 实施记录与交付门槛
 
-- 实现提交：`411a098`、`9c67a2c`、`206ecce`、`61ce14a`、`5d3da6a`、`a70175b`、`435fde9`、`b2c3b85221822e2e8415621130716739afb8f4d3`；
+- 实现提交：`411a098`、`9c67a2c`、`206ecce`、`61ce14a`、`5d3da6a`、`a70175b`、`435fde9`、`b2c3b85221822e2e8415621130716739afb8f4d3`、`00791e4b9e267108fa295761d2cf7c56bde0ece1`、`ee008c36d703b56c7adf9310f854347c7ec81afc`；
 - 本地证据：React 测试、typecheck、production build；聚焦 SQLite、workspace、lease 与恢复副本 Go 测试；完整 Go race/vet 与 prototype 验证见最终验证记录；
-- CI 证据：提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 的 [GitHub Foundation CI run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 因缺少 `frontend/dist` 失败；后续 [run 31450873891](https://github.com/lishen802/novel-studio/actions/runs/31450873891) 在修正构建顺序后通过 Ubuntu tests 与 macOS production build。Windows production build 仍失败：只读工作区测试清理前未关闭 `project.db`、SQLite URI 测试使用非法 `?` 文件名字符、lease 元数据读取与 byte-range lock 冲突，且恢复副本目录同步返回 `Access is denied`。修复并重跑通过后，才能关闭本计划。
+- CI 证据：提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 的 [run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 因缺少 `frontend/dist` 失败；[run 31450873891](https://github.com/lishen802/novel-studio/actions/runs/31450873891) 在修正构建顺序后通过 Ubuntu 与 macOS，但暴露 Windows 文件语义问题。提交 `ee008c36d703b56c7adf9310f854347c7ec81afc` 的 [run 31451705510](https://github.com/lishen802/novel-studio/actions/runs/31451705510) 在 Ubuntu、macOS 和 Windows 均通过，关闭本计划的 CI 证据完备。
 - 手工证据：`foundation-acceptance.md` 的 F-12 至 F-14 已记录为 Windows/macOS 通过（2026-08-11）。
 - 遗留风险：R1.4 仍负责同步盘/运行期 sharing violation、完整 WAL/SHM/checkpoint 写入探针与 Windows 默认 MAX_PATH 路径边界。
 
-在上述 CI 和人工证据记录完成前，状态不得改为 `completed`；当前人工证据已完成，但 CI 仍失败。这避免将本地实现完成误报为 R1 阶段完全退出。
+CI 与人工证据均已完成，本计划状态为 `completed`。R1.4 的同步目录、运行期 sharing violation、完整 WAL/SHM/checkpoint 写入探针和 Windows 默认 MAX_PATH 路径边界仍是独立遗留项，不得据此宣告 R1 阶段整体退出。
