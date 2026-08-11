@@ -794,6 +794,7 @@ type fakeStore struct {
 	draft               draftRecord
 	savedDraft          draftRecord
 	commitCalls         int
+	commitErr           error
 	deleteDraftID       string
 	deleteDraftRevision int64
 	closeEvent          string
@@ -826,6 +827,7 @@ type fakeStore struct {
 	changeSets          map[string]revisiondomain.ChangeSet
 	chapterRevisions    map[string][]revisiondomain.ChapterRevision
 	backupPath          string
+	backupErr           error
 	closeCalls          int
 	closeStarted        chan struct{}
 	closeRelease        chan struct{}
@@ -910,6 +912,9 @@ func (f *fakeStore) DeleteDraft(_ context.Context, chapterID string, baseRevisio
 
 func (f *fakeStore) CommitChapter(_ context.Context, chapter, _ projectdomain.Chapter) error {
 	f.commitCalls++
+	if f.commitErr != nil {
+		return f.commitErr
+	}
 	f.chapters[chapter.ID] = chapter
 	return nil
 }
@@ -942,7 +947,7 @@ func (f *fakeStore) RestoreChapterRevision(_ context.Context, chapterID string, 
 
 func (f *fakeStore) Backup(_ context.Context, targetPath string) error {
 	f.backupPath = targetPath
-	return nil
+	return f.backupErr
 }
 
 func (f *fakeStore) CreateChangeSet(_ context.Context, changeSet revisiondomain.ChangeSet) error {
@@ -1654,6 +1659,7 @@ type fakeProjectLease struct {
 	events     *[]string
 	metadata   ports.ProjectLeaseMetadata
 	releaseErr error
+	released   bool
 }
 
 func (f *fakeProjectLease) UpdateMetadata(metadata ports.ProjectLeaseMetadata) error {
@@ -1664,6 +1670,7 @@ func (f *fakeProjectLease) UpdateMetadata(metadata ports.ProjectLeaseMetadata) e
 
 func (f *fakeProjectLease) Release() error {
 	appendEvent(f.events, "release-lease")
+	f.released = true
 	return f.releaseErr
 }
 

@@ -37,6 +37,9 @@ func (s *Service) CreateProjectRecoveryCopy(
 	if err != nil {
 		return RecoveryCopyResult{}, fmt.Errorf("inspect recovery copy source: %w", err)
 	}
+	if err := s.validateRecoveryCopyPath(source, parentDirectory); err != nil {
+		return RecoveryCopyResult{}, fmt.Errorf("validate recovery copy path: %w", err)
+	}
 	if err := s.requireRecoveryCopySourceStable(source); err != nil {
 		return RecoveryCopyResult{}, err
 	}
@@ -48,7 +51,10 @@ func (s *Service) CreateProjectRecoveryCopy(
 	closeErr := readOnly.Close()
 	if copyErr != nil {
 		result := RecoveryCopyResult{Path: published.Root}
-		return result, joinRecoveryCopyErrors(copyErr, closeErr)
+		return result, s.handleFilesystemWriteFailureForPackage(
+			source.Root,
+			joinRecoveryCopyErrors(copyErr, closeErr),
+		)
 	}
 
 	result := RecoveryCopyResult{Path: published.Root}
@@ -61,6 +67,16 @@ func (s *Service) CreateProjectRecoveryCopy(
 	}
 	result.Project = &project
 	return result, nil
+}
+
+func (s *Service) validateRecoveryCopyPath(source ports.ProjectPackage, parentDirectory string) error {
+	s.mu.RLock()
+	guard := s.filesystem
+	s.mu.RUnlock()
+	if guard == nil {
+		return nil
+	}
+	return guard.ValidateRecoveryCopyPath(source, parentDirectory)
 }
 
 // requireRecoveryCopySourceStable is a pure source preflight. In particular,

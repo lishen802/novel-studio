@@ -167,6 +167,97 @@ func (s *Service) preflightEditable(packageInfo ports.ProjectPackage) (ports.Pro
 	return guard.PreflightEditable(packageInfo)
 }
 
+// RecheckFilesystemHealth repeats the lossless editable filesystem probe for
+// the active project. A successful probe replaces a transient degraded state
+// with the current risk hint; a failed probe leaves the last known health
+// intact so the caller can continue offering recovery actions.
+func (s *Service) RecheckFilesystemHealth(ctx context.Context) (ports.ProjectFilesystemHealth, error) {
+	if err := s.beginLifecycleOperation(); err != nil {
+		return ports.ProjectFilesystemHealth{}, err
+	}
+	defer s.endLifecycleOperation()
+	if err := ctx.Err(); err != nil {
+		return ports.ProjectFilesystemHealth{}, err
+	}
+
+	s.mu.RLock()
+	if err := s.requireEditableLocked(); err != nil {
+		s.mu.RUnlock()
+		return ports.ProjectFilesystemHealth{}, err
+	}
+	packageInfo := s.active.packageInfo
+	s.mu.RUnlock()
+
+	health, err := s.preflightEditable(packageInfo)
+	if err != nil {
+		return ports.ProjectFilesystemHealth{}, fmt.Errorf("recheck project filesystem: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireEditableLocked(); err != nil {
+		return ports.ProjectFilesystemHealth{}, err
+	}
+	if s.active.packageInfo.Root != packageInfo.Root {
+		return ports.ProjectFilesystemHealth{}, ErrNoActiveProject
+	}
+	s.active.filesystemHealth = health
+	return health, nil
+}
+
+// handleFilesystemWriteFailureLocked preserves the source error while adding
+// the stable filesystem sentinel and updating only the active in-memory
+// health. Callers must hold s.mu for writing.
+func (s *Service) handleFilesystemWriteFailureLocked(err error) error {
+	if err == nil {
+		return nil
+	}
+	failure := s.projectFilesystemFailureLocked(err)
+	if failure == nil {
+		return err
+	}
+	if s.active != nil {
+		s.active.filesystemHealth = ports.ProjectFilesystemHealth{
+			Level:    ports.ProjectFilesystemDegraded,
+			Category: failure.Category,
+			Actions: []ports.ProjectFilesystemAction{
+				ports.ProjectFilesystemRetry,
+				ports.ProjectFilesystemCopyText,
+				ports.ProjectFilesystemOpenReadOnly,
+				ports.ProjectFilesystemCreateRecoveryCopy,
+			},
+		}
+	}
+	if errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		return err
+	}
+	return errors.Join(err, failure)
+}
+
+// handleFilesystemWriteFailureForPackage applies a failure only when the
+// package being written is the active workspace. Recovery-copy callers can
+// inspect arbitrary source packages, so they must not degrade an unrelated
+// active project's status.
+func (s *Service) handleFilesystemWriteFailureForPackage(packageRoot string, err error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != nil && s.active.packageInfo.Root == packageRoot {
+		return s.handleFilesystemWriteFailureLocked(err)
+	}
+	failure := s.projectFilesystemFailureLocked(err)
+	if failure == nil || errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		return err
+	}
+	return errors.Join(err, failure)
+}
+
+func (s *Service) projectFilesystemFailureLocked(err error) *ports.ProjectFilesystemFailure {
+	var failure *ports.ProjectFilesystemFailure
+	if errors.As(err, &failure) || s.filesystem == nil {
+		return failure
+	}
+	return s.filesystem.ClassifyRuntimeError(err)
+}
+
 func (s *Service) CreateProject(
 	ctx context.Context,
 	parentDirectory, title, genre, summary string,
@@ -459,13 +550,13 @@ func (s *Service) SaveDraft(ctx context.Context, chapterID, body string, baseRev
 		return err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.requireEditableLocked(); err != nil {
 		return err
 	}
 	if err := s.active.store.SaveDraft(ctx, chapterID, body, baseRevision); err != nil {
-		return fmt.Errorf("save draft: %w", err)
+		return fmt.Errorf("save draft: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -475,13 +566,13 @@ func (s *Service) DiscardDraft(ctx context.Context, chapterID string, baseRevisi
 		return err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.requireEditableLocked(); err != nil {
 		return err
 	}
 	if err := s.active.store.DeleteDraft(ctx, chapterID, baseRevision); err != nil {
-		return fmt.Errorf("discard recovery draft: %w", err)
+		return fmt.Errorf("discard recovery draft: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -495,8 +586,8 @@ func (s *Service) CommitChapter(
 		return ChapterView{}, err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.requireEditableLocked(); err != nil {
 		return ChapterView{}, err
 	}
@@ -509,7 +600,7 @@ func (s *Service) CommitChapter(
 		return ChapterView{}, err
 	}
 	if err := s.active.store.CommitChapter(ctx, updated, previous); err != nil {
-		return ChapterView{}, fmt.Errorf("commit chapter: %w", err)
+		return ChapterView{}, fmt.Errorf("commit chapter: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return chapterView(updated), nil
 }

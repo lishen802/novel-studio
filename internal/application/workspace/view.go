@@ -32,12 +32,13 @@ type ChapterView struct {
 
 func projectView(project projectdomain.Project, path string) ProjectView {
 	return ProjectView{
-		ID:         project.ID,
-		Title:      project.Title,
-		Genre:      project.Genre,
-		Summary:    project.Summary,
-		Path:       path,
-		AccessMode: ports.ProjectAccessEditable,
+		ID:               project.ID,
+		Title:            project.Title,
+		Genre:            project.Genre,
+		Summary:          project.Summary,
+		Path:             path,
+		AccessMode:       ports.ProjectAccessEditable,
+		FilesystemHealth: ports.NormalProjectFilesystemHealth(),
 	}
 }
 
