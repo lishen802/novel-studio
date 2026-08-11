@@ -65,6 +65,25 @@ func TestPreflightEditableLeavesCanonicalFilesUnchanged(t *testing.T) {
 	}
 }
 
+func TestPreflightEditableWarnsForKnownSyncRoot(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "OneDrive")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := (Manager{}).Create(parent, "同步作品")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	health, err := (Manager{}).PreflightEditable(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health.Level != ports.ProjectFilesystemWarning || health.Category != ports.ProjectFilesystemSyncRisk {
+		t.Fatalf("health = %#v", health)
+	}
+}
+
 func TestClassifyFilesystemErrorMapsRuntimeWriteFailures(t *testing.T) {
 	for _, test := range []struct {
 		err  error

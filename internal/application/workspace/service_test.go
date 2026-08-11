@@ -795,6 +795,8 @@ type fakeStore struct {
 	savedDraft          draftRecord
 	commitCalls         int
 	commitErr           error
+	createChapterErr    error
+	archiveCharacterErr error
 	deleteDraftID       string
 	deleteDraftRevision int64
 	closeEvent          string
@@ -871,6 +873,9 @@ func (f *fakeStore) Project(context.Context) (projectdomain.Project, error) {
 }
 
 func (f *fakeStore) CreateChapter(_ context.Context, chapter projectdomain.Chapter) error {
+	if f.createChapterErr != nil {
+		return f.createChapterErr
+	}
 	f.chapters[chapter.ID] = chapter
 	return nil
 }
@@ -1148,6 +1153,9 @@ func (f *fakeStore) Character(_ context.Context, id string) (worlddomain.Charact
 	return character, nil
 }
 func (f *fakeStore) ArchiveCharacter(_ context.Context, id string, archivedAt time.Time) error {
+	if f.archiveCharacterErr != nil {
+		return f.archiveCharacterErr
+	}
 	character, ok := f.characters[id]
 	if !ok {
 		return errors.New("character missing")

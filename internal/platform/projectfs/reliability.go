@@ -102,7 +102,34 @@ func (Manager) PreflightEditable(pkg ports.ProjectPackage) (ports.ProjectFilesys
 	if err := probeAtomicReplacement(probeRoot); err != nil {
 		return ports.NormalProjectFilesystemHealth(), preflightFailure(err)
 	}
-	return ports.NormalProjectFilesystemHealth(), nil
+	return filesystemRiskHint(pkg.Root), nil
+}
+
+// filesystemRiskHint deliberately recognises only well-known synchronisation
+// roots and UNC-style network paths. It warns rather than blocks because a
+// successful preflight cannot guarantee that a sync client will not contend
+// with a later write.
+func filesystemRiskHint(root string) ports.ProjectFilesystemHealth {
+	clean := filepath.Clean(root)
+	if strings.HasPrefix(clean, `\\`) || strings.HasPrefix(clean, `//`) {
+		return syncRiskHealth()
+	}
+	for _, component := range strings.FieldsFunc(clean, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		name := strings.ToLower(component)
+		if strings.HasPrefix(name, "onedrive") || name == "dropbox" || name == "google drive" || name == "googledrive" || name == "icloud drive" || name == "mobile documents" || name == "cloudstorage" {
+			return syncRiskHealth()
+		}
+	}
+	return ports.NormalProjectFilesystemHealth()
+}
+
+func syncRiskHealth() ports.ProjectFilesystemHealth {
+	return ports.ProjectFilesystemHealth{
+		Level:    ports.ProjectFilesystemWarning,
+		Category: ports.ProjectFilesystemSyncRisk,
+	}
 }
 
 func preflightFailure(err error) error {

@@ -207,7 +207,7 @@ func (s *Service) CreateStoryEvent(ctx context.Context, input StoryEventInput) (
 		return StoryEventView{}, err
 	}
 	if err := s.active.store.CreateStoryEvent(ctx, event); err != nil {
-		return StoryEventView{}, fmt.Errorf("create story event: %w", err)
+		return StoryEventView{}, fmt.Errorf("create story event: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return storyEventView(event), nil
 }
@@ -230,7 +230,7 @@ func (s *Service) UpdateStoryEvent(ctx context.Context, id string, input StoryEv
 		return StoryEventView{}, err
 	}
 	if err := s.active.store.UpdateStoryEvent(ctx, updated); err != nil {
-		return StoryEventView{}, fmt.Errorf("update story event: %w", err)
+		return StoryEventView{}, fmt.Errorf("update story event: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return storyEventView(updated), nil
 }
@@ -261,7 +261,7 @@ func (s *Service) LinkStoryEvent(ctx context.Context, input StoryEventLinkInput)
 		return StoryEventLinkView{}, err
 	}
 	if err := s.active.store.UpsertStoryEventLink(ctx, link); err != nil {
-		return StoryEventLinkView{}, fmt.Errorf("link story event: %w", err)
+		return StoryEventLinkView{}, fmt.Errorf("link story event: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return storyEventLinkView(link), nil
 }
@@ -290,7 +290,7 @@ func (s *Service) CreateFact(ctx context.Context, input FactInput) (FactView, er
 		return FactView{}, err
 	}
 	if err := s.active.store.CreateFact(ctx, fact); err != nil {
-		return FactView{}, fmt.Errorf("create fact: %w", err)
+		return FactView{}, fmt.Errorf("create fact: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factView(fact), nil
 }
@@ -316,7 +316,7 @@ func (s *Service) UpdateFact(ctx context.Context, id string, input FactInput) (F
 		return FactView{}, err
 	}
 	if err := s.active.store.UpdateFact(ctx, updated); err != nil {
-		return FactView{}, fmt.Errorf("update fact: %w", err)
+		return FactView{}, fmt.Errorf("update fact: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factView(updated), nil
 }
@@ -339,7 +339,7 @@ func (s *Service) ConfirmFact(ctx context.Context, id string) (FactView, error) 
 		return FactView{}, err
 	}
 	if err := s.active.store.UpdateFact(ctx, confirmed); err != nil {
-		return FactView{}, fmt.Errorf("confirm fact: %w", err)
+		return FactView{}, fmt.Errorf("confirm fact: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factView(confirmed), nil
 }
@@ -403,7 +403,7 @@ func (s *Service) CreateCharacterKnowledge(ctx context.Context, input CharacterK
 		return CharacterKnowledgeView{}, err
 	}
 	if err := s.active.store.CreateCharacterKnowledge(ctx, knowledge); err != nil {
-		return CharacterKnowledgeView{}, fmt.Errorf("create character knowledge: %w", err)
+		return CharacterKnowledgeView{}, fmt.Errorf("create character knowledge: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return characterKnowledgeView(knowledge), nil
 }
@@ -440,7 +440,7 @@ func (s *Service) AddFactEvidence(ctx context.Context, input FactEvidenceInput) 
 		return FactEvidenceView{}, canondomain.ErrInvalidEvidence
 	}
 	if err := s.active.store.CreateFactEvidence(ctx, evidence); err != nil {
-		return FactEvidenceView{}, fmt.Errorf("add fact evidence: %w", err)
+		return FactEvidenceView{}, fmt.Errorf("add fact evidence: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factEvidenceView(evidence), nil
 }
@@ -470,7 +470,7 @@ func (s *Service) AddFactScope(ctx context.Context, input FactScopeInput) (FactS
 		return FactScopeView{}, err
 	}
 	if err := s.active.store.CreateFactScope(ctx, scope); err != nil {
-		return FactScopeView{}, fmt.Errorf("add fact scope: %w", err)
+		return FactScopeView{}, fmt.Errorf("add fact scope: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factScopeView(scope), nil
 }
@@ -501,7 +501,7 @@ func (s *Service) CreateFactConflict(ctx context.Context, input FactConflictInpu
 		return FactConflictView{}, err
 	}
 	if err := s.active.store.CreateFactConflict(ctx, conflict); err != nil {
-		return FactConflictView{}, fmt.Errorf("create fact conflict: %w", err)
+		return FactConflictView{}, fmt.Errorf("create fact conflict: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factConflictView(conflict), nil
 }

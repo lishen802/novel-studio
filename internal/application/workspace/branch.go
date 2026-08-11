@@ -139,7 +139,7 @@ func (s *Service) CreateBranch(
 		s.clock.Now(),
 	)
 	if err != nil {
-		return BranchView{}, fmt.Errorf("create project branch: %w", err)
+		return BranchView{}, fmt.Errorf("create project branch: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return branchView(created, false), nil
 }
@@ -192,7 +192,7 @@ func (s *Service) SwitchBranch(
 		s.clock.Now(),
 	)
 	if err != nil {
-		return BranchSwitchView{}, s.reopenAfterBranchFailureLocked(ctx, active.packageInfo, err)
+		return BranchSwitchView{}, s.reopenAfterBranchFailureLocked(ctx, active.packageInfo, s.handleFilesystemWriteFailureLocked(err))
 	}
 	store, err := s.stores.Open(ctx, active.packageInfo.Database)
 	if err != nil {
@@ -219,11 +219,12 @@ func (s *Service) SwitchBranch(
 		)
 	}
 	s.active = &activeWorkspace{
-		packageInfo:  active.packageInfo,
-		store:        store,
-		mode:         active.mode,
-		projectLease: active.projectLease,
-		generation:   active.generation,
+		packageInfo:      active.packageInfo,
+		store:            store,
+		mode:             active.mode,
+		projectLease:     active.projectLease,
+		filesystemHealth: active.filesystemHealth,
+		generation:       active.generation,
 	}
 	s.branchMergePreviews = make(map[string]branchMergePreview)
 	return s.branchWorkspaceViewLocked(ctx, nextCatalog.ActiveBranchID)
@@ -325,7 +326,7 @@ func (s *Service) ConfirmBranchMerge(
 		preparedPath,
 		s.clock.Now(),
 	); err != nil {
-		return BranchSwitchView{}, fmt.Errorf("refresh merge target: %w", err)
+		return BranchSwitchView{}, fmt.Errorf("refresh merge target: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	currentPlan, err := s.branches.PlanMerge(
 		s.active.packageInfo.Branches,
@@ -357,18 +358,19 @@ func (s *Service) ConfirmBranchMerge(
 		s.clock.Now(),
 	)
 	if err != nil {
-		return BranchSwitchView{}, s.reopenAfterBranchFailureLocked(ctx, active.packageInfo, err)
+		return BranchSwitchView{}, s.reopenAfterBranchFailureLocked(ctx, active.packageInfo, s.handleFilesystemWriteFailureLocked(err))
 	}
 	store, err := s.stores.Open(ctx, active.packageInfo.Database)
 	if err != nil {
 		return BranchSwitchView{}, s.reopenAfterBranchFailureLocked(ctx, active.packageInfo, err)
 	}
 	s.active = &activeWorkspace{
-		packageInfo:  active.packageInfo,
-		store:        store,
-		mode:         active.mode,
-		projectLease: active.projectLease,
-		generation:   active.generation,
+		packageInfo:      active.packageInfo,
+		store:            store,
+		mode:             active.mode,
+		projectLease:     active.projectLease,
+		filesystemHealth: active.filesystemHealth,
+		generation:       active.generation,
 	}
 	return s.branchWorkspaceViewLocked(ctx, catalog.ActiveBranchID)
 }
@@ -386,7 +388,7 @@ func (s *Service) DeleteBranch(ctx context.Context, id string) error {
 		return ErrBranchFeatureUnavailable
 	}
 	if err := s.branches.Delete(s.active.packageInfo.Branches, strings.TrimSpace(id)); err != nil {
-		return fmt.Errorf("delete project branch: %w", err)
+		return fmt.Errorf("delete project branch: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -402,11 +404,11 @@ func (s *Service) ensureBranchCatalog(ctx context.Context, active *activeWorkspa
 	preparedID := s.ids.NewID()
 	preparedPath, err := s.branches.Prepare(active.packageInfo.Branches, preparedID)
 	if err != nil {
-		return fmt.Errorf("prepare initial branch backup: %w", err)
+		return fmt.Errorf("prepare initial branch backup: %w", s.handleFilesystemWriteFailureForPackage(active.packageInfo.Root, err))
 	}
 	defer s.branches.DiscardPrepared(active.packageInfo.Branches, preparedID)
 	if err := active.store.Backup(ctx, preparedPath); err != nil {
-		return fmt.Errorf("backup initial branch state: %w", err)
+		return fmt.Errorf("backup initial branch state: %w", s.handleFilesystemWriteFailureForPackage(active.packageInfo.Root, err))
 	}
 	if _, err := s.branches.Initialize(
 		active.packageInfo.Branches,
@@ -415,7 +417,7 @@ func (s *Service) ensureBranchCatalog(ctx context.Context, active *activeWorkspa
 		preparedPath,
 		s.clock.Now(),
 	); err != nil {
-		return fmt.Errorf("initialize project branches: %w", err)
+		return fmt.Errorf("initialize project branches: %w", s.handleFilesystemWriteFailureForPackage(active.packageInfo.Root, err))
 	}
 	return nil
 }
@@ -438,7 +440,7 @@ func (s *Service) checkpointActiveBranchLocked(
 		preparedPath,
 		s.clock.Now(),
 	); err != nil {
-		return revisiondomain.BranchCatalog{}, fmt.Errorf("checkpoint active branch: %w", err)
+		return revisiondomain.BranchCatalog{}, fmt.Errorf("checkpoint active branch: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return s.branches.Load(s.active.packageInfo.Branches)
 }
@@ -449,11 +451,11 @@ func (s *Service) prepareActiveBranchBackupLocked(
 	id := s.ids.NewID()
 	path, err := s.branches.Prepare(s.active.packageInfo.Branches, id)
 	if err != nil {
-		return "", "", fmt.Errorf("prepare branch backup: %w", err)
+		return "", "", fmt.Errorf("prepare branch backup: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	if err := s.active.store.Backup(ctx, path); err != nil {
 		_ = s.branches.DiscardPrepared(s.active.packageInfo.Branches, id)
-		return "", "", fmt.Errorf("backup active branch: %w", err)
+		return "", "", fmt.Errorf("backup active branch: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return id, path, nil
 }
@@ -476,7 +478,7 @@ func (s *Service) branchWorkspaceViewLocked(
 	}
 	return BranchSwitchView{
 		ActiveBranchID: activeBranchID,
-		Project:        projectView(project, s.active.packageInfo.Root),
+		Project:        projectViewWithHealth(project, s.active.packageInfo.Root, s.active.filesystemHealth),
 		Chapters:       views,
 	}, nil
 }
@@ -493,11 +495,12 @@ func (s *Service) reopenAfterBranchFailureLocked(
 			s.active = &activeWorkspace{packageInfo: projectPackage, store: store}
 		} else {
 			s.active = &activeWorkspace{
-				packageInfo:  projectPackage,
-				store:        store,
-				mode:         active.mode,
-				projectLease: active.projectLease,
-				generation:   active.generation,
+				packageInfo:      projectPackage,
+				store:            store,
+				mode:             active.mode,
+				projectLease:     active.projectLease,
+				filesystemHealth: active.filesystemHealth,
+				generation:       active.generation,
 			}
 		}
 	} else {

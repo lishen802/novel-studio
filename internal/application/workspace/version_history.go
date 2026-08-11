@@ -160,7 +160,7 @@ func (s *Service) RestoreSnapshot(
 		return SnapshotRestoreView{}, fmt.Errorf("close project before snapshot restore: %w", err)
 	}
 	if err := s.snapshots.BeginRestore(active.packageInfo.Database, snapshotPath); err != nil {
-		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, err)
+		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, s.handleFilesystemWriteFailureLocked(err))
 	}
 	restoredStore, err := s.stores.Open(ctx, active.packageInfo.Database)
 	if err != nil {
@@ -181,14 +181,15 @@ func (s *Service) RestoreSnapshot(
 	}
 	if err := s.snapshots.CommitRestore(active.packageInfo.Database); err != nil {
 		_ = restoredStore.Close()
-		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, err)
+		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, s.handleFilesystemWriteFailureLocked(err))
 	}
 	s.active = &activeWorkspace{
-		packageInfo:  active.packageInfo,
-		store:        restoredStore,
-		mode:         active.mode,
-		projectLease: active.projectLease,
-		generation:   active.generation,
+		packageInfo:      active.packageInfo,
+		store:            restoredStore,
+		mode:             active.mode,
+		projectLease:     active.projectLease,
+		filesystemHealth: active.filesystemHealth,
+		generation:       active.generation,
 	}
 	chapterViews := make([]ChapterView, 0, len(chapters))
 	for _, chapter := range chapters {
@@ -196,7 +197,7 @@ func (s *Service) RestoreSnapshot(
 	}
 	return SnapshotRestoreView{
 		SnapshotID: selected.ID,
-		Project:    projectView(restoredProject, active.packageInfo.Root),
+		Project:    projectViewWithHealth(restoredProject, active.packageInfo.Root, active.filesystemHealth),
 		Chapters:   chapterViews,
 	}, nil
 }
@@ -222,15 +223,15 @@ func (s *Service) createSnapshotLocked(
 	}
 	targetPath, err := s.snapshots.Prepare(s.active.packageInfo.Snapshots, snapshot.ID)
 	if err != nil {
-		return revisiondomain.Snapshot{}, fmt.Errorf("prepare project snapshot: %w", err)
+		return revisiondomain.Snapshot{}, fmt.Errorf("prepare project snapshot: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	if err := s.active.store.Backup(ctx, targetPath); err != nil {
 		_ = s.snapshots.Discard(s.active.packageInfo.Snapshots, snapshot.ID)
-		return revisiondomain.Snapshot{}, fmt.Errorf("backup project snapshot: %w", err)
+		return revisiondomain.Snapshot{}, fmt.Errorf("backup project snapshot: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	if err := s.snapshots.Record(s.active.packageInfo.Snapshots, snapshot); err != nil {
 		_ = s.snapshots.Discard(s.active.packageInfo.Snapshots, snapshot.ID)
-		return revisiondomain.Snapshot{}, fmt.Errorf("record project snapshot: %w", err)
+		return revisiondomain.Snapshot{}, fmt.Errorf("record project snapshot: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return snapshot, nil
 }
@@ -248,11 +249,12 @@ func (s *Service) rollbackSnapshotRestoreLocked(
 			s.active = &activeWorkspace{packageInfo: projectPackage, store: reopened}
 		} else {
 			s.active = &activeWorkspace{
-				packageInfo:  projectPackage,
-				store:        reopened,
-				mode:         active.mode,
-				projectLease: active.projectLease,
-				generation:   active.generation,
+				packageInfo:      projectPackage,
+				store:            reopened,
+				mode:             active.mode,
+				projectLease:     active.projectLease,
+				filesystemHealth: active.filesystemHealth,
+				generation:       active.generation,
 			}
 		}
 	} else {

@@ -9,6 +9,9 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
 func TestOpenProjectPreflightFailureKeepsCurrentWorkspace(t *testing.T) {
@@ -229,6 +232,128 @@ func TestRecoveryCopyFilesystemFailureDegradesActiveSourceHealth(t *testing.T) {
 	}
 	if got := activeFilesystemHealth(t, service); got.Level != ports.ProjectFilesystemDegraded || got.Category != ports.ProjectFilesystemSharingViolation {
 		t.Fatalf("filesystem health = %#v", got)
+	}
+}
+
+func TestCreateChapterFilesystemFailureDegradesWithoutCreatingChapter(t *testing.T) {
+	project := mustProject(t, "project-create-chapter", "章节失败")
+	store := newFakeStore(project)
+	store.createChapterErr = errors.New("disk is full")
+	service := filesystemHealthService(t, project, store)
+
+	_, err := service.CreateChapter(context.Background(), "第一章")
+	if !errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		t.Fatalf("CreateChapter error = %v, want filesystem failure", err)
+	}
+	if len(store.chapters) != 0 {
+		t.Fatalf("chapter persisted after failed create: %#v", store.chapters)
+	}
+	assertDegradedSharingViolation(t, service)
+}
+
+func TestArchiveCharacterFilesystemFailureDegradesWithoutArchivingCharacter(t *testing.T) {
+	project := mustProject(t, "project-archive-character", "角色归档失败")
+	store := newFakeStore(project)
+	character := mustWorldCharacter(t, "character-archive", project.ID, "林默", worlddomain.RoleProtagonist)
+	store.characters[character.ID] = character
+	store.archiveCharacterErr = errors.New("sharing violation")
+	service := filesystemHealthService(t, project, store)
+
+	err := service.ArchiveCharacter(context.Background(), character.ID)
+	if !errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		t.Fatalf("ArchiveCharacter error = %v, want filesystem failure", err)
+	}
+	if store.characters[character.ID].DeletedAt != nil {
+		t.Fatalf("character archived after failed write: %#v", store.characters[character.ID])
+	}
+	assertDegradedSharingViolation(t, service)
+}
+
+func TestCreateSnapshotFilesystemFailureDegradesWithoutRecordingSnapshot(t *testing.T) {
+	project := mustProject(t, "project-snapshot", "快照失败")
+	store := newFakeStore(project)
+	store.backupErr = errors.New("sharing violation")
+	archive := &fakeSnapshotArchive{}
+	service := NewService(
+		&fakePackageManager{openPackage: testPackage("/books/snapshot.zjproject")},
+		&fakeStoreFactory{openStore: store},
+		license.NoopService{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"snapshot-1"}},
+		archive,
+	)
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{failure: &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemSharingViolation}})
+	if _, err := service.OpenProject(context.Background(), "/books/snapshot.zjproject"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := service.CreateSnapshot(context.Background(), "保存点")
+	if !errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		t.Fatalf("CreateSnapshot error = %v, want filesystem failure", err)
+	}
+	if len(archive.recorded) != 0 {
+		t.Fatalf("snapshot recorded after failed backup: %#v", archive.recorded)
+	}
+	assertDegradedSharingViolation(t, service)
+}
+
+func TestRestoreSnapshotPreservesFilesystemHealthInActiveWorkspaceAndView(t *testing.T) {
+	project := mustProject(t, "project-restore-health", "恢复健康")
+	currentStore := newFakeStore(project)
+	restoredStore := newFakeStore(project)
+	target, err := revisiondomain.NewSnapshot("snapshot-health", project.ID, "保存点", revisiondomain.SnapshotNamed, time.Unix(150, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(
+		&fakePackageManager{openPackage: testPackage("/books/restore-health.zjproject")},
+		&fakeStoreFactory{openStores: []ports.ProjectStore{currentStore, restoredStore}},
+		license.NoopService{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"snapshot-recovery"}},
+		&fakeSnapshotArchive{snapshots: []revisiondomain.Snapshot{target}},
+	)
+	if _, err := service.OpenProject(context.Background(), "/books/restore-health.zjproject"); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	service.active.filesystemHealth = ports.ProjectFilesystemHealth{Level: ports.ProjectFilesystemDegraded, Category: ports.ProjectFilesystemSharingViolation}
+	service.mu.Unlock()
+
+	result, err := service.RestoreSnapshot(context.Background(), target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Project.FilesystemHealth.Level; got != ports.ProjectFilesystemDegraded {
+		t.Fatalf("snapshot restore view health = %#v", result.Project.FilesystemHealth)
+	}
+	if got := activeFilesystemHealth(t, service).Level; got != ports.ProjectFilesystemDegraded {
+		t.Fatalf("active health = %#v", activeFilesystemHealth(t, service))
+	}
+}
+
+func filesystemHealthService(t *testing.T, project projectdomain.Project, store *fakeStore) *Service {
+	t.Helper()
+	service := NewService(
+		&fakePackageManager{openPackage: testPackage("/books/filesystem-health.zjproject")},
+		&fakeStoreFactory{openStore: store},
+		license.NoopService{},
+		fixedClock{now: time.Unix(100, 0)},
+		&sequenceIDs{ids: []string{"generated-id"}},
+		&fakeSnapshotArchive{},
+	)
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{failure: &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemSharingViolation}})
+	if _, err := service.OpenProject(context.Background(), "/books/filesystem-health.zjproject"); err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+func assertDegradedSharingViolation(t *testing.T, service *Service) {
+	t.Helper()
+	health := activeFilesystemHealth(t, service)
+	if health.Level != ports.ProjectFilesystemDegraded || health.Category != ports.ProjectFilesystemSharingViolation {
+		t.Fatalf("filesystem health = %#v", health)
 	}
 }
 

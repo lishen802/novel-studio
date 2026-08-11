@@ -167,7 +167,7 @@ func (s *Service) CreateOutlineNode(ctx context.Context, input CreateOutlineNode
 		}
 	}
 	if err := s.active.store.CreateOutlineNode(ctx, node); err != nil {
-		return OutlineNodeView{}, fmt.Errorf("create outline node: %w", err)
+		return OutlineNodeView{}, fmt.Errorf("create outline node: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return outlineNodeView(node), nil
 }
@@ -190,7 +190,7 @@ func (s *Service) CreateStoryLine(ctx context.Context, input CreateStoryLineInpu
 		return StoryLineView{}, err
 	}
 	if err := s.active.store.CreateStoryLine(ctx, line); err != nil {
-		return StoryLineView{}, fmt.Errorf("create story line: %w", err)
+		return StoryLineView{}, fmt.Errorf("create story line: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return storyLineView(line), nil
 }
@@ -241,7 +241,7 @@ func (s *Service) LinkStoryLine(ctx context.Context, input LinkStoryLineInput) (
 		return StoryLineLinkView{}, err
 	}
 	if err := s.active.store.LinkStoryLine(ctx, project.ID, link); err != nil {
-		return StoryLineLinkView{}, fmt.Errorf("link story line: %w", err)
+		return StoryLineLinkView{}, fmt.Errorf("link story line: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return storyLineLinkView(link), nil
 }
@@ -294,7 +294,7 @@ func (s *Service) CreateSceneCard(ctx context.Context, input CreateSceneCardInpu
 	card.POV, card.Location = strings.TrimSpace(input.POV), strings.TrimSpace(input.Location)
 	card.Goal, card.Conflict, card.Outcome = strings.TrimSpace(input.Goal), strings.TrimSpace(input.Conflict), strings.TrimSpace(input.Outcome)
 	if err := s.active.store.CreateSceneCard(ctx, card); err != nil {
-		return SceneCardView{}, fmt.Errorf("create scene card: %w", err)
+		return SceneCardView{}, fmt.Errorf("create scene card: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return sceneCardView(card), nil
 }
@@ -309,7 +309,7 @@ func (s *Service) ArchiveOutlineNode(ctx context.Context, id string) error {
 		return err
 	}
 	if err := s.active.store.ArchiveOutlineNode(ctx, id, s.clock.Now()); err != nil {
-		return fmt.Errorf("archive outline node: %w", err)
+		return fmt.Errorf("archive outline node: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -362,7 +362,7 @@ func (s *Service) MoveOutlineNode(ctx context.Context, id, direction string) err
 		return nil
 	}
 	if err := s.active.store.SwapOutlineNodePositions(ctx, id, siblings[target].ID, s.clock.Now()); err != nil {
-		return fmt.Errorf("move outline node: %w", err)
+		return fmt.Errorf("move outline node: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }

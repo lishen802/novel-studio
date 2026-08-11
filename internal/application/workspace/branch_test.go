@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
@@ -14,6 +16,46 @@ import (
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 	"github.com/lishen802/novel-studio/internal/platform/snapshotfs"
 )
+
+func TestSwitchBranchPreservesFilesystemHealthInWorkspaceAndView(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)},
+		ids.UUIDGenerator{},
+		snapshotfs.Archive{},
+		branchfs.Archive{},
+	)
+	t.Cleanup(func() { _ = service.Close() })
+	if _, err := service.CreateProject(ctx, t.TempDir(), "分支健康", "奇幻", ""); err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateBranch(ctx, "健康分支", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ports.ProjectFilesystemHealth{
+		Level:    ports.ProjectFilesystemDegraded,
+		Category: ports.ProjectFilesystemSharingViolation,
+		Actions:  []ports.ProjectFilesystemAction{ports.ProjectFilesystemRetry},
+	}
+	service.mu.Lock()
+	service.active.filesystemHealth = want
+	service.mu.Unlock()
+
+	result, err := service.SwitchBranch(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Project.FilesystemHealth, want) {
+		t.Fatalf("switch branch view health = %#v, want %#v", result.Project.FilesystemHealth, want)
+	}
+	if !reflect.DeepEqual(activeFilesystemHealth(t, service), want) {
+		t.Fatalf("active health = %#v, want %#v", activeFilesystemHealth(t, service), want)
+	}
+}
 
 func TestProjectBranchesIsolateCompleteWorkspaceAndFastForwardMerge(t *testing.T) {
 	ctx := context.Background()

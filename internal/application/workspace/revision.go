@@ -165,7 +165,7 @@ func (s *Service) ProposeChapterChange(ctx context.Context, input ChapterChangeI
 		return ChangeSetView{}, err
 	}
 	if err := s.active.store.CreateChangeSet(ctx, changeSet); err != nil {
-		return ChangeSetView{}, fmt.Errorf("create change set: %w", err)
+		return ChangeSetView{}, fmt.Errorf("create change set: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return changeSetView(changeSet), nil
 }
@@ -196,7 +196,7 @@ func (s *Service) ProposeStructuredChange(ctx context.Context, input StructuredC
 		return ChangeSetView{}, err
 	}
 	if err := s.active.store.CreateChangeSet(ctx, changeSet); err != nil {
-		return ChangeSetView{}, fmt.Errorf("create structured change set: %w", err)
+		return ChangeSetView{}, fmt.Errorf("create structured change set: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return changeSetView(changeSet), nil
 }
@@ -232,7 +232,7 @@ func (s *Service) EditChangeOperation(ctx context.Context, input ChangeOperation
 		ctx, changeSet.ID, selected.ID, afterValue, s.clock.Now(),
 	)
 	if err != nil {
-		return ChangeSetView{}, fmt.Errorf("edit change operation: %w", err)
+		return ChangeSetView{}, fmt.Errorf("edit change operation: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return changeSetView(edited), nil
 }
@@ -259,12 +259,12 @@ func (s *Service) ApplyChangeSet(ctx context.Context, id string) (ChangeSetApply
 	if pending > 1 {
 		name := fmt.Sprintf("应用候选“%s”前", changeSet.Title)
 		if _, err := s.createSnapshotLocked(ctx, name, revisiondomain.SnapshotRecovery); err != nil {
-			return ChangeSetApplyView{}, fmt.Errorf("create change set recovery point: %w", err)
+			return ChangeSetApplyView{}, fmt.Errorf("create change set recovery point: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 	}
 	result, err := s.active.store.ApplyChangeSet(ctx, changeSet.ID, s.clock.Now())
 	if err != nil {
-		return ChangeSetApplyView{}, fmt.Errorf("apply change set: %w", err)
+		return ChangeSetApplyView{}, fmt.Errorf("apply change set: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return changeSetApplyView(result.ChangeSet, result.Chapters), nil
 }
@@ -282,7 +282,7 @@ func (s *Service) ApplyChangeOperation(ctx context.Context, changeSetID, operati
 		ctx, strings.TrimSpace(changeSetID), strings.TrimSpace(operationID), s.clock.Now(),
 	)
 	if err != nil {
-		return ChangeSetApplyView{}, fmt.Errorf("apply change operation: %w", err)
+		return ChangeSetApplyView{}, fmt.Errorf("apply change operation: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return changeSetApplyView(result.ChangeSet, result.Chapters), nil
 }
@@ -299,7 +299,7 @@ func (s *Service) RejectChangeOperation(ctx context.Context, changeSetID, operat
 	if err := s.active.store.RejectChangeOperation(
 		ctx, strings.TrimSpace(changeSetID), strings.TrimSpace(operationID), s.clock.Now(),
 	); err != nil {
-		return fmt.Errorf("reject change operation: %w", err)
+		return fmt.Errorf("reject change operation: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -314,7 +314,7 @@ func (s *Service) RejectChangeSet(ctx context.Context, id string) error {
 		return err
 	}
 	if err := s.active.store.RejectChangeSet(ctx, strings.TrimSpace(id), s.clock.Now()); err != nil {
-		return fmt.Errorf("reject change set: %w", err)
+		return fmt.Errorf("reject change set: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }

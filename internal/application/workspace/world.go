@@ -181,7 +181,7 @@ func (s *Service) CreateCharacter(ctx context.Context, input CharacterInput) (Ch
 		return CharacterView{}, err
 	}
 	if err := s.active.store.CreateCharacter(ctx, character); err != nil {
-		return CharacterView{}, fmt.Errorf("create character: %w", err)
+		return CharacterView{}, fmt.Errorf("create character: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return characterView(character), nil
 }
@@ -208,7 +208,7 @@ func (s *Service) UpdateCharacter(ctx context.Context, id string, input Characte
 		return CharacterView{}, err
 	}
 	if err := s.active.store.UpdateCharacter(ctx, updated); err != nil {
-		return CharacterView{}, fmt.Errorf("update character: %w", err)
+		return CharacterView{}, fmt.Errorf("update character: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return characterView(updated), nil
 }
@@ -216,7 +216,7 @@ func (s *Service) UpdateCharacter(ctx context.Context, id string, input Characte
 func (s *Service) ArchiveCharacter(ctx context.Context, id string) error {
 	return s.withStoryWrite(ctx, func() error {
 		if err := s.active.store.ArchiveCharacter(ctx, strings.TrimSpace(id), s.clock.Now()); err != nil {
-			return fmt.Errorf("archive character: %w", err)
+			return fmt.Errorf("archive character: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 		return nil
 	})
@@ -248,7 +248,7 @@ func (s *Service) CreateFaction(ctx context.Context, input FactionInput) (Factio
 		return FactionView{}, err
 	}
 	if err := s.active.store.CreateFaction(ctx, faction); err != nil {
-		return FactionView{}, fmt.Errorf("create faction: %w", err)
+		return FactionView{}, fmt.Errorf("create faction: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factionView(faction), nil
 }
@@ -275,7 +275,7 @@ func (s *Service) UpdateFaction(ctx context.Context, id string, input FactionInp
 		return FactionView{}, err
 	}
 	if err := s.active.store.UpdateFaction(ctx, updated); err != nil {
-		return FactionView{}, fmt.Errorf("update faction: %w", err)
+		return FactionView{}, fmt.Errorf("update faction: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return factionView(updated), nil
 }
@@ -283,7 +283,7 @@ func (s *Service) UpdateFaction(ctx context.Context, id string, input FactionInp
 func (s *Service) ArchiveFaction(ctx context.Context, id string) error {
 	return s.withStoryWrite(ctx, func() error {
 		if err := s.active.store.ArchiveFaction(ctx, strings.TrimSpace(id), s.clock.Now()); err != nil {
-			return fmt.Errorf("archive faction: %w", err)
+			return fmt.Errorf("archive faction: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 		return nil
 	})
@@ -315,7 +315,7 @@ func (s *Service) UpsertMembership(ctx context.Context, input MembershipInput) (
 		return MembershipView{}, err
 	}
 	if err := s.active.store.UpsertMembership(ctx, membership); err != nil {
-		return MembershipView{}, fmt.Errorf("upsert membership: %w", err)
+		return MembershipView{}, fmt.Errorf("upsert membership: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return membershipView(membership), nil
 }
@@ -323,7 +323,7 @@ func (s *Service) UpsertMembership(ctx context.Context, input MembershipInput) (
 func (s *Service) DeleteMembership(ctx context.Context, characterID, factionID string) error {
 	return s.withStoryWrite(ctx, func() error {
 		if err := s.active.store.DeleteMembership(ctx, strings.TrimSpace(characterID), strings.TrimSpace(factionID)); err != nil {
-			return fmt.Errorf("delete membership: %w", err)
+			return fmt.Errorf("delete membership: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 		return nil
 	})
@@ -351,7 +351,7 @@ func (s *Service) CreateRelationship(ctx context.Context, input RelationshipInpu
 		return RelationshipView{}, err
 	}
 	if err := s.active.store.CreateRelationship(ctx, relationship); err != nil {
-		return RelationshipView{}, fmt.Errorf("create relationship: %w", err)
+		return RelationshipView{}, fmt.Errorf("create relationship: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return relationshipView(relationship), nil
 }
@@ -359,7 +359,7 @@ func (s *Service) CreateRelationship(ctx context.Context, input RelationshipInpu
 func (s *Service) ArchiveRelationship(ctx context.Context, id string) error {
 	return s.withStoryWrite(ctx, func() error {
 		if err := s.active.store.ArchiveRelationship(ctx, strings.TrimSpace(id), s.clock.Now()); err != nil {
-			return fmt.Errorf("archive relationship: %w", err)
+			return fmt.Errorf("archive relationship: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 		return nil
 	})
@@ -387,7 +387,7 @@ func (s *Service) LinkCharacterToChapter(ctx context.Context, input AppearanceIn
 		return err
 	}
 	if err := s.active.store.AddChapterAppearance(ctx, appearance); err != nil {
-		return fmt.Errorf("link character to chapter: %w", err)
+		return fmt.Errorf("link character to chapter: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -395,7 +395,7 @@ func (s *Service) LinkCharacterToChapter(ctx context.Context, input AppearanceIn
 func (s *Service) UnlinkCharacterFromChapter(ctx context.Context, characterID, chapterID string) error {
 	return s.withStoryWrite(ctx, func() error {
 		if err := s.active.store.RemoveChapterAppearance(ctx, strings.TrimSpace(characterID), strings.TrimSpace(chapterID)); err != nil {
-			return fmt.Errorf("unlink character from chapter: %w", err)
+			return fmt.Errorf("unlink character from chapter: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 		return nil
 	})
@@ -426,7 +426,7 @@ func (s *Service) LinkCharacterToScene(ctx context.Context, input AppearanceInpu
 		return err
 	}
 	if err := s.active.store.AddSceneAppearance(ctx, appearance); err != nil {
-		return fmt.Errorf("link character to scene: %w", err)
+		return fmt.Errorf("link character to scene: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -434,7 +434,7 @@ func (s *Service) LinkCharacterToScene(ctx context.Context, input AppearanceInpu
 func (s *Service) UnlinkCharacterFromScene(ctx context.Context, characterID, sceneCardID string) error {
 	return s.withStoryWrite(ctx, func() error {
 		if err := s.active.store.RemoveSceneAppearance(ctx, strings.TrimSpace(characterID), strings.TrimSpace(sceneCardID)); err != nil {
-			return fmt.Errorf("unlink character from scene: %w", err)
+			return fmt.Errorf("unlink character from scene: %w", s.handleFilesystemWriteFailureLocked(err))
 		}
 		return nil
 	})
@@ -449,7 +449,7 @@ func (s *Service) withStoryWrite(ctx context.Context, operation func() error) er
 	if err := s.requireEditableLocked(); err != nil {
 		return err
 	}
-	return operation()
+	return s.handleFilesystemWriteFailureLocked(operation())
 }
 
 type sceneCardLister interface {

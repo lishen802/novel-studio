@@ -252,6 +252,7 @@ type fakeSnapshotArchive struct {
 	committedRestore   bool
 	rolledBackRestore  bool
 	rollbackErr        error
+	recordErr          error
 	recoveredDatabases []string
 	recoveryRequired   bool
 	events             *[]string
@@ -262,6 +263,9 @@ func (f *fakeSnapshotArchive) Prepare(directory string, id string) (string, erro
 }
 
 func (f *fakeSnapshotArchive) Record(_ string, snapshot revisiondomain.Snapshot) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
 	f.recorded = append(f.recorded, snapshot)
 	f.snapshots = append(f.snapshots, snapshot)
 	return nil

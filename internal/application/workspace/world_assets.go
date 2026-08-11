@@ -228,7 +228,7 @@ func (s *Service) CreateWorldRegion(ctx context.Context, input WorldRegionInput)
 	}
 	region.Summary, region.Terrain, region.Climate = strings.TrimSpace(input.Summary), strings.TrimSpace(input.Terrain), strings.TrimSpace(input.Climate)
 	if err := s.active.store.CreateWorldRegion(ctx, region); err != nil {
-		return WorldRegionView{}, fmt.Errorf("create world region: %w", err)
+		return WorldRegionView{}, fmt.Errorf("create world region: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return worldRegionView(region), nil
 }
@@ -262,7 +262,7 @@ func (s *Service) UpdateWorldRegion(ctx context.Context, id string, input WorldR
 		return WorldRegionView{}, err
 	}
 	if err := s.active.store.UpdateWorldRegion(ctx, updated); err != nil {
-		return WorldRegionView{}, fmt.Errorf("update world region: %w", err)
+		return WorldRegionView{}, fmt.Errorf("update world region: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return worldRegionView(updated), nil
 }
@@ -289,7 +289,7 @@ func (s *Service) UpsertRegionAdjacency(ctx context.Context, input RegionAdjacen
 		return RegionAdjacencyView{}, err
 	}
 	if err := s.active.store.UpsertRegionAdjacency(ctx, adjacency); err != nil {
-		return RegionAdjacencyView{}, fmt.Errorf("upsert region adjacency: %w", err)
+		return RegionAdjacencyView{}, fmt.Errorf("upsert region adjacency: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return regionAdjacencyView(adjacency), nil
 }
@@ -316,7 +316,7 @@ func (s *Service) DeleteRegionAdjacency(ctx context.Context, firstRegionID, seco
 		return err
 	}
 	if err := s.active.store.DeleteRegionAdjacency(ctx, adjacency.FirstRegionID, adjacency.SecondRegionID); err != nil {
-		return fmt.Errorf("delete region adjacency: %w", err)
+		return fmt.Errorf("delete region adjacency: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return nil
 }
@@ -352,7 +352,7 @@ func (s *Service) CreateLocation(ctx context.Context, input LocationInput) (Loca
 		return LocationView{}, err
 	}
 	if err := s.active.store.CreateLocation(ctx, location); err != nil {
-		return LocationView{}, fmt.Errorf("create location: %w", err)
+		return LocationView{}, fmt.Errorf("create location: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return locationView(location), nil
 }
@@ -383,7 +383,7 @@ func (s *Service) UpdateLocation(ctx context.Context, id string, input LocationI
 		return LocationView{}, err
 	}
 	if err := s.active.store.UpdateLocation(ctx, updated); err != nil {
-		return LocationView{}, fmt.Errorf("update location: %w", err)
+		return LocationView{}, fmt.Errorf("update location: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return locationView(updated), nil
 }
@@ -414,7 +414,7 @@ func (s *Service) LinkLocation(ctx context.Context, input LocationLinkInput) (Lo
 		return LocationLinkView{}, err
 	}
 	if err := s.active.store.UpsertLocationLink(ctx, link); err != nil {
-		return LocationLinkView{}, fmt.Errorf("link location: %w", err)
+		return LocationLinkView{}, fmt.Errorf("link location: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return locationLinkView(link), nil
 }
@@ -448,7 +448,7 @@ func (s *Service) CreateItem(ctx context.Context, input ItemInput) (ItemView, er
 		return ItemView{}, err
 	}
 	if err := s.active.store.CreateItem(ctx, item); err != nil {
-		return ItemView{}, fmt.Errorf("create item: %w", err)
+		return ItemView{}, fmt.Errorf("create item: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return itemView(item), nil
 }
@@ -475,7 +475,7 @@ func (s *Service) UpdateItem(ctx context.Context, id string, input ItemInput) (I
 		return ItemView{}, err
 	}
 	if err := s.active.store.UpdateItem(ctx, updated); err != nil {
-		return ItemView{}, fmt.Errorf("update item: %w", err)
+		return ItemView{}, fmt.Errorf("update item: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return itemView(updated), nil
 }
@@ -508,7 +508,7 @@ func (s *Service) TransferItem(ctx context.Context, input ItemTransferInput) (It
 		return ItemTransferView{}, err
 	}
 	if err := s.active.store.TransferItem(ctx, updated, transfer); err != nil {
-		return ItemTransferView{}, fmt.Errorf("transfer item: %w", err)
+		return ItemTransferView{}, fmt.Errorf("transfer item: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return itemTransferView(transfer), nil
 }
@@ -543,7 +543,7 @@ func (s *Service) CreateWorldRule(ctx context.Context, input WorldRuleInput) (Wo
 		return WorldRuleView{}, err
 	}
 	if err := s.active.store.CreateWorldRule(ctx, rule); err != nil {
-		return WorldRuleView{}, fmt.Errorf("create world rule: %w", err)
+		return WorldRuleView{}, fmt.Errorf("create world rule: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return worldRuleView(rule), nil
 }
@@ -573,7 +573,7 @@ func (s *Service) UpdateWorldRule(ctx context.Context, id string, input WorldRul
 		return WorldRuleView{}, err
 	}
 	if err := s.active.store.UpdateWorldRule(ctx, updated); err != nil {
-		return WorldRuleView{}, fmt.Errorf("update world rule: %w", err)
+		return WorldRuleView{}, fmt.Errorf("update world rule: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return worldRuleView(updated), nil
 }
@@ -608,7 +608,7 @@ func (s *Service) CreateForeshadowingHook(ctx context.Context, input Foreshadowi
 		return ForeshadowingHookView{}, err
 	}
 	if err := s.active.store.CreateForeshadowingHook(ctx, hook); err != nil {
-		return ForeshadowingHookView{}, fmt.Errorf("create foreshadowing hook: %w", err)
+		return ForeshadowingHookView{}, fmt.Errorf("create foreshadowing hook: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return foreshadowingHookView(hook), nil
 }
@@ -638,7 +638,7 @@ func (s *Service) UpdateForeshadowingHook(ctx context.Context, id string, input 
 		return ForeshadowingHookView{}, err
 	}
 	if err := s.active.store.UpdateForeshadowingHook(ctx, updated); err != nil {
-		return ForeshadowingHookView{}, fmt.Errorf("update foreshadowing hook: %w", err)
+		return ForeshadowingHookView{}, fmt.Errorf("update foreshadowing hook: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return foreshadowingHookView(updated), nil
 }

@@ -516,7 +516,7 @@ func (s *Service) CreateChapter(ctx context.Context, title string) (ChapterView,
 		return ChapterView{}, err
 	}
 	if err := s.active.store.CreateChapter(ctx, chapter); err != nil {
-		return ChapterView{}, fmt.Errorf("create chapter: %w", err)
+		return ChapterView{}, fmt.Errorf("create chapter: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return chapterView(chapter), nil
 }

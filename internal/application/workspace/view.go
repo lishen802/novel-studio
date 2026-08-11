@@ -31,6 +31,10 @@ type ChapterView struct {
 }
 
 func projectView(project projectdomain.Project, path string) ProjectView {
+	return projectViewWithHealth(project, path, ports.NormalProjectFilesystemHealth())
+}
+
+func projectViewWithHealth(project projectdomain.Project, path string, filesystemHealth ports.ProjectFilesystemHealth) ProjectView {
 	return ProjectView{
 		ID:               project.ID,
 		Title:            project.Title,
@@ -38,7 +42,7 @@ func projectView(project projectdomain.Project, path string) ProjectView {
 		Summary:          project.Summary,
 		Path:             path,
 		AccessMode:       ports.ProjectAccessEditable,
-		FilesystemHealth: ports.NormalProjectFilesystemHealth(),
+		FilesystemHealth: filesystemHealth,
 	}
 }
 
