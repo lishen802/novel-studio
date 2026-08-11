@@ -52,6 +52,7 @@ func newApp() *App {
 	)
 	workspaceService.ConfigureImportSourceArchive(projectfs.ImportSourceArchive{})
 	workspaceService.ConfigureProjectLease(projectfs.LeaseManager{}, processLeaseMetadata())
+	workspaceService.ConfigureProjectFilesystemGuard(projectfs.Manager{})
 	notifier := newWailsJobEventNotifier()
 	workspaceService.SetJobEventNotifier(notifier)
 	app := &App{

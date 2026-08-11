@@ -25,6 +25,7 @@ type Service struct {
 	providers     ports.ModelProviderFactory
 	leaseManager  ports.ProjectLeaseManager
 	leaseMetadata ports.ProjectLeaseMetadata
+	filesystem    ports.ProjectFilesystemGuard
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -60,11 +61,12 @@ type Service struct {
 }
 
 type activeWorkspace struct {
-	packageInfo  ports.ProjectPackage
-	store        ports.ProjectStore
-	mode         ports.ProjectAccessMode
-	projectLease ports.ProjectLease
-	generation   uint64
+	packageInfo      ports.ProjectPackage
+	store            ports.ProjectStore
+	mode             ports.ProjectAccessMode
+	projectLease     ports.ProjectLease
+	filesystemHealth ports.ProjectFilesystemHealth
+	generation       uint64
 }
 
 // requireEditableLocked is the application-level write barrier. Callers must
@@ -149,6 +151,22 @@ func (s *Service) ConfigureProjectLease(manager ports.ProjectLeaseManager, metad
 	s.leaseMetadata = metadata
 }
 
+func (s *Service) ConfigureProjectFilesystemGuard(guard ports.ProjectFilesystemGuard) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.filesystem = guard
+}
+
+func (s *Service) preflightEditable(packageInfo ports.ProjectPackage) (ports.ProjectFilesystemHealth, error) {
+	s.mu.RLock()
+	guard := s.filesystem
+	s.mu.RUnlock()
+	if guard == nil {
+		return ports.NormalProjectFilesystemHealth(), nil
+	}
+	return guard.PreflightEditable(packageInfo)
+}
+
 func (s *Service) CreateProject(
 	ctx context.Context,
 	parentDirectory, title, genre, summary string,
@@ -173,13 +191,18 @@ func (s *Service) CreateProject(
 	if err != nil {
 		return ProjectView{}, fmt.Errorf("acquire project lease: %w", err)
 	}
+	filesystemHealth, err := s.preflightEditable(packageInfo)
+	if err != nil {
+		_ = releaseProjectLease(projectLease)
+		return ProjectView{}, fmt.Errorf("preflight project filesystem: %w", err)
+	}
 	store, err := s.stores.Create(ctx, packageInfo.Database, project)
 	if err != nil {
 		_ = releaseProjectLease(projectLease)
 		return ProjectView{}, fmt.Errorf("create project store: %w", err)
 	}
 
-	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease}
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease, filesystemHealth: filesystemHealth}
 	if err := s.updateProjectLeaseMetadata(ctx, &candidate); err != nil {
 		_ = closeWorkspaceResources(candidate)
 		return ProjectView{}, err
@@ -195,7 +218,9 @@ func (s *Service) CreateProject(
 	if err := s.replaceActive(candidate); err != nil {
 		return ProjectView{}, err
 	}
-	return projectView(project, packageInfo.Root), nil
+	view := projectView(project, packageInfo.Root)
+	view.FilesystemHealth = filesystemHealth
+	return view, nil
 }
 
 // recoverInterruptedJobs transitions agent runs and extraction tasks left in
@@ -244,6 +269,10 @@ func (s *Service) openProjectEditable(ctx context.Context, packagePath string) (
 			_ = releaseProjectLease(projectLease)
 		}
 	}()
+	filesystemHealth, err := s.preflightEditable(packageInfo)
+	if err != nil {
+		return ProjectView{}, fmt.Errorf("preflight project filesystem: %w", err)
+	}
 	if err := s.packages.PrepareEditable(packageInfo); err != nil {
 		return ProjectView{}, fmt.Errorf("prepare project package for editing: %w", err)
 	}
@@ -265,7 +294,7 @@ func (s *Service) openProjectEditable(ctx context.Context, packagePath string) (
 		return ProjectView{}, fmt.Errorf("read project: %w", err)
 	}
 
-	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease}
+	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease, filesystemHealth: filesystemHealth}
 	if err := s.updateProjectLeaseMetadata(ctx, &candidate); err != nil {
 		_ = store.Close()
 		return ProjectView{}, err
@@ -283,7 +312,9 @@ func (s *Service) openProjectEditable(ctx context.Context, packagePath string) (
 	if replaceErr != nil {
 		return ProjectView{}, replaceErr
 	}
-	return projectView(project, packageInfo.Root), nil
+	view := projectView(project, packageInfo.Root)
+	view.FilesystemHealth = filesystemHealth
+	return view, nil
 }
 
 // OpenProjectReadOnly opens a current-schema project without acquiring the

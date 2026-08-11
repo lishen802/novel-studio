@@ -8,12 +8,13 @@ import (
 )
 
 type ProjectView struct {
-	ID         string                  `json:"id"`
-	Title      string                  `json:"title"`
-	Genre      string                  `json:"genre"`
-	Summary    string                  `json:"summary"`
-	Path       string                  `json:"path"`
-	AccessMode ports.ProjectAccessMode `json:"accessMode"`
+	ID               string                        `json:"id"`
+	Title            string                        `json:"title"`
+	Genre            string                        `json:"genre"`
+	Summary          string                        `json:"summary"`
+	Path             string                        `json:"path"`
+	AccessMode       ports.ProjectAccessMode       `json:"accessMode"`
+	FilesystemHealth ports.ProjectFilesystemHealth `json:"filesystemHealth"`
 }
 
 type ChapterView struct {

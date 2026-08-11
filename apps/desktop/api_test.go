@@ -40,7 +40,7 @@ func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("result = %#v, want %#v", got, want)
 	}
 	if workspaces.createInput != input {
@@ -68,7 +68,7 @@ func TestDesktopAPIOpenProjectUsesStructuredAccessContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened.Outcome != projectOpenOutcomeOpened || opened.Project == nil || *opened.Project != editable {
+	if opened.Outcome != projectOpenOutcomeOpened || opened.Project == nil || !reflect.DeepEqual(*opened.Project, editable) {
 		t.Fatalf("editable open result = %#v", opened)
 	}
 	if workspaces.openPath != "/books/长夜织境.zjproject" {
@@ -82,7 +82,7 @@ func TestDesktopAPIOpenProjectUsesStructuredAccessContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened.Outcome != projectOpenOutcomeOpened || opened.Project == nil || *opened.Project != readOnly {
+	if opened.Outcome != projectOpenOutcomeOpened || opened.Project == nil || !reflect.DeepEqual(*opened.Project, readOnly) {
 		t.Fatalf("read-only open result = %#v", opened)
 	}
 	if workspaces.openReadOnlyPath != "/books/长夜织境.zjproject" {
@@ -168,7 +168,7 @@ func TestDesktopAPICreatesRecoveryCopyWithPartialSuccessContract(t *testing.T) {
 			if got.Outcome != test.want || got.Path != project.Path {
 				t.Fatalf("result = %#v", got)
 			}
-			if test.want == recoveryCopyOutcomeOpened && (got.Project == nil || *got.Project != project) {
+			if test.want == recoveryCopyOutcomeOpened && (got.Project == nil || !reflect.DeepEqual(*got.Project, project)) {
 				t.Fatalf("opened project = %#v", got.Project)
 			}
 			if workspaces.recoveryCopyInput != (recoveryCopyCall{sourcePath: "/books/长夜织境.zjproject", parentDirectory: "/copies"}) {
