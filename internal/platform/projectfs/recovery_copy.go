@@ -87,6 +87,9 @@ func (m Manager) CreateRecoveryCopy(
 	if err != nil {
 		return ports.ProjectPackage{}, err
 	}
+	if err := validateRecoveryCopyLayout(layout); err != nil {
+		return ports.ProjectPackage{}, err
+	}
 	if err := os.Mkdir(layout.temporary, 0o700); err != nil {
 		return ports.ProjectPackage{}, fmt.Errorf("create recovery copy temporary package: %w", err)
 	}

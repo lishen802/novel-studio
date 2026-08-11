@@ -9,6 +9,9 @@ type Manager struct {
 }
 
 func (Manager) Create(parentDirectory, projectTitle string) (ports.ProjectPackage, error) {
+	if err := (Manager{}).ValidateCreatePath(parentDirectory, projectTitle); err != nil {
+		return ports.ProjectPackage{}, err
+	}
 	layout, err := NewLayout(parentDirectory, projectTitle)
 	if err != nil {
 		return ports.ProjectPackage{}, err

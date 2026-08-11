@@ -73,6 +73,9 @@ func InspectLayout(packagePath string) (Layout, error) {
 	if !strings.EqualFold(filepath.Ext(packagePath), packageExtension) {
 		return Layout{}, fmt.Errorf("%w: package must end in %s", ErrInvalidPackage, packageExtension)
 	}
+	if err := validateProjectPath(packagePath); err != nil {
+		return Layout{}, err
+	}
 
 	info, err := os.Stat(packagePath)
 	if err != nil {
