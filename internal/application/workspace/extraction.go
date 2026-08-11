@@ -194,13 +194,14 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		s.mu.Unlock()
 		return ExtractionRunView{}, ErrAgentRuntimeUnavailable
 	}
+	generation := s.active.generation
 
 	task, err := store.Task(ctx, taskID)
 	if err != nil {
 		if ctx.Err() != nil {
 			s.mu.Unlock()
 			view, cancelErr := s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
-			return view, s.handleFilesystemWriteFailure(cancelErr)
+			return view, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 		}
 		s.mu.Unlock()
 		return ExtractionRunView{}, err
@@ -243,7 +244,6 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		return ExtractionRunView{}, err
 	}
 
-	generation := s.active.generation
 	lease, err := s.leases.acquire(taskID, generation)
 	if err != nil {
 		s.mu.Unlock()
@@ -261,7 +261,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		s.mu.Unlock()
 		if ctx.Err() != nil {
 			view, cancelErr := s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
-			return view, s.handleFilesystemWriteFailure(cancelErr)
+			return view, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 		}
 		return ExtractionRunView{}, err
 	}
@@ -269,11 +269,11 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	currentJob, err := importDetails.Job.MarkExtractionStarted(task.ID, s.clock.Now())
 	if err != nil {
 		s.mu.Unlock()
-		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, err)
+		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, err, generation)
 	}
 	if err := importStore.UpdateImportJobExtraction(ctx, currentJob); err != nil {
 		s.mu.Unlock()
-		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, stableImportStoreError(s.handleFilesystemWriteFailureForGeneration(generation, err)))
+		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, stableImportStoreError(s.handleFilesystemWriteFailureForGeneration(generation, err)), generation)
 	}
 	s.mu.Unlock()
 
@@ -299,6 +299,7 @@ func (s *Service) failExtractionStart(
 	store ports.ExtractionStore,
 	task extractiondomain.Task,
 	cause error,
+	generation uint64,
 ) (ExtractionRunView, error) {
 	task.ErrorCode = "extraction_start_state_failed"
 	failed, transitionErr := task.Transition(extractiondomain.StatusFailed, cause.Error(), s.clock.Now())
@@ -314,7 +315,7 @@ func (s *Service) failExtractionStart(
 		return ExtractionRunView{}, errors.Join(cause, draftErr)
 	}
 	if persistErr := store.UpdateTask(ctx, failed, failedDraft); persistErr != nil {
-		return ExtractionRunView{}, errors.Join(cause, s.handleFilesystemWriteFailure(persistErr))
+		return ExtractionRunView{}, errors.Join(cause, s.handleFilesystemWriteFailureForGeneration(generation, persistErr))
 	}
 	s.notifyJobUpdated(ctx, store, failed.ID, agentdomain.JobKindExtraction)
 	return extractionRunView(failed, nil), cause

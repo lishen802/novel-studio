@@ -11,6 +11,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	extractiondomain "github.com/lishen802/novel-studio/internal/domain/extraction"
 	importingdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -394,6 +395,40 @@ func TestExtractionArtifactFilesystemFailureInBackgroundDegradesActiveHealth(t *
 	assertDegradedSharingViolation(t, service)
 }
 
+func TestFailExtractionStartStaleGenerationDoesNotDegradeReplacementWorkspace(t *testing.T) {
+	providerFactory := &fakeModelProviderFactory{outputs: map[string]string{
+		"extraction-model": extractionEventModelOutput,
+	}}
+	service, taskID, _ := configuredExtractionService(t, providerFactory)
+	defer service.Close()
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{failure: &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemSharingViolation}})
+	replaceActiveStoreWithFilesystemFailure(t, service, func(store *filesystemFailingSQLiteStore) {
+		store.extractionTaskErr = errors.New("sharing violation")
+	})
+
+	service.mu.Lock()
+	oldGeneration := service.active.generation
+	service.active.generation++ // models a replacement workspace becoming active.
+	store := service.active.store.(ports.ExtractionStore)
+	service.mu.Unlock()
+	task, err := store.Task(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = task.Transition(extractiondomain.StatusRunning, "", time.Unix(400, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.failExtractionStart(context.Background(), store, task, errors.New("import lifecycle write failed"), oldGeneration)
+	if !errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		t.Fatalf("failExtractionStart error = %v, want filesystem failure", err)
+	}
+	if got := activeFilesystemHealth(t, service); !reflect.DeepEqual(got, ports.NormalProjectFilesystemHealth()) {
+		t.Fatalf("replacement workspace health = %#v, want normal", got)
+	}
+}
+
 func TestRestoreSnapshotPreservesFilesystemHealthInActiveWorkspaceAndView(t *testing.T) {
 	project := mustProject(t, "project-restore-health", "恢复健康")
 	currentStore := newFakeStore(project)
@@ -488,6 +523,7 @@ type filesystemFailingSQLiteStore struct {
 	*sqlite.Store
 	agentArtifactErr      error
 	extractionArtifactErr error
+	extractionTaskErr     error
 }
 
 func (s *filesystemFailingSQLiteStore) CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error {
@@ -502,6 +538,13 @@ func (s *filesystemFailingSQLiteStore) CreateArtifact(ctx context.Context, artif
 		return s.extractionArtifactErr
 	}
 	return s.Store.CreateArtifact(ctx, artifact)
+}
+
+func (s *filesystemFailingSQLiteStore) UpdateTask(ctx context.Context, task extractiondomain.Task, drafts ...agentdomain.JobEventDraft) error {
+	if s.extractionTaskErr != nil {
+		return s.extractionTaskErr
+	}
+	return s.Store.UpdateTask(ctx, task, drafts...)
 }
 
 func replaceActiveStoreWithFilesystemFailure(

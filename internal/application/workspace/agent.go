@@ -467,17 +467,18 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		s.mu.Unlock()
 		return AgentRunView{}, ErrAgentRuntimeUnavailable
 	}
+	generation := s.active.generation
 	if ctx.Err() != nil {
 		s.mu.Unlock()
 		view, cancelErr := s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
-		return view, s.handleFilesystemWriteFailure(cancelErr)
+		return view, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 	}
 	run, err := store.AgentRun(ctx, runID)
 	if err != nil {
 		if ctx.Err() != nil {
 			s.mu.Unlock()
 			view, cancelErr := s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
-			return view, s.handleFilesystemWriteFailure(cancelErr)
+			return view, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 		}
 		s.mu.Unlock()
 		return AgentRunView{}, err
@@ -486,7 +487,6 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		s.mu.Unlock()
 		return AgentRunView{}, fmt.Errorf("agent run is not queued: %s", run.Status)
 	}
-	generation := s.active.generation
 	lease, err := s.leases.acquire(runID, generation)
 	if err != nil {
 		s.mu.Unlock()
@@ -504,7 +504,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		s.mu.Unlock()
 		if ctx.Err() != nil {
 			view, cancelErr := s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
-			return view, s.handleFilesystemWriteFailure(cancelErr)
+			return view, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 		}
 		return AgentRunView{}, err
 	}

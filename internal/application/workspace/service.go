@@ -250,14 +250,6 @@ func (s *Service) handleFilesystemWriteFailureForGeneration(generation uint64, e
 	return errors.Join(err, failure)
 }
 
-// handleFilesystemWriteFailure is for write paths that are not already under
-// the workspace mutex and are not associated with a background job lease.
-func (s *Service) handleFilesystemWriteFailure(err error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.handleFilesystemWriteFailureLocked(err)
-}
-
 // handleFilesystemWriteFailureForPackage applies a failure only when the
 // package being written is the active workspace. Recovery-copy callers can
 // inspect arbitrary source packages, so they must not degrade an unrelated

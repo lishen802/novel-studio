@@ -174,7 +174,7 @@ func TestFailExtractionStartCompensatesRunningTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.failExtractionStart(ctx, store, task, errors.New("import lifecycle write failed"))
+	_, err = service.failExtractionStart(ctx, store, task, errors.New("import lifecycle write failed"), service.active.generation)
 	if err == nil {
 		t.Fatal("failExtractionStart returned nil error")
 	}
