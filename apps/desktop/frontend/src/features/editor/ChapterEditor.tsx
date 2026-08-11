@@ -345,6 +345,10 @@ function isProjectFilesystemError(error: unknown): boolean {
       "PROJECT_SHARING_VIOLATION",
       "PROJECT_CHECKPOINT_FAILED",
       "PROJECT_ATOMIC_REPLACE_FAILED",
+      "PROJECT_FILESYSTEM_BUSY",
+      "PROJECT_FILESYSTEM_READ_ONLY",
+      "PROJECT_FILESYSTEM_DISK_FULL",
+      "PROJECT_FILESYSTEM_IO",
     ]).has(error.code)
   );
 }

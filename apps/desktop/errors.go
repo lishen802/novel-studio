@@ -44,6 +44,10 @@ const (
 	errorProjectSharingViolation    desktopErrorCode = "PROJECT_SHARING_VIOLATION"
 	errorProjectCheckpointFailed    desktopErrorCode = "PROJECT_CHECKPOINT_FAILED"
 	errorProjectAtomicReplaceFailed desktopErrorCode = "PROJECT_ATOMIC_REPLACE_FAILED"
+	errorProjectFilesystemBusy      desktopErrorCode = "PROJECT_FILESYSTEM_BUSY"
+	errorProjectFilesystemReadOnly  desktopErrorCode = "PROJECT_FILESYSTEM_READ_ONLY"
+	errorProjectFilesystemDiskFull  desktopErrorCode = "PROJECT_FILESYSTEM_DISK_FULL"
+	errorProjectFilesystemIO        desktopErrorCode = "PROJECT_FILESYSTEM_IO"
 	errorRevisionConflict           desktopErrorCode = "REVISION_CONFLICT"
 	errorWriteFailed                desktopErrorCode = "WRITE_FAILED"
 	errorDatabaseBusy               desktopErrorCode = "DATABASE_BUSY"
@@ -227,6 +231,14 @@ func safeProjectFilesystemError(err error) (desktopErrorCode, string, bool) {
 		return errorProjectCheckpointFailed, "项目检查点写入失败，请检查位置后重试。", true
 	case ports.ProjectFilesystemAtomicReplace:
 		return errorProjectAtomicReplaceFailed, "项目文件替换失败，请检查位置后重试。", true
+	case ports.ProjectFilesystemBusy:
+		return errorProjectFilesystemBusy, "项目文件正被占用，请稍后重试。", true
+	case ports.ProjectFilesystemReadOnly:
+		return errorProjectFilesystemReadOnly, "项目位置当前不可写，请检查权限或同步状态后重试。", true
+	case ports.ProjectFilesystemDiskFull:
+		return errorProjectFilesystemDiskFull, "项目磁盘空间不足，请清理空间后重试。", true
+	case ports.ProjectFilesystemIO:
+		return errorProjectFilesystemIO, "项目文件读写失败，请检查位置后重试。", true
 	default:
 		return "", "", false
 	}

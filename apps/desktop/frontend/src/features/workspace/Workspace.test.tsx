@@ -13,16 +13,16 @@ import { FakeStudioClient } from "../../lib/fake-studio-client";
 import { StudioClientError } from "../../lib/studio-client";
 
 describe("Workspace", () => {
-  it("updates the persistent filesystem risk after a classified chapter commit failure", async () => {
+  it("updates the persistent filesystem risk after a disk-full chapter commit failure", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.chaptersResult = [client.createChapterResult];
     client.commitChapterError = new StudioClientError(
-      "PROJECT_SHARING_VIOLATION",
-      "项目文件正被同步或其他程序占用，请稍后重试。",
+      "PROJECT_FILESYSTEM_DISK_FULL",
+      "项目磁盘空间不足，请清理空间后重试。",
     );
     const filesystemHealth = vi.fn(async () => ({
       level: "degraded" as const,
-      category: "sharing_violation" as const,
+      category: "disk_full" as const,
       actions: ["retry", "copy_text", "create_recovery_copy"] as const,
     }));
     Object.assign(client, { filesystemHealth });
@@ -43,6 +43,45 @@ describe("Workspace", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("项目写入遇到风险");
     expect(screen.getByRole("button", { name: "创建恢复副本" })).toBeEnabled();
     expect(filesystemHealth).toHaveBeenCalledOnce();
+  });
+
+  it("prevents a second recovery-copy request while the first is pending", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.openProjectResult = {
+      ...client.openProjectResult,
+      filesystemHealth: {
+        level: "degraded",
+        category: "sharing_violation",
+        actions: ["create_recovery_copy"],
+      },
+    };
+    let chooseParent: ((path: string | null) => void) | undefined;
+    client.chooseProjectParent = vi.fn(
+      () => new Promise<string | null>((resolve) => {
+        chooseParent = resolve;
+      }),
+    );
+    client.recoveryCopyResponse = {
+      outcome: "published",
+      path: "/copies/长夜织境-恢复副本.zjproject",
+    };
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    const action = await screen.findByRole("button", { name: "创建恢复副本" });
+    fireEvent.click(action);
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(client.chooseProjectParent).toHaveBeenCalledOnce();
+
+    chooseParent?.("/copies");
+    await waitFor(() => {
+      expect(client.createProjectRecoveryCopyCalls).toEqual([
+        {
+          sourcePath: "/books/长夜织境.zjproject",
+          parentDirectory: "/copies",
+        },
+      ]);
+    });
   });
 
   it("keeps an editable workspace enabled for sync risk", async () => {

@@ -134,6 +134,7 @@ export function Workspace({
         <ProjectFilesystemRiskBanner
           health={filesystemHealth}
           onCreateRecoveryCopy={() => void onCreateRecoveryCopy()}
+          recoveryCopying={workspace.recoveryCopying}
         />
 
         <nav className="workspace-sections" aria-label="作品功能">

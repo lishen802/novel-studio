@@ -19,6 +19,7 @@ export type WorkspaceStatus =
       project: ProjectView;
       chapters: ChapterView[];
       activeChapterId: string | null;
+      recoveryCopying?: boolean;
     }
   | {
       kind: "lease_conflict";
@@ -153,21 +154,31 @@ export function createWorkspaceStore(
 
     async createRecoveryCopy() {
       const current = get().status;
+      if (
+        (current.kind === "lease_conflict" && current.busy) ||
+        (current.kind === "ready" && current.recoveryCopying)
+      ) {
+        return;
+      }
       const sourcePath =
         current.kind === "lease_conflict"
           ? current.conflict.path
           : current.kind === "ready" && current.project.accessMode === "editable"
             ? current.project.path
             : null;
-      if (!sourcePath || (current.kind === "lease_conflict" && current.busy)) return;
+      if (!sourcePath) return;
       try {
         if (current.kind === "lease_conflict") {
           set({ status: { ...current, busy: true } });
+        } else if (current.kind === "ready") {
+          set({ status: { ...current, recoveryCopying: true } });
         }
         const parentDirectory = await client.chooseProjectParent();
         if (!parentDirectory) {
           if (current.kind === "lease_conflict") {
             set({ status: { ...current, busy: false } });
+          } else if (current.kind === "ready") {
+            set({ status: { ...current, recoveryCopying: false } });
           }
           return;
         }

@@ -3,11 +3,13 @@ import type { ProjectFilesystemHealth } from "../../lib/studio-client";
 type ProjectFilesystemRiskBannerProps = {
   health: ProjectFilesystemHealth;
   onCreateRecoveryCopy?: () => void;
+  recoveryCopying?: boolean;
 };
 
 export function ProjectFilesystemRiskBanner({
   health,
   onCreateRecoveryCopy,
+  recoveryCopying = false,
 }: ProjectFilesystemRiskBannerProps) {
   if (health.level === "normal") return null;
   const degraded = health.level === "degraded";
@@ -30,8 +32,8 @@ export function ProjectFilesystemRiskBanner({
         </span>
       </div>
       {canCreateRecoveryCopy && (
-        <button type="button" onClick={onCreateRecoveryCopy}>
-          创建恢复副本
+        <button type="button" disabled={recoveryCopying} onClick={onCreateRecoveryCopy}>
+          {recoveryCopying ? "正在创建恢复副本…" : "创建恢复副本"}
         </button>
       )}
     </aside>

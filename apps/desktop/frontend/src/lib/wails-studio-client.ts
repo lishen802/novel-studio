@@ -112,10 +112,10 @@ const projectFilesystemHealthSchema = z.object({
     "checkpoint",
     "atomic_replace",
     "preflight",
-  ]),
+  ]).default(""),
   actions: z.array(
     z.enum(["retry", "copy_text", "open_read_only", "create_recovery_copy"]),
-  ),
+  ).default([]),
 }).strict();
 const projectSchema = z.object({
   id: z.string(),

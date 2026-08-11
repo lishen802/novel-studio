@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
@@ -84,6 +85,42 @@ func TestDesktopAPIFilesystemHealthReturnsOnlyTypedHealth(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("FilesystemHealth() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalFilesystemHealthWireContractOmitsEmptyOptionalFields(t *testing.T) {
+	encoded, err := json.Marshal(ports.NormalProjectFilesystemHealth())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"level":"normal"}`; got != want {
+		t.Fatalf("normal filesystem health JSON = %s, want %s", got, want)
+	}
+}
+
+func TestDesktopAPIMapsAllRuntimeFilesystemCategoriesToSafeCodes(t *testing.T) {
+	tests := []struct {
+		category ports.ProjectFilesystemCategory
+		code     desktopErrorCode
+	}{
+		{ports.ProjectFilesystemBusy, "PROJECT_FILESYSTEM_BUSY"},
+		{ports.ProjectFilesystemReadOnly, "PROJECT_FILESYSTEM_READ_ONLY"},
+		{ports.ProjectFilesystemDiskFull, "PROJECT_FILESYSTEM_DISK_FULL"},
+		{ports.ProjectFilesystemIO, "PROJECT_FILESYSTEM_IO"},
+	}
+	for _, test := range tests {
+		t.Run(string(test.category), func(t *testing.T) {
+			api := newDesktopAPI(&fakeWorkspace{commitErr: &ports.ProjectFilesystemFailure{Category: test.category}}, &fakeDirectoryPicker{})
+			api.startup(context.Background())
+			_, err := api.CommitChapter("chapter-1", "不应泄露的正文", 1)
+			var got *desktopError
+			if !errors.As(err, &got) || got.Code != test.code {
+				t.Fatalf("CommitChapter() error = %#v, want %s", err, test.code)
+			}
+			if containsAny(got.Message, "正文", "filesystem", "sqlite", "/") {
+				t.Fatalf("unsafe filesystem error message: %q", got.Message)
+			}
+		})
 	}
 }
 

@@ -651,6 +651,24 @@ describe("wailsStudioClient", () => {
     expect(api.CreateProject).toHaveBeenCalledWith(input);
   });
 
+  it("normalizes omitted optional filesystem health fields from desktop JSON", async () => {
+    installNative({
+      CreateProject: vi.fn(async () => ({
+        ...project,
+        filesystemHealth: { level: "normal" },
+      })),
+    });
+
+    await expect(
+      wailsStudioClient.createProject({
+        parentDirectory: "/books",
+        title: "长夜织境",
+        genre: "东方奇幻",
+        summary: "",
+      }),
+    ).resolves.toEqual(project);
+  });
+
   it("forwards an explicit project access mode and parses opened results", async () => {
     const readOnlyProject = { ...project, accessMode: "read_only" };
     const api = installNative({
