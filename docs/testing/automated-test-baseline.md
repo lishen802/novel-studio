@@ -120,6 +120,19 @@ Go 侧测试位于 `internal/application/workspace`（`job_event_test.go`），R
 
 本地完整 Go 命令仍使用 `go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`。平台 job 另外运行上述聚焦命令，是为了在失败时明确标出生命周期保护边界。只读读取活跃 WAL 时 SQLite 可能维护 `project.db-shm` 或建立空协调文件；该受限协调工件不等同于业务写入，测试会分别校验 `project.db`、已有 WAL 内容、`recovery/` 与其他业务文件保持不变。
 
+## R1.4 文件系统运行期可靠性
+
+R1.4 的自动测试验证可移植路径预算、无损可编辑预检、运行期错误分类，以及桌面端保留未保存文本的恢复界面。预检成功只说明当时的临时探针可完成；同步客户端、网络共享、杀毒或存储状态仍可能在编辑期间改变，因此不能把它当作后续写入必然安全的承诺。
+
+| 验收关联 | 自动证据 |
+| --- | --- |
+| F-15 同步目录与网络共享位置显示风险提示，运行期 busy/共享冲突进入可恢复的 degraded 状态 | `TestPreflightEditableWarnsForKnownSyncRoot`、`TestFilesystemRiskHintUsesNetworkVolumeCheck`、`TestFilesystemRiskHintWarnsForRawUNCPath`、`TestClassifyFilesystemErrorMapsRuntimeWriteFailures`、`TestCommitFilesystemFailureDegradesWithoutChangingRevision` |
+| F-16 预检只在临时目录执行，不能改动项目包中的 canonical 文件 | `TestPreflightEditableLeavesCanonicalFilesUnchanged` |
+| F-17 只读、磁盘满和 sharing failure 不提交失败写入；编辑器保留文本，并提供恢复草稿、复制和重试路径 | `TestReadOnlyWorkspaceRejectsEveryWriteWithoutChangingProjectFiles`、`TestCommitFilesystemFailureDegradesWithoutChangingRevision`、`TestCreateChapterFilesystemFailureDegradesWithoutCreatingChapter`、`ChapterEditor` 的 `safely saves one recovery draft when a commit fails`、`tells the author to copy text when draft recovery also fails` 与 `retries the failed commit and copies the retained text` |
+| F-18 Windows 兼容路径预算拒绝过长项目根；恢复副本在发布前也验证目标路径 | `TestValidateCreatePathRejectsLongWindowsCompatibleRoot`、`TestCreateRecoveryCopyRejectsFilesystemPathFailureBeforeCopying`、`TestRecoveryCopyFixturesFitPortablePathBudgetWithLongGoTemporaryTestNames` |
+
+这些自动证据由本地完整 Go/前端命令和 Foundation CI 的相关 Go 测试覆盖，但不模拟真实同步客户端、共享服务、配额、Windows 长路径策略或原生文件锁时序。F-15 至 F-18 仍须在 Windows 与 macOS production build 上按[基础手工验收](foundation-acceptance.md)使用一次性副本执行并记录证据；在该证据完成前，R1.4 不得关闭或合并。
+
 ## 隐私与 fixture 规则
 
 - 不提交 `.zjproject`、SQLite 数据库、WAL/SHM、API Key、私钥或签名证书；
@@ -148,3 +161,5 @@ Go 侧测试位于 `internal/application/workspace`（`job_event_test.go`），R
 5. 并发与作业恢复契约测试通过（见上文表格）；
 6. JobEvent cursor 补拉与 snapshot 重建契约测试通过（见上文表格）；
 7. GitHub Foundation CI 的相关 Job 通过。
+
+这仅是提交级自动化完成判定；涉及 R1.4 时，F-15 至 F-18 的双平台原生手工证据仍是阶段关闭和合并的额外前提。
