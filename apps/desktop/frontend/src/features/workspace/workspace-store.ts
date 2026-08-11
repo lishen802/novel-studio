@@ -166,6 +166,8 @@ export function createWorkspaceStore(
           : current.kind === "ready" && current.project.accessMode === "editable"
             ? current.project.path
             : null;
+      const readyProjectID =
+        current.kind === "ready" ? current.project.id : null;
       if (!sourcePath) return;
       try {
         if (current.kind === "lease_conflict") {
@@ -178,7 +180,17 @@ export function createWorkspaceStore(
           if (current.kind === "lease_conflict") {
             set({ status: { ...current, busy: false } });
           } else if (current.kind === "ready") {
-            set({ status: { ...current, recoveryCopying: false } });
+            set((latest) => {
+              if (
+                latest.status.kind !== "ready" ||
+                latest.status.project.id !== readyProjectID
+              ) {
+                return {};
+              }
+              return {
+                status: { ...latest.status, recoveryCopying: false },
+              };
+            });
           }
           return;
         }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 import type {
   ChapterView,
@@ -8,6 +8,33 @@ import type {
 import { createWorkspaceStore } from "./workspace-store";
 
 describe("workspace store", () => {
+  it("preserves ready workspace updates when recovery-copy directory selection is cancelled", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = { ...client.createChapterResult, body: "原始正文" };
+    client.chaptersResult = [chapter];
+    let chooseParent: ((path: string | null) => void) | undefined;
+    client.chooseProjectParent = vi.fn(
+      () => new Promise<string | null>((resolve) => {
+        chooseParent = resolve;
+      }),
+    );
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+
+    const creatingCopy = store.getState().createRecoveryCopy();
+    store.getState().updateChapter({ ...chapter, body: "选择目录期间的新正文", revision: 2 });
+    chooseParent?.(null);
+    await creatingCopy;
+
+    const status = store.getState().status;
+    expect(status).toMatchObject({ kind: "ready", recoveryCopying: false });
+    if (status.kind === "ready") {
+      expect(status.chapters).toContainEqual(
+        expect.objectContaining({ body: "选择目录期间的新正文", revision: 2 }),
+      );
+    }
+  });
+
   it("keeps a lease conflict actionable so the author can retry or open read-only", async () => {
     const client = new FakeStudioClient();
     client.projectToOpen = "/books/长夜织境.zjproject";
