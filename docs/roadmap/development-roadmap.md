@@ -1,7 +1,7 @@
 # 织境 Story Studio 总体开发路线图
 
 - 状态：已批准
-- 更新日期：2026-08-11（R1.3 手工验收已通过，待修复并重跑原生 CI）
+- 更新日期：2026-08-11（R1.3 手工验收已通过，Windows 原生 CI 修复待重跑）
 - 适用范围：当前商业发布底线与完整 V1
 - 上游依据：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 实施计划规范：[实施计划目录说明](../plans/README.md)
@@ -161,7 +161,7 @@ R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race
 
 R1.2（可恢复 JobEvent）已完成并通过三平台 Foundation CI（run `31155638906`：Ubuntu race/vet/shuffle=on、macOS 生产构建、Windows 完整 Go tests 与生产构建）。建立 append-only `JobEvent` 事件源与 `JobSnapshot` 投影，状态变化与事件同事务提交；`ExecuteAgentRun`/`ExecuteExtractionRun` 改为异步返回 running，Wails 只发送 `job_id + latest_sequence` 轻量通知；React 按 cursor 增量补拉、检测缺口并幂等更新，覆盖重挂载、漏推与应用重启后的 snapshot 重建。项目重开时 `RecoverInterruptedAgentRuns`/`RecoverInterruptedTasks` 在同一事务内 append `job_recovered` 事件并刷新 `JobSnapshot`，使事件流水终点与权威投影一致；恢复与边界测试（漏推/重复/乱序、Bridge 重挂载、cursor 早于清理下界、drain 超时后安全退出）已在 Go 与 React 两侧覆盖。详见 [R1.2 实施计划](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)。
 
-R1.2 已包含原路线图中单列的“React JobEvent replay”，不再重复建立第二份计划。R1.3 已实现 OS lease、真正只读、争锁救局和恢复副本；2026-08-11 的 Windows/macOS F-12 至 F-14 手工验收均通过。该提交的 [Foundation CI run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 在 macOS 与 Windows 的 production build 阶段失败：工作流在构建前端前执行 `wails generate module`，使 `main.go` 的 `frontend/dist` embed 模式无法匹配。修复该 CI 顺序并取得通过 run 后，R1.3 才可标记为 `completed`。同步目录运行期冲突、完整写入探针与 Windows 路径预算作为 R1.4 单独规划，R1.4 完成前不宣告 R1 整体退出。
+R1.2 已包含原路线图中单列的“React JobEvent replay”，不再重复建立第二份计划。R1.3 已实现 OS lease、真正只读、争锁救局和恢复副本；2026-08-11 的 Windows/macOS F-12 至 F-14 手工验收均通过。前端构建顺序修正后，[Foundation CI run 31450873891](https://github.com/lishen802/novel-studio/actions/runs/31450873891) 的 Ubuntu 与 macOS 已通过；Windows 在项目 lease、恢复副本目录同步、只读工作区清理和 SQLite 文件 URI 的平台测试失败。相应修复必须在 Windows Runner 重跑通过后，R1.3 才可标记为 `completed`。同步目录运行期冲突、完整写入探针与 Windows 路径预算作为 R1.4 单独规划，R1.4 完成前不宣告 R1 整体退出。
 
 ## 7. R2：正式资产写入与导入正确性
 

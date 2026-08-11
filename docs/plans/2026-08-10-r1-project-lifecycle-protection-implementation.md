@@ -358,7 +358,7 @@ cd apps/desktop/frontend && npm test -- --run && npm run typecheck && npm run bu
 - Modify: `docs/roadmap/development-roadmap.md`
 - Modify: this plan
 
-- [ ] macOS/Windows 原生 job 显式运行 projectfs lease helper-process、SQLite read-only/WAL、workspace conflict/recovery-copy tests；Ubuntu race 继续覆盖应用并发，不能用跳过代替平台修复。2026-08-11 的 [run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 在此前端 build 前的 `wails generate module` 步骤失败，尚未实际运行这些门禁。
+- [ ] macOS/Windows 原生 job 显式运行 projectfs lease helper-process、SQLite read-only/WAL、workspace conflict/recovery-copy tests；Ubuntu race 继续覆盖应用并发，不能用跳过代替平台修复。前端 build 顺序修正后的 [run 31450873891](https://github.com/lishen802/novel-studio/actions/runs/31450873891) 已使 Ubuntu 与 macOS 通过，但 Windows 在这些门禁的运行时文件语义测试失败；修复待重跑。
 - [x] 手工验收记录：第二实例冲突、占用来源、重试、真正只读、从只读退出、恢复副本、应用退出释放锁、残留元数据、活跃 WAL。Windows 与 macOS 的 F-12 至 F-14 于 2026-08-11 通过，记录见 [`foundation-acceptance.md`](../testing/foundation-acceptance.md)。
 - [x] 更新恢复手册，明确不能手删有效 lease、只读不会升级旧项目、恢复副本是新包且原件不变。
 - [ ] 将计划状态改为 `completed` 之前记录 commit、CI run URL/ID、macOS/Windows 结果和遗留 R1.4 风险。提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 已推送；手工验收通过，但 CI 尚未通过，因此状态保持 `implementation_complete_pending_native_ci`。
@@ -406,7 +406,7 @@ git status --short
 
 - 实现提交：`411a098`、`9c67a2c`、`206ecce`、`61ce14a`、`5d3da6a`、`a70175b`、`435fde9`、`b2c3b85221822e2e8415621130716739afb8f4d3`；
 - 本地证据：React 测试、typecheck、production build；聚焦 SQLite、workspace、lease 与恢复副本 Go 测试；完整 Go race/vet 与 prototype 验证见最终验证记录；
-- CI 证据：提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 的 [GitHub Foundation CI run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 完成但失败。Ubuntu tests 通过；macOS 和 Windows production build 都在 `wails generate module` 前端 build 前失败，错误为 `main.go:12:12: pattern all:frontend/dist: no matching files found`。修复工作流顺序并重跑通过后，才能关闭本计划。
+- CI 证据：提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 的 [GitHub Foundation CI run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 因缺少 `frontend/dist` 失败；后续 [run 31450873891](https://github.com/lishen802/novel-studio/actions/runs/31450873891) 在修正构建顺序后通过 Ubuntu tests 与 macOS production build。Windows production build 仍失败：只读工作区测试清理前未关闭 `project.db`、SQLite URI 测试使用非法 `?` 文件名字符、lease 元数据读取与 byte-range lock 冲突，且恢复副本目录同步返回 `Access is denied`。修复并重跑通过后，才能关闭本计划。
 - 手工证据：`foundation-acceptance.md` 的 F-12 至 F-14 已记录为 Windows/macOS 通过（2026-08-11）。
 - 遗留风险：R1.4 仍负责同步盘/运行期 sharing violation、完整 WAL/SHM/checkpoint 写入探针与 Windows 默认 MAX_PATH 路径边界。
 

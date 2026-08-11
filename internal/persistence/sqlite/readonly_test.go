@@ -122,7 +122,7 @@ func TestReadOnlyStoreRejectsWritesAndCanCreateConsistentBackup(t *testing.T) {
 	}
 }
 
-func TestReadOnlyBackupEscapesTargetFileURI(t *testing.T) {
+func TestReadOnlyBackupEscapesFragmentDelimiterInTargetFileURI(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "project.db")
 	project, err := newReadOnlyTestProject()
@@ -146,7 +146,7 @@ func TestReadOnlyBackupEscapesTargetFileURI(t *testing.T) {
 	defer readOnly.Close()
 
 	targetDirectory := t.TempDir()
-	target := filepath.Join(targetDirectory, "snapshot ?#.sqlite")
+	target := filepath.Join(targetDirectory, "snapshot #.sqlite")
 	truncatedSibling := filepath.Join(targetDirectory, "snapshot ")
 	const sentinel = "do not replace"
 	if err := os.WriteFile(truncatedSibling, []byte(sentinel), 0o600); err != nil {
@@ -194,9 +194,9 @@ func TestReserveBackupTargetRejectsFileCreatedAfterPreflight(t *testing.T) {
 	}
 }
 
-func TestSQLiteFileURIEscapesQuestionMarkInPath(t *testing.T) {
+func TestSQLiteFileURIEscapesFragmentDelimiterInPath(t *testing.T) {
 	ctx := context.Background()
-	target := filepath.Join(t.TempDir(), "sqlite ?.db")
+	target := filepath.Join(t.TempDir(), "sqlite #.db")
 	uri, err := sqliteFileURI(target, "")
 	if err != nil {
 		t.Fatal(err)

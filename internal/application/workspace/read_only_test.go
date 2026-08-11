@@ -180,11 +180,14 @@ func TestReadOnlyWorkspaceCancellationFallbackRechecksAfterTransition(t *testing
 		projectfs.Manager{}, sqlite.Factory{}, license.NoopService{},
 		fixedClock{now: time.Unix(1_000, 0)}, ids.UUIDGenerator{}, snapshotfs.Archive{},
 	)
-	t.Cleanup(func() { _ = service.Close() })
-	project, err := service.CreateProject(ctx, t.TempDir(), "切换中的项目", "奇幻", "")
+	projectDirectory := t.TempDir()
+	project, err := service.CreateProject(ctx, projectDirectory, "切换中的项目", "奇幻", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Register after TempDir so Close releases the database before TempDir's
+	// cleanup removes project.db on Windows.
+	t.Cleanup(func() { _ = service.Close() })
 	if err := service.requireEditable(); err != nil {
 		t.Fatalf("initial editable check: %v", err)
 	}

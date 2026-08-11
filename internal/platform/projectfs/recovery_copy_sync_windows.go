@@ -2,25 +2,8 @@
 
 package projectfs
 
-import "golang.org/x/sys/windows"
-
-func syncRecoveryCopyDirectory(directory string) error {
-	path, err := windows.UTF16PtrFromString(directory)
-	if err != nil {
-		return err
-	}
-	handle, err := windows.CreateFile(
-		path,
-		windows.GENERIC_READ,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_FLAG_BACKUP_SEMANTICS,
-		0,
-	)
-	if err != nil {
-		return err
-	}
-	defer windows.CloseHandle(handle)
-	return windows.FlushFileBuffers(handle)
-}
+// Windows does not expose a portable equivalent of fsync for directory
+// handles. All recovery-copy files are synced before their atomic rename;
+// attempting FlushFileBuffers on a directory returns ERROR_ACCESS_DENIED on
+// supported Windows filesystems and prevents a valid copy from publishing.
+func syncRecoveryCopyDirectory(_ string) error { return nil }
