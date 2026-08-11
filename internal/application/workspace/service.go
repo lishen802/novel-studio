@@ -233,6 +233,31 @@ func (s *Service) handleFilesystemWriteFailureLocked(err error) error {
 	return errors.Join(err, failure)
 }
 
+// handleFilesystemWriteFailureForGeneration is the asynchronous equivalent of
+// handleFilesystemWriteFailureLocked. A background job writes through a store
+// captured for one workspace generation, so it must never degrade a project
+// that became active after that store was replaced.
+func (s *Service) handleFilesystemWriteFailureForGeneration(generation uint64, err error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != nil && s.active.generation == generation {
+		return s.handleFilesystemWriteFailureLocked(err)
+	}
+	failure := s.projectFilesystemFailureLocked(err)
+	if failure == nil || errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		return err
+	}
+	return errors.Join(err, failure)
+}
+
+// handleFilesystemWriteFailure is for write paths that are not already under
+// the workspace mutex and are not associated with a background job lease.
+func (s *Service) handleFilesystemWriteFailure(err error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handleFilesystemWriteFailureLocked(err)
+}
+
 // handleFilesystemWriteFailureForPackage applies a failure only when the
 // package being written is the active workspace. Recovery-copy callers can
 // inspect arbitrary source packages, so they must not degrade an unrelated

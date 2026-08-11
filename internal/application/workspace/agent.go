@@ -233,7 +233,7 @@ func (s *Service) DeleteProviderConnection(ctx context.Context, id string) error
 		return err
 	}
 	if err := store.DeleteProviderConnection(ctx, connection.ID); err != nil {
-		return err
+		return s.handleFilesystemWriteFailureLocked(err)
 	}
 	if s.credentials != nil {
 		if err := s.credentials.Delete(ctx, connection.CredentialRef); err != nil {
@@ -328,7 +328,7 @@ func (s *Service) SaveAgentProfile(
 	}
 	profile.CreatedAt = createdAt
 	if err := store.UpsertAgentProfile(ctx, profile); err != nil {
-		return AgentProfileView{}, err
+		return AgentProfileView{}, s.handleFilesystemWriteFailureLocked(err)
 	}
 	return agentProfileView(profile), nil
 }
@@ -469,13 +469,15 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 	}
 	if ctx.Err() != nil {
 		s.mu.Unlock()
-		return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+		view, cancelErr := s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+		return view, s.handleFilesystemWriteFailure(cancelErr)
 	}
 	run, err := store.AgentRun(ctx, runID)
 	if err != nil {
 		if ctx.Err() != nil {
 			s.mu.Unlock()
-			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+			view, cancelErr := s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+			return view, s.handleFilesystemWriteFailure(cancelErr)
 		}
 		s.mu.Unlock()
 		return AgentRunView{}, err
@@ -498,9 +500,11 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		return AgentRunView{}, draftErr
 	}
 	if err := store.UpdateAgentRun(ctx, run, startedDraft); err != nil {
+		err = s.handleFilesystemWriteFailureLocked(err)
 		s.mu.Unlock()
 		if ctx.Err() != nil {
-			return s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+			view, cancelErr := s.persistCancelledRunByID(context.WithoutCancel(ctx), store, runID)
+			return view, s.handleFilesystemWriteFailure(cancelErr)
 		}
 		return AgentRunView{}, err
 	}
@@ -563,7 +567,7 @@ func (s *Service) runAgentPipeline(
 		if errors.Is(cause, context.Canceled) {
 			persistCtx := context.WithoutCancel(ctx)
 			if cancelErr := s.persistCancelledRun(persistCtx, store, run); cancelErr != nil {
-				return AgentRunView{}, cancelErr
+				return AgentRunView{}, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 			}
 			s.notifyJobUpdated(persistCtx, store, run.ID, agentdomain.JobKindAgent)
 			run, err := store.AgentRun(persistCtx, run.ID)
@@ -583,7 +587,7 @@ func (s *Service) runAgentPipeline(
 			return AgentRunView{}, draftErr
 		}
 		if updateErr := store.UpdateAgentRun(context.WithoutCancel(ctx), run, failedDraft); updateErr != nil {
-			return AgentRunView{}, updateErr
+			return AgentRunView{}, errors.Join(cause, s.handleFilesystemWriteFailureForGeneration(generation, updateErr))
 		}
 		s.notifyJobUpdated(context.WithoutCancel(ctx), store, run.ID, agentdomain.JobKindAgent)
 		return agentRunView(run), cause
@@ -611,12 +615,12 @@ func (s *Service) runAgentPipeline(
 		return failStale()
 	}
 	if err := store.UpdateAgentRun(ctx, run); err != nil {
-		return failed(err)
+		return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 	if err := store.CreateAgentArtifact(ctx, newArtifact(
 		s.ids.NewID(), run.ID, "", agentdomain.ArtifactContext, contextJSON, s.clock.Now(),
 	)); err != nil {
-		return failed(err)
+		return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 
 	profiles, err := store.ListAgentProfiles(ctx)
@@ -656,7 +660,7 @@ func (s *Service) runAgentPipeline(
 			return failed(draftErr)
 		}
 		if err := store.UpdateAgentRunStep(ctx, step, stepStartedDraft); err != nil {
-			return failed(err)
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		s.notifyJobUpdated(ctx, store, run.ID, agentdomain.JobKindAgent)
 		request := agentRequest(step.Role, profile, run.Prompt, contextJSON, plan, draft)
@@ -688,7 +692,7 @@ func (s *Service) runAgentPipeline(
 					step,
 					stepFailedDraft,
 				); updateErr != nil {
-					return AgentRunView{}, updateErr
+					return failed(errors.Join(err, s.handleFilesystemWriteFailureForGeneration(generation, updateErr)))
 				}
 			}
 			run.Steps[index] = step
@@ -720,7 +724,7 @@ func (s *Service) runAgentPipeline(
 					step,
 					stepFailedDraft,
 				); updateErr != nil {
-					return AgentRunView{}, updateErr
+					return failed(errors.Join(err, s.handleFilesystemWriteFailureForGeneration(generation, updateErr)))
 				}
 			}
 			run.Steps[index] = step
@@ -745,10 +749,10 @@ func (s *Service) runAgentPipeline(
 			return AgentRunView{}, draftErr
 		}
 		if err := store.UpdateAgentRunStep(persistCtx, step, stepCompletedDraft); err != nil {
-			return AgentRunView{}, err
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		if err := store.UpdateAgentRun(persistCtx, run); err != nil {
-			return AgentRunView{}, err
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		s.notifyJobUpdated(persistCtx, store, run.ID, agentdomain.JobKindAgent)
 		kind := agentdomain.ArtifactPlan
@@ -765,7 +769,7 @@ func (s *Service) runAgentPipeline(
 		if err := store.CreateAgentArtifact(persistCtx, newArtifact(
 			s.ids.NewID(), run.ID, step.ID, kind, generated.Text, s.clock.Now(),
 		)); err != nil {
-			return AgentRunView{}, err
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		if err := ctx.Err(); err != nil {
 			return failed(err)
@@ -797,7 +801,7 @@ func (s *Service) runAgentPipeline(
 		return failed(err)
 	}
 	if err := projectStore.CreateChangeSet(ctx, changeSet); err != nil {
-		return failed(err)
+		return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 	run.ChangeSetID = changeSet.ID
 	run, err = run.Transition(agentdomain.RunCompleted, "", s.clock.Now())
@@ -810,7 +814,7 @@ func (s *Service) runAgentPipeline(
 		return AgentRunView{}, draftErr
 	}
 	if err := store.UpdateAgentRun(context.WithoutCancel(ctx), run, completedDraft); err != nil {
-		return AgentRunView{}, err
+		return AgentRunView{}, s.handleFilesystemWriteFailureForGeneration(generation, err)
 	}
 	s.notifyJobUpdated(context.WithoutCancel(ctx), store, run.ID, agentdomain.JobKindAgent)
 	return agentRunView(run), nil

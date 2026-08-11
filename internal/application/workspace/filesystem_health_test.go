@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	importingdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
+	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
 
 func TestOpenProjectPreflightFailureKeepsCurrentWorkspace(t *testing.T) {
@@ -297,6 +301,99 @@ func TestCreateSnapshotFilesystemFailureDegradesWithoutRecordingSnapshot(t *test
 	assertDegradedSharingViolation(t, service)
 }
 
+func TestApplyImportFilesystemFailurePreservesTypedErrorAndDegradesActiveHealth(t *testing.T) {
+	project := mustProject(t, "project-import-write", "导入写入失败")
+	store := newFakeImportStore(project)
+	job, candidates := mustWorkspaceImportJob(t, "import-write-job", project.ID, importingdomain.JobStatusPrepared)
+	store.jobs[job.ID] = ports.ImportJobDetails{Job: job, Chapters: candidates}
+	store.applyErr = errors.New("sharing violation")
+	service := openImportTestService(t, store, validFakeImportArchive(), &fakeLicense{}, &sequenceIDs{ids: []string{"chapter-import"}})
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{failure: &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemSharingViolation}})
+
+	_, err := service.ApplyImportJob(context.Background(), job.ID, []string{candidates[0].ID})
+	if !errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		t.Fatalf("ApplyImportJob error = %v, want filesystem failure", err)
+	}
+	assertDegradedSharingViolation(t, service)
+}
+
+func TestApplyImportNonFilesystemFailureRetainsStableImportError(t *testing.T) {
+	project := mustProject(t, "project-import-nonfilesystem", "导入普通失败")
+	store := newFakeImportStore(project)
+	job, candidates := mustWorkspaceImportJob(t, "import-nonfilesystem-job", project.ID, importingdomain.JobStatusPrepared)
+	store.jobs[job.ID] = ports.ImportJobDetails{Job: job, Chapters: candidates}
+	store.applyErr = errors.New("transaction aborted")
+	service := openImportTestService(t, store, validFakeImportArchive(), &fakeLicense{}, &sequenceIDs{ids: []string{"chapter-import"}})
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{})
+
+	_, err := service.ApplyImportJob(context.Background(), job.ID, []string{candidates[0].ID})
+	if !errors.Is(err, ports.ErrImportPersistence) {
+		t.Fatalf("ApplyImportJob error = %v, want stable import persistence error", err)
+	}
+	if errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		t.Fatalf("ApplyImportJob error = %v, unexpectedly classified as filesystem failure", err)
+	}
+	if got := activeFilesystemHealth(t, service); !reflect.DeepEqual(got, ports.NormalProjectFilesystemHealth()) {
+		t.Fatalf("filesystem health = %#v, want normal", got)
+	}
+}
+
+func TestAgentArtifactFilesystemFailureInBackgroundDegradesActiveHealth(t *testing.T) {
+	providerFactory := &fakeModelProviderFactory{outputs: map[string]string{
+		"planner":  `{"summary":"计划","scenes":[]}`,
+		"writer":   "正文",
+		"reviewer": `{"approved":true,"summary":"通过","issues":[]}`,
+	}}
+	service, chapter := configuredAgentService(t, providerFactory)
+	defer service.Close()
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{failure: &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemSharingViolation}})
+	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaceActiveStoreWithFilesystemFailure(t, service, func(store *filesystemFailingSQLiteStore) {
+		store.agentArtifactErr = errors.New("sharing violation")
+	})
+
+	if _, err := service.ExecuteAgentRun(context.Background(), run.ID); err != nil {
+		t.Fatalf("ExecuteAgentRun error = %v", err)
+	}
+	waitForAgentRunStatus(t, service, run.ID, "failed", 5*time.Second)
+	failedRun, err := service.AgentRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(failedRun.ErrorMessage, ports.ErrProjectFilesystemFailure.Error()) {
+		t.Fatalf("agent failure = %#v, missing filesystem failure", failedRun)
+	}
+	assertDegradedSharingViolation(t, service)
+}
+
+func TestExtractionArtifactFilesystemFailureInBackgroundDegradesActiveHealth(t *testing.T) {
+	providerFactory := &fakeModelProviderFactory{outputs: map[string]string{
+		"extraction-model": extractionEventModelOutput,
+	}}
+	service, taskID, _ := configuredExtractionService(t, providerFactory)
+	defer service.Close()
+	service.ConfigureProjectFilesystemGuard(&fakeFilesystemGuard{failure: &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemSharingViolation}})
+	replaceActiveStoreWithFilesystemFailure(t, service, func(store *filesystemFailingSQLiteStore) {
+		store.extractionArtifactErr = errors.New("sharing violation")
+	})
+
+	if _, err := service.ExecuteExtractionRun(context.Background(), taskID); err != nil {
+		t.Fatalf("ExecuteExtractionRun error = %v", err)
+	}
+	waitForExtractionTaskStatus(t, service, taskID, "failed", 5*time.Second)
+	failedTask, err := service.ExtractionTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(failedTask.Task.ErrorMessage, ports.ErrProjectFilesystemFailure.Error()) {
+		t.Fatalf("extraction failure = %#v, missing filesystem failure", failedTask.Task)
+	}
+	assertDegradedSharingViolation(t, service)
+}
+
 func TestRestoreSnapshotPreservesFilesystemHealthInActiveWorkspaceAndView(t *testing.T) {
 	project := mustProject(t, "project-restore-health", "恢复健康")
 	currentStore := newFakeStore(project)
@@ -383,6 +480,45 @@ type fakeFilesystemGuard struct {
 	failure         *ports.ProjectFilesystemFailure
 	recoveryCopyErr error
 	preflightCalls  int
+}
+
+// filesystemFailingSQLiteStore promotes every production SQLite store method
+// while overriding selected asynchronous write points.
+type filesystemFailingSQLiteStore struct {
+	*sqlite.Store
+	agentArtifactErr      error
+	extractionArtifactErr error
+}
+
+func (s *filesystemFailingSQLiteStore) CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error {
+	if s.agentArtifactErr != nil {
+		return s.agentArtifactErr
+	}
+	return s.Store.CreateAgentArtifact(ctx, artifact)
+}
+
+func (s *filesystemFailingSQLiteStore) CreateArtifact(ctx context.Context, artifact ports.ExtractionArtifact) error {
+	if s.extractionArtifactErr != nil {
+		return s.extractionArtifactErr
+	}
+	return s.Store.CreateArtifact(ctx, artifact)
+}
+
+func replaceActiveStoreWithFilesystemFailure(
+	t *testing.T,
+	service *Service,
+	configure func(*filesystemFailingSQLiteStore),
+) {
+	t.Helper()
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	store, ok := service.active.store.(*sqlite.Store)
+	if !ok {
+		t.Fatalf("active store = %T, want *sqlite.Store", service.active.store)
+	}
+	failing := &filesystemFailingSQLiteStore{Store: store}
+	configure(failing)
+	service.active.store = failing
 }
 
 func (f *fakeFilesystemGuard) PreflightEditable(ports.ProjectPackage) (ports.ProjectFilesystemHealth, error) {

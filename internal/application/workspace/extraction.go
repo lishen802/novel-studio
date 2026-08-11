@@ -199,7 +199,8 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	if err != nil {
 		if ctx.Err() != nil {
 			s.mu.Unlock()
-			return s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
+			view, cancelErr := s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
+			return view, s.handleFilesystemWriteFailure(cancelErr)
 		}
 		s.mu.Unlock()
 		return ExtractionRunView{}, err
@@ -256,9 +257,11 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 		return ExtractionRunView{}, draftErr
 	}
 	if err := store.UpdateTask(ctx, task, startedDraft); err != nil {
+		err = s.handleFilesystemWriteFailureLocked(err)
 		s.mu.Unlock()
 		if ctx.Err() != nil {
-			return s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
+			view, cancelErr := s.persistCancelledExtractionByID(context.WithoutCancel(ctx), store, taskID)
+			return view, s.handleFilesystemWriteFailure(cancelErr)
 		}
 		return ExtractionRunView{}, err
 	}
@@ -270,7 +273,7 @@ func (s *Service) ExecuteExtractionRun(ctx context.Context, id string) (Extracti
 	}
 	if err := importStore.UpdateImportJobExtraction(ctx, currentJob); err != nil {
 		s.mu.Unlock()
-		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, stableImportStoreError(err))
+		return s.failExtractionStart(context.WithoutCancel(ctx), store, task, stableImportStoreError(s.handleFilesystemWriteFailureForGeneration(generation, err)))
 	}
 	s.mu.Unlock()
 
@@ -311,7 +314,7 @@ func (s *Service) failExtractionStart(
 		return ExtractionRunView{}, errors.Join(cause, draftErr)
 	}
 	if persistErr := store.UpdateTask(ctx, failed, failedDraft); persistErr != nil {
-		return ExtractionRunView{}, errors.Join(cause, persistErr)
+		return ExtractionRunView{}, errors.Join(cause, s.handleFilesystemWriteFailure(persistErr))
 	}
 	s.notifyJobUpdated(ctx, store, failed.ID, agentdomain.JobKindExtraction)
 	return extractionRunView(failed, nil), cause
@@ -366,7 +369,7 @@ func (s *Service) runExtractionPipeline(
 		if errors.Is(cause, context.Canceled) {
 			persistCtx := context.WithoutCancel(ctx)
 			if cancelErr := s.persistCancelledExtraction(persistCtx, store, task); cancelErr != nil {
-				return ExtractionRunView{}, cancelErr
+				return ExtractionRunView{}, s.handleFilesystemWriteFailureForGeneration(generation, cancelErr)
 			}
 			s.notifyJobUpdated(persistCtx, store, task.ID, agentdomain.JobKindExtraction)
 			task, _ = store.Task(persistCtx, task.ID)
@@ -383,12 +386,12 @@ func (s *Service) runExtractionPipeline(
 			return ExtractionRunView{}, draftErr
 		}
 		if persistErr := store.UpdateTask(context.WithoutCancel(ctx), task, failedDraft); persistErr != nil {
-			return ExtractionRunView{}, errors.Join(cause, persistErr)
+			return ExtractionRunView{}, errors.Join(cause, s.handleFilesystemWriteFailureForGeneration(generation, persistErr))
 		}
 		s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 		failedJob, _ := currentJob.MarkExtractionFailed(s.clock.Now())
 		if importErr := importStore.UpdateImportJobExtraction(context.WithoutCancel(ctx), failedJob); importErr != nil {
-			return ExtractionRunView{}, errors.Join(cause, stableImportStoreError(importErr))
+			return ExtractionRunView{}, errors.Join(cause, stableImportStoreError(s.handleFilesystemWriteFailureForGeneration(generation, importErr)))
 		}
 		return extractionRunView(task, nil), cause
 	}
@@ -415,7 +418,7 @@ func (s *Service) runExtractionPipeline(
 			return failed(draftErr)
 		}
 		if err := store.UpdateStep(ctx, runningStep, stepStartedDraft); err != nil {
-			return failed(err)
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		s.notifyJobUpdated(ctx, store, task.ID, agentdomain.JobKindExtraction)
 
@@ -429,7 +432,7 @@ func (s *Service) runExtractionPipeline(
 		if err := store.CreateArtifact(ctx, newExtractionArtifact(
 			s.ids.NewID(), task.ID, runningStep.ID, "context_manifest", contextJSON, s.clock.Now(),
 		)); err != nil {
-			return failed(err)
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 
 		// Provider call — lock-free.
@@ -460,7 +463,7 @@ func (s *Service) runExtractionPipeline(
 					return ExtractionRunView{}, draftErr
 				}
 				if updateErr := store.UpdateStep(context.WithoutCancel(ctx), failedStep, stepFailedDraft); updateErr != nil {
-					return failed(errors.Join(err, updateErr))
+					return failed(errors.Join(err, s.handleFilesystemWriteFailureForGeneration(generation, updateErr)))
 				}
 			}
 			task.Steps[index] = failedStep
@@ -492,15 +495,15 @@ func (s *Service) runExtractionPipeline(
 			return ExtractionRunView{}, draftErr
 		}
 		if err := store.UpdateStep(persistCtx, completedStep, stepCompletedDraft); err != nil {
-			return ExtractionRunView{}, err
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		if err := store.UpdateTask(persistCtx, task); err != nil {
-			return ExtractionRunView{}, err
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		if err := store.CreateArtifact(persistCtx, newExtractionArtifact(
 			s.ids.NewID(), task.ID, completedStep.ID, "model_response", generated.Text, s.clock.Now(),
 		)); err != nil {
-			return ExtractionRunView{}, err
+			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		s.notifyJobUpdated(persistCtx, store, task.ID, agentdomain.JobKindExtraction)
 		if err := ctx.Err(); err != nil {
@@ -529,7 +532,12 @@ func (s *Service) runExtractionPipeline(
 		if draftErr != nil {
 			return ExtractionRunView{}, draftErr
 		}
-		_ = store.UpdateTask(context.WithoutCancel(ctx), task, noCandidateDraft)
+		if persistErr := store.UpdateTask(context.WithoutCancel(ctx), task, noCandidateDraft); persistErr != nil {
+			return ExtractionRunView{}, errors.Join(
+				fmt.Errorf("extraction produced no candidates"),
+				s.handleFilesystemWriteFailureForGeneration(generation, persistErr),
+			)
+		}
 		s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 		return extractionRunView(task, nil), fmt.Errorf("extraction produced no candidates")
 	}
@@ -543,7 +551,7 @@ func (s *Service) runExtractionPipeline(
 		return failed(err)
 	}
 	if err := projectStore.CreateChangeSet(ctx, changeSet); err != nil {
-		return failed(err)
+		return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 	task.ChangeSetID = changeSet.ID
 	task, err = task.Transition(extractiondomain.StatusCompleted, "", s.clock.Now())
@@ -556,7 +564,7 @@ func (s *Service) runExtractionPipeline(
 		return ExtractionRunView{}, draftErr
 	}
 	if err := store.UpdateTask(context.WithoutCancel(ctx), task, completedDraft); err != nil {
-		return ExtractionRunView{}, err
+		return ExtractionRunView{}, s.handleFilesystemWriteFailureForGeneration(generation, err)
 	}
 	s.notifyJobUpdated(context.WithoutCancel(ctx), store, task.ID, agentdomain.JobKindExtraction)
 	completedJob, err := currentJob.MarkExtractionCompleted(s.clock.Now())
@@ -564,7 +572,7 @@ func (s *Service) runExtractionPipeline(
 		return ExtractionRunView{}, err
 	}
 	if err := importStore.UpdateImportJobExtraction(context.WithoutCancel(ctx), completedJob); err != nil {
-		return ExtractionRunView{}, stableImportStoreError(err)
+		return ExtractionRunView{}, stableImportStoreError(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 
 	changeSetView := changeSetView(changeSet)
@@ -639,8 +647,8 @@ func (s *Service) CancelExtractionRun(ctx context.Context, id string) error {
 // task that has no in-memory job. Re-checking after taking s.mu prevents a
 // workspace transition to read-only from reaching the persistence fallback.
 func (s *Service) cancelExtractionRunFallback(ctx context.Context, id string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.requireEditableLocked(); err != nil {
 		return err
 	}
@@ -655,7 +663,7 @@ func (s *Service) cancelExtractionRunFallback(ctx context.Context, id string) er
 	if task.Status != extractiondomain.StatusQueued && task.Status != extractiondomain.StatusRecoverable {
 		return fmt.Errorf("extraction task cannot be cancelled from status %s", task.Status)
 	}
-	return s.persistCancelledExtraction(ctx, store, task)
+	return s.handleFilesystemWriteFailureLocked(s.persistCancelledExtraction(ctx, store, task))
 }
 
 func (s *Service) ExtractionTasks(ctx context.Context) ([]ExtractionTaskView, error) {

@@ -96,7 +96,7 @@ func (s *Service) PrepareManuscriptImport(
 	jobID := s.ids.NewID()
 	prepared, err := s.imports.Prepare(ctx, s.active.packageInfo, jobID, sourcePath)
 	if err != nil {
-		return ImportPrepareResult{}, stableImportArchiveError(err)
+		return ImportPrepareResult{}, stableImportArchiveError(s.handleFilesystemWriteFailureLocked(err))
 	}
 	cleanup := func(cause error) error {
 		cleanupErr := s.cleanupImportArchive(
@@ -104,7 +104,7 @@ func (s *Service) PrepareManuscriptImport(
 			prepared.ArchivedRelativePath,
 		)
 		if cleanupErr != nil {
-			return errors.Join(cause, cleanupErr)
+			return errors.Join(cause, s.handleFilesystemWriteFailureLocked(cleanupErr))
 		}
 		return cause
 	}
@@ -419,6 +419,10 @@ func (s *Service) cleanupImportArchive(
 	cleanupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.imports.Delete(cleanupContext, projectPackage, relativePath); err != nil {
+		classified := s.handleFilesystemWriteFailureLocked(err)
+		if errors.Is(classified, ports.ErrProjectFilesystemFailure) {
+			return classified
+		}
 		return ErrImportArchiveCleanup
 	}
 	return nil
@@ -443,6 +447,9 @@ func safePreparedImportMetadata(
 }
 
 func stableImportArchiveError(err error) error {
+	if errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		return err
+	}
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}

@@ -155,8 +155,8 @@ func (s *Service) CancelAgentRun(ctx context.Context, id string) error {
 // caller's initial editable check, so this path must re-check under s.mu
 // before it reads or persists through the store.
 func (s *Service) cancelAgentRunFallback(ctx context.Context, id string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.requireEditableLocked(); err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (s *Service) cancelAgentRunFallback(ctx context.Context, id string) error {
 	if run.Status != agentdomain.RunQueued && run.Status != agentdomain.RunRecoverable {
 		return fmt.Errorf("agent run cannot be cancelled from status %s", run.Status)
 	}
-	return s.persistCancelledRun(ctx, store, run)
+	return s.handleFilesystemWriteFailureLocked(s.persistCancelledRun(ctx, store, run))
 }
 
 func (s *Service) RetryAgentRun(ctx context.Context, id string) (AgentRunView, error) {
