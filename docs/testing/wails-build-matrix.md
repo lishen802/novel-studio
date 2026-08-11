@@ -52,6 +52,6 @@ Go 版本来自根 `go.mod`/`toolchain`，Node 固定为 22，Wails 固定为 v2
 
 任何失败都不得通过 `continue-on-error`、缩小上传范围到空文件或删除平台 Job 规避。
 
-## R8 边界
+## R9 边界
 
-以下能力留给 R8：macOS Intel/universal、Windows ARM64、正式版本号与渠道、DMG/PKG/MSI/MSIX/NSIS、Developer ID、Apple 公证、Gatekeeper、Authenticode、安装/升级/卸载、Release artifact 和长期供应链证明。
+以下能力留给 R9：macOS Intel/universal、Windows ARM64、正式版本号与渠道、DMG/PKG/MSI/MSIX/NSIS、Developer ID、Apple 公证、Gatekeeper、Authenticode、安装/升级/卸载、Release artifact 和长期供应链证明。

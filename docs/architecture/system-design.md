@@ -43,7 +43,9 @@ SQLite project DB + project files   OS credential store   Official local runtime
 
 每部小说是独立项目包（扩展名可为 `.zjproject`），可移动、备份和恢复。项目包包含项目 SQLite 数据库、正文与导出文件、可再生成的搜索索引以及必要元数据；绝不包含 API Key、订阅令牌或操作系统身份信息。
 
-应用级 `settings.db` 位于操作系统应用数据目录，只保存非敏感设置、模型连接元数据、作者人格/工作流模板与本地市场缓存。API Key 只存操作系统凭据库（macOS Keychain、Windows Credential Manager）；订阅身份由官方本地运行时自行持有。本应用只保存连接状态和授权能力，不复制 Cookie、OAuth token 或刷新令牌。
+应用级 `settings.db` 位于操作系统应用数据目录，只保存非敏感设置、模型连接元数据、版本化 CreativeProfile/AuthorProfile/AuthorTeam、最近项目索引、主题与高级偏好、本地市场缓存。API Key 只存操作系统凭据库（macOS Keychain、Windows Credential Manager）；订阅身份由官方本地运行时自行持有。本应用只保存连接状态和授权能力，不复制 Cookie、OAuth token 或刷新令牌。
+
+当前旧项目数据库内已有 `provider_connections`、`agent_profiles` 和项目级运行设置。迁移到应用设置时必须先复制并验证非敏感元数据与凭据引用，再让项目保存方案版本选择和角色覆盖；不能先删除旧配置。相同凭据引用的连接应去重，冲突配置保留为可命名选择。旧项目完成兼容迁移前仍可只读查看，但不能把项目内密钥或连接元数据静默写入其他项目。
 
 写入采用显式事务、追加式 revision 和原子文件替换。启动时先执行恢复检查：处理未完成作业、修复临时导出，并允许从最近一致快照恢复。正文和数据库备份可在项目级开启版本化快照。
 
@@ -61,7 +63,7 @@ SQLite project DB + project files   OS credential store   Official local runtime
 
 ### 4.1 作品与资产
 
-`NovelProject` 持有标题、定位、阶段、目标篇幅、当前 canonical revision 和创建配置。`StoryAsset` 是带类型、状态、来源和 revision 的统一资产：作品方案、全书/卷/章大纲、人物、势力、地点、规则、关系、时间线、事实、伏笔、导入证据和作者人格应用记录。
+`NovelProject` 持有标题、定位、阶段、目标篇幅、当前 canonical revision、创建配置、选中的应用级创作方案版本和项目角色覆盖。项目只保存方案引用、非敏感覆盖和运行冻结快照，不保存应用级连接凭据。`StoryAsset` 是带类型、状态、来源和 revision 的统一资产：作品方案、全书/卷/章大纲、人物、势力、地点、规则、关系、时间线、事实、伏笔、导入证据和作者人格应用记录。
 
 资产状态严格区分：`candidate`、`proposed`、`confirmed`、`superseded`、`discarded`。AI 或导入不能直接写入 `confirmed`；作者确认或直接编辑生成的 revision 才能成为正式资产。
 
@@ -109,7 +111,7 @@ Manifest 不复制已由不可变 revision 保存的完整正文。调用工件�
 ## 6. AI 写作工作流状态机
 
 ```text
-idea/imported
+idea
   → directions_pending_confirmation
   → proposal_pending_confirmation
   → roadmap_pending_confirmation
@@ -118,9 +120,16 @@ idea/imported
   → batch_review
   → awaiting_finalization
   → ready_to_write | completed
+
+imported
+  → manuscript_ready
+  → whole_book_archive_generating
+  → whole_book_archive_review
+  → ready_to_write
+  → batch_generating | manual_writing
 ```
 
-作者可在任意节点暂停、编辑或提出意见。方向、完整作品方案、章节路线图、影响方案和每章定稿是硬确认点。正文批次大小为 1–50 章，默认 3–10 章；批次中的章节完成“草稿 → 自动审阅/修订 → 作者审阅 → 定稿/替换/丢弃”后，才允许创建下一批。作业层按单章和单阶段拆分，便于断点续跑、取消和重试。
+作者可在任意节点暂停、编辑或提出意见。导入作品在 `manuscript_ready` 后始终允许手工阅读和写作；整书档案未确认前不能把局部抽取观察当作 canonical memory。方向、完整作品方案、章节路线图、整书档案包、影响方案和每章定稿是硬确认点。正文批次大小为 1–50 章，默认 3–10 章；批次中的章节完成“草稿 → 自动审阅/修订 → 作者审阅 → 定稿/替换/丢弃”后，才允许创建下一批。作业层按单章和单阶段拆分，便于断点续跑、取消和重试。
 
 批次编排器在默认每 3–5 章的边界插入 `BatchCheckpoint`。检查点只读取当前批次 provisional 候选和启动时冻结的 canonical head，输出主线偏离、硬锚点、锁定设定、人物状态、世界规则、时间线、严重审阅项和剩余预算。出现阻断条件时，作业转为 `needs_confirmation`，并在持久化事件中记录原因、已完成步骤和允许动作；在作者确认前不得调度后续模型调用。
 
@@ -177,19 +186,30 @@ Harness 分别记录冷启动、热缓存、Context Token/字符占用、查询�
 
 影响方案冻结 canonical head、扫描覆盖、检索查询、模型调用和预计费用。任何相关 revision、资产或作业状态变化都会使方案失效；历史定稿始终只生成报告或显式修订候选。
 
-## 9. 导入续写与参考材料
+## 9. 导入续写、整书档案与参考材料
 
-导入采用三阶段流水线：
+导入型项目先执行 `ingest`：本地安全归档、编码识别、重复检测、确定性切分卷章、原文行范围和基础全文索引，不调用模型。完成后默认打开正文，作者立即可以阅读、编辑、新建章节和完全自行写作。
 
-1. `ingest`：本地安全归档、编码识别、重复检测、确定性切分卷章、原文行范围和基础全文索引，不调用模型；完成后正文即可阅读和编辑。
-2. `continuation preparation`：按近期章节、当前卷和作者选择范围创建章节级抽取步骤，优先形成续写所需的人物当前状态、硬规则和未解线索候选。
-3. `background enrichment`：其余授权章节在后台继续抽取，支持优先级调整、暂停、断点恢复和仅重试失败/未完成步骤。
+AI 档案生成使用一个用户可见的 `WholeBookArchiveJob`。它冻结本次分析的章节/revision `SourceManifest`、导入哈希、模型方案、预算和 Context Manifest，并在后台编排：
 
-导入分析状态为 `imported/partially_analyzed/continuation_ready/fully_analyzed/needs_review`。每个步骤冻结来源章节/revision 或导入哈希、行范围、模型、Schema、预算与 Context Manifest。已完成步骤立即持久化，后续步骤失败不能使其失效；重试默认复用输入未变化的完成步骤。
+```text
+WholeBookArchiveJob
+  → ChapterExtractionStep[]
+  → VolumeMergeStep[]
+  → GlobalEntityResolutionStep
+  → WholeBookSynthesisStep
+  → ArchiveCandidateBundle
+```
 
-跨章合并不得使用简单的“首次值获胜”或“末次值获胜”。实体匹配先按稳定 ID、规范化名称和别名建立候选簇；字段一致时合并证据，字段冲突时保留多个带来源的值并生成 `needs_review` 候选。关系、事件、时间线和伏笔只有在引用目标可解析时才能进入可应用 ChangeSet。
+`ChapterExtractionStep` 和 `VolumeMergeStep` 是可恢复技术单元，不是最终产品资产。它们保留精确证据、局部观察和中间哈希，支持暂停、取消、断点恢复、仅重试失败/输入变化步骤和应用重启后的事件补拉。正文写入不等待这些步骤。
 
-抽取结果产出大纲、人物、世界观、关系、时间线、事实和未解线索的候选资产。证据必须包含精确原文片段及章节/revision 或导入行范围；作者确认、编辑或舍弃后，才能作为续写的 canonical memory。达到最低续写条件后可在覆盖范围提示下继续写作，其余后台结果仍只能进入候选队列。
+`GlobalEntityResolutionStep` 以稳定 ID、规范化名称、别名、关系和时间边界建立全书候选簇。不得使用简单的“首次值获胜”或“末次值获胜”；字段一致时合并证据，字段冲突时保留多个带来源和生效范围的值。人物状态、势力关系、世界规则、事件、时间线和伏笔必须区分全书演变与真正冲突。
+
+`WholeBookSynthesisStep` 产出一个版本化 `ArchiveCandidateBundle`，包括全书/分卷/故事弧大纲、人物与人物弧、势力与关系、世界规则/地点/物品、全书时间线/事件/事实以及伏笔/揭示/未解线索。每项结论引用多个章节/revision/导入行范围证据；章节级观察不能直接进入 canonical story archive。
+
+作者按档案分类审阅、编辑、拒绝并解决阻断冲突。所有分类完成后，应用用短事务原子提交整个确认包、候选到正式资产映射、证据和档案版本。模型 IO 不得位于该事务内。后续重新分析产生新的 bundle 和差异，不静默修改确认档案。
+
+任务运行期间作者修改正文时，SourceManifest 保持不变。完成页比较当前 revision 与冻结来源；若来源章节变化，受影响的合并和综合结果标为 stale，并通过增量重算或重新合并生成新 bundle。任务后新增章节可以排除在该版本之外，但必须在档案元数据中记录截止章节和 revision。
 
 参考材料服务只接受作者合法提供的短篇完整作品、少量摘录、简介或公开介绍链接。网页获取必须展示来源、抓取内容和版权提示。分析器输出题材、读者期待、叙事节奏、冲突模式和风格禁区等高层灵感约束；不得复用专名、角色关系、关键情节链、段落或可识别文风。相似性/引用风险审阅是生成前后都可启用的检查。
 
@@ -216,6 +236,10 @@ V1 定义本地 `AuthorProfile` 与 `AuthorTeam`：题材偏好、叙事视角�
 ## 12. 前端、绑定与事件
 
 Wails binding 提供命令式用例：创建/打开项目、读取工作台状态、保存作者编辑、确认资产、启动/暂停/取消作业、提交反馈、确认 ChangeSet、配置连接、导入与导出。启动长作业先持久化并返回 `job_id`，后台执行不依赖调用页面继续存活。
+
+Wails 应用壳还提供原生菜单命令、应用设置、最近项目和主题偏好。macOS 软件名称菜单只处理应用级命令；项目生命周期命令位于“文件”。关闭、切换或返回首页必须复用正文 flush、job lease drain、store close 和项目 lease 释放流程，不能由菜单直接关闭数据库。
+
+Go 应用层返回权威 `WorkbenchProjection`，至少包含当前产品阶段、主要画布、可用动作、AI 面板建议状态、待审阅数量、可恢复作业和安全的模型/预算摘要。React 可以保存面板折叠、滚动和筛选等展示状态，但不能根据组件路由自行推断领域阶段。
 
 大文本流和作业状态使用可恢复的 job event feed。Go 端至少提供：
 
@@ -256,14 +280,15 @@ JobEvent 测试必须覆盖漏推后补拉、重复通知、sequence 缺口、Br
 
 ## 15. 现有基线与交付顺序
 
-当前仓库已有基础桌面项目和 P0–P4 的部分能力：正文/修订与恢复、结构化故事资产、变更集与快照、OpenAI/Anthropic Provider 与 Agent Run、以及确定性导入基础。SQLite 已启用 WAL、5 秒 busy timeout 和单连接基线；可恢复 JobEvent feed、Model IO 与工作区锁隔离、项目级 OS lease、真正的只读 store 和分层长篇 Harness 尚未完成。它们是迁移基线，不等同于完整产品已经实现。
+当前仓库已有基础桌面项目和 P0–P4 的部分能力：正文/修订与恢复、结构化故事资产、变更集与快照、OpenAI/Anthropic Provider 与 Agent Run、确定性导入基础，以及已经完成的可恢复 JobEvent、Model IO 与工作区锁隔离、项目级 OS lease、真正只读和文件系统可靠性。应用级 settings store、最近项目首页、原生菜单命令、分级作品导航、阶段工作台投影和整书档案聚合尚未完成。它们是迁移基线，不等同于完整产品已经实现。
 
 后续实现按可验收纵切推进：
 
-1. 商业发布底线：统一项目状态机、canonical/candidate、默认 3–10 章批次闭环、锚点、检查点、API 运行时、可恢复 JobEvent feed、Model IO 与编辑锁隔离、项目级写入 lease、基本项目恢复，以及现有快速导入与作者选择范围的抽取确认；
-2. 连续性强化：ContextManifest、长期记忆、量化 Harness、影响分析和渐进导入的断点/冲突/覆盖管理；
-3. 完整 V1：最多 50 章高级批次、全书后台深化、满足发布门槛的官方订阅运行时、作者模板、剧情分支和跨平台硬化。
+1. 产品与交互基础：应用级 settings store、模型方案版本、原生系统菜单、最近项目首页、分级作品导航、阶段工作台投影和可折叠 AI 面板；
+2. 商业发布底线：统一项目状态机、canonical/candidate、正式资产写入、默认 3–10 章批次闭环、锚点、检查点、API 运行时、现有快速导入与整书档案候选确认；
+3. 连续性强化：ContextManifest、长期记忆、量化 Harness、影响分析和整书档案的断点、实体冲突与全书聚合；
+4. 完整 V1：最多 50 章高级批次、满足发布门槛的官方订阅运行时、作者模板、剧情分支和跨平台硬化。
 
-每一切片都必须更新测试和迁移。已有导入与基础资产抽取作为实现基线保留，但不能把当前完成度等同于全书渐进抽取、冲突保留和续写准备已经满足。
+每一切片都必须更新测试和迁移。已有导入与基础资产抽取作为实现基线保留，但不能把当前完成度等同于整书档案分段处理、全书实体聚合、冲突保留和整包确认已经满足。
 
 详细阶段依赖、退出标准和实施计划队列以[总体开发路线图](../roadmap/development-roadmap.md)为准。路线图只安排执行顺序；若与产品需求、交互设计、本系统设计或 ADR 冲突，必须先修正规划，不能用路线图改变上游设计。
