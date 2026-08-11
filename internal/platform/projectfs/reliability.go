@@ -1,11 +1,16 @@
 package projectfs
 
 import (
+	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"unicode/utf16"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	_ "modernc.org/sqlite"
 )
 
 const windowsCompatiblePathLimit = 240
@@ -53,6 +58,122 @@ func (Manager) ClassifyRuntimeError(err error) *ports.ProjectFilesystemFailure {
 	var failure *ports.ProjectFilesystemFailure
 	if errors.As(err, &failure) {
 		return failure
+	}
+	return nil
+}
+
+func (Manager) PreflightEditable(pkg ports.ProjectPackage) (ports.ProjectFilesystemHealth, error) {
+	if err := validateProjectPath(pkg.Root); err != nil {
+		return ports.NormalProjectFilesystemHealth(), err
+	}
+	probeRoot, err := os.MkdirTemp(pkg.Root, ".r1-4-probe-")
+	if err != nil {
+		return ports.NormalProjectFilesystemHealth(), preflightFailure(err)
+	}
+	defer os.RemoveAll(probeRoot)
+	if err := probeDirectory(probeRoot); err != nil {
+		return ports.NormalProjectFilesystemHealth(), preflightFailure(err)
+	}
+	if err := probeSQLite(filepath.Join(probeRoot, "probe.sqlite")); err != nil {
+		return ports.NormalProjectFilesystemHealth(), preflightFailure(err)
+	}
+	if err := probeAtomicReplacement(probeRoot); err != nil {
+		return ports.NormalProjectFilesystemHealth(), preflightFailure(err)
+	}
+	return ports.NormalProjectFilesystemHealth(), nil
+}
+
+func preflightFailure(err error) error {
+	return errors.Join(&ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemPreflight}, err)
+}
+
+func probeDirectory(root string) error {
+	path := filepath.Join(root, "directory-probe")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString("probe"); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func probeSQLite(path string) error {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, "CREATE TABLE probe(value TEXT NOT NULL)"); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO probe(value) VALUES ('kept')"); err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO probe(value) VALUES ('rolled-back')"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Rollback(); err != nil {
+		return err
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM probe").Scan(&count); err != nil {
+		return err
+	}
+	if count != 1 {
+		return fmt.Errorf("probe transaction count = %d", count)
+	}
+	_, err = db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	return err
+}
+
+func probeAtomicReplacement(root string) error {
+	source := filepath.Join(root, "replace-source")
+	target := filepath.Join(root, "replace-target")
+	for _, item := range []struct{ path, body string }{{source, "source"}, {target, "target"}} {
+		file, err := os.OpenFile(item.path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err := file.WriteString(item.body); err != nil {
+			_ = file.Close()
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(source, target); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		return err
+	}
+	if string(body) != "source" {
+		return fmt.Errorf("replacement body = %q", body)
 	}
 	return nil
 }
