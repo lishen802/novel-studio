@@ -65,6 +65,23 @@ func TestPreflightEditableLeavesCanonicalFilesUnchanged(t *testing.T) {
 	}
 }
 
+func TestClassifyFilesystemErrorMapsRuntimeWriteFailures(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		want ports.ProjectFilesystemCategory
+	}{
+		{errors.New("database is locked"), ports.ProjectFilesystemBusy},
+		{errors.New("disk is full"), ports.ProjectFilesystemDiskFull},
+		{errors.New("readonly database"), ports.ProjectFilesystemReadOnly},
+		{errors.New("disk I/O error"), ports.ProjectFilesystemIO},
+	} {
+		got := ClassifyFilesystemError(test.err)
+		if got == nil || got.Category != test.want {
+			t.Fatalf("%v => %#v, want %q", test.err, got, test.want)
+		}
+	}
+}
+
 func projectFileHashes(t *testing.T, root string) map[string][sha256.Size]byte {
 	t.Helper()
 	hashes := make(map[string][sha256.Size]byte)

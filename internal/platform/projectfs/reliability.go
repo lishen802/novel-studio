@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"unicode/utf16"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -55,9 +56,30 @@ func validateRecoveryCopyLayout(layout recoveryCopyLayout) error {
 }
 
 func (Manager) ClassifyRuntimeError(err error) *ports.ProjectFilesystemFailure {
+	return ClassifyFilesystemError(err)
+}
+
+func ClassifyFilesystemError(err error) *ports.ProjectFilesystemFailure {
+	if err == nil {
+		return nil
+	}
 	var failure *ports.ProjectFilesystemFailure
 	if errors.As(err, &failure) {
 		return failure
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemReadOnly}
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "database is locked"), strings.Contains(message, "database table is locked"):
+		return &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemBusy}
+	case strings.Contains(message, "readonly"), strings.Contains(message, "read-only"):
+		return &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemReadOnly}
+	case strings.Contains(message, "disk is full"), strings.Contains(message, "disk full"):
+		return &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemDiskFull}
+	case strings.Contains(message, "disk i/o"), strings.Contains(message, "ioerr"):
+		return &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemIO}
 	}
 	return nil
 }
