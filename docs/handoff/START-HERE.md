@@ -6,7 +6,7 @@
 
 生产基线为 Go + Wails v2 + React/TypeScript + Vite + SQLite。`prototype/web` 是 UX 参考，不得成为生产层间依赖。
 
-R1.1、R1.2 与 R1.3 已完成。R1.3 已覆盖项目级 OS lease、真正只读 store、结构化争锁救局和恢复副本；2026-08-11 已完成 Windows/macOS 的 F-12 至 F-14 手工验收，并在 [Foundation CI run 31451705510](https://github.com/lishen802/novel-studio/actions/runs/31451705510) 中通过 Ubuntu、macOS 与 Windows 三端门禁。R1.4（同步盘/运行期文件锁、写入探针与 Windows 路径边界）尚未开始，不能把 R1.3 的完成误报为整个 R1 退出。
+R1.1 至 R1.4 已完成。R1.4 覆盖同步盘/网络位置风险提示、运行期文件系统失败分类、无损写入探针和 Windows 路径边界；2026-08-11 Windows/macOS 的 F-15 至 F-18 已由用户确认通过（未提供独立证据文件），并在 [Foundation CI run 31466741585](https://github.com/lishen802/novel-studio/actions/runs/31466741585) 中通过 Ubuntu、macOS 与 Windows 三端门禁。R1 阶段可退出。
 
 ## 必读文档
 

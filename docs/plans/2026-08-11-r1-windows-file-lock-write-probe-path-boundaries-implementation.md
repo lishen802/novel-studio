@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
 - 上游依据：[产品需求 5.1.7–5.1.8、13](../product/requirements.md)、[产品设计 8/10.15](../product/design.md)、[系统设计 3、5、13、14](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)、[ADR-0003](../architecture/0003-wails-project-layout.md)
 - 前置计划：[R1.3 项目生命周期保护](2026-08-10-r1-project-lifecycle-protection-implementation.md)（`completed`）
@@ -451,11 +451,11 @@ git commit -m "feat: present project filesystem risks safely"
 **Files:**
 - Modify: `docs/testing/automated-test-baseline.md`, `docs/testing/foundation-acceptance.md`, `docs/operations/project-recovery.md`, `docs/roadmap/development-roadmap.md`, `docs/handoff/START-HERE.md`
 
-- [ ] **Step 1: Add F-15 through F-18 only after their automated tests exist**
+- [x] **Step 1: Add F-15 through F-18 only after their automated tests exist**
 
 F-15 sync-client or network-share locking while editing; F-16 failed probe leaves a disposable package unchanged; F-17 full/readonly/sharing failure preserves editor text and gives recovery actions; F-18 Windows long root and recovery-copy path. State that successful preflight is not a promise of future safety.
 
-- [ ] **Step 2: Run complete regression evidence**
+- [x] **Step 2: Run complete regression evidence**
 
 Run: `go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`
 
@@ -465,20 +465,19 @@ Run: `cd prototype/web && npm test -- --run && npm run typecheck && npm run buil
 
 Expected: all commands PASS.
 
-- [ ] **Step 3: Run native CI and manual acceptance**
+- [x] **Step 3: Run native CI and manual acceptance**
 
 Run focused projectfs/workspace reliability tests in the Windows Foundation job, then verify Windows and macOS production builds. Execute F-15–F-18 only on disposable copies and record commit, OS version, date, result, and non-sensitive evidence path.
 
-- [ ] **Step 4: Commit documentation and close the stage only after evidence succeeds**
+- [x] **Step 4: Commit documentation and close the stage only after evidence succeeds**
 
 ```bash
 git add docs/testing docs/operations/project-recovery.md docs/roadmap/development-roadmap.md docs/handoff/START-HERE.md
 git commit -m "docs: close R1.4 filesystem reliability"
 ```
 
-- [ ] **Step 5: Final completion checks**
+- [x] **Step 5: Final completion checks**
 
 Run: `git diff --check && git status --short && go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`
 
 Expected: empty status, no sensitive artifacts, and PASS. Merge the isolated feature branch into `main` only after the recorded Windows/macOS evidence is successful.
-
