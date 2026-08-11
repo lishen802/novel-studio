@@ -41,7 +41,7 @@ func TestRecoveryCopyIncludesCommittedActiveWALAndExcludesCoordinationFiles(t *t
 	if err := os.WriteFile(attachment, []byte("persistent attachment"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	copyPackage, err := (Manager{}).CreateRecoveryCopy(ctx, source, t.TempDir(), readOnly.Backup)
+	copyPackage, err := (Manager{}).CreateRecoveryCopy(ctx, source, recoveryCopyDestination(t), readOnly.Backup)
 	if err != nil {
 		t.Fatalf("CreateRecoveryCopy: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestRecoveryCopyNeverOverwritesExistingTarget(t *testing.T) {
 	ctx := context.Background()
 	source, sourceStore := recoveryCopySource(t)
 	defer sourceStore.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	manager := Manager{recoveryCopyHooks: &recoveryCopyHooks{
 		now:      func() time.Time { return time.Unix(0, 0) },
 		randomID: func() (string, error) { return "fixed-id", nil },
@@ -111,7 +111,7 @@ func TestRecoveryCopyRejectsSourceChangeWithoutPublishingPartialPackage(t *testi
 	if err := os.WriteFile(attachment, []byte("before"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	changed := false
 	manager := Manager{recoveryCopyHooks: &recoveryCopyHooks{
 		copyPersistentFile: func(ctx context.Context, from, to string) error {
@@ -168,7 +168,7 @@ func TestRecoveryCopyRejectsABASourceMutationWhenCopiedBytesDoNotMatchManifest(t
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	_, err = (Manager{recoveryCopyHooks: &hooks}).CreateRecoveryCopy(ctx, source, parent, readOnly.Backup)
 	if !errors.Is(err, ErrRecoveryCopySourceChanged) {
 		t.Fatalf("CreateRecoveryCopy error = %v, want source changed", err)
@@ -182,7 +182,7 @@ func TestRecoveryCopyValidationFailureCleansOnlyOwnedTemporaryPackage(t *testing
 	ctx := context.Background()
 	source, sourceStore := recoveryCopySource(t)
 	defer sourceStore.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	validateErr := errors.New("validation failed")
 	manager := Manager{recoveryCopyHooks: &recoveryCopyHooks{validate: func(context.Context, recoveryCopyLayout) error { return validateErr }}}
 	readOnly, err := (sqlite.Factory{}).OpenReadOnly(ctx, source.Database)
@@ -250,7 +250,7 @@ func TestRecoveryCopyFaultsDoNotPublishPartialPackageOrDeleteSource(t *testing.T
 				t.Fatal(err)
 			}
 			defer readOnly.Close()
-			parent := t.TempDir()
+			parent := recoveryCopyDestination(t)
 			injected := errors.New(test.name + " failure")
 			hooks := test.hooks(injected)
 			manager := Manager{recoveryCopyHooks: &hooks}
@@ -284,7 +284,7 @@ func TestRecoveryCopySyncsParentAfterAtomicPublicationAndRetainsPublishedPathOnF
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	syncCalls := 0
 	parentSyncErr := errors.New("parent sync failed")
 	hooks := recoveryCopyHooks{syncDirectory: func(string) error {
@@ -318,7 +318,7 @@ func TestRecoveryCopyUsesFreshTargetForEachRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	first, err := (Manager{}).CreateRecoveryCopy(ctx, source, parent, readOnly.Backup)
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestRecoveryCopyRejectsInterruptedRecoveryArtifactsWithoutPublishingOrReadi
 	if err := os.WriteFile(journal, []byte(`{"database":"/private/source/project.db"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	snapshotCalled := false
 	_, err := (Manager{}).CreateRecoveryCopy(ctx, source, parent, func(context.Context, string) error {
 		snapshotCalled = true
@@ -391,7 +391,7 @@ func TestRecoveryCopyRejectsRecoveryJournalIntroducedDuringCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	_, err = (Manager{recoveryCopyHooks: &hooks}).CreateRecoveryCopy(ctx, source, parent, readOnly.Backup)
 	if !errors.Is(err, ErrProjectRecoveryRequired) {
 		t.Fatalf("CreateRecoveryCopy error = %v, want recovery required", err)
@@ -414,7 +414,7 @@ func TestRecoveryCopyDoesNotDiscardPersistentAttachmentNamedTemporary(t *testing
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
-	copyPackage, err := (Manager{}).CreateRecoveryCopy(ctx, source, t.TempDir(), readOnly.Backup)
+	copyPackage, err := (Manager{}).CreateRecoveryCopy(ctx, source, recoveryCopyDestination(t), readOnly.Backup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestRecoveryCopyHonorsContextCancellationDuringPersistentCopy(t *testing.T)
 		cancel()
 		return copyRecoveryCopyFile(ctx, source, target, recoveryCopyHooks{})
 	}}
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	_, err = (Manager{recoveryCopyHooks: &hooks}).CreateRecoveryCopy(ctx, source, parent, readOnly.Backup)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("CreateRecoveryCopy error = %v, want context cancellation", err)
@@ -485,7 +485,7 @@ func TestRecoveryCopyRejectsMalformedSnapshotOrBranchArchivesBeforePublication(t
 				t.Fatal(err)
 			}
 			defer readOnly.Close()
-			parent := t.TempDir()
+			parent := recoveryCopyDestination(t)
 			_, err = (Manager{}).CreateRecoveryCopy(ctx, source, parent, readOnly.Backup)
 			if err == nil {
 				t.Fatal("CreateRecoveryCopy succeeded with malformed archive")
@@ -530,7 +530,7 @@ func TestRecoveryCopyRejectsBranchHeadDigestMismatchBeforePublication(t *testing
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
-	parent := t.TempDir()
+	parent := recoveryCopyDestination(t)
 	_, err = (Manager{}).CreateRecoveryCopy(ctx, source, parent, readOnly.Backup)
 	if !errors.Is(err, branchfs.ErrBranchHeadChanged) {
 		t.Fatalf("CreateRecoveryCopy error = %v, want branch head changed", err)
@@ -540,9 +540,18 @@ func TestRecoveryCopyRejectsBranchHeadDigestMismatchBeforePublication(t *testing
 	}
 }
 
+func TestRecoveryCopyFixturesFitPortablePathBudgetWithLongGoTemporaryTestNames(t *testing.T) {
+	source, sourceStore := recoveryCopySource(t)
+	defer sourceStore.Close()
+
+	if err := (Manager{}).ValidateRecoveryCopyPath(source, recoveryCopyDestination(t)); err != nil {
+		t.Fatalf("recovery copy fixture path = %v", err)
+	}
+}
+
 func recoveryCopySource(t *testing.T) (ports.ProjectPackage, *sqlite.Store) {
 	t.Helper()
-	packageInfo, err := (Manager{}).Create(t.TempDir(), "恢复副本")
+	packageInfo, err := (Manager{}).Create(recoveryCopyDestination(t), "恢复副本")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,6 +568,20 @@ func recoveryCopySource(t *testing.T) (ports.ProjectPackage, *sqlite.Store) {
 		t.Fatalf("store = %T", created)
 	}
 	return packageInfo, store
+}
+
+func recoveryCopyDestination(t *testing.T) string {
+	t.Helper()
+	directory, err := os.MkdirTemp(filepath.Join("..", "..", ".."), ".z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Errorf("remove recovery copy fixture directory: %v", err)
+		}
+	})
+	return directory
 }
 
 func mustRecoveryCopyChapter(t *testing.T, id, body string) projectdomain.Chapter {
