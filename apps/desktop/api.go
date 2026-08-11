@@ -14,6 +14,7 @@ type WorkspaceUseCases interface {
 	OpenProject(context.Context, string) (workspace.ProjectView, error)
 	OpenProjectReadOnly(context.Context, string) (workspace.ProjectView, error)
 	CreateProjectRecoveryCopy(context.Context, string, string) (workspace.RecoveryCopyResult, error)
+	FilesystemHealth(context.Context) (ports.ProjectFilesystemHealth, error)
 	ListChapters(context.Context) ([]workspace.ChapterView, error)
 	CreateChapter(context.Context, string) (workspace.ChapterView, error)
 	OpenChapter(context.Context, string) (workspace.ChapterView, error)
@@ -407,6 +408,10 @@ func (a *DesktopAPI) CreateProjectRecoveryCopy(input RecoveryCopyInput) (Recover
 		return RecoveryCopyResultView{}, safeDesktopError(err)
 	}
 	return RecoveryCopyResultView{}, safeDesktopError(ErrRecoveryCopyResultMissing)
+}
+
+func (a *DesktopAPI) FilesystemHealth() (ports.ProjectFilesystemHealth, error) {
+	return safeResult(a.workspace.FilesystemHealth(a.ctx))
 }
 
 func (a *DesktopAPI) ListChapters() ([]workspace.ChapterView, error) {

@@ -204,6 +204,23 @@ func (s *Service) RecheckFilesystemHealth(ctx context.Context) (ports.ProjectFil
 	return health, nil
 }
 
+// FilesystemHealth returns the active workspace's in-memory filesystem state.
+// It intentionally does not touch the project store: callers use it after a
+// failed write, when another filesystem access may be unsafe or unavailable.
+func (s *Service) FilesystemHealth(ctx context.Context) (ports.ProjectFilesystemHealth, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.ProjectFilesystemHealth{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return ports.ProjectFilesystemHealth{}, ErrNoActiveProject
+	}
+	health := s.active.filesystemHealth
+	health.Actions = append([]ports.ProjectFilesystemAction(nil), health.Actions...)
+	return health, nil
+}
+
 // handleFilesystemWriteFailureLocked preserves the source error while adding
 // the stable filesystem sentinel and updating only the active in-memory
 // health. Callers must hold s.mu for writing.

@@ -10,8 +10,41 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
+import { StudioClientError } from "../../lib/studio-client";
 
 describe("Workspace", () => {
+  it("updates the persistent filesystem risk after a classified chapter commit failure", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    client.commitChapterError = new StudioClientError(
+      "PROJECT_SHARING_VIOLATION",
+      "项目文件正被同步或其他程序占用，请稍后重试。",
+    );
+    const filesystemHealth = vi.fn(async () => ({
+      level: "degraded" as const,
+      category: "sharing_violation" as const,
+      actions: ["retry", "copy_text", "create_recovery_copy"] as const,
+    }));
+    Object.assign(client, { filesystemHealth });
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: /第一章/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "章节正文" }), {
+      target: { value: "不能丢失的正文" },
+    });
+    await act(
+      async () =>
+        await new Promise((resolve) => {
+          setTimeout(resolve, 800);
+        }),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("项目写入遇到风险");
+    expect(screen.getByRole("button", { name: "创建恢复副本" })).toBeEnabled();
+    expect(filesystemHealth).toHaveBeenCalledOnce();
+  });
+
   it("keeps an editable workspace enabled for sync risk", async () => {
     const client = FakeStudioClient.withReadyProject();
     const chapter = { ...client.createChapterResult, body: "可继续编辑" };

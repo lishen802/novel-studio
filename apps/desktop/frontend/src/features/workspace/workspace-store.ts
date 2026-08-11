@@ -38,6 +38,7 @@ export type WorkspaceState = {
   retryProjectOpen(): Promise<void>;
   openProjectReadOnly(): Promise<void>;
   createRecoveryCopy(): Promise<void>;
+  refreshFilesystemHealth(): Promise<void>;
   cancelProjectOpen(): void;
   loadProject(project: ProjectView): Promise<void>;
   createChapter(title: string): Promise<boolean>;
@@ -188,6 +189,32 @@ export function createWorkspaceStore(
         });
       } catch (error) {
         set({ status: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    async refreshFilesystemHealth() {
+      const current = get().status;
+      if (current.kind !== "ready") return;
+      const projectID = current.project.id;
+      try {
+        const filesystemHealth = await client.filesystemHealth();
+        set((latest) => {
+          if (
+            latest.status.kind !== "ready" ||
+            latest.status.project.id !== projectID
+          ) {
+            return {};
+          }
+          return {
+            status: {
+              ...latest.status,
+              project: { ...latest.status.project, filesystemHealth },
+            },
+          };
+        });
+      } catch {
+        // The write failure and its local recovery controls remain visible even
+        // when the health snapshot cannot be read.
       }
     },
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   RevisionConflictError,
+  StudioClientError,
   type ChapterView,
   type StudioClient,
 } from "../../lib/studio-client";
@@ -11,6 +12,7 @@ type ChapterEditorProps = {
   client: StudioClient;
   onChapterUpdated?: (chapter: ChapterView) => void;
   onFlushAvailable?: (flush: (() => Promise<void>) | null) => void;
+  onFilesystemHealthChanged?: () => Promise<void>;
   readOnly?: boolean;
 };
 
@@ -22,6 +24,7 @@ export function ChapterEditor({
   client,
   onChapterUpdated,
   onFlushAvailable,
+  onFilesystemHealthChanged,
   readOnly = false,
 }: ChapterEditorProps) {
   const [body, setBody] = useState(chapter.body);
@@ -43,7 +46,7 @@ export function ChapterEditor({
   const editVersion = useRef(0);
   const reloadRequest = useRef(0);
   const activeCommit = useRef<Promise<void>>(Promise.resolve());
-  const commitNow = useRef<() => Promise<void>>(async () => undefined);
+const commitNow = useRef<() => Promise<void>>(async () => undefined);
   const flushDraft = useRef<() => Promise<void>>(async () => undefined);
 
   const clearTimers = () => {
@@ -119,6 +122,9 @@ export function ChapterEditor({
         }
       } catch (error) {
         dirtyRef.current = true;
+        if (isProjectFilesystemError(error)) {
+          void onFilesystemHealthChanged?.();
+        }
         if (!(error instanceof RevisionConflictError)) {
           try {
             await client.saveDraft(chapter.id, committedBody, baseRevision);
@@ -327,5 +333,18 @@ export function ChapterEditor({
         />
       )}
     </section>
+  );
+}
+
+function isProjectFilesystemError(error: unknown): boolean {
+  return (
+    error instanceof StudioClientError &&
+    new Set([
+      "PROJECT_FILESYSTEM_PREFLIGHT_FAILED",
+      "PROJECT_PATH_TOO_LONG",
+      "PROJECT_SHARING_VIOLATION",
+      "PROJECT_CHECKPOINT_FAILED",
+      "PROJECT_ATOMIC_REPLACE_FAILED",
+    ]).has(error.code)
   );
 }

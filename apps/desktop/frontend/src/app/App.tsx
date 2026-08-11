@@ -84,6 +84,7 @@ export function App({
         onDismissError={state.clearWorkspaceError}
         onFlushAvailable={onFlushAvailable}
         onCreateRecoveryCopy={state.createRecoveryCopy}
+        onRefreshFilesystemHealth={state.refreshFilesystemHealth}
       />
     );
   }

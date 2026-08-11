@@ -46,6 +46,7 @@ type WorkspaceProps = {
   onDismissError(): void;
   onFlushAvailable(flush: (() => Promise<void>) | null): void;
   onCreateRecoveryCopy(): Promise<void>;
+  onRefreshFilesystemHealth(): Promise<void>;
 };
 
 export function Workspace({
@@ -61,6 +62,7 @@ export function Workspace({
   onDismissError,
   onFlushAvailable,
   onCreateRecoveryCopy,
+  onRefreshFilesystemHealth,
 }: WorkspaceProps) {
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
@@ -315,6 +317,7 @@ export function Workspace({
               client={client}
               onChapterUpdated={onChapterUpdated}
               onFlushAvailable={onFlushAvailable}
+              onFilesystemHealthChanged={onRefreshFilesystemHealth}
               readOnly={readOnly}
             />
           ) : (

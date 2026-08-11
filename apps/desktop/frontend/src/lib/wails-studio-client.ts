@@ -98,6 +98,25 @@ import {
   type JobSummaryView,
 } from "./studio-client";
 
+const projectFilesystemHealthSchema = z.object({
+  level: z.enum(["normal", "warning", "degraded"]),
+  category: z.enum([
+    "",
+    "sync_risk",
+    "path_too_long",
+    "sharing_violation",
+    "busy",
+    "read_only",
+    "disk_full",
+    "io",
+    "checkpoint",
+    "atomic_replace",
+    "preflight",
+  ]),
+  actions: z.array(
+    z.enum(["retry", "copy_text", "open_read_only", "create_recovery_copy"]),
+  ),
+}).strict();
 const projectSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -105,25 +124,7 @@ const projectSchema = z.object({
   summary: z.string(),
   path: z.string(),
   accessMode: z.enum(["editable", "read_only"]),
-  filesystemHealth: z.object({
-    level: z.enum(["normal", "warning", "degraded"]),
-    category: z.enum([
-      "",
-      "sync_risk",
-      "path_too_long",
-      "sharing_violation",
-      "busy",
-      "read_only",
-      "disk_full",
-      "io",
-      "checkpoint",
-      "atomic_replace",
-      "preflight",
-    ]),
-    actions: z.array(
-      z.enum(["retry", "copy_text", "open_read_only", "create_recovery_copy"]),
-    ),
-  }).strict(),
+  filesystemHealth: projectFilesystemHealthSchema,
 }).strict();
 const projectLeaseHolderSchema = z.object({
   pid: z.number().int().nonnegative(),
@@ -1128,6 +1129,7 @@ type NativeDesktopAPI = {
   CreateProject(input: CreateProjectInput): Promise<unknown>;
   OpenProject(input: ProjectOpenInput): Promise<unknown>;
   CreateProjectRecoveryCopy(input: RecoveryCopyInput): Promise<unknown>;
+  FilesystemHealth(): Promise<unknown>;
   ListChapters(): Promise<unknown>;
   CreateChapter(title: string): Promise<unknown>;
   OpenChapter(id: string): Promise<unknown>;
@@ -1294,6 +1296,10 @@ function nativeAPI(): NativeDesktopAPI {
 
 function projectView(value: unknown): ProjectView {
   return projectSchema.parse(value);
+}
+
+function projectFilesystemHealth(value: unknown) {
+  return projectFilesystemHealthSchema.parse(value);
 }
 
 function projectOpenResultView(value: unknown): ProjectOpenResultView {
@@ -1557,6 +1563,11 @@ export const wailsStudioClient: StudioClient = {
   async createProjectRecoveryCopy(input) {
     return recoveryCopyResultView(
       await safeCall(() => nativeAPI().CreateProjectRecoveryCopy(input)),
+    );
+  },
+  async filesystemHealth() {
+    return projectFilesystemHealth(
+      await safeCall(() => nativeAPI().FilesystemHealth()),
     );
   },
   async listChapters() {

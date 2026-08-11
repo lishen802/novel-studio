@@ -69,6 +69,24 @@ func TestDesktopAPIMapsSharingViolationToSafeCode(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIFilesystemHealthReturnsOnlyTypedHealth(t *testing.T) {
+	want := ports.ProjectFilesystemHealth{
+		Level:    ports.ProjectFilesystemDegraded,
+		Category: ports.ProjectFilesystemSharingViolation,
+		Actions:  []ports.ProjectFilesystemAction{ports.ProjectFilesystemRetry, ports.ProjectFilesystemCreateRecoveryCopy},
+	}
+	api := newDesktopAPI(&fakeWorkspace{filesystemHealthResult: want}, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	got, err := api.FilesystemHealth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FilesystemHealth() = %#v, want %#v", got, want)
+	}
+}
+
 func TestDesktopAPIOpenProjectUsesStructuredAccessContract(t *testing.T) {
 	editable := workspace.ProjectView{
 		ID:         "project-1",
@@ -1144,6 +1162,8 @@ type fakeWorkspace struct {
 	jobEventsErr             error
 	recoverableJobsResult    []workspace.JobSummaryView
 	recoverableJobsErr       error
+	filesystemHealthResult   ports.ProjectFilesystemHealth
+	filesystemHealthErr      error
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -1177,6 +1197,10 @@ func (f *fakeWorkspace) OpenProjectReadOnly(_ context.Context, path string) (wor
 func (f *fakeWorkspace) CreateProjectRecoveryCopy(_ context.Context, sourcePath, parentDirectory string) (workspace.RecoveryCopyResult, error) {
 	f.recoveryCopyInput = recoveryCopyCall{sourcePath: sourcePath, parentDirectory: parentDirectory}
 	return f.recoveryCopyResult, f.recoveryCopyErr
+}
+
+func (f *fakeWorkspace) FilesystemHealth(context.Context) (ports.ProjectFilesystemHealth, error) {
+	return f.filesystemHealthResult, f.filesystemHealthErr
 }
 
 func (f *fakeWorkspace) ListChapters(context.Context) ([]workspace.ChapterView, error) {

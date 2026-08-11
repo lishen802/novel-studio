@@ -135,6 +135,7 @@ export class FakeStudioClient implements StudioClient {
   openProjectResult: ProjectView = this.createProjectResult;
   projectOpenResponse: ProjectOpenResultView | null = null;
   recoveryCopyResponse: RecoveryCopyResultView | null = null;
+  filesystemHealthResult = this.createProjectResult.filesystemHealth;
   chaptersResult: ChapterView[] = [];
   createChapterResult: ChapterView = {
     id: "chapter-1",
@@ -244,6 +245,7 @@ export class FakeStudioClient implements StudioClient {
   openProjectCalls: string[] = [];
   openProjectInputs: Array<{ path: string; mode: ProjectAccessMode }> = [];
   createProjectRecoveryCopyCalls: RecoveryCopyInput[] = [];
+  filesystemHealthCalls = 0;
   createChapterCalls: string[] = [];
   openChapterCalls: string[] = [];
   saveDraftCalls: ChapterWriteCall[] = [];
@@ -657,6 +659,11 @@ export class FakeStudioClient implements StudioClient {
       path: this.openProjectResult.path,
       project: this.openProjectResult,
     };
+  }
+
+  async filesystemHealth() {
+    this.filesystemHealthCalls++;
+    return this.filesystemHealthResult;
   }
 
   async listChapters(): Promise<ChapterView[]> {

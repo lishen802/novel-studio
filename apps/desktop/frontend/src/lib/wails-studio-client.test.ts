@@ -66,6 +66,7 @@ function installNative(overrides: Record<string, unknown> = {}) {
     CreateProject: vi.fn(async () => project),
     OpenProject: vi.fn(async () => project),
     CreateProjectRecoveryCopy: vi.fn(),
+    FilesystemHealth: vi.fn(async () => project.filesystemHealth),
     ListChapters: vi.fn(async () => []),
     CreateChapter: vi.fn(),
     OpenChapter: vi.fn(),

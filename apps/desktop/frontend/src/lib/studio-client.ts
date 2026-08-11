@@ -784,6 +784,7 @@ export interface StudioClient {
   createProjectRecoveryCopy(
     input: RecoveryCopyInput,
   ): Promise<RecoveryCopyResultView>;
+  filesystemHealth(): Promise<ProjectFilesystemHealth>;
   listChapters(): Promise<ChapterView[]>;
   createChapter(title: string): Promise<ChapterView>;
   openChapter(chapterId: string): Promise<ChapterView>;
