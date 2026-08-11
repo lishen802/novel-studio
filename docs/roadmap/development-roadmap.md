@@ -155,7 +155,7 @@ R0 三项计划已全部完成并通过三平台 Foundation CI（Ubuntu race/vet
 1. [R1 Agent job lease 与工作区锁隔离](../plans/2026-08-06-r1-agent-job-lease-workspace-lock-isolation-implementation.md)（`completed`）
 2. [R1 可恢复 JobEvent feed](../plans/2026-08-06-r1-recoverable-job-event-feed-implementation.md)（`completed`）
 3. [R1.3 项目生命周期保护](../plans/2026-08-10-r1-project-lifecycle-protection-implementation.md)（`completed`）
-4. `R1.4 Windows 文件锁、写入探针与路径边界`
+4. [R1.4 Windows 文件锁、写入探针与路径边界](../plans/2026-08-11-r1-windows-file-lock-write-probe-path-boundaries-implementation.md)（`in_progress`）
 
 R1.1 已完成并通过三平台 Foundation CI（run `31089401016`：Ubuntu race/vet、macOS 生产构建、Windows 完整 Go tests 与生产构建）。Agent 与抽取作业的 Provider 调用不再持有工作区全局锁，作者可在模型 IO 期间保存草稿与新建章节；项目切换/关闭先 drain job lease 再关闭 store，generation 安全网保证作业不向已关闭 store 回写，超时作业转入 `recoverable` 供作者重试。R1.2–R1.4 按其退出标准依次推进。
 

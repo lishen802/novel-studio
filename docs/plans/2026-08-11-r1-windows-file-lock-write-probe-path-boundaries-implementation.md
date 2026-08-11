@@ -10,6 +10,12 @@
 
 ---
 
+- 状态：`in_progress`
+- 路线图阶段：[R1：长任务与项目可靠性](../roadmap/development-roadmap.md#6-r1长任务与项目可靠性)
+- 上游依据：[产品需求 5.1.7–5.1.8、13](../product/requirements.md)、[产品设计 8/10.15](../product/design.md)、[系统设计 3、5、13、14](../architecture/system-design.md)、[ADR-0002](../architecture/0002-go-first-wails-stack.md)、[ADR-0003](../architecture/0003-wails-project-layout.md)
+- 前置计划：[R1.3 项目生命周期保护](2026-08-10-r1-project-lifecycle-protection-implementation.md)（`completed`）
+- 同阶段后续：R1 退出验收与完成证据
+
 ## File map
 
 - Create `internal/application/ports/project_filesystem.go`: stable health, action, failure and guard contracts.
@@ -475,3 +481,4 @@ git commit -m "docs: close R1.4 filesystem reliability"
 Run: `git diff --check && git status --short && go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`
 
 Expected: empty status, no sensitive artifacts, and PASS. Merge the isolated feature branch into `main` only after the recorded Windows/macOS evidence is successful.
+
