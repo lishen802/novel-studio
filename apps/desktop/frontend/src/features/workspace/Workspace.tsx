@@ -27,6 +27,7 @@ import { ChangeReviewWorkbench } from "../revisions/ChangeReviewWorkbench";
 import { VersionHistoryWorkbench } from "../revisions/VersionHistoryWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
+import { ProjectFilesystemRiskBanner } from "./ProjectFilesystemRiskBanner";
 import type { WorkspaceStatus } from "./workspace-store";
 
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
@@ -44,6 +45,7 @@ type WorkspaceProps = {
   onBeforeVersionOperation(): Promise<void>;
   onDismissError(): void;
   onFlushAvailable(flush: (() => Promise<void>) | null): void;
+  onCreateRecoveryCopy(): Promise<void>;
 };
 
 export function Workspace({
@@ -58,6 +60,7 @@ export function Workspace({
   onBeforeVersionOperation,
   onDismissError,
   onFlushAvailable,
+  onCreateRecoveryCopy,
 }: WorkspaceProps) {
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
@@ -77,6 +80,11 @@ export function Workspace({
     (chapter) => chapter.id === workspace.activeChapterId,
   );
   const readOnly = workspace.project.accessMode === "read_only";
+  const filesystemHealth = workspace.project.filesystemHealth ?? {
+    level: "normal" as const,
+    category: "" as const,
+    actions: [],
+  };
   const openNewChapter = () => {
     if (readOnly) return;
     onDismissError();
@@ -121,6 +129,10 @@ export function Workspace({
             只读模式：可查看，不会写入或更新恢复数据。
           </p>
         )}
+        <ProjectFilesystemRiskBanner
+          health={filesystemHealth}
+          onCreateRecoveryCopy={() => void onCreateRecoveryCopy()}
+        />
 
         <nav className="workspace-sections" aria-label="作品功能">
           <button

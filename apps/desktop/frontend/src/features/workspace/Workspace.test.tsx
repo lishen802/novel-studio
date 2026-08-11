@@ -12,6 +12,21 @@ import { App } from "../../app/App";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 
 describe("Workspace", () => {
+  it("keeps an editable workspace enabled for sync risk", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = { ...client.createChapterResult, body: "可继续编辑" };
+    client.openProjectResult = {
+      ...client.openProjectResult,
+      filesystemHealth: { level: "warning", category: "sync_risk", actions: [] },
+    };
+    client.chaptersResult = [chapter];
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+    await user.click(await screen.findByRole("button", { name: /第一章/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("项目文件系统存在风险");
+    expect(screen.getByRole("textbox", { name: "章节正文" })).not.toHaveAttribute("readonly");
+  });
+
   it("renders a read-only workspace without author save controls", async () => {
     const client = FakeStudioClient.withReadyProject();
     const chapter = { ...client.createChapterResult, body: "只读正文" };
@@ -37,6 +52,7 @@ describe("Workspace", () => {
       summary: "失落城邦与梦境交叠。",
       path: "/books/长夜织境.zjproject",
       accessMode: "editable",
+      filesystemHealth: { level: "normal", category: "", actions: [] },
     };
     const user = userEvent.setup();
     render(<App client={client} />);

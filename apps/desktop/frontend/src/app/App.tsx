@@ -83,6 +83,7 @@ export function App({
         onBeforeVersionOperation={flushPendingChapterChanges}
         onDismissError={state.clearWorkspaceError}
         onFlushAvailable={onFlushAvailable}
+        onCreateRecoveryCopy={state.createRecoveryCopy}
       />
     );
   }

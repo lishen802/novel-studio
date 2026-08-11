@@ -30,47 +30,52 @@ var (
 )
 
 const (
-	errorProjectNotFound      desktopErrorCode = "PROJECT_NOT_FOUND"
-	errorPermissionDenied     desktopErrorCode = "PERMISSION_DENIED"
-	errorProjectCorrupt       desktopErrorCode = "PROJECT_CORRUPT"
-	errorProjectTooNew        desktopErrorCode = "PROJECT_TOO_NEW"
-	errorProjectReadOnly      desktopErrorCode = "PROJECT_READ_ONLY"
-	errorProjectMigration     desktopErrorCode = "PROJECT_MIGRATION_REQUIRED"
-	errorProjectRecovery      desktopErrorCode = "PROJECT_RECOVERY_REQUIRED"
-	errorRecoveryCopyChanged  desktopErrorCode = "RECOVERY_COPY_SOURCE_CHANGED"
-	errorRecoveryCopyFailed   desktopErrorCode = "RECOVERY_COPY_FAILED"
-	errorRevisionConflict     desktopErrorCode = "REVISION_CONFLICT"
-	errorWriteFailed          desktopErrorCode = "WRITE_FAILED"
-	errorDatabaseBusy         desktopErrorCode = "DATABASE_BUSY"
-	errorReferenceConflict    desktopErrorCode = "REFERENCE_CONFLICT"
-	errorBranchConflict       desktopErrorCode = "BRANCH_CONFLICT"
-	errorAgentBudgetExceeded  desktopErrorCode = "AGENT_BUDGET_EXCEEDED"
-	errorAgentContextExceeded desktopErrorCode = "AGENT_CONTEXT_EXCEEDED"
-	errorAgentRunActive       desktopErrorCode = "AGENT_RUN_ACTIVE"
-	errorOperationCancelled   desktopErrorCode = "OPERATION_CANCELLED"
-	errorOperationTimeout     desktopErrorCode = "OPERATION_TIMEOUT"
-	errorImportFormat         desktopErrorCode = "IMPORT_FORMAT_UNSUPPORTED"
-	errorImportEmpty          desktopErrorCode = "IMPORT_SOURCE_EMPTY"
-	errorImportTooLarge       desktopErrorCode = "IMPORT_SOURCE_TOO_LARGE"
-	errorImportEncoding       desktopErrorCode = "IMPORT_ENCODING_UNSUPPORTED"
-	errorImportUnsafe         desktopErrorCode = "IMPORT_SOURCE_UNSAFE"
-	errorImportDuplicate      desktopErrorCode = "IMPORT_SOURCE_DUPLICATE"
-	errorImportJobMissing     desktopErrorCode = "IMPORT_JOB_MISSING"
-	errorImportJobApplied     desktopErrorCode = "IMPORT_JOB_APPLIED"
-	errorImportJobNotPrepared desktopErrorCode = "IMPORT_JOB_NOT_PREPARED"
-	errorImportSelection      desktopErrorCode = "IMPORT_SELECTION_REQUIRED"
-	errorImportMapping        desktopErrorCode = "IMPORT_MAPPING_INVALID"
-	errorImportArchive        desktopErrorCode = "IMPORT_ARCHIVE_UNSUPPORTED"
-	errorImportCleanup        desktopErrorCode = "IMPORT_ARCHIVE_CLEANUP_FAILED"
-	errorImportActive         desktopErrorCode = "IMPORT_ACTIVE"
-	errorImportRefresh        desktopErrorCode = "IMPORT_APPLIED_REFRESH_FAILED"
-	errorImportWorkspaceRead  desktopErrorCode = "IMPORT_WORKSPACE_READ_FAILED"
-	errorImportPrepare        desktopErrorCode = "IMPORT_SOURCE_PREPARE_FAILED"
-	errorImportUnavailable    desktopErrorCode = "IMPORT_UNAVAILABLE"
-	errorImportInvalid        desktopErrorCode = "IMPORT_DATA_INVALID"
-	errorImportPersistence    desktopErrorCode = "IMPORT_PERSISTENCE_FAILED"
-	errorValidationFailed     desktopErrorCode = "VALIDATION_FAILED"
-	errorOperationFailed      desktopErrorCode = "OPERATION_FAILED"
+	errorProjectNotFound            desktopErrorCode = "PROJECT_NOT_FOUND"
+	errorPermissionDenied           desktopErrorCode = "PERMISSION_DENIED"
+	errorProjectCorrupt             desktopErrorCode = "PROJECT_CORRUPT"
+	errorProjectTooNew              desktopErrorCode = "PROJECT_TOO_NEW"
+	errorProjectReadOnly            desktopErrorCode = "PROJECT_READ_ONLY"
+	errorProjectMigration           desktopErrorCode = "PROJECT_MIGRATION_REQUIRED"
+	errorProjectRecovery            desktopErrorCode = "PROJECT_RECOVERY_REQUIRED"
+	errorRecoveryCopyChanged        desktopErrorCode = "RECOVERY_COPY_SOURCE_CHANGED"
+	errorRecoveryCopyFailed         desktopErrorCode = "RECOVERY_COPY_FAILED"
+	errorProjectFilesystemPreflight desktopErrorCode = "PROJECT_FILESYSTEM_PREFLIGHT_FAILED"
+	errorProjectPathTooLong         desktopErrorCode = "PROJECT_PATH_TOO_LONG"
+	errorProjectSharingViolation    desktopErrorCode = "PROJECT_SHARING_VIOLATION"
+	errorProjectCheckpointFailed    desktopErrorCode = "PROJECT_CHECKPOINT_FAILED"
+	errorProjectAtomicReplaceFailed desktopErrorCode = "PROJECT_ATOMIC_REPLACE_FAILED"
+	errorRevisionConflict           desktopErrorCode = "REVISION_CONFLICT"
+	errorWriteFailed                desktopErrorCode = "WRITE_FAILED"
+	errorDatabaseBusy               desktopErrorCode = "DATABASE_BUSY"
+	errorReferenceConflict          desktopErrorCode = "REFERENCE_CONFLICT"
+	errorBranchConflict             desktopErrorCode = "BRANCH_CONFLICT"
+	errorAgentBudgetExceeded        desktopErrorCode = "AGENT_BUDGET_EXCEEDED"
+	errorAgentContextExceeded       desktopErrorCode = "AGENT_CONTEXT_EXCEEDED"
+	errorAgentRunActive             desktopErrorCode = "AGENT_RUN_ACTIVE"
+	errorOperationCancelled         desktopErrorCode = "OPERATION_CANCELLED"
+	errorOperationTimeout           desktopErrorCode = "OPERATION_TIMEOUT"
+	errorImportFormat               desktopErrorCode = "IMPORT_FORMAT_UNSUPPORTED"
+	errorImportEmpty                desktopErrorCode = "IMPORT_SOURCE_EMPTY"
+	errorImportTooLarge             desktopErrorCode = "IMPORT_SOURCE_TOO_LARGE"
+	errorImportEncoding             desktopErrorCode = "IMPORT_ENCODING_UNSUPPORTED"
+	errorImportUnsafe               desktopErrorCode = "IMPORT_SOURCE_UNSAFE"
+	errorImportDuplicate            desktopErrorCode = "IMPORT_SOURCE_DUPLICATE"
+	errorImportJobMissing           desktopErrorCode = "IMPORT_JOB_MISSING"
+	errorImportJobApplied           desktopErrorCode = "IMPORT_JOB_APPLIED"
+	errorImportJobNotPrepared       desktopErrorCode = "IMPORT_JOB_NOT_PREPARED"
+	errorImportSelection            desktopErrorCode = "IMPORT_SELECTION_REQUIRED"
+	errorImportMapping              desktopErrorCode = "IMPORT_MAPPING_INVALID"
+	errorImportArchive              desktopErrorCode = "IMPORT_ARCHIVE_UNSUPPORTED"
+	errorImportCleanup              desktopErrorCode = "IMPORT_ARCHIVE_CLEANUP_FAILED"
+	errorImportActive               desktopErrorCode = "IMPORT_ACTIVE"
+	errorImportRefresh              desktopErrorCode = "IMPORT_APPLIED_REFRESH_FAILED"
+	errorImportWorkspaceRead        desktopErrorCode = "IMPORT_WORKSPACE_READ_FAILED"
+	errorImportPrepare              desktopErrorCode = "IMPORT_SOURCE_PREPARE_FAILED"
+	errorImportUnavailable          desktopErrorCode = "IMPORT_UNAVAILABLE"
+	errorImportInvalid              desktopErrorCode = "IMPORT_DATA_INVALID"
+	errorImportPersistence          desktopErrorCode = "IMPORT_PERSISTENCE_FAILED"
+	errorValidationFailed           desktopErrorCode = "VALIDATION_FAILED"
+	errorOperationFailed            desktopErrorCode = "OPERATION_FAILED"
 )
 
 type desktopError struct {
@@ -85,6 +90,9 @@ func (e *desktopError) Error() string {
 func safeDesktopError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if code, message, ok := safeProjectFilesystemError(err); ok {
+		return &desktopError{Code: code, Message: message}
 	}
 
 	code := errorOperationFailed
@@ -201,6 +209,27 @@ func safeDesktopError(err error) error {
 		code, message = errorDatabaseBusy, "项目正在被其他操作占用，请稍后重试。"
 	}
 	return &desktopError{Code: code, Message: message}
+}
+
+func safeProjectFilesystemError(err error) (desktopErrorCode, string, bool) {
+	var failure *ports.ProjectFilesystemFailure
+	if !errors.As(err, &failure) {
+		return "", "", false
+	}
+	switch failure.Category {
+	case ports.ProjectFilesystemPreflight:
+		return errorProjectFilesystemPreflight, "项目文件系统检查未通过，请检查位置后重试。", true
+	case ports.ProjectFilesystemPathTooLong:
+		return errorProjectPathTooLong, "项目路径过长，请移动到更短的位置后重试。", true
+	case ports.ProjectFilesystemSharingViolation:
+		return errorProjectSharingViolation, "项目文件正被同步或其他程序占用，请稍后重试。", true
+	case ports.ProjectFilesystemCheckpoint:
+		return errorProjectCheckpointFailed, "项目检查点写入失败，请检查位置后重试。", true
+	case ports.ProjectFilesystemAtomicReplace:
+		return errorProjectAtomicReplaceFailed, "项目文件替换失败，请检查位置后重试。", true
+	default:
+		return "", "", false
+	}
 }
 
 func safeResult[T any](value T, err error) (T, error) {

@@ -15,6 +15,7 @@ type ChapterEditorProps = {
 };
 
 type SaveState = "committed" | "drafting" | "drafted" | "conflict" | "error";
+type CommitRecoveryState = "none" | "saved" | "failed";
 
 export function ChapterEditor({
   chapter,
@@ -26,6 +27,8 @@ export function ChapterEditor({
   const [body, setBody] = useState(chapter.body);
   const [revision, setRevision] = useState(chapter.revision);
   const [saveState, setSaveState] = useState<SaveState>("committed");
+  const [commitRecoveryState, setCommitRecoveryState] =
+    useState<CommitRecoveryState>("none");
   const [reloading, setReloading] = useState(false);
   const [showRecovery, setShowRecovery] = useState(chapter.hasRecoveryDraft);
   const [recoveryDeferred, setRecoveryDeferred] = useState(false);
@@ -55,6 +58,7 @@ export function ChapterEditor({
     clearTimers();
     editVersion.current++;
     dirtyRef.current = true;
+    setCommitRecoveryState("none");
     setSaveState(reloadingRef.current ? "conflict" : "drafting");
 
     draftTimer.current = setTimeout(async () => {
@@ -100,6 +104,7 @@ export function ChapterEditor({
         if (bodyRef.current === committedBody) {
           dirtyRef.current = false;
           setSaveState("committed");
+          setCommitRecoveryState("none");
         } else {
           try {
             await client.saveDraft(
@@ -113,6 +118,15 @@ export function ChapterEditor({
           }
         }
       } catch (error) {
+        dirtyRef.current = true;
+        if (!(error instanceof RevisionConflictError)) {
+          try {
+            await client.saveDraft(chapter.id, committedBody, baseRevision);
+            setCommitRecoveryState("saved");
+          } catch {
+            setCommitRecoveryState("failed");
+          }
+        }
         setSaveState(error instanceof RevisionConflictError ? "conflict" : "error");
       } finally {
         committing.current = false;
@@ -155,6 +169,7 @@ export function ChapterEditor({
     revisionRef.current = chapter.revision;
     dirtyRef.current = false;
     setSaveState("committed");
+    setCommitRecoveryState("none");
     setShowRecovery(!readOnly && chapter.hasRecoveryDraft);
     setRecoveryDeferred(false);
 
@@ -249,6 +264,28 @@ export function ChapterEditor({
           <button type="button" disabled={reloading} onClick={() => void reload()}>
             {reloading ? "正在加载…" : "重新加载服务器版本"}
           </button>
+        </div>
+      )}
+
+      {commitRecoveryState !== "none" && (
+        <div className="editor-alert" role="alert">
+          <span>
+            {commitRecoveryState === "saved"
+              ? "恢复草稿已安全保存"
+              : "无法保存恢复草稿；请复制文本"}
+          </span>
+          <div className="editor-alert__actions">
+            <button type="button" onClick={() => void commitNow.current()}>
+              重试保存
+            </button>
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => void navigator.clipboard.writeText(bodyRef.current)}
+            >
+              复制文本
+            </button>
+          </div>
         </div>
       )}
 

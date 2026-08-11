@@ -152,17 +152,27 @@ export function createWorkspaceStore(
 
     async createRecoveryCopy() {
       const current = get().status;
-      if (current.kind !== "lease_conflict" || current.busy) return;
+      const sourcePath =
+        current.kind === "lease_conflict"
+          ? current.conflict.path
+          : current.kind === "ready" && current.project.accessMode === "editable"
+            ? current.project.path
+            : null;
+      if (!sourcePath || (current.kind === "lease_conflict" && current.busy)) return;
       try {
-        set({ status: { ...current, busy: true } });
+        if (current.kind === "lease_conflict") {
+          set({ status: { ...current, busy: true } });
+        }
         const parentDirectory = await client.chooseProjectParent();
         if (!parentDirectory) {
-          set({ status: { ...current, busy: false } });
+          if (current.kind === "lease_conflict") {
+            set({ status: { ...current, busy: false } });
+          }
           return;
         }
         set({ status: { kind: "opening" } });
         const result = await client.createProjectRecoveryCopy({
-          sourcePath: current.conflict.path,
+          sourcePath,
           parentDirectory,
         });
         if (result.outcome === "opened") {

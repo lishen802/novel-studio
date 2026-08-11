@@ -105,6 +105,25 @@ const projectSchema = z.object({
   summary: z.string(),
   path: z.string(),
   accessMode: z.enum(["editable", "read_only"]),
+  filesystemHealth: z.object({
+    level: z.enum(["normal", "warning", "degraded"]),
+    category: z.enum([
+      "",
+      "sync_risk",
+      "path_too_long",
+      "sharing_violation",
+      "busy",
+      "read_only",
+      "disk_full",
+      "io",
+      "checkpoint",
+      "atomic_replace",
+      "preflight",
+    ]),
+    actions: z.array(
+      z.enum(["retry", "copy_text", "open_read_only", "create_recovery_copy"]),
+    ),
+  }).strict(),
 }).strict();
 const projectLeaseHolderSchema = z.object({
   pid: z.number().int().nonnegative(),

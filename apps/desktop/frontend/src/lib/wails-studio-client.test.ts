@@ -19,6 +19,7 @@ const project = {
   summary: "",
   path: "/books/长夜织境.zjproject",
   accessMode: "editable",
+  filesystemHealth: { level: "normal", category: "", actions: [] },
 };
 
 function nativeImportJob(overrides: Record<string, unknown> = {}) {

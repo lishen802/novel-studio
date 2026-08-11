@@ -181,6 +181,52 @@ describe("ChapterEditor", () => {
     ).toBeEnabled();
   });
 
+  it("safely saves one recovery draft when a commit fails", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.commitChapterError = new Error("PROJECT_SHARING_VIOLATION|写入遇到风险");
+    render(<ChapterEditor chapter={client.createChapterResult} client={client} />);
+    const editor = screen.getByRole("textbox", { name: "章节正文" });
+    fireEvent.change(editor, { target: { value: "必须保留的文本" } });
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    await act(async () => vi.advanceTimersByTimeAsync(550));
+    expect(editor).toHaveValue("必须保留的文本");
+    expect(client.saveDraftCalls).toHaveLength(2);
+    expect(client.saveDraftCalls).toContainEqual({ chapterId: "chapter-1", body: "必须保留的文本", baseRevision: 1 });
+    expect(screen.getByRole("alert")).toHaveTextContent("恢复草稿已安全保存");
+  });
+
+  it("tells the author to copy text when draft recovery also fails", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.commitChapterError = new Error("PROJECT_SHARING_VIOLATION|写入遇到风险");
+    render(<ChapterEditor chapter={client.createChapterResult} client={client} />);
+    const editor = screen.getByRole("textbox", { name: "章节正文" });
+    fireEvent.change(editor, { target: { value: "无法写入的文本" } });
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    client.saveDraftError = new Error("PROJECT_SHARING_VIOLATION|写入遇到风险");
+    await act(async () => vi.advanceTimersByTimeAsync(550));
+    expect(editor).toHaveValue("无法写入的文本");
+    expect(screen.getByRole("alert")).toHaveTextContent("无法保存恢复草稿；请复制文本");
+  });
+
+  it("retries the failed commit and copies the retained text", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.commitChapterError = new Error("PROJECT_SHARING_VIOLATION|写入遇到风险");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<ChapterEditor chapter={client.createChapterResult} client={client} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "章节正文" }), { target: { value: "可恢复正文" } });
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+    fireEvent.click(screen.getByRole("button", { name: "复制文本" }));
+    expect(writeText).toHaveBeenCalledWith("可恢复正文");
+    client.commitChapterError = null;
+    fireEvent.click(screen.getByRole("button", { name: "重试保存" }));
+    await act(async () => Promise.resolve());
+    expect(client.commitChapterCalls).toEqual([
+      { chapterId: "chapter-1", body: "可恢复正文", baseRevision: 1 },
+      { chapterId: "chapter-1", body: "可恢复正文", baseRevision: 1 },
+    ]);
+  });
+
   it("does not overwrite newer local input while conflict reload is pending", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.commitChapterError = new RevisionConflictError();

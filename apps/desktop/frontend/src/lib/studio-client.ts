@@ -14,9 +14,33 @@ export type ProjectView = {
   summary: string;
   path: string;
   accessMode: ProjectAccessMode;
+  filesystemHealth: ProjectFilesystemHealth;
 };
 
 export type ProjectAccessMode = "editable" | "read_only";
+export type ProjectFilesystemHealthLevel = "normal" | "warning" | "degraded";
+export type ProjectFilesystemCategory =
+  | ""
+  | "sync_risk"
+  | "path_too_long"
+  | "sharing_violation"
+  | "busy"
+  | "read_only"
+  | "disk_full"
+  | "io"
+  | "checkpoint"
+  | "atomic_replace"
+  | "preflight";
+export type ProjectFilesystemAction =
+  | "retry"
+  | "copy_text"
+  | "open_read_only"
+  | "create_recovery_copy";
+export type ProjectFilesystemHealth = {
+  level: ProjectFilesystemHealthLevel;
+  category: ProjectFilesystemCategory;
+  actions: ProjectFilesystemAction[];
+};
 export type ProjectOpenInput = {
   path: string;
   mode: ProjectAccessMode;

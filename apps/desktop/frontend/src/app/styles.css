@@ -677,6 +677,42 @@ button:disabled {
   background: rgba(233, 189, 134, 0.08);
 }
 
+.project-filesystem-risk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 16px 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(108, 122, 166, 0.3);
+  border-radius: 9px;
+  color: #c4cce5;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  background: rgba(108, 122, 166, 0.1);
+}
+
+.project-filesystem-risk > div {
+  display: grid;
+  gap: 3px;
+}
+
+.project-filesystem-risk strong {
+  font-size: 0.78rem;
+}
+
+.project-filesystem-risk--degraded {
+  border-color: rgba(162, 70, 61, 0.34);
+  color: #f0b7b0;
+  background: rgba(162, 70, 61, 0.12);
+}
+
+.project-filesystem-risk button,
+.editor-alert__actions button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .workspace-main--read-only::before {
   display: block;
   margin: 16px 24px -6px;
@@ -2425,6 +2461,18 @@ button:disabled {
 .editor-alert button {
   color: #fff8f0;
   background: #94463e;
+}
+
+.editor-alert__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.editor-alert__actions .secondary-action {
+  color: #873c35;
+  border: 1px solid rgba(162, 70, 61, 0.3);
+  background: transparent;
 }
 
 .recovery-dialog {

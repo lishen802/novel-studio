@@ -130,6 +130,7 @@ export class FakeStudioClient implements StudioClient {
     summary: "",
     path: "/books/长夜织境.zjproject",
     accessMode: "editable",
+    filesystemHealth: { level: "normal", category: "", actions: [] },
   };
   openProjectResult: ProjectView = this.createProjectResult;
   projectOpenResponse: ProjectOpenResultView | null = null;

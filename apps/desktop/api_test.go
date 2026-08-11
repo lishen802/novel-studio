@@ -48,6 +48,27 @@ func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
 	}
 }
 
+func TestDesktopAPIMapsSharingViolationToSafeCode(t *testing.T) {
+	api := newDesktopAPI(&fakeWorkspace{
+		commitErr: &ports.ProjectFilesystemFailure{
+			Category: ports.ProjectFilesystemSharingViolation,
+		},
+	}, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	_, err := api.CommitChapter("chapter-1", "不应泄露的正文", 1)
+	var got *desktopError
+	if !errors.As(err, &got) {
+		t.Fatalf("CommitChapter() error = %#v, want desktop error", err)
+	}
+	if got.Code != desktopErrorCode("PROJECT_SHARING_VIOLATION") {
+		t.Fatalf("CommitChapter() code = %q", got.Code)
+	}
+	if containsAny(got.Message, "正文", "filesystem", "sqlite", "/") {
+		t.Fatalf("unsafe filesystem error message: %q", got.Message)
+	}
+}
+
 func TestDesktopAPIOpenProjectUsesStructuredAccessContract(t *testing.T) {
 	editable := workspace.ProjectView{
 		ID:         "project-1",
