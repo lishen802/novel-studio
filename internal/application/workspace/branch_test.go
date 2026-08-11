@@ -19,6 +19,7 @@ import (
 
 func TestSwitchBranchPreservesFilesystemHealthInWorkspaceAndView(t *testing.T) {
 	ctx := context.Background()
+	parentDir := t.TempDir()
 	service := NewService(
 		projectfs.Manager{},
 		sqlite.Factory{},
@@ -29,7 +30,7 @@ func TestSwitchBranchPreservesFilesystemHealthInWorkspaceAndView(t *testing.T) {
 		branchfs.Archive{},
 	)
 	t.Cleanup(func() { _ = service.Close() })
-	if _, err := service.CreateProject(ctx, t.TempDir(), "分支健康", "奇幻", ""); err != nil {
+	if _, err := service.CreateProject(ctx, parentDir, "分支健康", "奇幻", ""); err != nil {
 		t.Fatal(err)
 	}
 	created, err := service.CreateBranch(ctx, "健康分支", "")
