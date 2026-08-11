@@ -6,7 +6,7 @@
 
 生产基线为 Go + Wails v2 + React/TypeScript + Vite + SQLite。`prototype/web` 是 UX 参考，不得成为生产层间依赖。
 
-R1.1 与 R1.2 已完成。R1.3 的实现已覆盖项目级 OS lease、真正只读 store、结构化争锁救局和恢复副本；提交/合并前仍需按其实施计划记录 macOS/Windows CI 与手工验收证据。R1.4（同步盘/运行期文件锁、写入探针与 Windows 路径边界）尚未开始，不能把 R1.3 的完成误报为整个 R1 退出。
+R1.1 与 R1.2 已完成。R1.3 的实现已覆盖项目级 OS lease、真正只读 store、结构化争锁救局和恢复副本；2026-08-11 已完成 Windows/macOS 的 F-12 至 F-14 手工验收。其 GitHub Foundation CI（[run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847)）尚未通过：macOS 与 Windows 都在前端 build 前执行 `wails generate module`，因 `frontend/dist` 不存在而失败。R1.3 仍处于 `implementation_complete_pending_native_ci`，不能标为完成。R1.4（同步盘/运行期文件锁、写入探针与 Windows 路径边界）尚未开始，不能把 R1.3 的完成误报为整个 R1 退出。
 
 ## 必读文档
 

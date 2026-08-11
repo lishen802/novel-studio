@@ -358,10 +358,10 @@ cd apps/desktop/frontend && npm test -- --run && npm run typecheck && npm run bu
 - Modify: `docs/roadmap/development-roadmap.md`
 - Modify: this plan
 
-- [ ] macOS/Windows 原生 job 显式运行 projectfs lease helper-process、SQLite read-only/WAL、workspace conflict/recovery-copy tests；Ubuntu race 继续覆盖应用并发，不能用跳过代替平台修复。
-- [ ] 手工验收记录：第二实例冲突、占用来源、重试、真正只读、从只读退出、恢复副本、应用退出释放锁、残留元数据、活跃 WAL。
-- [ ] 更新恢复手册，明确不能手删有效 lease、只读不会升级旧项目、恢复副本是新包且原件不变。
-- [ ] 将计划状态改为 `completed` 之前记录 commit、CI run URL/ID、macOS/Windows 结果和遗留 R1.4 风险。
+- [ ] macOS/Windows 原生 job 显式运行 projectfs lease helper-process、SQLite read-only/WAL、workspace conflict/recovery-copy tests；Ubuntu race 继续覆盖应用并发，不能用跳过代替平台修复。2026-08-11 的 [run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 在此前端 build 前的 `wails generate module` 步骤失败，尚未实际运行这些门禁。
+- [x] 手工验收记录：第二实例冲突、占用来源、重试、真正只读、从只读退出、恢复副本、应用退出释放锁、残留元数据、活跃 WAL。Windows 与 macOS 的 F-12 至 F-14 于 2026-08-11 通过，记录见 [`foundation-acceptance.md`](../testing/foundation-acceptance.md)。
+- [x] 更新恢复手册，明确不能手删有效 lease、只读不会升级旧项目、恢复副本是新包且原件不变。
+- [ ] 将计划状态改为 `completed` 之前记录 commit、CI run URL/ID、macOS/Windows 结果和遗留 R1.4 风险。提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 已推送；手工验收通过，但 CI 尚未通过，因此状态保持 `implementation_complete_pending_native_ci`。
 - [ ] Commit：`git commit -m "test: gate project lifecycle protection on native platforms"`
 
 ## 6. 最终验证
@@ -404,9 +404,10 @@ git status --short
 
 ## 8. 实施记录与交付门槛
 
-- 实现提交：`411a098`、`9c67a2c`、`206ecce`、`61ce14a`、`5d3da6a`、`a70175b`、`435fde9`，以及本计划 Task 8/9 的后续提交；
+- 实现提交：`411a098`、`9c67a2c`、`206ecce`、`61ce14a`、`5d3da6a`、`a70175b`、`435fde9`、`b2c3b85221822e2e8415621130716739afb8f4d3`；
 - 本地证据：React 测试、typecheck、production build；聚焦 SQLite、workspace、lease 与恢复副本 Go 测试；完整 Go race/vet 与 prototype 验证见最终验证记录；
-- 待补充的发布证据：本提交推送后的 GitHub Foundation CI run URL/ID、macOS/Windows 生命周期 gate 结果，以及 `foundation-acceptance.md` F-12 至 F-14 的两平台人工记录；
+- CI 证据：提交 `b2c3b85221822e2e8415621130716739afb8f4d3` 的 [GitHub Foundation CI run 31370477847](https://github.com/lishen802/novel-studio/actions/runs/31370477847) 完成但失败。Ubuntu tests 通过；macOS 和 Windows production build 都在 `wails generate module` 前端 build 前失败，错误为 `main.go:12:12: pattern all:frontend/dist: no matching files found`。修复工作流顺序并重跑通过后，才能关闭本计划。
+- 手工证据：`foundation-acceptance.md` 的 F-12 至 F-14 已记录为 Windows/macOS 通过（2026-08-11）。
 - 遗留风险：R1.4 仍负责同步盘/运行期 sharing violation、完整 WAL/SHM/checkpoint 写入探针与 Windows 默认 MAX_PATH 路径边界。
 
-在上述 CI 和人工证据记录完成前，状态不得改为 `completed`；这避免将本地实现完成误报为 R1 阶段完全退出。
+在上述 CI 和人工证据记录完成前，状态不得改为 `completed`；当前人工证据已完成，但 CI 仍失败。这避免将本地实现完成误报为 R1 阶段完全退出。
