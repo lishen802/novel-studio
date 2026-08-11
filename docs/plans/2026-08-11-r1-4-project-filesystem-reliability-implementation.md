@@ -344,7 +344,7 @@ Expected: FAIL because no filesystem guard or health exists.
 
 Add `filesystem ports.ProjectFilesystemGuard` to `Service`, `filesystemHealth ports.ProjectFilesystemHealth` to `activeWorkspace`, and `ConfigureProjectFilesystemGuard`. In editable create/open, acquire OS lease, call `filesystem.PreflightEditable`, then call the existing compatibility preparation, migration recovery, branch recovery and writable store open. If preflight fails, release only the new lease and do not replace the active workspace. `OpenProjectReadOnly` must not call it.
 
-Add `FilesystemHealth ports.ProjectFilesystemHealth\x60json:"filesystemHealth"\x60` to `ProjectView`. Route classified failed store/archive writes through a private method that changes only the active in-memory health to:
+Add `FilesystemHealth ports.ProjectFilesystemHealth \`json:"filesystemHealth"\`` to `ProjectView`. Route classified failed store/archive writes through a private method that changes only the active in-memory health to:
 
 ```go
 ports.ProjectFilesystemHealth{
