@@ -67,6 +67,9 @@ func ClassifyFilesystemError(err error) *ports.ProjectFilesystemFailure {
 	if errors.As(err, &failure) {
 		return failure
 	}
+	if failure := classifyPlatformFilesystemError(err); failure != nil {
+		return failure
+	}
 	if errors.Is(err, os.ErrPermission) {
 		return &ports.ProjectFilesystemFailure{Category: ports.ProjectFilesystemReadOnly}
 	}
@@ -106,12 +109,23 @@ func (Manager) PreflightEditable(pkg ports.ProjectPackage) (ports.ProjectFilesys
 }
 
 // filesystemRiskHint deliberately recognises only well-known synchronisation
-// roots and UNC-style network paths. It warns rather than blocks because a
-// successful preflight cannot guarantee that a sync client will not contend
-// with a later write.
+// roots and platform-confirmed network volumes. It warns rather than blocks
+// because a successful preflight cannot guarantee that a sync client will not
+// contend with a later write.
 func filesystemRiskHint(root string) ports.ProjectFilesystemHealth {
+	return filesystemRiskHintWithNetworkVolumeCheck(root, isNetworkFilesystem)
+}
+
+// filesystemRiskHintWithNetworkVolumeCheck keeps the raw path long enough to
+// identify UNC paths: filepath.Clean can reduce a leading double slash on
+// Unix-like systems. The platform check is intentionally fail-closed to normal
+// when its native volume query cannot establish that the volume is remote.
+func filesystemRiskHintWithNetworkVolumeCheck(root string, isNetworkVolume func(string) bool) ports.ProjectFilesystemHealth {
+	if strings.HasPrefix(root, `\\`) || strings.HasPrefix(root, `//`) {
+		return syncRiskHealth()
+	}
 	clean := filepath.Clean(root)
-	if strings.HasPrefix(clean, `\\`) || strings.HasPrefix(clean, `//`) {
+	if isNetworkVolume != nil && isNetworkVolume(clean) {
 		return syncRiskHealth()
 	}
 	for _, component := range strings.FieldsFunc(clean, func(r rune) bool {
