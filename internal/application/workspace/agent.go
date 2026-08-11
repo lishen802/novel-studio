@@ -140,7 +140,7 @@ func (s *Service) SaveAgentRuntimeSettings(
 		return AgentRuntimeSettingsView{}, err
 	}
 	if err := store.SaveAgentRuntimeSettings(ctx, settings); err != nil {
-		return AgentRuntimeSettingsView{}, err
+		return AgentRuntimeSettingsView{}, s.handleFilesystemWriteFailureLocked(err)
 	}
 	return agentRuntimeSettingsView(settings), nil
 }
@@ -193,7 +193,7 @@ func (s *Service) SaveProviderConnection(
 		return ProviderConnectionView{}, fmt.Errorf("provider API key is required: %w", err)
 	}
 	if err := store.UpsertProviderConnection(ctx, connection); err != nil {
-		return ProviderConnectionView{}, err
+		return ProviderConnectionView{}, s.handleFilesystemWriteFailureLocked(err)
 	}
 	return providerConnectionView(connection, true), nil
 }
@@ -427,7 +427,7 @@ func (s *Service) createChapterAgentRunLocked(
 	}
 	run.RetryOf = strings.TrimSpace(retryOf)
 	if err := store.CreateAgentRun(ctx, run); err != nil {
-		return AgentRunView{}, err
+		return AgentRunView{}, s.handleFilesystemWriteFailureLocked(err)
 	}
 	return agentRunView(run), nil
 }

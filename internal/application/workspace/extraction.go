@@ -149,7 +149,7 @@ func (s *Service) StartExtractionRun(ctx context.Context, input ExtractionRunInp
 		return ExtractionRunView{}, err
 	}
 	if err := store.CreateTask(ctx, task); err != nil {
-		return ExtractionRunView{}, fmt.Errorf("create extraction task: %w", err)
+		return ExtractionRunView{}, fmt.Errorf("create extraction task: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return extractionRunView(task, nil), nil
 }
@@ -615,7 +615,7 @@ func (s *Service) RetryExtractionRun(ctx context.Context, id string) (Extraction
 	}
 	task.RetryOf = original.ID
 	if err := store.CreateTask(ctx, task); err != nil {
-		return ExtractionRunView{}, fmt.Errorf("create retry extraction task: %w", err)
+		return ExtractionRunView{}, fmt.Errorf("create retry extraction task: %w", s.handleFilesystemWriteFailureLocked(err))
 	}
 	return extractionRunView(task, nil), nil
 }

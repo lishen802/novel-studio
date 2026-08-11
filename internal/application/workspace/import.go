@@ -138,7 +138,7 @@ func (s *Service) PrepareManuscriptImport(
 			return ImportPrepareResult{}, cleanup(stableImportConstructionError(err))
 		}
 		if err := store.CreateFailedImportJob(ctx, failed); err != nil {
-			return ImportPrepareResult{}, cleanup(stableImportStoreError(err))
+			return ImportPrepareResult{}, cleanup(stableImportStoreError(s.handleFilesystemWriteFailureLocked(err)))
 		}
 		return ImportPrepareResult{Job: importJobView(failed, []importing.ImportChapter{})}, nil
 	}
@@ -178,7 +178,7 @@ func (s *Service) PrepareManuscriptImport(
 		return ImportPrepareResult{}, cleanup(stableImportConstructionError(err))
 	}
 	if err := store.CreateImportJob(ctx, job, chapters); err != nil {
-		return ImportPrepareResult{}, cleanup(stableImportStoreError(err))
+		return ImportPrepareResult{}, cleanup(stableImportStoreError(s.handleFilesystemWriteFailureLocked(err)))
 	}
 	return ImportPrepareResult{Job: importJobView(job, chapters)}, nil
 }
@@ -263,7 +263,7 @@ func (s *Service) DeleteImportJob(ctx context.Context, id string) error {
 		return ports.ErrImportJobAlreadyApplied
 	}
 	if err := store.DeleteImportJob(ctx, details.Job.ID); err != nil {
-		return stableImportStoreError(err)
+		return stableImportStoreError(s.handleFilesystemWriteFailureLocked(err))
 	}
 	// The archived source is immutable project-level evidence. Snapshot and
 	// branch databases may still reference it after the current job row is
@@ -359,7 +359,7 @@ func (s *Service) ApplyImportJob(
 
 	applied, err := store.ApplyImportJob(ctx, details.Job.ID, orderedIDs, requestedChapters, now)
 	if err != nil {
-		return ImportApplyView{}, stableImportStoreError(err)
+		return ImportApplyView{}, stableImportStoreError(s.handleFilesystemWriteFailureLocked(err))
 	}
 	if applied.Job.ProjectID != project.ID ||
 		len(applied.Chapters) != len(orderedIDs) {
@@ -467,6 +467,9 @@ func stableImportArchiveError(err error) error {
 }
 
 func stableImportStoreError(err error) error {
+	if errors.Is(err, ports.ErrProjectFilesystemFailure) {
+		return err
+	}
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
