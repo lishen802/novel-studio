@@ -15,6 +15,8 @@ type ProjectView struct {
 	Path             string                        `json:"path"`
 	AccessMode       ports.ProjectAccessMode       `json:"accessMode"`
 	FilesystemHealth ports.ProjectFilesystemHealth `json:"filesystemHealth"`
+	ProfileSelection ports.ProjectProfileSelection `json:"profileSelection"`
+	Workbench        WorkbenchProjection           `json:"workbench"`
 }
 
 type ChapterView struct {
@@ -35,6 +37,16 @@ func projectView(project projectdomain.Project, path string) ProjectView {
 }
 
 func projectViewWithHealth(project projectdomain.Project, path string, filesystemHealth ports.ProjectFilesystemHealth) ProjectView {
+	return projectViewWithProfile(project, path, filesystemHealth, ports.ProjectProfileSelection{}, defaultWorkbenchProjection())
+}
+
+func projectViewWithProfile(
+	project projectdomain.Project,
+	path string,
+	filesystemHealth ports.ProjectFilesystemHealth,
+	selection ports.ProjectProfileSelection,
+	workbench WorkbenchProjection,
+) ProjectView {
 	return ProjectView{
 		ID:               project.ID,
 		Title:            project.Title,
@@ -43,6 +55,8 @@ func projectViewWithHealth(project projectdomain.Project, path string, filesyste
 		Path:             path,
 		AccessMode:       ports.ProjectAccessEditable,
 		FilesystemHealth: filesystemHealth,
+		ProfileSelection: selection,
+		Workbench:        workbench,
 	}
 }
 

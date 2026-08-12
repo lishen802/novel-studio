@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,19 +14,20 @@ import (
 )
 
 type Service struct {
-	packages      ports.ProjectPackageManager
-	stores        ports.ProjectStoreFactory
-	license       license.Service
-	clock         ports.Clock
-	ids           ports.IDGenerator
-	snapshots     ports.SnapshotArchive
-	branches      ports.BranchArchive
-	imports       ports.ImportSourceArchive
-	credentials   ports.CredentialStore
-	providers     ports.ModelProviderFactory
-	leaseManager  ports.ProjectLeaseManager
-	leaseMetadata ports.ProjectLeaseMetadata
-	filesystem    ports.ProjectFilesystemGuard
+	packages        ports.ProjectPackageManager
+	stores          ports.ProjectStoreFactory
+	license         license.Service
+	clock           ports.Clock
+	ids             ports.IDGenerator
+	snapshots       ports.SnapshotArchive
+	branches        ports.BranchArchive
+	imports         ports.ImportSourceArchive
+	credentials     ports.CredentialStore
+	providers       ports.ModelProviderFactory
+	leaseManager    ports.ProjectLeaseManager
+	leaseMetadata   ports.ProjectLeaseMetadata
+	filesystem      ports.ProjectFilesystemGuard
+	projectDefaults ports.ProjectDefaults
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -157,6 +159,15 @@ func (s *Service) ConfigureProjectFilesystemGuard(guard ports.ProjectFilesystemG
 	s.filesystem = guard
 }
 
+// ConfigureProjectDefaults installs the read-only port used to pin the current
+// application default creative profile version into newly created projects.
+// Existing projects are never implicitly upgraded when the default changes.
+func (s *Service) ConfigureProjectDefaults(defaults ports.ProjectDefaults) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projectDefaults = defaults
+}
+
 func (s *Service) preflightEditable(packageInfo ports.ProjectPackage) (ports.ProjectFilesystemHealth, error) {
 	s.mu.RLock()
 	guard := s.filesystem
@@ -219,6 +230,57 @@ func (s *Service) FilesystemHealth(ctx context.Context) (ports.ProjectFilesystem
 	health := s.active.filesystemHealth
 	health.Actions = append([]ports.ProjectFilesystemAction(nil), health.Actions...)
 	return health, nil
+}
+
+// Workbench returns the authoritative workbench projection for the active
+// project. When no state has been persisted it derives the projection from the
+// chapter list and, for editable projects, persists it so it survives restart.
+// Read-only projects return the projection without writing state.
+func (s *Service) Workbench(ctx context.Context) (WorkbenchProjection, error) {
+	if err := ctx.Err(); err != nil {
+		return WorkbenchProjection{}, err
+	}
+	s.mu.RLock()
+	if s.active == nil {
+		s.mu.RUnlock()
+		return WorkbenchProjection{}, ErrNoActiveProject
+	}
+	store := s.active.store
+	mode := s.active.mode
+	s.mu.RUnlock()
+
+	projection := defaultWorkbenchProjection()
+	if ws, ok := store.(workbenchStore); ok {
+		state, err := ws.WorkbenchState(ctx)
+		if err == nil {
+			return workbenchProjectionFromState(state), nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return WorkbenchProjection{}, fmt.Errorf("read workbench state: %w", err)
+		}
+	}
+
+	chapters, err := store.ListChapters(ctx)
+	if err != nil {
+		return WorkbenchProjection{}, fmt.Errorf("list chapters for workbench: %w", err)
+	}
+	if len(chapters) > 0 {
+		projection.Stage = projectdomain.StageWriting
+		projection.Canvas = "manuscript"
+	}
+
+	if mode == ports.ProjectAccessEditable {
+		if ws, ok := store.(workbenchStore); ok {
+			_ = ws.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+				Stage:         projection.Stage,
+				Canvas:        projection.Canvas,
+				AIPanel:       projection.AIPanel,
+				ArchiveStatus: projection.ArchiveStatus,
+				UpdatedAt:     s.clock.Now(),
+			})
+		}
+	}
+	return projection, nil
 }
 
 // handleFilesystemWriteFailureLocked preserves the source error while adding
@@ -328,6 +390,11 @@ func (s *Service) CreateProject(
 	}
 
 	candidate := activeWorkspace{packageInfo: packageInfo, store: store, mode: ports.ProjectAccessEditable, projectLease: projectLease, filesystemHealth: filesystemHealth}
+	pinnedSelection, err := s.pinDefaultProfile(ctx, &candidate)
+	if err != nil {
+		_ = closeWorkspaceResources(candidate)
+		return ProjectView{}, err
+	}
 	if err := s.updateProjectLeaseMetadata(ctx, &candidate); err != nil {
 		_ = closeWorkspaceResources(candidate)
 		return ProjectView{}, err
@@ -343,9 +410,41 @@ func (s *Service) CreateProject(
 	if err := s.replaceActive(candidate); err != nil {
 		return ProjectView{}, err
 	}
-	view := projectView(project, packageInfo.Root)
-	view.FilesystemHealth = filesystemHealth
+	workbench, err := computeWorkbenchProjection(ctx, store)
+	if err != nil {
+		return ProjectView{}, err
+	}
+	view := projectViewWithProfile(project, packageInfo.Root, filesystemHealth, pinnedSelection, workbench)
 	return view, nil
+}
+
+// pinDefaultProfile reads the current application default profile selection and
+// writes it as the project's pinned profile. When projectDefaults is nil (not
+// configured) or the store does not support profile persistence, pinning is
+// skipped and a zero selection is returned. This keeps existing tests that do
+// not configure defaults backward compatible.
+func (s *Service) pinDefaultProfile(ctx context.Context, candidate *activeWorkspace) (ports.ProjectProfileSelection, error) {
+	s.mu.RLock()
+	defaults := s.projectDefaults
+	s.mu.RUnlock()
+	if defaults == nil {
+		return ports.ProjectProfileSelection{}, nil
+	}
+	selection, err := defaults.DefaultProfileSelection(ctx)
+	if err != nil {
+		return ports.ProjectProfileSelection{}, fmt.Errorf("read default profile selection: %w", err)
+	}
+	ws, ok := candidate.store.(workbenchStore)
+	if !ok {
+		return ports.ProjectProfileSelection{ProfileID: selection.ProfileID, Version: selection.Version}, nil
+	}
+	if err := ws.SaveProfileSelection(ctx, projectdomain.ProfileSelection{
+		ProfileID: selection.ProfileID,
+		Version:   selection.Version,
+	}, s.clock.Now()); err != nil {
+		return ports.ProjectProfileSelection{}, fmt.Errorf("pin project profile selection: %w", err)
+	}
+	return ports.ProjectProfileSelection{ProfileID: selection.ProfileID, Version: selection.Version}, nil
 }
 
 // recoverInterruptedJobs transitions agent runs and extraction tasks left in
@@ -437,8 +536,15 @@ func (s *Service) openProjectEditable(ctx context.Context, packagePath string) (
 	if replaceErr != nil {
 		return ProjectView{}, replaceErr
 	}
-	view := projectView(project, packageInfo.Root)
-	view.FilesystemHealth = filesystemHealth
+	selection, _, err := readProfileSelection(ctx, store)
+	if err != nil {
+		return ProjectView{}, err
+	}
+	workbench, err := computeWorkbenchProjection(ctx, store)
+	if err != nil {
+		return ProjectView{}, err
+	}
+	view := projectViewWithProfile(project, packageInfo.Root, filesystemHealth, selection, workbench)
 	return view, nil
 }
 
@@ -491,7 +597,15 @@ func (s *Service) OpenProjectReadOnly(ctx context.Context, packagePath string) (
 	if err := s.replaceActive(candidate); err != nil {
 		return ProjectView{}, err
 	}
-	view := projectView(project, packageInfo.Root)
+	selection, _, err := readProfileSelection(ctx, store)
+	if err != nil {
+		return ProjectView{}, err
+	}
+	workbench, err := computeWorkbenchProjection(ctx, store)
+	if err != nil {
+		return ProjectView{}, err
+	}
+	view := projectViewWithProfile(project, packageInfo.Root, ports.NormalProjectFilesystemHealth(), selection, workbench)
 	view.AccessMode = ports.ProjectAccessReadOnly
 	return view, nil
 }

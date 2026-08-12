@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	ErrProjectCount   = errors.New("project database must contain exactly one project")
-	ErrChapterMissing = errors.New("chapter does not exist")
+	ErrProjectCount     = errors.New("project database must contain exactly one project")
+	ErrChapterMissing   = errors.New("chapter does not exist")
+	ErrWorkbenchMissing = fmt.Errorf("%w: workbench state or profile not set", sql.ErrNoRows)
 )
 
 type Factory struct{}
@@ -245,6 +246,100 @@ func (s *Store) DeleteDraft(ctx context.Context, chapterID string, baseRevision 
 		return databaseOperationError("read recovery draft revision", err)
 	}
 	return projectdomain.ErrRevisionConflict
+}
+
+func (s *Store) SaveProfileSelection(ctx context.Context, selection projectdomain.ProfileSelection, updatedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO project_creative_profile (id, profile_id, profile_version, role_overrides_json, updated_at)
+		VALUES (1, ?, ?, '{}', ?)
+		ON CONFLICT(id) DO UPDATE SET
+			profile_id = excluded.profile_id,
+			profile_version = excluded.profile_version,
+			role_overrides_json = excluded.role_overrides_json,
+			updated_at = excluded.updated_at
+	`, selection.ProfileID, selection.Version, formatTime(updatedAt))
+	if err != nil {
+		return databaseOperationError("save project profile selection", err)
+	}
+	return nil
+}
+
+func (s *Store) ProfileSelection(ctx context.Context) (projectdomain.ProfileSelection, error) {
+	var selection projectdomain.ProfileSelection
+	var updatedAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT profile_id, profile_version, updated_at
+		FROM project_creative_profile
+		WHERE id = 1
+	`).Scan(&selection.ProfileID, &selection.Version, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return projectdomain.ProfileSelection{}, ErrWorkbenchMissing
+	}
+	if err != nil {
+		return projectdomain.ProfileSelection{}, fmt.Errorf("read project profile selection: %w", err)
+	}
+	return selection, nil
+}
+
+func (s *Store) SaveWorkbenchState(ctx context.Context, state projectdomain.WorkbenchState) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO project_workbench_state (
+			id, stage, canvas, ai_panel, pending_review_count,
+			recoverable_job_count, archive_status, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			stage = excluded.stage,
+			canvas = excluded.canvas,
+			ai_panel = excluded.ai_panel,
+			pending_review_count = excluded.pending_review_count,
+			recoverable_job_count = excluded.recoverable_job_count,
+			archive_status = excluded.archive_status,
+			updated_at = excluded.updated_at
+	`,
+		string(state.Stage),
+		state.Canvas,
+		state.AIPanel,
+		state.PendingReviewCount,
+		state.RecoverableJobCount,
+		state.ArchiveStatus,
+		formatTime(state.UpdatedAt),
+	)
+	if err != nil {
+		return databaseOperationError("save project workbench state", err)
+	}
+	return nil
+}
+
+func (s *Store) WorkbenchState(ctx context.Context) (projectdomain.WorkbenchState, error) {
+	var state projectdomain.WorkbenchState
+	var stage string
+	var updatedAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT stage, canvas, ai_panel, pending_review_count,
+			recoverable_job_count, archive_status, updated_at
+		FROM project_workbench_state
+		WHERE id = 1
+	`).Scan(
+		&stage,
+		&state.Canvas,
+		&state.AIPanel,
+		&state.PendingReviewCount,
+		&state.RecoverableJobCount,
+		&state.ArchiveStatus,
+		&updatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return projectdomain.WorkbenchState{}, ErrWorkbenchMissing
+	}
+	if err != nil {
+		return projectdomain.WorkbenchState{}, fmt.Errorf("read project workbench state: %w", err)
+	}
+	state.Stage = projectdomain.WorkbenchStage(stage)
+	state.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return projectdomain.WorkbenchState{}, fmt.Errorf("parse workbench updated_at: %w", err)
+	}
+	return state, nil
 }
 
 func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdomain.Chapter) error {
