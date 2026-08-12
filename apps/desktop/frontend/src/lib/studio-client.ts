@@ -73,6 +73,7 @@ export type RecoveryCopyResultView =
 export type ApplicationPreferencesView = {
   theme: "system" | "light" | "dark";
   defaultCreativeProfileId: string;
+  updatedAt: string;
 };
 
 export type RecentProjectView = {
@@ -90,6 +91,8 @@ export type ProviderView = {
   kind: string;
   baseUrl: string;
   hasCredential: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CreativeProfileRoleView = {
@@ -108,6 +111,7 @@ export type CreativeProfileView = {
   roles: CreativeProfileRoleView[];
   maxRunTokens: number;
   maxContextChars: number;
+  createdAt: string;
 };
 
 export type ApplicationBootstrapView = {

@@ -7,11 +7,9 @@ import (
 
 const menuCommandEvent = "app:menu-command"
 
-// MenuCommand is the stable payload emitted through runtime.EventsEmit whenever
-// a native menu item is clicked. React subscribes to the menuCommandEvent and
-// dispatches on the Command field.
+// MenuCommand 是原生菜单发给前端的稳定事件载荷，线上的 type 字段与前端契约一致。
 type MenuCommand struct {
-	Command string `json:"command"`
+	Command string `json:"type"`
 }
 
 // Stable menu command values. React matches these exactly; they must never
@@ -21,6 +19,7 @@ const (
 	menuCmdImportNovel        = "import_novel"
 	menuCmdOpenProject        = "open_project"
 	menuCmdCloseProject       = "close_project"
+	menuCmdQuitApplication    = "quit_application"
 	menuCmdAppSettings        = "app_settings"
 	menuCmdProjectSettings    = "project_settings"
 	menuCmdToggleNavigation   = "toggle_navigation"
@@ -92,7 +91,7 @@ func buildApplicationMenu(emit func(string)) *menu.Menu {
 		menu.Text("检查更新…", nil, clickFor(emit, menuCmdCheckForUpdates)),
 		menu.Separator(),
 		menu.Text("隐藏织境", nil, nil),
-		menu.Text("退出织境", nil, clickFor(emit, menuCmdCloseProject)),
+		menu.Text("退出织境", nil, clickFor(emit, menuCmdQuitApplication)),
 	)
 }
 

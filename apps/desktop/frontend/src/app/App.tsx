@@ -173,6 +173,7 @@ export function App({
         bootstrap: {
           ...current,
           preferences: {
+            ...current.preferences,
             theme: input.theme,
             defaultCreativeProfileId: input.defaultCreativeProfileId,
           },
@@ -415,7 +416,7 @@ export function App({
                 className="secondary-action"
                 onClick={() => appState.dismissError()}
               >
-                关闭
+                {bootstrap ? "关闭" : "重试"}
               </button>
               {recovery && (
                 <button

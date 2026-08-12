@@ -1,11 +1,42 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/menu"
 )
+
+func TestMenuCommandWireContractUsesType(t *testing.T) {
+	encoded, err := json.Marshal(MenuCommand{Command: menuCmdOpenProject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"type":"open_project"}`; got != want {
+		t.Fatalf("menu command JSON = %s, want %s", got, want)
+	}
+}
+
+func TestQuitMenuEmitsApplicationQuitInsteadOfProjectClose(t *testing.T) {
+	var emitted string
+	model := buildMenu(func(command string) { emitted = command })
+	appMenu := model.Items[0]
+	for _, item := range appMenu.SubMenu.Items {
+		if item.Label != "退出织境" {
+			continue
+		}
+		if item.Click == nil {
+			t.Fatal("退出织境没有点击回调")
+		}
+		item.Click(&menu.CallbackData{MenuItem: item})
+		if emitted != "quit_application" {
+			t.Fatalf("退出织境发送 %q，期望 quit_application", emitted)
+		}
+		return
+	}
+	t.Fatal("未找到退出织境菜单项")
+}
 
 // menuLabels returns the labels of all non-separator items in a submenu.
 func menuLabels(m *menu.Menu) []string {

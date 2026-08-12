@@ -5,7 +5,11 @@ import type { ApplicationBootstrapView, RecentProjectView } from "../../lib/stud
 import { HomeScreen } from "./HomeScreen";
 
 const emptyBootstrap: ApplicationBootstrapView = {
-  preferences: { theme: "system", defaultCreativeProfileId: "" },
+  preferences: {
+    theme: "system",
+    defaultCreativeProfileId: "",
+    updatedAt: "2026-08-12T10:00:00Z",
+  },
   recentProjects: [],
   providers: [],
   profiles: [],

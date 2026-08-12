@@ -191,7 +191,7 @@ export function createAppShellStore(
       if (bootstrap) {
         set({ status: { kind: "home", bootstrap } });
       } else {
-        set({ status: { kind: "loading" } });
+        void get().load();
       }
     },
 
@@ -206,6 +206,13 @@ export function createAppShellStore(
             }
             await get().closeProject();
           })();
+        } else if (command.type === "quit_application") {
+          void (async () => {
+            await options?.onBeforeProjectClose?.();
+            await target.completeClose();
+          })().catch(() => {
+            // 草稿刷新失败时保留应用窗口，避免未保存文本丢失。
+          });
         } else if (command.type === "app_settings") {
           get().openSettings();
         }

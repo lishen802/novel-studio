@@ -9,7 +9,11 @@ import type {
 import { ApplicationSettings } from "./ApplicationSettings";
 
 const baseBootstrap: ApplicationBootstrapView = {
-  preferences: { theme: "system", defaultCreativeProfileId: "" },
+  preferences: {
+    theme: "system",
+    defaultCreativeProfileId: "",
+    updatedAt: "2026-08-12T10:00:00Z",
+  },
   recentProjects: [],
   providers: [],
   profiles: [],
@@ -66,6 +70,8 @@ describe("ApplicationSettings", () => {
           kind: "openai",
           baseUrl: "https://api.openai.com/v1",
           hasCredential: true,
+          createdAt: "2026-08-12T10:00:00Z",
+          updatedAt: "2026-08-12T10:00:00Z",
         },
         {
           id: "provider-2",
@@ -73,6 +79,8 @@ describe("ApplicationSettings", () => {
           kind: "anthropic",
           baseUrl: "",
           hasCredential: false,
+          createdAt: "2026-08-12T10:00:00Z",
+          updatedAt: "2026-08-12T10:00:00Z",
         },
       ],
     };
@@ -162,6 +170,7 @@ describe("ApplicationSettings", () => {
           roles: [],
           maxRunTokens: 30000,
           maxContextChars: 120000,
+          createdAt: "2026-08-12T10:00:00Z",
         },
       ],
     };

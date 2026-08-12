@@ -2031,6 +2031,67 @@ func TestBootstrapReturnsRecentProjectsAndPreferences(t *testing.T) {
 	}
 }
 
+func TestApplicationBootstrapPreferencesWireContractIncludesEmptyDefaultAndUpdatedAt(t *testing.T) {
+	repo := &fakeAppSettingsRepo{
+		prefs: appdomain.Preferences{
+			Theme:     appdomain.ThemeSystem,
+			UpdatedAt: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC),
+		},
+	}
+	settingsService := newTestAppSettingsService(repo, &fakeCredentialStore{})
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.settings = settingsService
+	api.startup(context.Background())
+
+	view, err := api.ApplicationBootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view.Preferences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"theme":"system","defaultCreativeProfileId":"","updatedAt":"2026-08-12T10:00:00Z"}`
+	if string(encoded) != want {
+		t.Fatalf("preferences JSON = %s, want %s", encoded, want)
+	}
+}
+
+func TestApplicationBootstrapRecentProjectWireContractIncludesLastWorkspace(t *testing.T) {
+	repo := &fakeAppSettingsRepo{
+		prefs: appdomain.Preferences{
+			Theme:     appdomain.ThemeSystem,
+			UpdatedAt: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC),
+		},
+		recent: []appdomain.RecentProject{{
+			ProjectID:     "project-1",
+			Title:         "长夜",
+			Path:          "/books/长夜.zjproject",
+			LastWorkspace: "manuscript",
+			LastOpenedAt:  time.Date(2026, time.August, 12, 9, 0, 0, 0, time.UTC),
+		}},
+	}
+	settingsService := newTestAppSettingsService(repo, &fakeCredentialStore{})
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.settings = settingsService
+	api.startup(context.Background())
+
+	view, err := api.ApplicationBootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view.RecentProjects[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"projectId":"project-1","title":"长夜","path":"/books/长夜.zjproject","lastWorkspace":"manuscript","lastOpenedAt":"2026-08-12T09:00:00Z","missing":false}`
+	if string(encoded) != want {
+		t.Fatalf("recent project JSON = %s, want %s", encoded, want)
+	}
+}
+
 func TestBootstrapReturnsFeatureNotAvailableWithoutSettings(t *testing.T) {
 	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
 	api.startup(context.Background())

@@ -13,7 +13,7 @@ describe("ProjectCreativeProfile", () => {
   it("shows the pinned profile version when project has a profile selection", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapResult = {
-      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      preferences: { theme: "system", defaultCreativeProfileId: "", updatedAt: "2026-08-12T10:00:00Z" },
       recentProjects: [],
       providers: [],
       profiles: [
@@ -33,6 +33,7 @@ describe("ProjectCreativeProfile", () => {
           ],
           maxRunTokens: 30000,
           maxContextChars: 120000,
+          createdAt: "2026-08-12T10:00:00Z",
         },
       ],
     };
@@ -54,7 +55,7 @@ describe("ProjectCreativeProfile", () => {
   it("shows the stability notice so authors know pinned profiles do not follow the global default", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapResult = {
-      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      preferences: { theme: "system", defaultCreativeProfileId: "", updatedAt: "2026-08-12T10:00:00Z" },
       recentProjects: [],
       providers: [],
       profiles: [
@@ -65,6 +66,7 @@ describe("ProjectCreativeProfile", () => {
           roles: [],
           maxRunTokens: 30000,
           maxContextChars: 120000,
+          createdAt: "2026-08-12T10:00:00Z",
         },
       ],
     };
@@ -89,7 +91,7 @@ describe("ProjectCreativeProfile", () => {
   it("lists each role with its model and enabled state", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapResult = {
-      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      preferences: { theme: "system", defaultCreativeProfileId: "", updatedAt: "2026-08-12T10:00:00Z" },
       recentProjects: [],
       providers: [],
       profiles: [
@@ -125,6 +127,7 @@ describe("ProjectCreativeProfile", () => {
           ],
           maxRunTokens: 30000,
           maxContextChars: 120000,
+          createdAt: "2026-08-12T10:00:00Z",
         },
       ],
     };
@@ -158,7 +161,7 @@ describe("ProjectCreativeProfile", () => {
   it("shows a recovery hint when the pinned version cannot be found in the application settings", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapResult = {
-      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      preferences: { theme: "system", defaultCreativeProfileId: "", updatedAt: "2026-08-12T10:00:00Z" },
       recentProjects: [],
       providers: [],
       profiles: [],
@@ -181,7 +184,7 @@ describe("ProjectCreativeProfile", () => {
   it("does not render API key or connection form fields", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapResult = {
-      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      preferences: { theme: "system", defaultCreativeProfileId: "", updatedAt: "2026-08-12T10:00:00Z" },
       recentProjects: [],
       providers: [],
       profiles: [
@@ -192,6 +195,7 @@ describe("ProjectCreativeProfile", () => {
           roles: [],
           maxRunTokens: 30000,
           maxContextChars: 120000,
+          createdAt: "2026-08-12T10:00:00Z",
         },
       ],
     };

@@ -489,6 +489,7 @@ const jobSummarySchema = z.object({
 const applicationPreferencesSchema = z.object({
   theme: z.enum(["system", "light", "dark"]),
   defaultCreativeProfileId: z.string(),
+  updatedAt: z.string(),
 }).strict();
 const recentProjectSchema = z.object({
   projectId: z.string(),
@@ -504,6 +505,8 @@ const providerViewSchema = z.object({
   kind: z.string(),
   baseUrl: z.string(),
   hasCredential: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 }).strict();
 const creativeProfileRoleSchema = z.object({
   role: z.string(),
@@ -520,6 +523,7 @@ const creativeProfileSchema = z.object({
   roles: z.array(creativeProfileRoleSchema),
   maxRunTokens: z.number(),
   maxContextChars: z.number(),
+  createdAt: z.string(),
 }).strict();
 const applicationBootstrapSchema = z.object({
   preferences: applicationPreferencesSchema,

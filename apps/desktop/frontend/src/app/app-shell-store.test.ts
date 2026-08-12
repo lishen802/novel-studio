@@ -8,7 +8,11 @@ import { StudioClientError } from "../lib/studio-client";
 import { createAppShellStore } from "./app-shell-store";
 
 const bootstrap: ApplicationBootstrapView = {
-  preferences: { theme: "system", defaultCreativeProfileId: "" },
+  preferences: {
+    theme: "system",
+    defaultCreativeProfileId: "",
+    updatedAt: "2026-08-12T10:00:00Z",
+  },
   recentProjects: [
     {
       projectId: "recent-1",
@@ -86,6 +90,21 @@ describe("app shell store", () => {
       kind: "error",
       message: "无法读取配置",
     });
+  });
+
+  it("retries initial bootstrap after dismissing the startup error", async () => {
+    const client = new FakeStudioClient();
+    client.applicationBootstrapError = new Error("无法读取配置");
+    const store = createAppShellStore(client);
+    await store.getState().load();
+
+    client.applicationBootstrapError = null;
+    store.getState().dismissError();
+
+    await vi.waitFor(() => {
+      expect(store.getState().status.kind).toBe("home");
+    });
+    expect(client.applicationBootstrapCalls).toBe(2);
   });
 
   it("opens and closes settings while keeping the project mounted", async () => {
@@ -218,6 +237,43 @@ describe("app shell store", () => {
     expect(beforeClose).toHaveBeenCalledOnce();
     expect(client.closeProjectCalls).toBe(1);
 
+    unsubscribe();
+  });
+
+  it("flushes pending edits and completes application close on quit_application", async () => {
+    const client = new FakeStudioClient();
+    client.applicationBootstrapResult = bootstrap;
+    const store = createAppShellStore(client);
+    await store.getState().load();
+    const beforeClose = vi.fn(async () => undefined);
+    const unsubscribe = store.getState().subscribeMenuCommands(client, {
+      onBeforeProjectClose: beforeClose,
+    });
+
+    client.emitMenuCommand({ type: "quit_application" });
+    await vi.waitFor(() => {
+      expect(client.completeCloseCalls).toBe(1);
+    });
+
+    expect(beforeClose).toHaveBeenCalledOnce();
+    expect(client.closeProjectCalls).toBe(0);
+    unsubscribe();
+  });
+
+  it("keeps the application open when pending edits fail on quit_application", async () => {
+    const client = new FakeStudioClient();
+    const store = createAppShellStore(client);
+    const unsubscribe = store.getState().subscribeMenuCommands(client, {
+      onBeforeProjectClose: vi.fn(async () => {
+        throw new Error("草稿保存失败");
+      }),
+    });
+
+    client.emitMenuCommand({ type: "quit_application" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(client.completeCloseCalls).toBe(0);
     unsubscribe();
   });
 

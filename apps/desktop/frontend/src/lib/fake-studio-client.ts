@@ -252,7 +252,11 @@ export class FakeStudioClient implements StudioClient {
   importMutationError: Error | null = null;
   extractionError: Error | null = null;
   applicationBootstrapResult: ApplicationBootstrapView = {
-    preferences: { theme: "system", defaultCreativeProfileId: "" },
+    preferences: {
+      theme: "system",
+      defaultCreativeProfileId: "",
+      updatedAt: "2026-08-12T10:00:00Z",
+    },
     recentProjects: [],
     providers: [],
     profiles: [],
@@ -281,6 +285,7 @@ export class FakeStudioClient implements StudioClient {
     roles: [],
     maxRunTokens: 30000,
     maxContextChars: 120000,
+    createdAt: "2026-08-12T10:00:00Z",
   };
   savedProviders: ProviderView[] = [];
 
@@ -2428,6 +2433,7 @@ export class FakeStudioClient implements StudioClient {
     this.applicationBootstrapResult = {
       ...this.applicationBootstrapResult,
       preferences: {
+        ...this.applicationBootstrapResult.preferences,
         theme: input.theme,
         defaultCreativeProfileId: input.defaultCreativeProfileId,
       },
@@ -2448,6 +2454,8 @@ export class FakeStudioClient implements StudioClient {
       kind: input.kind,
       baseUrl: input.baseUrl,
       hasCredential: Boolean(input.apiKey),
+      createdAt: "2026-08-12T10:00:00Z",
+      updatedAt: "2026-08-12T10:00:00Z",
     };
     this.savedProviders = [...this.savedProviders, view];
     this.applicationBootstrapResult = {

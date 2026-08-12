@@ -226,7 +226,11 @@ function installNative(overrides: Record<string, unknown> = {}) {
     RetryExtractionRun: vi.fn(),
     CompleteClose: vi.fn(async () => undefined),
     ApplicationBootstrap: vi.fn(async () => ({
-      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      preferences: {
+        theme: "system",
+        defaultCreativeProfileId: "",
+        updatedAt: "2026-08-12T10:00:00Z",
+      },
       recentProjects: [],
       providers: [],
       profiles: [],
@@ -1366,6 +1370,61 @@ describe("wailsStudioClient", () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(api.CompleteClose).toHaveBeenCalledOnce();
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("parses the production application bootstrap wire contract", async () => {
+    installNative({
+      ApplicationBootstrap: vi.fn(async () => ({
+        preferences: {
+          theme: "system",
+          defaultCreativeProfileId: "",
+          updatedAt: "2026-08-12T10:00:00Z",
+        },
+        recentProjects: [
+          {
+            projectId: "project-1",
+            title: "长夜",
+            path: "/books/长夜.zjproject",
+            lastWorkspace: "manuscript",
+            lastOpenedAt: "2026-08-12T09:00:00Z",
+            missing: false,
+          },
+        ],
+        providers: [
+          {
+            id: "provider-1",
+            name: "OpenAI",
+            kind: "openai",
+            baseUrl: "https://api.openai.com/v1",
+            hasCredential: true,
+            createdAt: "2026-08-12T08:00:00Z",
+            updatedAt: "2026-08-12T09:00:00Z",
+          },
+        ],
+        profiles: [
+          {
+            profileId: "profile-1",
+            version: 1,
+            name: "默认方案",
+            roles: [],
+            maxRunTokens: 30000,
+            maxContextChars: 120000,
+            createdAt: "2026-08-12T09:00:00Z",
+          },
+        ],
+      })),
+    });
+
+    await expect(wailsStudioClient.applicationBootstrap()).resolves.toMatchObject({
+      preferences: {
+        theme: "system",
+        defaultCreativeProfileId: "",
+        updatedAt: "2026-08-12T10:00:00Z",
+      },
+      recentProjects: [{ lastWorkspace: "manuscript" }],
+      providers: [{ createdAt: "2026-08-12T08:00:00Z" }],
+      profiles: [{ createdAt: "2026-08-12T09:00:00Z" }],
+    });
   });
 
   it("shows only the safe message from a coded desktop error", async () => {

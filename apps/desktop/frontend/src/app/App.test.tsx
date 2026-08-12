@@ -55,6 +55,21 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers a retry when the initial application bootstrap fails", async () => {
+    const client = new FakeStudioClient();
+    client.applicationBootstrapError = new Error("无法读取配置");
+    const user = userEvent.setup();
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("alertdialog", { name: "应用错误" })).toBeVisible();
+    client.applicationBootstrapError = null;
+    await user.click(screen.getByRole("button", { name: "重试" }));
+
+    expect(
+      await screen.findByRole("button", { name: /从一个想法开始/ }),
+    ).toBeEnabled();
+  });
+
   it("opens a recent project from its card", async () => {
     const client = new FakeStudioClient();
     const recent: RecentProjectView = {

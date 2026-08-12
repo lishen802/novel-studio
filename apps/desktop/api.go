@@ -234,7 +234,7 @@ type CreateBranchInput struct {
 // preferences. It never includes credentials or internal paths.
 type ApplicationPreferencesView struct {
 	Theme                    string `json:"theme"`
-	DefaultCreativeProfileID string `json:"defaultCreativeProfileId,omitempty"`
+	DefaultCreativeProfileID string `json:"defaultCreativeProfileId"`
 	UpdatedAt                string `json:"updatedAt"`
 }
 
@@ -246,11 +246,12 @@ type ApplicationPreferencesInput struct {
 
 // RecentProjectView is the safe projection of a recent project entry.
 type RecentProjectView struct {
-	ProjectID    string `json:"projectId"`
-	Title        string `json:"title"`
-	Path         string `json:"path"`
-	LastOpenedAt string `json:"lastOpenedAt"`
-	Missing      bool   `json:"missing"`
+	ProjectID     string `json:"projectId"`
+	Title         string `json:"title"`
+	Path          string `json:"path"`
+	LastWorkspace string `json:"lastWorkspace"`
+	LastOpenedAt  string `json:"lastOpenedAt"`
+	Missing       bool   `json:"missing"`
 }
 
 // ProviderView is the safe projection of a provider connection. It never
@@ -980,11 +981,12 @@ func (a *DesktopAPI) ApplicationBootstrap() (ApplicationBootstrapView, error) {
 	recentViews := make([]RecentProjectView, 0, len(recent))
 	for _, rp := range recent {
 		recentViews = append(recentViews, RecentProjectView{
-			ProjectID:    rp.ProjectID,
-			Title:        rp.Title,
-			Path:         rp.Path,
-			LastOpenedAt: formatDesktopTime(rp.LastOpenedAt),
-			Missing:      rp.Missing,
+			ProjectID:     rp.ProjectID,
+			Title:         rp.Title,
+			Path:          rp.Path,
+			LastWorkspace: rp.LastWorkspace,
+			LastOpenedAt:  formatDesktopTime(rp.LastOpenedAt),
+			Missing:       rp.Missing,
 		})
 	}
 
