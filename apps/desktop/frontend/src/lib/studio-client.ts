@@ -15,6 +15,8 @@ export type ProjectView = {
   path: string;
   accessMode: ProjectAccessMode;
   filesystemHealth: ProjectFilesystemHealth;
+  profileSelection?: { profileId: string; version: number };
+  workbench?: WorkbenchProjection;
 };
 
 export type ProjectAccessMode = "editable" | "read_only";
@@ -67,6 +69,92 @@ export type RecoveryCopyInput = {
 export type RecoveryCopyResultView =
   | { outcome: "opened"; path: string; project: ProjectView }
   | { outcome: "published"; path: string };
+
+export type ApplicationPreferencesView = {
+  theme: "system" | "light" | "dark";
+  defaultCreativeProfileId: string;
+};
+
+export type RecentProjectView = {
+  projectId: string;
+  title: string;
+  path: string;
+  lastWorkspace: string;
+  lastOpenedAt: string;
+  missing: boolean;
+};
+
+export type ProviderView = {
+  id: string;
+  name: string;
+  kind: string;
+  baseUrl: string;
+  hasCredential: boolean;
+};
+
+export type CreativeProfileRoleView = {
+  role: string;
+  connectionId: string;
+  model: string;
+  maxOutputTokens: number;
+  temperature: number;
+  enabled: boolean;
+};
+
+export type CreativeProfileView = {
+  profileId: string;
+  version: number;
+  name: string;
+  roles: CreativeProfileRoleView[];
+  maxRunTokens: number;
+  maxContextChars: number;
+};
+
+export type ApplicationBootstrapView = {
+  preferences: ApplicationPreferencesView;
+  recentProjects: RecentProjectView[];
+  providers: ProviderView[];
+  profiles: CreativeProfileView[];
+};
+
+export type WorkbenchProjection = {
+  stage: string;
+  canvas: string;
+  aiPanel: string;
+  pendingReviewCount: number;
+  recoverableJobCount: number;
+  archiveStatus: string;
+};
+
+export type ApplicationPreferencesInput = {
+  theme: "system" | "light" | "dark";
+  defaultCreativeProfileId: string;
+};
+
+export type ApplicationProviderInput = {
+  name: string;
+  kind: string;
+  baseUrl: string;
+  apiKey: string;
+};
+
+export type PublishProfileInput = {
+  profileId: string;
+  name: string;
+  roles: CreativeProfileRoleView[];
+  maxRunTokens: number;
+  maxContextChars: number;
+};
+
+export type DesktopError = {
+  code: string;
+  message: string;
+};
+
+export type MenuCommand = {
+  type: string;
+  [key: string]: unknown;
+};
 
 export type ChapterView = {
   id: string;
@@ -952,6 +1040,16 @@ export interface StudioClient {
   onJobUpdated(handler: (jobId: string, jobKind: string, latestSequence: number) => void): () => void;
   onBeforeClose(handler: () => Promise<void>): () => void;
   completeClose(): Promise<void>;
+  applicationBootstrap(): Promise<ApplicationBootstrapView>;
+  saveApplicationPreferences(input: ApplicationPreferencesInput): Promise<void>;
+  saveApplicationProvider(input: ApplicationProviderInput): Promise<ProviderView>;
+  deleteApplicationProvider(id: string): Promise<void>;
+  testApplicationProvider(id: string): Promise<void>;
+  publishCreativeProfile(input: PublishProfileInput): Promise<CreativeProfileView>;
+  openRecentProject(projectId: string): Promise<ProjectOpenResultView>;
+  projectWorkbench(): Promise<WorkbenchProjection>;
+  closeProject(): Promise<void>;
+  onMenuCommand(handler: (command: MenuCommand) => void): () => void;
 }
 
 export class RevisionConflictError extends Error {

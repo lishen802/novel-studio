@@ -1,6 +1,9 @@
-import { RevisionConflictError } from "./studio-client";
+import { RevisionConflictError, StudioClientError } from "./studio-client";
 import type {
   AppearanceInput,
+  ApplicationBootstrapView,
+  ApplicationPreferencesInput,
+  ApplicationProviderInput,
   BranchComparisonView,
   BranchMergePreviewView,
   BranchSwitchView,
@@ -20,6 +23,9 @@ import type {
   CreateOutlineNodeInput,
   CreateSceneCardInput,
   CreateStoryLineInput,
+  CreativeProfileView,
+  DesktopError,
+  MenuCommand,
   FactionInput,
   FactionView,
   ForeshadowingHookInput,
@@ -40,6 +46,8 @@ import type {
   ProjectView,
   ProjectAccessMode,
   ProjectOpenResultView,
+  ProviderView,
+  PublishProfileInput,
   RecoveryCopyInput,
   RecoveryCopyResultView,
   RelationshipInput,
@@ -60,6 +68,7 @@ import type {
   WorldRegionView,
   WorldRuleInput,
   WorldRuleView,
+  WorkbenchProjection,
   ContinuityView,
   StoryEventInput,
   StoryEventView,
@@ -240,6 +249,38 @@ export class FakeStudioClient implements StudioClient {
   prepareManuscriptImportError: Error | null = null;
   importMutationError: Error | null = null;
   extractionError: Error | null = null;
+  applicationBootstrapResult: ApplicationBootstrapView = {
+    preferences: { theme: "system", defaultCreativeProfileId: "" },
+    recentProjects: [],
+    providers: [],
+    profiles: [],
+  };
+  applicationBootstrapError: Error | null = null;
+  saveApplicationPreferencesError: Error | null = null;
+  saveApplicationProviderError: Error | null = null;
+  deleteApplicationProviderError: Error | null = null;
+  testApplicationProviderError: Error | null = null;
+  publishCreativeProfileError: Error | null = null;
+  projectWorkbenchError: Error | null = null;
+  closeProjectError: Error | null = null;
+  openRecentProjectError?: DesktopError;
+  workbenchProjectionResult: WorkbenchProjection = {
+    stage: "manuscript",
+    canvas: "",
+    aiPanel: "",
+    pendingReviewCount: 0,
+    recoverableJobCount: 0,
+    archiveStatus: "",
+  };
+  publishCreativeProfileResult: CreativeProfileView = {
+    profileId: "profile-1",
+    version: 1,
+    name: "默认方案",
+    roles: [],
+    maxRunTokens: 30000,
+    maxContextChars: 120000,
+  };
+  savedProviders: ProviderView[] = [];
 
   createProjectCalls: CreateProjectInput[] = [];
   openProjectCalls: string[] = [];
@@ -374,6 +415,18 @@ export class FakeStudioClient implements StudioClient {
   retryExtractionRunCalls: string[] = [];
   completeCloseCalls = 0;
   beforeCloseHandler: (() => Promise<void>) | null = null;
+  applicationBootstrapCalls = 0;
+  saveApplicationPreferencesCalls: ApplicationPreferencesInput[] = [];
+  saveApplicationProviderCalls: ApplicationProviderInput[] = [];
+  deleteApplicationProviderCalls: string[] = [];
+  testApplicationProviderCalls: string[] = [];
+  publishCreativeProfileCalls: PublishProfileInput[] = [];
+  openRecentProjectCalls: string[] = [];
+  openRecentProjectInputs: Array<{ path: string; mode: ProjectAccessMode }> =
+    [];
+  projectWorkbenchCalls = 0;
+  closeProjectCalls = 0;
+  menuCommandHandlers: Array<(command: MenuCommand) => void> = [];
   getJobSnapshotCalls: string[] = [];
   jobSnapshotResult: JobSnapshotView | null = null;
   getJobEventsCalls: Array<{
@@ -2300,5 +2353,151 @@ export class FakeStudioClient implements StudioClient {
    */
   upsertJobSnapshot(snapshot: JobSnapshotView): void {
     this.jobSnapshotsByJobId.set(snapshot.jobId, snapshot);
+  }
+
+  async applicationBootstrap(): Promise<ApplicationBootstrapView> {
+    this.applicationBootstrapCalls++;
+    if (this.applicationBootstrapError) throw this.applicationBootstrapError;
+    return this.applicationBootstrapResult;
+  }
+
+  async saveApplicationPreferences(
+    input: ApplicationPreferencesInput,
+  ): Promise<void> {
+    this.saveApplicationPreferencesCalls.push(input);
+    if (this.saveApplicationPreferencesError) {
+      throw this.saveApplicationPreferencesError;
+    }
+    this.applicationBootstrapResult = {
+      ...this.applicationBootstrapResult,
+      preferences: {
+        theme: input.theme,
+        defaultCreativeProfileId: input.defaultCreativeProfileId,
+      },
+    };
+  }
+
+  async saveApplicationProvider(
+    input: ApplicationProviderInput,
+  ): Promise<ProviderView> {
+    this.saveApplicationProviderCalls.push(input);
+    if (this.saveApplicationProviderError) {
+      throw this.saveApplicationProviderError;
+    }
+    const id = `provider-${this.savedProviders.length + 1}`;
+    const view: ProviderView = {
+      id,
+      name: input.name,
+      kind: input.kind,
+      baseUrl: input.baseUrl,
+      hasCredential: Boolean(input.apiKey),
+    };
+    this.savedProviders = [...this.savedProviders, view];
+    this.applicationBootstrapResult = {
+      ...this.applicationBootstrapResult,
+      providers: this.savedProviders,
+    };
+    return view;
+  }
+
+  async deleteApplicationProvider(id: string): Promise<void> {
+    this.deleteApplicationProviderCalls.push(id);
+    if (this.deleteApplicationProviderError) {
+      throw this.deleteApplicationProviderError;
+    }
+    this.savedProviders = this.savedProviders.filter(
+      (provider) => provider.id !== id,
+    );
+    this.applicationBootstrapResult = {
+      ...this.applicationBootstrapResult,
+      providers: this.savedProviders,
+    };
+  }
+
+  async testApplicationProvider(id: string): Promise<void> {
+    this.testApplicationProviderCalls.push(id);
+    if (this.testApplicationProviderError) {
+      throw this.testApplicationProviderError;
+    }
+  }
+
+  async publishCreativeProfile(
+    input: PublishProfileInput,
+  ): Promise<CreativeProfileView> {
+    this.publishCreativeProfileCalls.push(input);
+    if (this.publishCreativeProfileError) {
+      throw this.publishCreativeProfileError;
+    }
+    const next: CreativeProfileView = {
+      ...this.publishCreativeProfileResult,
+      profileId: input.profileId || this.publishCreativeProfileResult.profileId,
+      name: input.name,
+      roles: input.roles,
+      maxRunTokens: input.maxRunTokens,
+      maxContextChars: input.maxContextChars,
+      version: this.publishCreativeProfileResult.version + 1,
+    };
+    this.publishCreativeProfileResult = next;
+    this.applicationBootstrapResult = {
+      ...this.applicationBootstrapResult,
+      profiles: [
+        ...this.applicationBootstrapResult.profiles.filter(
+          (profile) => profile.profileId !== next.profileId,
+        ),
+        next,
+      ],
+    };
+    return next;
+  }
+
+  async openRecentProject(
+    projectId: string,
+  ): Promise<ProjectOpenResultView> {
+    this.openRecentProjectCalls.push(projectId);
+    if (this.openRecentProjectError) {
+      throw new StudioClientError(
+        this.openRecentProjectError.code,
+        this.openRecentProjectError.message,
+      );
+    }
+    const recent = this.applicationBootstrapResult.recentProjects.find(
+      (item) => item.projectId === projectId,
+    );
+    const mode: ProjectAccessMode = "editable";
+    if (recent) {
+      this.openRecentProjectInputs.push({ path: recent.path, mode });
+    }
+    return this.projectOpenResponse ?? {
+      outcome: "opened",
+      project: this.openProjectResult,
+    };
+  }
+
+  async projectWorkbench(): Promise<WorkbenchProjection> {
+    this.projectWorkbenchCalls++;
+    if (this.projectWorkbenchError) throw this.projectWorkbenchError;
+    return this.workbenchProjectionResult;
+  }
+
+  async closeProject(): Promise<void> {
+    this.closeProjectCalls++;
+    if (this.closeProjectError) throw this.closeProjectError;
+  }
+
+  onMenuCommand(
+    handler: (command: MenuCommand) => void,
+  ): () => void {
+    this.menuCommandHandlers.push(handler);
+    return () => {
+      this.menuCommandHandlers = this.menuCommandHandlers.filter(
+        (item) => item !== handler,
+      );
+    };
+  }
+
+  emitMenuCommand(command: MenuCommand): void {
+    for (const handler of this.menuCommandHandlers) {
+      handler(command);
+    }
   }
 }

@@ -2,6 +2,9 @@ import { z } from "zod";
 import {
   RevisionConflictError,
   StudioClientError,
+  type ApplicationBootstrapView,
+  type ApplicationPreferencesInput,
+  type ApplicationProviderInput,
   type ChapterView,
   type BranchComparisonView,
   type BranchMergePreviewView,
@@ -18,9 +21,12 @@ import {
   type CharacterView,
   type CreateOutlineNodeInput,
   type CreateProjectInput,
+  type CreativeProfileView,
   type ProjectAccessMode,
   type ProjectOpenInput,
   type ProjectOpenResultView,
+  type ProviderView,
+  type PublishProfileInput,
   type RecoveryCopyInput,
   type RecoveryCopyResultView,
   type CreateBranchInput,
@@ -59,6 +65,7 @@ import {
   type WorldRegionView,
   type WorldRuleInput,
   type WorldRuleView,
+  type WorkbenchProjection,
   type ForeshadowingHookInput,
   type ForeshadowingHookView,
   type ContinuityView,
@@ -96,6 +103,7 @@ import {
   type JobEventsPage,
   type JobSnapshotView,
   type JobSummaryView,
+  type MenuCommand,
 } from "./studio-client";
 
 const projectFilesystemHealthSchema = z.object({
@@ -117,6 +125,14 @@ const projectFilesystemHealthSchema = z.object({
     z.enum(["retry", "copy_text", "open_read_only", "create_recovery_copy"]),
   ).default([]),
 }).strict();
+const workbenchProjectionSchema = z.object({
+  stage: z.string(),
+  canvas: z.string(),
+  aiPanel: z.string(),
+  pendingReviewCount: z.number(),
+  recoverableJobCount: z.number(),
+  archiveStatus: z.string(),
+}).strict();
 const projectSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -125,6 +141,11 @@ const projectSchema = z.object({
   path: z.string(),
   accessMode: z.enum(["editable", "read_only"]),
   filesystemHealth: projectFilesystemHealthSchema,
+  profileSelection: z.object({
+    profileId: z.string(),
+    version: z.number(),
+  }).optional(),
+  workbench: workbenchProjectionSchema.optional(),
 }).strict();
 const projectLeaseHolderSchema = z.object({
   pid: z.number().int().nonnegative(),
@@ -462,6 +483,48 @@ const jobSummarySchema = z.object({
   maxSequence: z.number().int().nonnegative(),
   updatedAt: z.string(),
 });
+
+const applicationPreferencesSchema = z.object({
+  theme: z.enum(["system", "light", "dark"]),
+  defaultCreativeProfileId: z.string(),
+}).strict();
+const recentProjectSchema = z.object({
+  projectId: z.string(),
+  title: z.string(),
+  path: z.string(),
+  lastWorkspace: z.string(),
+  lastOpenedAt: z.string(),
+  missing: z.boolean(),
+}).strict();
+const providerViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  baseUrl: z.string(),
+  hasCredential: z.boolean(),
+}).strict();
+const creativeProfileRoleSchema = z.object({
+  role: z.string(),
+  connectionId: z.string(),
+  model: z.string(),
+  maxOutputTokens: z.number(),
+  temperature: z.number(),
+  enabled: z.boolean(),
+}).strict();
+const creativeProfileSchema = z.object({
+  profileId: z.string(),
+  version: z.number(),
+  name: z.string(),
+  roles: z.array(creativeProfileRoleSchema),
+  maxRunTokens: z.number(),
+  maxContextChars: z.number(),
+}).strict();
+const applicationBootstrapSchema = z.object({
+  preferences: applicationPreferencesSchema,
+  recentProjects: z.array(recentProjectSchema),
+  providers: z.array(providerViewSchema),
+  profiles: z.array(creativeProfileSchema),
+}).strict();
 
 const outlineNodeSchema = z.object({
   id: z.string(),
@@ -1271,6 +1334,15 @@ type NativeDesktopAPI = {
   ): Promise<unknown>;
   ListRecoverableJobs(): Promise<unknown>;
   CompleteClose(): Promise<void>;
+  ApplicationBootstrap(): Promise<unknown>;
+  SaveApplicationPreferences(input: ApplicationPreferencesInput): Promise<void>;
+  SaveApplicationProvider(input: ApplicationProviderInput): Promise<unknown>;
+  DeleteApplicationProvider(id: string): Promise<void>;
+  TestApplicationProvider(id: string): Promise<void>;
+  PublishCreativeProfile(input: PublishProfileInput): Promise<unknown>;
+  OpenRecentProject(projectID: string): Promise<unknown>;
+  ProjectWorkbench(): Promise<unknown>;
+  CloseProject(): Promise<void>;
 };
 
 type NativeRuntime = {
@@ -1371,6 +1443,14 @@ const jobSnapshotView = (value: unknown): JobSnapshotView =>
   jobSnapshotSchema.parse(value);
 const jobSummaryViews = (value: unknown): JobSummaryView[] =>
   z.array(jobSummarySchema).parse(value);
+const applicationBootstrapView = (value: unknown): ApplicationBootstrapView =>
+  applicationBootstrapSchema.parse(value);
+const providerView = (value: unknown): ProviderView =>
+  providerViewSchema.parse(value);
+const creativeProfileView = (value: unknown): CreativeProfileView =>
+  creativeProfileSchema.parse(value);
+const workbenchProjectionView = (value: unknown): WorkbenchProjection =>
+  workbenchProjectionSchema.parse(value);
 
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
@@ -2045,5 +2125,60 @@ export const wailsStudioClient: StudioClient = {
   },
   async completeClose() {
     await safeCall(() => nativeAPI().CompleteClose());
+  },
+  async applicationBootstrap() {
+    return applicationBootstrapView(
+      await safeCall(() => nativeAPI().ApplicationBootstrap()),
+    );
+  },
+  async saveApplicationPreferences(input) {
+    await safeCall(() =>
+      nativeAPI().SaveApplicationPreferences(input),
+    );
+  },
+  async saveApplicationProvider(input) {
+    return providerView(
+      await safeCall(() => nativeAPI().SaveApplicationProvider(input)),
+    );
+  },
+  async deleteApplicationProvider(id) {
+    await safeCall(() => nativeAPI().DeleteApplicationProvider(id));
+  },
+  async testApplicationProvider(id) {
+    await safeCall(() => nativeAPI().TestApplicationProvider(id));
+  },
+  async publishCreativeProfile(input) {
+    return creativeProfileView(
+      await safeCall(() => nativeAPI().PublishCreativeProfile(input)),
+    );
+  },
+  async openRecentProject(projectId) {
+    return projectOpenResultView(
+      await safeCall(() => nativeAPI().OpenRecentProject(projectId)),
+    );
+  },
+  async projectWorkbench() {
+    return workbenchProjectionView(
+      await safeCall(() => nativeAPI().ProjectWorkbench()),
+    );
+  },
+  async closeProject() {
+    await safeCall(() => nativeAPI().CloseProject());
+  },
+  onMenuCommand(handler) {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOnMultiple(
+      "app:menu-command",
+      (payload: unknown) => {
+        if (
+          typeof payload === "object" &&
+          payload !== null &&
+          typeof (payload as { type?: unknown }).type === "string"
+        ) {
+          handler(payload as MenuCommand);
+        }
+      },
+      -1,
+    );
   },
 };

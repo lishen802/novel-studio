@@ -225,6 +225,43 @@ function installNative(overrides: Record<string, unknown> = {}) {
     CancelExtractionRun: vi.fn(async () => undefined),
     RetryExtractionRun: vi.fn(),
     CompleteClose: vi.fn(async () => undefined),
+    ApplicationBootstrap: vi.fn(async () => ({
+      preferences: { theme: "system", defaultCreativeProfileId: "" },
+      recentProjects: [],
+      providers: [],
+      profiles: [],
+    })),
+    SaveApplicationPreferences: vi.fn(async () => undefined),
+    SaveApplicationProvider: vi.fn(async () => ({
+      id: "provider-1",
+      name: "OpenAI",
+      kind: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      hasCredential: true,
+    })),
+    DeleteApplicationProvider: vi.fn(async () => undefined),
+    TestApplicationProvider: vi.fn(async () => undefined),
+    PublishCreativeProfile: vi.fn(async () => ({
+      profileId: "profile-1",
+      version: 2,
+      name: "默认方案",
+      roles: [],
+      maxRunTokens: 30000,
+      maxContextChars: 120000,
+    })),
+    OpenRecentProject: vi.fn(async () => ({
+      outcome: "opened",
+      project,
+    })),
+    ProjectWorkbench: vi.fn(async () => ({
+      stage: "manuscript",
+      canvas: "",
+      aiPanel: "",
+      pendingReviewCount: 0,
+      recoverableJobCount: 0,
+      archiveStatus: "",
+    })),
+    CloseProject: vi.fn(async () => undefined),
     ...overrides,
   };
   window.go = { main: { DesktopAPI: api } } as typeof window.go;

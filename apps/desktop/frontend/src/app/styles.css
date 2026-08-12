@@ -508,6 +508,241 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+.welcome-guide {
+  margin: 26px auto 0;
+  max-width: 480px;
+  color: #a6a1b4;
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.recent-project-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-project-list li {
+  display: flex;
+}
+
+.recent-project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 248, 232, 0.13);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f7f1e6;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.recent-project-card:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(240, 199, 146, 0.34);
+}
+
+.recent-project-card:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.recent-project-card__title {
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+
+.recent-project-card__meta {
+  color: #a6a1b4;
+  font-size: 0.78rem;
+}
+
+.application-settings {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: min(100%, 720px);
+  max-height: calc(100vh - 80px);
+  padding: 32px;
+  border: 1px solid rgba(255, 248, 232, 0.14);
+  border-radius: 22px;
+  color: #f7f1e6;
+  background: #282e42;
+  box-shadow: 0 28px 80px rgba(2, 4, 12, 0.56);
+  overflow: auto;
+}
+
+.application-settings__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.application-settings__header h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", "STSong", serif;
+  font-size: 1.6rem;
+  font-weight: 500;
+}
+
+.application-settings__section {
+  display: grid;
+  gap: 14px;
+}
+
+.application-settings__section h3 {
+  margin: 0;
+  color: #f0c792;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.application-settings__section p,
+.application-settings__notice {
+  margin: 0;
+  color: #aeb4c4;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.provider-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.provider-form label {
+  display: grid;
+  gap: 6px;
+  color: #d4d7df;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.provider-form input,
+.application-settings select {
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(10, 13, 23, 0.35);
+  color: #f8f2e8;
+  padding: 9px 11px;
+  font: inherit;
+}
+
+.provider-form .provider-form__submit {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+.provider-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provider-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.provider-list__item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-list__item-name {
+  font-weight: 650;
+  color: #f7f1e6;
+}
+
+.provider-list__item-meta {
+  color: #a6a1b4;
+  font-size: 0.76rem;
+}
+
+.provider-list__item-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.provider-credential-status {
+  font-size: 0.74rem;
+  font-weight: 650;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.provider-credential-status--ok {
+  color: #4d6f4f;
+  background: rgba(110, 200, 130, 0.16);
+}
+
+.provider-credential-status--missing {
+  color: #c08046;
+  background: rgba(232, 167, 100, 0.16);
+}
+
+.theme-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-selector button {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d7df;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.theme-selector button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.theme-selector button[aria-pressed="true"] {
+  background: #e8bd86;
+  color: #28231f;
+  border-color: #f0ca9a;
+}
+
+.profile-form {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-form__notice {
+  color: #c9b388;
+  font-size: 0.78rem;
+}
+
 .entry-error {
   margin: 18px 0 0;
   color: #f3b3a6;
