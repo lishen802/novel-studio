@@ -220,7 +220,8 @@ func (s *Service) DefaultProfileSelection(ctx context.Context) (ports.ProjectPro
 		return ports.ProjectProfileSelection{}, err
 	}
 	if prefs.DefaultCreativeProfileID == "" {
-		return ports.ProjectProfileSelection{}, ErrProfileNotFound
+		// 未配置默认方案不是创建项目的错误；作者仍可先手写，再在应用设置中配置模型。
+		return ports.ProjectProfileSelection{}, nil
 	}
 	latest, err := s.repo.LatestProfileVersion(ctx, prefs.DefaultCreativeProfileID)
 	if err != nil {

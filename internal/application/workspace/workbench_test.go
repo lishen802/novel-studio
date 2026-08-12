@@ -60,6 +60,37 @@ func TestCreateProjectPinsCurrentDefaultProfileVersion(t *testing.T) {
 	}
 }
 
+func TestCreateProjectSucceedsWithoutConfiguredDefaultProfile(t *testing.T) {
+	ctx := context.Background()
+	service := newWorkbenchTestService(t)
+	service.ConfigureProjectDefaults(&fakeProjectDefaults{})
+
+	view, err := service.CreateProject(ctx, t.TempDir(), "未配置模型的新书", "奇幻", "")
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v, want project creation without a default profile to succeed", err)
+	}
+	if view.ProfileSelection.ProfileID != "" || view.ProfileSelection.Version != 0 {
+		t.Fatalf("profile selection = %#v, want no pinned selection", view.ProfileSelection)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := (projectfs.Manager{}).Inspect(view.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := (sqlite.Factory{}).Open(ctx, pkg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	selectionStore := store.(workbenchStore)
+	if _, err := selectionStore.ProfileSelection(ctx); !errors.Is(err, sqlite.ErrWorkbenchMissing) {
+		t.Fatalf("ProfileSelection() error = %v, want no persisted selection", err)
+	}
+}
+
 func TestOpenProjectNeverUpgradesPinnedProfileImplicitly(t *testing.T) {
 	ctx := context.Background()
 

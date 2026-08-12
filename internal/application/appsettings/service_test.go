@@ -423,11 +423,14 @@ func TestDefaultProfileSelectionReturnsLatestVersion(t *testing.T) {
 	}
 }
 
-func TestDefaultProfileSelectionReturnsErrorWhenNoDefault(t *testing.T) {
+func TestDefaultProfileSelectionReturnsEmptySelectionWhenNoDefault(t *testing.T) {
 	svc, _, _ := newServiceHarness(t)
-	_, err := svc.DefaultProfileSelection(context.Background())
-	if !errors.Is(err, ErrProfileNotFound) {
-		t.Fatalf("error = %v, want ErrProfileNotFound", err)
+	selection, err := svc.DefaultProfileSelection(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultProfileSelection() error = %v, want no error", err)
+	}
+	if selection != (ports.ProjectProfileSelection{}) {
+		t.Fatalf("selection = %#v, want empty selection", selection)
 	}
 }
 

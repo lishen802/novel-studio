@@ -446,6 +446,10 @@ func (s *Service) pinDefaultProfile(ctx context.Context, candidate *activeWorksp
 	if err != nil {
 		return ports.ProjectProfileSelection{}, fmt.Errorf("read default profile selection: %w", err)
 	}
+	if selection.ProfileID == "" {
+		// 应用尚未配置默认创作方案时不写入空 pin，项目可先作为纯手写作品创建。
+		return ports.ProjectProfileSelection{}, nil
+	}
 	ws, ok := candidate.store.(workbenchStore)
 	if !ok {
 		return ports.ProjectProfileSelection{ProfileID: selection.ProfileID, Version: selection.Version}, nil
