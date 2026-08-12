@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`in_progress`
+- 状态：`completed`
 - 所属阶段：[R2 产品壳、应用设置与交互基础](../roadmap/development-roadmap.md#7-r2产品壳应用设置与交互基础)
 - 上游文档：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 架构约束：[Go-first](../architecture/0002-go-first-wails-stack.md)、[Wails 目录](../architecture/0003-wails-project-layout.md)
@@ -1000,7 +1000,7 @@ git commit -m "feat: add stage canvas and imported writing entry"
 - Modify: `docs/roadmap/development-roadmap.md`
 - Modify: `docs/plans/2026-08-11-r2-product-shell-interaction-foundation-implementation.md`
 
-- [ ] **Step 1: 运行格式与静态检查**
+- [x] **Step 1: 运行格式与静态检查**
 
 Run: `gofmt -w internal/domain/appsettings internal/application/appsettings internal/application/appshell internal/application/workspace internal/application/ports internal/persistence/appsqlite internal/persistence/sqlite internal/platform/appdirs apps/desktop`
 
@@ -1010,39 +1010,39 @@ Run: `git diff --check`
 
 Expected: 无输出，exit 0。
 
-- [ ] **Step 2: 运行完整 Go 门禁**
+- [x] **Step 2: 运行完整 Go 门禁**
 
 Run: `go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...`
 
 Expected: 全部 PASS，无 race、timeout、真实网络或 OS 钥匙串依赖。
 
-- [ ] **Step 3: 运行生产前端门禁**
+- [x] **Step 3: 运行生产前端门禁**
 
 Run: `cd apps/desktop/frontend && npm test -- --run && npm run typecheck && npm run build`
 
 Expected: Vitest、TypeScript 和 Vite build 全部 PASS。
 
-- [ ] **Step 4: 运行原型回归门禁**
+- [x] **Step 4: 运行原型回归门禁**
 
 Run: `cd prototype/web && npm test -- --run && npm run typecheck && npm run build`
 
 Expected: 参考原型继续可运行；生产 UI 改动不能破坏原型。
 
-- [ ] **Step 5: 执行 Windows/macOS 冒烟清单**
+- [x] **Step 5: 执行 Windows/macOS 冒烟清单**
 
 在两个原生平台分别记录：首次启动无 recent、存在 recent、recent 路径失效、应用菜单与文件菜单分离、设置中保存凭据、发布 profile v2 后旧项目仍 pin v1、新项目 pin v2、打开旧项目迁移、只读打开不迁移、项目侧栏分组、`Cmd/Ctrl+J`、设置抽屉与 AI 面板不丢正文、首页导入后立即进入正文、整书档案按钮不会伪造成功。
 
 Expected: 每项记录平台、构建 SHA、结果和证据路径；任何一项失败都不把计划标为 `completed`。
 
-- [ ] **Step 6: 更新权威状态与证据**
+- [x] **Step 6: 更新权威状态与证据**
 
 把自动命令结果加入 automated baseline，把新冒烟项加入 foundation acceptance。仅在双平台和全部自动门禁通过后：将本计划状态改为 `completed`，把路线图 R2 标记为完成，并在 START-HERE 将首个未完成阶段改为 R3。未通过时保持 `in_progress` 并记录真实阻断，不修改退出结论。
 
-- [ ] **Step 7: 请求代码审阅并修复阻断问题**
+- [x] **Step 7: 请求代码审阅并修复阻断问题**
 
 使用 `superpowers:requesting-code-review` 检查需求符合性、设置数据库/凭据安全、旧项目迁移、Wails/React 边界、菜单平台差异和编辑状态保留。对审阅意见使用 `superpowers:receiving-code-review` 验证后修复，再完整重跑 Step 1–5。
 
-- [ ] **Step 8: 提交阶段证据**
+- [x] **Step 8: 提交阶段证据**
 
 ```bash
 git add docs/testing/automated-test-baseline.md docs/testing/foundation-acceptance.md docs/handoff/START-HERE.md docs/roadmap/development-roadmap.md docs/plans/2026-08-11-r2-product-shell-interaction-foundation-implementation.md

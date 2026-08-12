@@ -133,6 +133,25 @@ R1.4 的自动测试验证可移植路径预算、无损可编辑预检、运行
 
 这些自动证据由本地完整 Go/前端命令和 Foundation CI 的相关 Go 测试覆盖，但不模拟真实同步客户端、共享服务、配额、Windows 长路径策略或原生文件锁时序。F-15 至 F-18 仍须在 Windows 与 macOS production build 上按[基础手工验收](foundation-acceptance.md)使用一次性副本执行并记录证据；在该证据完成前，R1.4 不得关闭或合并。
 
+## R2 产品壳与交互基础
+
+R2 建立独立于 `.zjproject` 的应用设置数据库、最近项目首页、原生菜单、分级作品导航、权威工作台投影和阶段自适应 AI 面板。以下自动证据保证应用设置隔离、旧配置迁移幂等、权威投影不可被本地猜测覆盖，以及未实现能力不伪造已完成效果。
+
+| 契约 | 自动证据 |
+| --- | --- |
+| `settings.db` 位于应用数据目录，不在任一 `.zjproject` 内；打开时创建版本化 schema | `TestResolveCreatesNoDirectoryAndUsesStableSettingsPath`、`TestOpenCreatesVersionedApplicationSchema` |
+| 应用设置仓储事务、并发安全与迁移幂等 | `internal/persistence/appsqlite/repository_test.go` |
+| 旧项目 provider/profile 配置无密钥导出，source digest 去重，失败可回滚 | `TestLegacyExport*`、`TestMigrateLegacySettings*` |
+| 首页导入项目幂等：重复提交复用已准备 import job 和已创建章节 | `TestCreateImportedProjectRetryReusesPreparedJob` |
+| 首页导入 apply 失败保留可恢复项目与 import job，不删除源文件 | `TestCreateImportedProjectApplyFailureReturnsRecoverableProject` |
+| 整书档案在 R2 返回 `FEATURE_NOT_AVAILABLE`，不创建抽取任务 | `TestStartWholeBookArchiveReturnsFeatureUnavailableWithoutCreatingExtractionTask` |
+| `WorkbenchProjection` 由 Go 应用层权威投影，React 不按路由猜测 canvas | `WorkbenchRouter.test.tsx`（routes from authoritative canvas） |
+| AI 面板默认隐藏，`Cmd/Ctrl+J` 呼出，切换画布/设置不丢输入与正文草稿 | `Workspace.test.tsx`（Cmd+J、面板切换保留状态） |
+| 选区审阅携带 base revision，正文变化后提交返回 `STALE_SELECTION` | `ChapterEditor.test.tsx`（selection review） |
+| 整书档案卡片在 `not_generated` 状态显示按钮但不伪造结论 | `WholeBookArchiveCard.test.tsx` |
+
+Go 侧测试位于 `internal/application/appshell`、`internal/application/appsettings`、`internal/persistence/appsqlite` 和 `apps/desktop`，React 侧测试位于 `apps/desktop/frontend/src/features/workbench`、`features/workspace`、`features/agents` 和 `features/imports`。前者由本地 `go test -race -shuffle=on` 覆盖，后者由本地 `npm test -- --run` 与 `npm run typecheck` 覆盖。实现详见 [R2 实施计划](../plans/2026-08-11-r2-product-shell-interaction-foundation-implementation.md)。
+
 ## 隐私与 fixture 规则
 
 - 不提交 `.zjproject`、SQLite 数据库、WAL/SHM、API Key、私钥或签名证书；

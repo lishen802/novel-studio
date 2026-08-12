@@ -1,7 +1,7 @@
 # 织境 Story Studio 总体开发路线图
 
 - 状态：已批准
-- 更新日期：2026-08-11（R1 已完成，R2 调整为产品壳与交互基础）
+- 更新日期：2026-08-12（R1 与 R2 已完成，下一阶段为 R3 正式资产写入）
 - 适用范围：当前商业发布底线与完整 V1
 - 上游依据：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 实施计划规范：[实施计划目录说明](../plans/README.md)
@@ -236,7 +236,9 @@ R1.2 已包含原路线图中单列的“React JobEvent replay”，不再重复
 
 ### 待建立实施计划
 
-1. [R2 产品壳与交互基础](../plans/2026-08-11-r2-product-shell-interaction-foundation-implementation.md)（`draft`）
+1. [R2 产品壳与交互基础](../plans/2026-08-11-r2-product-shell-interaction-foundation-implementation.md)（`completed`）
+
+R2 产品壳与交互基础已完成并通过全部自动门禁与双平台手工冒烟（F-19 至 F-25）。应用级 `settings.db`、模型连接元数据、CreativeProfile 版本、最近项目首页、原生菜单、分级作品导航、权威 `WorkbenchProjection` 和阶段自适应 AI 面板均已就位；旧项目 provider/profile 配置可幂等迁移到应用设置且失败可回滚，API Key 继续只存 OS 凭据库。首页"导入小说并续写"完成后正文立即可读写；整书档案入口存在但在 R2 返回 `FEATURE_NOT_AVAILABLE`，不伪造成功。R2 阶段完成，可进入 R3。
 
 ## 8. R3：正式资产写入与整书档案确认
 
@@ -525,7 +527,7 @@ R1.2 已包含原路线图中单列的“React JobEvent replay”，不再重复
 
 ## 17. 实施计划创建顺序
 
-R0 与 R1 已完成，下一阶段从 R2 产品壳与交互基础开始。一个阶段包含多个独立能力时，按“领域/协议基础 → 持久化/平台适配 → Wails binding → React 交互 → 阶段验收”的依赖拆分计划，但每份计划仍应尽可能形成可运行的纵向结果。
+R0、R1 与 R2 已完成，下一阶段从 R3 正式资产写入与整书档案确认开始。一个阶段包含多个独立能力时，按“领域/协议基础 → 持久化/平台适配 → Wails binding → React 交互 → 阶段验收”的依赖拆分计划，但每份计划仍应尽可能形成可运行的纵向结果。
 
 实施计划文件使用：
 
@@ -535,4 +537,4 @@ docs/plans/YYYY-MM-DD-r<阶段>-<能力>-implementation.md
 
 计划状态为 `draft/approved/in_progress/completed/superseded`。只有 `approved` 或 `in_progress` 的计划可以指导实现；产品设计变化后，旧计划必须更新或标记 `superseded`，不能继续凭历史任务清单开发。
 
-R0 与 R1 已全部完成。当前只建立 R2 的产品壳与交互基础实施计划；R3–R10 继续保留阶段边界，待 R2 退出后再逐项建立文件级计划。
+R0、R1 与 R2 已全部完成。当前进入 R3 正式资产写入与整书档案确认；R3–R10 继续保留阶段边界，待前一阶段退出后再逐项建立文件级计划。
