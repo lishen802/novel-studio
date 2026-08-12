@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/lishen802/novel-studio/internal/application/appshell"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -80,6 +81,14 @@ const (
 	errorImportPersistence          desktopErrorCode = "IMPORT_PERSISTENCE_FAILED"
 	errorValidationFailed           desktopErrorCode = "VALIDATION_FAILED"
 	errorOperationFailed            desktopErrorCode = "OPERATION_FAILED"
+	errorProjectRelocateRequired    desktopErrorCode = "PROJECT_RELOCATE_REQUIRED"
+	errorFeatureNotAvailable        desktopErrorCode = "FEATURE_NOT_AVAILABLE"
+	errorStaleSelection             desktopErrorCode = "STALE_SELECTION"
+)
+
+var (
+	errFeatureNotAvailable = errors.New("feature is not available in this release")
+	errStaleSelection      = errors.New("selection is stale; chapter revision changed")
 )
 
 type desktopError struct {
@@ -107,6 +116,12 @@ func safeDesktopError(err error) error {
 		code, message = errorOperationCancelled, "操作已取消。"
 	case errors.Is(err, context.DeadlineExceeded):
 		code, message = errorOperationTimeout, "操作超时，请重试。"
+	case errors.Is(err, appshell.ErrProjectRelocateRequired):
+		code, message = errorProjectRelocateRequired, "项目文件已移动或删除，请重新定位项目。"
+	case errors.Is(err, errFeatureNotAvailable):
+		code, message = errorFeatureNotAvailable, "该功能将在后续版本中提供。"
+	case errors.Is(err, errStaleSelection):
+		code, message = errorStaleSelection, "选区已失效，章节正文已更新，请重新选择。"
 	case errors.Is(err, errInvalidProjectOpenMode):
 		code, message = errorValidationFailed, "项目打开模式无效。"
 	case errors.Is(err, ports.ErrUnsupportedImportFormat):

@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"sync/atomic"
 	"time"
 
+	"github.com/lishen802/novel-studio/internal/application/appsettings"
+	"github.com/lishen802/novel-studio/internal/application/appshell"
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
+	"github.com/lishen802/novel-studio/internal/persistence/appsqlite"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
+	"github.com/lishen802/novel-studio/internal/platform/appdirs"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
 	"github.com/lishen802/novel-studio/internal/platform/credentials"
 	"github.com/lishen802/novel-studio/internal/platform/ids"
@@ -53,6 +58,21 @@ func newApp() *App {
 	workspaceService.ConfigureImportSourceArchive(projectfs.ImportSourceArchive{})
 	workspaceService.ConfigureProjectLease(projectfs.LeaseManager{}, processLeaseMetadata())
 	workspaceService.ConfigureProjectFilesystemGuard(projectfs.Manager{})
+
+	clock := timeutil.SystemClock{}
+	idGenerator := ids.UUIDGenerator{}
+
+	appSettingsService := newAppSettingsService(clock, idGenerator)
+	if appSettingsService != nil {
+		workspaceService.ConfigureProjectDefaults(appSettingsService)
+		workspaceService.ConfigureLegacyImporter(appSettingsService)
+	}
+
+	var shell *appshell.Service
+	if appSettingsService != nil {
+		shell = appshell.New(workspaceService, appSettingsService, clock)
+	}
+
 	notifier := newWailsJobEventNotifier()
 	workspaceService.SetJobEventNotifier(notifier)
 	app := &App{
@@ -64,7 +84,29 @@ func newApp() *App {
 		notifier: notifier,
 	}
 	app.api.completeClose = app.completeClose
+	app.api.settings = appSettingsService
+	app.api.shell = shell
 	return app
+}
+
+// newAppSettingsService opens the application settings database and creates the
+// settings service. When the database cannot be opened (for example, the OS
+// data directory is unavailable), it logs the error and returns nil so the app
+// continues without application-level settings; the desktop API returns
+// FEATURE_NOT_AVAILABLE for settings-dependent methods.
+func newAppSettingsService(clock ports.Clock, ids ports.IDGenerator) *appsettings.Service {
+	paths, err := appdirs.ResolveDefault()
+	if err != nil {
+		log.Printf("appsettings: resolve application data directory: %v", err)
+		return nil
+	}
+	db, err := appsqlite.Open(context.Background(), paths.Database)
+	if err != nil {
+		log.Printf("appsettings: open settings database: %v", err)
+		return nil
+	}
+	store := appsqlite.NewStore(db)
+	return appsettings.NewService(store, credentials.NewStore(), clock, ids)
 }
 
 func processLeaseMetadata() ports.ProjectLeaseMetadata {

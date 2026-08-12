@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/lishen802/novel-studio/internal/application/appsettings"
+	"github.com/lishen802/novel-studio/internal/application/appshell"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -132,6 +137,7 @@ type WorkspaceUseCases interface {
 	GetJobSnapshot(context.Context, string) (workspace.JobSnapshotView, error)
 	GetJobEvents(context.Context, string, uint64, int) (workspace.JobEventsPageView, error)
 	ListRecoverableJobs(context.Context) ([]workspace.JobSummaryView, error)
+	Workbench(context.Context) (workspace.WorkbenchProjection, error)
 	Close() error
 }
 
@@ -180,6 +186,7 @@ type ProjectOpenResultView struct {
 	Outcome  projectOpenOutcome        `json:"outcome"`
 	Project  *workspace.ProjectView    `json:"project,omitempty"`
 	Conflict *ProjectLeaseConflictView `json:"conflict,omitempty"`
+	Warning  string                    `json:"warning,omitempty"`
 }
 
 type RecoveryCopyInput struct {
@@ -205,11 +212,109 @@ type CreateBranchInput struct {
 	Description string `json:"description"`
 }
 
+// ApplicationPreferencesView is the safe projection of application-level
+// preferences. It never includes credentials or internal paths.
+type ApplicationPreferencesView struct {
+	Theme                    string `json:"theme"`
+	DefaultCreativeProfileID string `json:"defaultCreativeProfileId,omitempty"`
+	UpdatedAt                string `json:"updatedAt"`
+}
+
+// ApplicationPreferencesInput carries the user's preferences update.
+type ApplicationPreferencesInput struct {
+	Theme                    string `json:"theme"`
+	DefaultCreativeProfileID string `json:"defaultCreativeProfileId,omitempty"`
+}
+
+// RecentProjectView is the safe projection of a recent project entry.
+type RecentProjectView struct {
+	ProjectID    string `json:"projectId"`
+	Title        string `json:"title"`
+	Path         string `json:"path"`
+	LastOpenedAt string `json:"lastOpenedAt"`
+	Missing      bool   `json:"missing"`
+}
+
+// ProviderView is the safe projection of a provider connection. It never
+// includes the credential reference or API key value.
+type ProviderView struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	BaseURL       string `json:"baseUrl"`
+	HasCredential bool   `json:"hasCredential"`
+	CreatedAt     string `json:"createdAt"`
+	UpdatedAt     string `json:"updatedAt"`
+}
+
+// ApplicationProviderInput carries the data needed to save a provider
+// connection. The API key is forwarded to the OS credential vault and never
+// persisted in the settings database.
+type ApplicationProviderInput struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	BaseURL string `json:"baseUrl"`
+	APIKey  string `json:"apiKey"`
+}
+
+// RoleBindingView is the safe projection of a role binding in a creative
+// profile version.
+type RoleBindingView struct {
+	Role            string  `json:"role"`
+	ConnectionID    string  `json:"connectionId"`
+	Model           string  `json:"model"`
+	MaxOutputTokens int     `json:"maxOutputTokens"`
+	Temperature     float64 `json:"temperature"`
+	Enabled         bool    `json:"enabled"`
+}
+
+// CreativeProfileView is the safe projection of a creative profile version.
+type CreativeProfileView struct {
+	ProfileID       string            `json:"profileId"`
+	Version         int64             `json:"version"`
+	Name            string            `json:"name"`
+	Roles           []RoleBindingView `json:"roles"`
+	MaxRunTokens    int               `json:"maxRunTokens"`
+	MaxContextChars int               `json:"maxContextChars"`
+	CreatedAt       string            `json:"createdAt"`
+}
+
+// PublishProfileInput carries the data needed to publish a new creative
+// profile version.
+type PublishProfileInput struct {
+	ProfileID       string             `json:"profileId"`
+	Name            string             `json:"name"`
+	Roles           []PublishRoleInput `json:"roles"`
+	MaxRunTokens    int                `json:"maxRunTokens"`
+	MaxContextChars int                `json:"maxContextChars"`
+}
+
+// PublishRoleInput is a single role binding in a publish profile input.
+type PublishRoleInput struct {
+	Role            string  `json:"role"`
+	ConnectionID    string  `json:"connectionId"`
+	Model           string  `json:"model"`
+	MaxOutputTokens int     `json:"maxOutputTokens"`
+	Temperature     float64 `json:"temperature"`
+	Enabled         bool    `json:"enabled"`
+}
+
+// ApplicationBootstrapView is the initial state payload sent to the frontend
+// on startup. It contains only safe, non-sensitive data.
+type ApplicationBootstrapView struct {
+	Preferences    ApplicationPreferencesView `json:"preferences"`
+	RecentProjects []RecentProjectView        `json:"recentProjects"`
+	Providers      []ProviderView             `json:"providers"`
+	Profiles       []CreativeProfileView      `json:"profiles"`
+}
+
 type DesktopAPI struct {
 	ctx           context.Context
 	workspace     WorkspaceUseCases
 	picker        DirectoryPicker
 	completeClose func()
+	settings      *appsettings.Service
+	shell         *appshell.Service
 }
 
 func newDesktopAPI(workspaceService WorkspaceUseCases, picker DirectoryPicker) *DesktopAPI {
@@ -783,6 +888,261 @@ func (a *DesktopAPI) CompleteClose() {
 	if a.completeClose != nil {
 		a.completeClose()
 	}
+}
+
+// ApplicationBootstrap returns the initial application state: preferences,
+// recent projects, provider connections (without credentials), and the
+// latest version of the default creative profile (if set).
+func (a *DesktopAPI) ApplicationBootstrap() (ApplicationBootstrapView, error) {
+	if a.settings == nil {
+		return ApplicationBootstrapView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	ctx := a.ctx
+
+	prefs, err := a.settings.Preferences(ctx)
+	if err != nil {
+		return ApplicationBootstrapView{}, safeDesktopError(err)
+	}
+
+	recent, err := a.settings.RecentProjects(ctx, 20)
+	if err != nil {
+		return ApplicationBootstrapView{}, safeDesktopError(err)
+	}
+
+	providers, err := a.settings.Providers(ctx)
+	if err != nil {
+		return ApplicationBootstrapView{}, safeDesktopError(err)
+	}
+
+	providerViews := make([]ProviderView, 0, len(providers))
+	for _, p := range providers {
+		providerViews = append(providerViews, ProviderView{
+			ID:            p.ID,
+			Name:          p.Name,
+			Kind:          string(p.Kind),
+			BaseURL:       p.BaseURL,
+			HasCredential: a.settings.HasCredential(ctx, p),
+			CreatedAt:     formatDesktopTime(p.CreatedAt),
+			UpdatedAt:     formatDesktopTime(p.UpdatedAt),
+		})
+	}
+
+	recentViews := make([]RecentProjectView, 0, len(recent))
+	for _, rp := range recent {
+		recentViews = append(recentViews, RecentProjectView{
+			ProjectID:    rp.ProjectID,
+			Title:        rp.Title,
+			Path:         rp.Path,
+			LastOpenedAt: formatDesktopTime(rp.LastOpenedAt),
+			Missing:      rp.Missing,
+		})
+	}
+
+	profiles := make([]CreativeProfileView, 0)
+	if prefs.DefaultCreativeProfileID != "" {
+		if latest, err := a.settings.LatestProfileVersion(ctx, prefs.DefaultCreativeProfileID); err == nil {
+			profiles = append(profiles, creativeProfileView(latest))
+		}
+	}
+
+	return ApplicationBootstrapView{
+		Preferences: ApplicationPreferencesView{
+			Theme:                    string(prefs.Theme),
+			DefaultCreativeProfileID: prefs.DefaultCreativeProfileID,
+			UpdatedAt:                formatDesktopTime(prefs.UpdatedAt),
+		},
+		RecentProjects: recentViews,
+		Providers:      providerViews,
+		Profiles:       profiles,
+	}, nil
+}
+
+// SaveApplicationPreferences updates the application-level preferences.
+func (a *DesktopAPI) SaveApplicationPreferences(input ApplicationPreferencesInput) error {
+	if a.settings == nil {
+		return safeDesktopError(errFeatureNotAvailable)
+	}
+	prefs, err := a.settings.Preferences(a.ctx)
+	if err != nil {
+		return safeDesktopError(err)
+	}
+	if input.Theme != "" {
+		prefs.Theme = appdomain.Theme(input.Theme)
+	}
+	if input.DefaultCreativeProfileID != "" {
+		prefs.DefaultCreativeProfileID = input.DefaultCreativeProfileID
+	}
+	prefs.UpdatedAt = time.Now().UTC()
+	return safeDesktopError(a.settings.SavePreferences(a.ctx, prefs))
+}
+
+// SaveApplicationProvider creates or updates a provider connection. The API
+// key is stored in the OS credential vault and never persisted in the settings
+// database.
+func (a *DesktopAPI) SaveApplicationProvider(input ApplicationProviderInput) (ProviderView, error) {
+	if a.settings == nil {
+		return ProviderView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	conn, err := a.settings.SaveProvider(a.ctx, appsettings.ProviderInput{
+		Name:    input.Name,
+		Kind:    toProviderKind(input.Kind),
+		BaseURL: input.BaseURL,
+		APIKey:  input.APIKey,
+	})
+	if err != nil {
+		return ProviderView{}, safeDesktopError(err)
+	}
+	return ProviderView{
+		ID:            conn.ID,
+		Name:          conn.Name,
+		Kind:          string(conn.Kind),
+		BaseURL:       conn.BaseURL,
+		HasCredential: a.settings.HasCredential(a.ctx, conn),
+		CreatedAt:     formatDesktopTime(conn.CreatedAt),
+		UpdatedAt:     formatDesktopTime(conn.UpdatedAt),
+	}, nil
+}
+
+// DeleteApplicationProvider removes a provider connection after verifying it
+// is not referenced by any creative profile.
+func (a *DesktopAPI) DeleteApplicationProvider(id string) error {
+	if a.settings == nil {
+		return safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeDesktopError(a.settings.DeleteProvider(a.ctx, id))
+}
+
+// TestApplicationProvider verifies that a credential exists for the provider.
+func (a *DesktopAPI) TestApplicationProvider(id string) error {
+	if a.settings == nil {
+		return safeDesktopError(errFeatureNotAvailable)
+	}
+	conn, err := a.settings.Providers(a.ctx)
+	if err != nil {
+		return safeDesktopError(err)
+	}
+	for _, p := range conn {
+		if p.ID == id {
+			if a.settings.HasCredential(a.ctx, p) {
+				return nil
+			}
+			return safeDesktopError(errors.New("provider credential not found"))
+		}
+	}
+	return safeDesktopError(appsettings.ErrProviderNotFound)
+}
+
+// PublishCreativeProfile publishes a new version of a creative profile.
+func (a *DesktopAPI) PublishCreativeProfile(input PublishProfileInput) (CreativeProfileView, error) {
+	if a.settings == nil {
+		return CreativeProfileView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	roles := make([]appsettings.RoleInput, len(input.Roles))
+	for i, r := range input.Roles {
+		roles[i] = appsettings.RoleInput{
+			Role:            toAgentRole(r.Role),
+			ConnectionID:    r.ConnectionID,
+			Model:           r.Model,
+			MaxOutputTokens: r.MaxOutputTokens,
+			Temperature:     r.Temperature,
+			Enabled:         r.Enabled,
+		}
+	}
+	version, err := a.settings.PublishCreativeProfile(a.ctx, appsettings.ProfileInput{
+		ProfileID:       input.ProfileID,
+		Name:            input.Name,
+		Roles:           roles,
+		MaxRunTokens:    input.MaxRunTokens,
+		MaxContextChars: input.MaxContextChars,
+	})
+	if err != nil {
+		return CreativeProfileView{}, safeDesktopError(err)
+	}
+	return creativeProfileView(version), nil
+}
+
+// ProjectWorkbench returns the authoritative workbench projection for the
+// active project.
+func (a *DesktopAPI) ProjectWorkbench() (workspace.WorkbenchProjection, error) {
+	return safeResult(a.workspace.Workbench(a.ctx))
+}
+
+// CloseProject closes the active project via the shell service when
+// configured, otherwise falls back to the workspace service.
+func (a *DesktopAPI) CloseProject() error {
+	if a.shell != nil {
+		return safeDesktopError(a.shell.Close())
+	}
+	return safeDesktopError(a.workspace.Close())
+}
+
+// OpenRecentProject opens a project from the recent list by its project ID.
+// When the recorded path no longer exists, the shell marks the entry missing
+// and returns PROJECT_RELOCATE_REQUIRED.
+func (a *DesktopAPI) OpenRecentProject(projectID string) (ProjectOpenResultView, error) {
+	if a.shell == nil {
+		return ProjectOpenResultView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	result, err := a.shell.OpenRecentProject(a.ctx, projectID)
+	if err != nil {
+		var conflict *ports.ProjectLeaseConflict
+		if errors.As(err, &conflict) {
+			return ProjectOpenResultView{
+				Outcome: projectOpenOutcomeLeaseConflict,
+				Conflict: &ProjectLeaseConflictView{
+					Holder:    conflict.Holder,
+					Retryable: conflict.Retryable,
+				},
+			}, nil
+		}
+		return ProjectOpenResultView{}, safeDesktopError(err)
+	}
+	return ProjectOpenResultView{
+		Outcome: projectOpenOutcomeOpened,
+		Project: &result.Project,
+		Warning: result.Warning,
+	}, nil
+}
+
+// formatDesktopTime formats a time value as RFC3339Nano in UTC for JSON
+// serialization.
+func formatDesktopTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// creativeProfileView converts a domain creative profile version to the safe
+// desktop view.
+func creativeProfileView(v appdomain.CreativeProfileVersion) CreativeProfileView {
+	roles := make([]RoleBindingView, len(v.Roles))
+	for i, r := range v.Roles {
+		roles[i] = RoleBindingView{
+			Role:            string(r.Role),
+			ConnectionID:    r.ConnectionID,
+			Model:           r.Model,
+			MaxOutputTokens: r.MaxOutputTokens,
+			Temperature:     r.Temperature,
+			Enabled:         r.Enabled,
+		}
+	}
+	return CreativeProfileView{
+		ProfileID:       v.ProfileID,
+		Version:         v.Version,
+		Name:            v.Name,
+		Roles:           roles,
+		MaxRunTokens:    v.MaxRunTokens,
+		MaxContextChars: v.MaxContextChars,
+		CreatedAt:       formatDesktopTime(v.CreatedAt),
+	}
+}
+
+// toProviderKind converts a string kind to the domain type.
+func toProviderKind(kind string) agentdomain.ProviderKind {
+	return agentdomain.ProviderKind(kind)
+}
+
+// toAgentRole converts a string role to the domain type.
+func toAgentRole(role string) agentdomain.AgentRole {
+	return agentdomain.AgentRole(role)
 }
 
 type wailsDirectoryPicker struct {

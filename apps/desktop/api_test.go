@@ -1,18 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lishen802/novel-studio/internal/application/appsettings"
+	"github.com/lishen802/novel-studio/internal/application/appshell"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
@@ -1201,6 +1206,8 @@ type fakeWorkspace struct {
 	recoverableJobsErr       error
 	filesystemHealthResult   ports.ProjectFilesystemHealth
 	filesystemHealthErr      error
+	workbenchResult          workspace.WorkbenchProjection
+	workbenchErr             error
 }
 
 func (f *fakeWorkspace) CreateProject(
@@ -1734,6 +1741,10 @@ func (f *fakeWorkspace) ListRecoverableJobs(context.Context) ([]workspace.JobSum
 	return f.recoverableJobsResult, f.recoverableJobsErr
 }
 
+func (f *fakeWorkspace) Workbench(context.Context) (workspace.WorkbenchProjection, error) {
+	return f.workbenchResult, f.workbenchErr
+}
+
 // TestDesktopAPIForwardsJobEventQueries asserts that GetJobSnapshot,
 // GetJobEvents, and ListRecoverableJobs forward their arguments to the
 // workspace service and return its results without transformation.
@@ -1824,5 +1835,321 @@ func TestWailsJobEventNotifierEmitsPayload(t *testing.T) {
 	}
 	if payload.LatestSequence != 7 {
 		t.Fatalf("payload.LatestSequence = %d, want 7", payload.LatestSequence)
+	}
+}
+
+// --- Application bootstrap and recent project tests ---
+
+// fakeAppSettingsRepo is a minimal ports.AppSettingsRepository for desktop API
+// tests. It returns canned data without touching SQLite.
+type fakeAppSettingsRepo struct {
+	prefs        appdomain.Preferences
+	providers    []appdomain.ProviderConnection
+	recent       []appdomain.RecentProject
+	profileVer   appdomain.CreativeProfileVersion
+	profileFound bool
+}
+
+func (r *fakeAppSettingsRepo) Preferences(context.Context) (appdomain.Preferences, error) {
+	return r.prefs, nil
+}
+func (r *fakeAppSettingsRepo) SavePreferences(context.Context, appdomain.Preferences) error {
+	return nil
+}
+func (r *fakeAppSettingsRepo) UpsertProvider(context.Context, appdomain.ProviderConnection) error {
+	return nil
+}
+func (r *fakeAppSettingsRepo) Provider(context.Context, string) (appdomain.ProviderConnection, error) {
+	return appdomain.ProviderConnection{}, nil
+}
+func (r *fakeAppSettingsRepo) Providers(context.Context) ([]appdomain.ProviderConnection, error) {
+	return r.providers, nil
+}
+func (r *fakeAppSettingsRepo) DeleteProvider(context.Context, string) error { return nil }
+func (r *fakeAppSettingsRepo) ProviderInUse(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (r *fakeAppSettingsRepo) PublishProfileVersion(context.Context, appdomain.CreativeProfileVersion) error {
+	return nil
+}
+func (r *fakeAppSettingsRepo) ProfileVersion(context.Context, string, int64) (appdomain.CreativeProfileVersion, error) {
+	return appdomain.CreativeProfileVersion{}, nil
+}
+func (r *fakeAppSettingsRepo) LatestProfileVersion(context.Context, string) (appdomain.CreativeProfileVersion, error) {
+	if !r.profileFound {
+		return appdomain.CreativeProfileVersion{}, errors.New("not found")
+	}
+	return r.profileVer, nil
+}
+func (r *fakeAppSettingsRepo) RecordRecentProject(context.Context, appdomain.RecentProject) error {
+	return nil
+}
+func (r *fakeAppSettingsRepo) RecentProjects(context.Context, int) ([]appdomain.RecentProject, error) {
+	return r.recent, nil
+}
+func (r *fakeAppSettingsRepo) MarkProjectMissing(context.Context, string, bool) error {
+	return nil
+}
+func (r *fakeAppSettingsRepo) RecordLegacyImport(context.Context, string, string, string, int64, time.Time) error {
+	return nil
+}
+func (r *fakeAppSettingsRepo) LegacyImport(context.Context, string, string) (string, int64, error) {
+	return "", 0, errors.New("not found")
+}
+
+// fakeCredentialStore is a minimal ports.CredentialStore for desktop API tests.
+type fakeCredentialStore struct {
+	secrets map[string]string
+}
+
+func (s *fakeCredentialStore) Save(_ context.Context, ref, secret string) error {
+	if s.secrets == nil {
+		s.secrets = make(map[string]string)
+	}
+	s.secrets[ref] = secret
+	return nil
+}
+func (s *fakeCredentialStore) Get(_ context.Context, ref string) (string, error) {
+	secret, ok := s.secrets[ref]
+	if !ok {
+		return "", errors.New("not found")
+	}
+	return secret, nil
+}
+func (s *fakeCredentialStore) Delete(_ context.Context, ref string) error {
+	delete(s.secrets, ref)
+	return nil
+}
+
+type fakeClock struct{ t time.Time }
+
+func (f *fakeClock) Now() time.Time { return f.t }
+
+type fakeIDGenerator struct{ counter int }
+
+func (f *fakeIDGenerator) NewID() string {
+	f.counter++
+	return "test-id-" + itoa(f.counter)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[pos:])
+}
+
+// newTestAppSettingsService creates a real appsettings.Service with fake
+// dependencies for desktop API tests.
+func newTestAppSettingsService(repo ports.AppSettingsRepository, creds ports.CredentialStore) *appsettings.Service {
+	clock := &fakeClock{t: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC)}
+	return appsettings.NewService(repo, creds, clock, &fakeIDGenerator{})
+}
+
+func TestBootstrapNeverSerializesCredentialValue(t *testing.T) {
+	const secret = "do-not-serialize"
+	provider := appdomain.ProviderConnection{
+		ID:            "provider-1",
+		Name:          "OpenAI",
+		Kind:          agentdomain.ProviderOpenAI,
+		BaseURL:       "https://api.openai.com/v1",
+		CredentialRef: "app-provider:provider-1",
+		CreatedAt:     time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC),
+		UpdatedAt:     time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC),
+	}
+	repo := &fakeAppSettingsRepo{
+		prefs: appdomain.Preferences{
+			Theme:     appdomain.ThemeSystem,
+			UpdatedAt: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC),
+		},
+		providers: []appdomain.ProviderConnection{provider},
+	}
+	creds := &fakeCredentialStore{secrets: map[string]string{"app-provider:provider-1": secret}}
+	settingsService := newTestAppSettingsService(repo, creds)
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.settings = settingsService
+	api.startup(context.Background())
+
+	view, err := api.ApplicationBootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(secret)) {
+		t.Fatalf("secret was serialized: %s", encoded)
+	}
+	if bytes.Contains(encoded, []byte("app-provider:")) {
+		t.Fatalf("credential reference was serialized: %s", encoded)
+	}
+	if len(view.Providers) != 1 || !view.Providers[0].HasCredential {
+		t.Fatalf("provider should have credential: %#v", view.Providers)
+	}
+}
+
+func TestBootstrapReturnsRecentProjectsAndPreferences(t *testing.T) {
+	repo := &fakeAppSettingsRepo{
+		prefs: appdomain.Preferences{
+			Theme:                    appdomain.ThemeDark,
+			DefaultCreativeProfileID: "profile-1",
+			UpdatedAt:                time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC),
+		},
+		recent: []appdomain.RecentProject{
+			{ProjectID: "p1", Title: "长夜", Path: "/books/长夜.zjproject", LastOpenedAt: time.Date(2026, time.August, 12, 9, 0, 0, 0, time.UTC)},
+		},
+	}
+	settingsService := newTestAppSettingsService(repo, &fakeCredentialStore{})
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.settings = settingsService
+	api.startup(context.Background())
+
+	view, err := api.ApplicationBootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Preferences.Theme != "dark" {
+		t.Fatalf("theme = %q, want dark", view.Preferences.Theme)
+	}
+	if view.Preferences.DefaultCreativeProfileID != "profile-1" {
+		t.Fatalf("default profile id = %q", view.Preferences.DefaultCreativeProfileID)
+	}
+	if len(view.RecentProjects) != 1 || view.RecentProjects[0].Title != "长夜" {
+		t.Fatalf("recent projects = %#v", view.RecentProjects)
+	}
+}
+
+func TestBootstrapReturnsFeatureNotAvailableWithoutSettings(t *testing.T) {
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	_, err := api.ApplicationBootstrap()
+	var safe *desktopError
+	if !errors.As(err, &safe) || safe.Code != errorFeatureNotAvailable {
+		t.Fatalf("ApplicationBootstrap() error = %#v, want FEATURE_NOT_AVAILABLE", err)
+	}
+}
+
+// fakeShellSettings implements appshell.Settings for desktop API tests.
+type fakeShellSettings struct {
+	recent        []appdomain.RecentProject
+	recorded      []appdomain.RecentProject
+	markedMissing map[string]bool
+}
+
+func (f *fakeShellSettings) RecentProjects(context.Context, int) ([]appdomain.RecentProject, error) {
+	return f.recent, nil
+}
+func (f *fakeShellSettings) RecordRecentProject(_ context.Context, rp appdomain.RecentProject) error {
+	f.recorded = append(f.recorded, rp)
+	return nil
+}
+func (f *fakeShellSettings) MarkProjectMissing(_ context.Context, projectID string, missing bool) error {
+	if f.markedMissing == nil {
+		f.markedMissing = make(map[string]bool)
+	}
+	f.markedMissing[projectID] = missing
+	return nil
+}
+
+func TestMissingRecentProjectReturnsRelocateAction(t *testing.T) {
+	ws := &fakeWorkspace{openErr: fs.ErrNotExist}
+	settings := &fakeShellSettings{
+		recent: []appdomain.RecentProject{
+			{ProjectID: "project-1", Title: "长夜", Path: "/books/长夜.zjproject"},
+		},
+	}
+	clock := &fakeClock{t: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC)}
+	shell := appshell.New(ws, settings, clock)
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.shell = shell
+	api.startup(context.Background())
+
+	_, err := api.OpenRecentProject("project-1")
+	var safe *desktopError
+	if !errors.As(err, &safe) {
+		t.Fatalf("OpenRecentProject() error = %#v, want desktop error", err)
+	}
+	if safe.Code != errorProjectRelocateRequired {
+		t.Fatalf("OpenRecentProject() code = %q, want PROJECT_RELOCATE_REQUIRED", safe.Code)
+	}
+	if !settings.markedMissing["project-1"] {
+		t.Fatalf("project was not marked missing")
+	}
+}
+
+func TestOpenRecentProjectReturnsOpenedProject(t *testing.T) {
+	project := workspace.ProjectView{ID: "p1", Title: "长夜", Path: "/books/长夜.zjproject"}
+	ws := &fakeWorkspace{openResult: project}
+	settings := &fakeShellSettings{
+		recent: []appdomain.RecentProject{
+			{ProjectID: "p1", Title: "长夜", Path: "/books/长夜.zjproject"},
+		},
+	}
+	clock := &fakeClock{t: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC)}
+	shell := appshell.New(ws, settings, clock)
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.shell = shell
+	api.startup(context.Background())
+
+	result, err := api.OpenRecentProject("p1")
+	if err != nil {
+		t.Fatalf("OpenRecentProject() error = %v", err)
+	}
+	if result.Outcome != projectOpenOutcomeOpened {
+		t.Fatalf("outcome = %q, want opened", result.Outcome)
+	}
+	if result.Project == nil || result.Project.ID != "p1" {
+		t.Fatalf("project = %#v", result.Project)
+	}
+}
+
+func TestProjectWorkbenchForwardsToWorkspace(t *testing.T) {
+	projection := workspace.WorkbenchProjection{
+		Stage:         projectdomain.StageWriting,
+		Canvas:        "manuscript",
+		AIPanel:       "hidden",
+		ArchiveStatus: "not_generated",
+	}
+	ws := &fakeWorkspace{workbenchResult: projection}
+	api := newDesktopAPI(ws, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+
+	got, err := api.ProjectWorkbench()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, projection) {
+		t.Fatalf("ProjectWorkbench() = %#v, want %#v", got, projection)
+	}
+}
+
+func TestCloseProjectDelegatesToShell(t *testing.T) {
+	ws := &fakeWorkspace{}
+	settings := &fakeShellSettings{}
+	clock := &fakeClock{t: time.Now()}
+	shell := appshell.New(ws, settings, clock)
+
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.shell = shell
+	api.startup(context.Background())
+
+	if err := api.CloseProject(); err != nil {
+		t.Fatalf("CloseProject() error = %v", err)
+	}
+	if ws.closeCalls != 1 {
+		t.Fatalf("workspace close calls = %d, want 1", ws.closeCalls)
 	}
 }
