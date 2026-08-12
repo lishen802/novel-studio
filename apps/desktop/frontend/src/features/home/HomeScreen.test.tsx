@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ApplicationBootstrapView, RecentProjectView } from "../../lib/studio-client";
@@ -30,7 +30,7 @@ const bootstrapWithRecent: ApplicationBootstrapView = {
 };
 
 describe("HomeScreen", () => {
-  it("shows welcome actions without a redundant brand dropdown when recent list is empty", () => {
+  it("shows the approved two-column welcome shell without a redundant brand block", () => {
     const onBeginCreate = vi.fn();
     render(
       <HomeScreen
@@ -43,24 +43,22 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("heading", { name: "织境 Story Studio" }),
-    ).toBeInTheDocument();
-    // The product title is a heading, not a button — there is no brand dropdown.
+    const navigation = screen.getByRole("complementary", { name: "首页导航" });
+    const content = screen.getByRole("region", { name: "首页内容" });
+    expect(within(content).getByRole("heading", { name: "开始一本新作品" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "织境 Story Studio" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /从一个想法开始/ }),
+      within(navigation).getByRole("button", { name: /从一个想法开始/ }),
     ).toBeEnabled();
     expect(
-      screen.getByRole("button", { name: /导入小说并续写/ }),
+      within(navigation).getByRole("button", { name: /导入小说并续写/ }),
     ).toBeEnabled();
     expect(
-      screen.getByRole("button", { name: /打开项目/ }),
+      within(navigation).getByRole("button", { name: /打开项目/ }),
     ).toBeEnabled();
-    // Welcome guide replaces the recent project list.
-    expect(screen.getByText(/暂无最近项目/)).toBeInTheDocument();
+    expect(within(content).getByText(/还没有最近作品/)).toBeInTheDocument();
   });
 
   it("lists recent projects with their last opened time", () => {
@@ -75,9 +73,11 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("button", { name: "打开 长夜织境" }),
-    ).toBeInTheDocument();
+    const navigation = screen.getByRole("complementary", { name: "首页导航" });
+    const content = screen.getByRole("region", { name: "首页内容" });
+    expect(within(navigation).getByRole("button", { name: "打开 长夜织境" })).toBeVisible();
+    expect(within(content).getByRole("heading", { name: "长夜织境" })).toBeVisible();
+    expect(within(content).getByRole("button", { name: "继续《长夜织境》" })).toBeVisible();
     expect(
       screen.getByText(/上次打开于 2026-08-10T08:00:00Z/),
     ).toBeInTheDocument();

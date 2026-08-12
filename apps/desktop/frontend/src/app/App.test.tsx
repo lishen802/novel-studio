@@ -91,6 +91,31 @@ describe("App", () => {
     expect(client.openRecentProjectCalls).toEqual(["recent-1"]);
   });
 
+  it("returns home after dismissing a recent-project open error", async () => {
+    const client = new FakeStudioClient();
+    client.applicationBootstrapResult.recentProjects = [{
+      projectId: "recent-1",
+      title: "旧作品",
+      path: "/books/旧作品.zjproject",
+      lastWorkspace: "manuscript",
+      lastOpenedAt: "2026-08-10T08:00:00Z",
+      missing: false,
+    }];
+    client.openRecentProjectError = {
+      code: "PROJECT_INVALID",
+      message: "项目字段无法读取",
+    };
+    const user = userEvent.setup();
+    render(<App client={client} />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 旧作品" }));
+    expect(await screen.findByRole("alertdialog", { name: "项目操作错误" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+
+    expect(screen.queryByRole("alertdialog", { name: "项目操作错误" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "首页导航" })).toBeVisible();
+  });
+
   it("keeps project mounted while application settings is open", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.chaptersResult = [client.createChapterResult];

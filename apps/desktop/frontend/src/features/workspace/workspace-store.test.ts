@@ -9,6 +9,51 @@ import type {
 import { createWorkspaceStore } from "./workspace-store";
 
 describe("workspace store", () => {
+  it("ignores a stale recent-project failure after a newer open succeeds", async () => {
+    const client = new FakeStudioClient();
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let resolveSecond: ((result: ProjectOpenResultView) => void) | undefined;
+    client.openRecentProject = vi.fn((projectId: string) => {
+      if (projectId === "recent-1") {
+        return new Promise<ProjectOpenResultView>((_resolve, reject) => {
+          rejectFirst = reject;
+        });
+      }
+      return new Promise<ProjectOpenResultView>((resolve) => {
+        resolveSecond = resolve;
+      });
+    });
+    const store = createWorkspaceStore(client);
+
+    const firstOpen = store.getState().openRecentProject("recent-1");
+    const secondOpen = store.getState().openRecentProject("recent-2");
+    resolveSecond?.({
+      outcome: "opened",
+      project: { ...client.openProjectResult, id: "project-2", title: "新作品" },
+    });
+    await secondOpen;
+    rejectFirst?.(new Error("旧请求迟到失败"));
+    await firstOpen;
+
+    expect(store.getState().status).toMatchObject({
+      kind: "ready",
+      project: { id: "project-2", title: "新作品" },
+    });
+  });
+
+  it("returns to the welcome state when a project-open error is dismissed", () => {
+    const store = createWorkspaceStore(new FakeStudioClient());
+    store.setState({
+      status: { kind: "error", message: "项目数据无法读取" },
+      workspaceError: "项目数据无法读取",
+    });
+
+    store.getState().clearWorkspaceError();
+
+    expect(store.getState().status).toEqual({ kind: "welcome" });
+    expect(store.getState().workspaceError).toBeNull();
+  });
+
   it("preserves ready workspace updates when recovery-copy directory selection is cancelled", async () => {
     const client = FakeStudioClient.withReadyProject();
     const chapter = { ...client.createChapterResult, body: "原始正文" };

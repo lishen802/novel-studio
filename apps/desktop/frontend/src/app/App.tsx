@@ -153,16 +153,10 @@ export function App({
   }, [client, workspaceStore]);
 
   const handleOpenRecent = useCallback(
-    async (projectId: string) => {
-      const result = await client.openRecentProject(projectId);
-      if (result.outcome === "lease_conflict") {
-        // Surface the conflict via the workspace store's lease_conflict path.
-        workspaceStore.getState().cancelProjectOpen();
-        return;
-      }
-      await workspaceStore.getState().loadProject(result.project);
+    (projectId: string) => {
+      void workspaceStore.getState().openRecentProject(projectId);
     },
-    [client, workspaceStore],
+    [workspaceStore],
   );
 
   const handleSavedPreferences = useCallback(

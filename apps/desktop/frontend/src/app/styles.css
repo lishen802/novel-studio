@@ -343,6 +343,171 @@ button:disabled {
   background: #6f7fb2;
 }
 
+.home-shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  width: min(100%, 1180px);
+  height: calc(100vh - 96px);
+  min-height: 600px;
+  max-height: 900px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 232, 0.13);
+  border-radius: 26px;
+  color: #f7f1e6;
+  background: rgba(28, 33, 51, 0.9);
+  box-shadow:
+    0 32px 80px rgba(4, 7, 16, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(22px);
+}
+
+.home-sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 32px;
+  padding: 32px 22px;
+  overflow: auto;
+  border-right: 1px solid rgba(255, 248, 232, 0.1);
+  background: rgba(20, 25, 40, 0.72);
+}
+
+.home-entry-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.home-entry-actions button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #ebe6dc;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 620;
+  text-align: left;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.home-entry-actions button:first-child {
+  border-color: rgba(231, 184, 127, 0.2);
+  color: #f5d4a9;
+  background: rgba(231, 184, 127, 0.11);
+}
+
+.home-entry-actions button:hover {
+  transform: translateX(2px);
+  border-color: rgba(240, 199, 146, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.home-entry-actions button:focus-visible,
+.home-continue-action:focus-visible {
+  outline: 3px solid rgba(240, 199, 146, 0.42);
+  outline-offset: 3px;
+}
+
+.home-recent {
+  min-height: 0;
+}
+
+.home-sidebar__label {
+  margin: 0 0 12px;
+  color: #858b9a;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.home-sidebar__empty {
+  margin: 0;
+  padding: 12px 14px;
+  color: #747b8d;
+  font-size: 0.82rem;
+}
+
+.home-sidebar .recent-project-list {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.home-sidebar .recent-project-card {
+  padding: 13px 14px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.home-content {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  padding: clamp(42px, 7vw, 88px);
+  overflow: auto;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 25%, rgba(80, 91, 128, 0.18), transparent 45%),
+    rgba(31, 37, 56, 0.62);
+}
+
+.home-empty-state,
+.home-featured-project {
+  width: min(100%, 580px);
+}
+
+.home-content h1 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", "STSong", serif;
+  font-size: clamp(2.25rem, 5vw, 4rem);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+}
+
+.home-content__description {
+  margin: 22px auto 0;
+  color: #b9bdc9;
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.home-featured-project__path {
+  margin: 10px auto 0;
+  overflow-wrap: anywhere;
+  color: #7f8799;
+  font-size: 0.8rem;
+}
+
+.home-continue-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 30px;
+  padding: 14px 22px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 680;
+}
+
+.home-content > .local-first-note {
+  position: absolute;
+  right: 32px;
+  bottom: 24px;
+  left: 32px;
+  margin: 0;
+}
+
 .welcome-card {
   position: relative;
   width: min(100%, 640px);
@@ -4729,6 +4894,14 @@ button:disabled {
 }
 
 @media (max-width: 900px) {
+  .home-shell {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+  .home-content {
+    padding: 40px 30px 72px;
+  }
+
   .workspace-shell {
     min-width: 720px;
     grid-template-columns: 230px minmax(0, 1fr);
@@ -4811,7 +4984,8 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .welcome-actions button {
+  .welcome-actions button,
+  .home-entry-actions button {
     transition: none;
   }
 }

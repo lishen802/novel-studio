@@ -56,6 +56,19 @@ func TestDesktopAPICreateProjectForwardsInput(t *testing.T) {
 	}
 }
 
+func TestProjectProfileSelectionWireContractUsesFrontendFieldNames(t *testing.T) {
+	encoded, err := json.Marshal(ports.ProjectProfileSelection{
+		ProfileID: "profile-1",
+		Version:   3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"profileId":"profile-1","version":3}`; got != want {
+		t.Fatalf("profile selection JSON = %s, want %s", got, want)
+	}
+}
+
 func TestDesktopAPIMapsSharingViolationToSafeCode(t *testing.T) {
 	api := newDesktopAPI(&fakeWorkspace{
 		commitErr: &ports.ProjectFilesystemFailure{

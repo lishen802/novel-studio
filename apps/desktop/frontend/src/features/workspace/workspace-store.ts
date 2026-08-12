@@ -74,6 +74,7 @@ export type WorkspaceState = {
   cancelCreate(): void;
   createProject(input: Omit<CreateProjectInput, "parentDirectory">): Promise<void>;
   openProject(): Promise<void>;
+  openRecentProject(projectId: string): Promise<void>;
   retryProjectOpen(): Promise<void>;
   openProjectReadOnly(): Promise<void>;
   createRecoveryCopy(): Promise<void>;
@@ -210,6 +211,38 @@ export function createWorkspaceStore(
         await openProjectAtPath(path, "editable");
       } catch (error) {
         set({ status: { kind: "error", message: errorMessage(error) } });
+      }
+    },
+
+    // 最近项目打开使用请求序号隔离并发结果，迟到的旧请求不得覆盖新工作区。
+    async openRecentProject(projectId) {
+      const request = ++selectionRequest;
+      set({ status: { kind: "opening" } });
+      try {
+        const result = await client.openRecentProject(projectId);
+        if (request !== selectionRequest) return;
+        if (result.outcome === "lease_conflict") {
+          set({ status: { kind: "lease_conflict", conflict: result.conflict } });
+          return;
+        }
+        const chapters = await client.listChapters();
+        if (request !== selectionRequest) return;
+        set({
+          status: {
+            kind: "ready",
+            project: result.project,
+            chapters,
+            activeChapterId: null,
+          },
+          workspaceError: null,
+          currentPage: "manuscript",
+          workbench: null,
+        });
+        void refreshWorkbenchForProject(result.project.id);
+      } catch (error) {
+        if (request === selectionRequest) {
+          set({ status: { kind: "error", message: errorMessage(error) } });
+        }
       }
     },
 
@@ -529,7 +562,15 @@ export function createWorkspaceStore(
     },
 
     clearWorkspaceError() {
-      set({ workspaceError: null });
+      set((latest) => ({
+        workspaceError: null,
+        ...(latest.status.kind === "error"
+          ? {
+              status: { kind: "welcome" } as const,
+              pendingParentDirectory: null,
+            }
+          : {}),
+      }));
     },
 
     setCurrentPage(page) {

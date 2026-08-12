@@ -46,6 +46,6 @@ type ProjectDefaults interface {
 // ProjectProfileSelection is the pinned profile version and optional role
 // overrides for a project.
 type ProjectProfileSelection struct {
-	ProfileID string
-	Version   int64
+	ProfileID string `json:"profileId"`
+	Version   int64  `json:"version"`
 }

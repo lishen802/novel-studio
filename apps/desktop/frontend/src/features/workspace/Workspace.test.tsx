@@ -158,8 +158,9 @@ describe("Workspace", () => {
     await user.click(await screen.findByRole("button", { name: /从一个想法开始/ }));
 
     expect(
-      screen.getByRole("heading", { name: "织境 Story Studio" }),
+      screen.getByRole("complementary", { name: "首页导航" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "开始一本新作品" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(client.createProjectCalls).toHaveLength(0);
   });
