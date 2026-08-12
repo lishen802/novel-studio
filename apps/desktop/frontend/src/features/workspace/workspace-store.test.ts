@@ -4,6 +4,7 @@ import type {
   ChapterView,
   ProjectOpenResultView,
   SnapshotRestoreView,
+  WorkbenchProjection,
 } from "../../lib/studio-client";
 import { createWorkspaceStore } from "./workspace-store";
 
@@ -292,5 +293,96 @@ describe("workspace store", () => {
     expect(store.getState().workspaceError).toBe(
       "导入章节数据无效，请重试。",
     );
+  });
+
+  it("resets the current page to manuscript when a project loads", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+
+    store.getState().setCurrentPage("story");
+    expect(store.getState().currentPage).toBe("story");
+
+    await store.getState().loadProject(client.openProjectResult);
+    expect(store.getState().currentPage).toBe("manuscript");
+  });
+
+  it("fetches the authoritative workbench projection on project load", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const projection: WorkbenchProjection = {
+      stage: "writing",
+      canvas: "manuscript",
+      aiPanel: "hidden",
+      pendingReviewCount: 2,
+      recoverableJobCount: 1,
+      archiveStatus: "not_generated",
+    };
+    client.workbenchProjectionResult = projection;
+    const store = createWorkspaceStore(client);
+
+    await store.getState().loadProject(client.openProjectResult);
+    // 等待异步的 refreshWorkbenchForProject 完成
+    await vi.waitFor(() => {
+      expect(store.getState().workbench).toEqual(projection);
+    });
+    expect(client.projectWorkbenchCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it("refreshWorkbench re-pulls the projection without reloading the project", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.workbenchProjectionResult = {
+      stage: "writing",
+      canvas: "manuscript",
+      aiPanel: "hidden",
+      pendingReviewCount: 0,
+      recoverableJobCount: 0,
+      archiveStatus: "not_generated",
+    };
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    await vi.waitFor(() => {
+      expect(store.getState().workbench).not.toBeNull();
+    });
+    const callsBefore = client.projectWorkbenchCalls;
+
+    const updated: WorkbenchProjection = {
+      stage: "writing",
+      canvas: "manuscript",
+      aiPanel: "hidden",
+      pendingReviewCount: 3,
+      recoverableJobCount: 0,
+      archiveStatus: "not_generated",
+    };
+    client.workbenchProjectionResult = updated;
+
+    await store.getState().refreshWorkbench();
+    expect(client.projectWorkbenchCalls).toBe(callsBefore + 1);
+    expect(store.getState().workbench).toEqual(updated);
+  });
+
+  it("setCurrentPage only updates local navigation state without contacting the client", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    const callsBefore = client.projectWorkbenchCalls;
+
+    store.getState().setCurrentPage("versions");
+    expect(store.getState().currentPage).toBe("versions");
+    expect(client.projectWorkbenchCalls).toBe(callsBefore);
+  });
+
+  it("keeps workbench null when projection fetch fails without blocking project load", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.projectWorkbenchError = new Error("projection unavailable");
+    const store = createWorkspaceStore(client);
+
+    await store.getState().loadProject(client.openProjectResult);
+    await vi.waitFor(() => {
+      expect(client.projectWorkbenchCalls).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(store.getState().status.kind).toBe("ready");
+    expect(store.getState().workbench).toBeNull();
   });
 });

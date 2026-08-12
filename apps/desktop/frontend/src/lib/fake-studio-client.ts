@@ -265,12 +265,12 @@ export class FakeStudioClient implements StudioClient {
   closeProjectError: Error | null = null;
   openRecentProjectError?: DesktopError;
   workbenchProjectionResult: WorkbenchProjection = {
-    stage: "manuscript",
-    canvas: "",
-    aiPanel: "",
+    stage: "writing",
+    canvas: "manuscript",
+    aiPanel: "hidden",
     pendingReviewCount: 0,
     recoverableJobCount: 0,
-    archiveStatus: "",
+    archiveStatus: "not_generated",
   };
   publishCreativeProfileResult: CreativeProfileView = {
     profileId: "profile-1",

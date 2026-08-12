@@ -7,9 +7,28 @@ import type {
   ProjectView,
   SnapshotRestoreView,
   StudioClient,
+  WorkbenchProjection,
 } from "../../lib/studio-client";
 
 type WorkspaceReplacement = Pick<SnapshotRestoreView, "project" | "chapters">;
+
+// 项目导航分组的二级页面 ID。一级分组固定，二级页面展开在其下；
+// stage/canvas/counts 始终从 client.projectWorkbench() 投影，不在此处推断。
+export type ProjectPage =
+  | "dashboard"
+  | "manuscript"
+  | "changes"
+  | "imports"
+  | "proposal"
+  | "story"
+  | "characters"
+  | "world"
+  | "continuity"
+  | "foreshadowing"
+  | "versions"
+  | "branches"
+  | "export"
+  | "maintenance";
 
 export type WorkspaceStatus =
   | { kind: "welcome" }
@@ -32,6 +51,10 @@ export type WorkspaceState = {
   status: WorkspaceStatus;
   pendingParentDirectory: string | null;
   workspaceError: string | null;
+  // 当前选中的二级页面。仅本地导航状态；权威的 stage/canvas 来自 workbench 投影。
+  currentPage: ProjectPage;
+  // 权威工作台投影。loadProject 时拉取，refreshWorkbench 可手动刷新。
+  workbench: WorkbenchProjection | null;
   beginCreate(): Promise<void>;
   cancelCreate(): void;
   createProject(input: Omit<CreateProjectInput, "parentDirectory">): Promise<void>;
@@ -48,6 +71,8 @@ export type WorkspaceState = {
   replaceChapters(chapters: ChapterView[]): void;
   restoreWorkspace(result: WorkspaceReplacement): void;
   clearWorkspaceError(): void;
+  setCurrentPage(page: ProjectPage): void;
+  refreshWorkbench(): Promise<void>;
 };
 
 function errorMessage(error: unknown): string {
@@ -77,10 +102,29 @@ export function createWorkspaceStore(
       }
     };
 
+    const refreshWorkbenchForProject = async (projectId: string): Promise<void> => {
+      try {
+        const workbench = await client.projectWorkbench();
+        set((latest) => {
+          if (
+            latest.status.kind !== "ready" ||
+            latest.status.project.id !== projectId
+          ) {
+            return {};
+          }
+          return { workbench };
+        });
+      } catch {
+        // 工作台投影失败不应阻断项目加载；UI 会显示占位状态。
+      }
+    };
+
     return {
     status: { kind: "welcome" },
     pendingParentDirectory: null,
     workspaceError: null,
+    currentPage: "manuscript",
+    workbench: null,
 
     async beginCreate() {
       set({ status: { kind: "opening" } });
@@ -119,7 +163,10 @@ export function createWorkspaceStore(
           },
           pendingParentDirectory: null,
           workspaceError: null,
+          currentPage: "manuscript",
+          workbench: null,
         });
+        void refreshWorkbenchForProject(project.id);
       } catch (error) {
         set({ status: { kind: "error", message: errorMessage(error) } });
       }
@@ -259,7 +306,10 @@ export function createWorkspaceStore(
             activeChapterId: null,
           },
           workspaceError: null,
+          currentPage: "manuscript",
+          workbench: null,
         });
+        void refreshWorkbenchForProject(project.id);
       } catch (error) {
         set({ status: { kind: "error", message: errorMessage(error) } });
       }
@@ -426,12 +476,25 @@ export function createWorkspaceStore(
             activeChapterId,
           },
           workspaceError: null,
+          currentPage: "manuscript" as const,
+          workbench: null,
         };
       });
+      void refreshWorkbenchForProject(result.project.id);
     },
 
     clearWorkspaceError() {
       set({ workspaceError: null });
+    },
+
+    setCurrentPage(page) {
+      set({ currentPage: page });
+    },
+
+    async refreshWorkbench() {
+      const current = get().status;
+      if (current.kind !== "ready") return;
+      await refreshWorkbenchForProject(current.project.id);
     },
   };
   });

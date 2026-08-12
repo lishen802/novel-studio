@@ -10,7 +10,7 @@
 
 ---
 
-- 状态：`draft`
+- 状态：`in_progress`
 - 所属阶段：[R2 产品壳、应用设置与交互基础](../roadmap/development-roadmap.md#7-r2产品壳应用设置与交互基础)
 - 上游文档：[产品需求](../product/requirements.md)、[产品与交互设计](../product/design.md)、[系统技术设计](../architecture/system-design.md)
 - 架构约束：[Go-first](../architecture/0002-go-first-wails-stack.md)、[Wails 目录](../architecture/0003-wails-project-layout.md)
@@ -745,7 +745,7 @@ git commit -m "feat: add recent projects home and app settings"
 - Modify: `apps/desktop/frontend/src/features/workspace/workspace-store.test.ts`
 - Modify: `apps/desktop/frontend/src/lib/studio-client.ts`
 
-- [ ] **Step 1: 写导航层级和权威投影的失败测试**
+- [x] **Step 1: 写导航层级和权威投影的失败测试**
 
 ```tsx
 it("groups archive pages below a secondary section", async () => {
@@ -764,13 +764,13 @@ it("routes from the authoritative workbench canvas instead of local mode", () =>
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `cd apps/desktop/frontend && npm test -- --run src/features/workspace src/features/agents`
 
 Expected: FAIL，旧 `Workspace` 仍把智能创作、故事架构、人物、世界等全部放在同一级。
 
-- [ ] **Step 3: 实现固定一级分组和可恢复页面 ID**
+- [x] **Step 3: 实现固定一级分组和可恢复页面 ID**
 
 ```ts
 export type ProjectSection =
@@ -800,7 +800,7 @@ export type ProjectPage =
 
 一级只渲染“创作驾驶舱、正文与章节、审阅与候选、导入与续写、作品档案、版本与交付”。二级展开现有页面；尚无独立页面的 proposal/foreshadowing/export/maintenance 显示诚实的 `尚未在当前阶段提供`，不显示假内容。当前 page 存 workspace store，但 stage/canvas/counts 始终从 `client.projectWorkbench()` 刷新。
 
-- [ ] **Step 4: 将 `AgentWorkbench` 拆成三个边界**
+- [x] **Step 4: 将 `AgentWorkbench` 拆成三个边界**
 
 `ApplicationSettings` 已承载连接和全局 profile；`ProjectCreativeProfile` 只选择已发布 profile version 和角色覆盖；`AgentRunPanel` 只显示当前项目运行预算、任务创建、运行进度与恢复。保留 `AgentWorkbench` 作为临时组合组件直到所有调用者迁移，然后删除其中连接/API Key 表单。
 
@@ -814,7 +814,7 @@ export type ProjectProfileSelectionInput = {
 
 项目选择页面必须显示 `默认方案 vN`、覆盖角色和“不会随全局默认自动变化”。切换 profile 不能修改已存在 run 的冻结 profile_id/model。
 
-- [ ] **Step 5: 保留现有页面可达性和读写保护**
+- [x] **Step 5: 保留现有页面可达性和读写保护**
 
 为 story/world/assets/continuity/imports/changes/versions/branches 建立一一对应路由测试；只读项目隐藏写操作但保留查看；文件系统风险 banner 继续位于项目壳顶部，不因二级导航折叠消失。
 
@@ -832,13 +832,13 @@ it.each([
 });
 ```
 
-- [ ] **Step 6: 运行 GREEN**
+- [x] **Step 6: 运行 GREEN**
 
 Run: `cd apps/desktop/frontend && npm test -- --run src/features/workspace src/features/agents src/features/story src/features/world src/features/assets src/features/continuity src/features/revisions`
 
 Expected: PASS；所有原有能力仍可到达，首页动作不出现在项目侧栏。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add apps/desktop/frontend/src/features/workspace apps/desktop/frontend/src/features/agents apps/desktop/frontend/src/lib/studio-client.ts

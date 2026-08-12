@@ -188,6 +188,8 @@ export function App({
             workspace={workspaceState.status}
             error={workspaceState.workspaceError}
             client={client}
+            currentPage={workspaceState.currentPage}
+            workbench={workspaceState.workbench}
             onCreateChapter={workspaceState.createChapter}
             onSelectChapter={workspaceState.selectChapter}
             onChapterUpdated={workspaceState.updateChapter}
@@ -198,6 +200,7 @@ export function App({
             onFlushAvailable={onFlushAvailable}
             onCreateRecoveryCopy={workspaceState.createRecoveryCopy}
             onRefreshFilesystemHealth={workspaceState.refreshFilesystemHealth}
+            onSetCurrentPage={workspaceState.setCurrentPage}
           />
           {isSettingsOverlayOpen && settingsBootstrap && (
             <div className="dialog-backdrop">

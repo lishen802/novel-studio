@@ -1,34 +1,15 @@
-import {
-  BookOpenText,
-  Bot,
-  Clock3,
-  FileSearch2,
-  FilePlus2,
-  Feather,
-  GitCompareArrows,
-  Globe2,
-  History,
-  LibraryBig,
-  Network,
-  UsersRound,
-} from "lucide-react";
+import { Feather, FilePlus2, LibraryBig } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type {
   ChapterView,
   SnapshotRestoreView,
   StudioClient,
+  WorkbenchProjection,
 } from "../../lib/studio-client";
-import { ChapterEditor } from "../editor/ChapterEditor";
-import { AgentWorkbench } from "../agents/AgentWorkbench";
-import { WorldAssetsWorkbench } from "../assets/WorldAssetsWorkbench";
-import { ContinuityWorkbench } from "../continuity/ContinuityWorkbench";
-import { ImportWorkbench } from "../imports/ImportWorkbench";
-import { ChangeReviewWorkbench } from "../revisions/ChangeReviewWorkbench";
-import { VersionHistoryWorkbench } from "../revisions/VersionHistoryWorkbench";
-import { StoryArchitecture } from "../story/StoryArchitecture";
-import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import { ProjectFilesystemRiskBanner } from "./ProjectFilesystemRiskBanner";
-import type { WorkspaceStatus } from "./workspace-store";
+import { ProjectNavigation } from "./ProjectNavigation";
+import { WorkbenchRouter } from "./WorkbenchRouter";
+import type { ProjectPage, WorkspaceStatus } from "./workspace-store";
 
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
 type WorkspaceReplacement = Pick<SnapshotRestoreView, "project" | "chapters">;
@@ -37,6 +18,10 @@ type WorkspaceProps = {
   workspace: ReadyWorkspace;
   error: string | null;
   client: StudioClient;
+  // 当前选中的二级页面，来自 workspace store
+  currentPage: ProjectPage;
+  // 权威工作台投影，来自 workspace store
+  workbench: WorkbenchProjection | null;
   onCreateChapter(title: string): Promise<boolean>;
   onSelectChapter(id: string): Promise<void>;
   onChapterUpdated(chapter: ChapterView): void;
@@ -47,12 +32,15 @@ type WorkspaceProps = {
   onFlushAvailable(flush: (() => Promise<void>) | null): void;
   onCreateRecoveryCopy(): Promise<void>;
   onRefreshFilesystemHealth(): Promise<void>;
+  onSetCurrentPage(page: ProjectPage): void;
 };
 
 export function Workspace({
   workspace,
   error,
   client,
+  currentPage,
+  workbench,
   onCreateChapter,
   onSelectChapter,
   onChapterUpdated,
@@ -63,24 +51,11 @@ export function Workspace({
   onFlushAvailable,
   onCreateRecoveryCopy,
   onRefreshFilesystemHealth,
+  onSetCurrentPage,
 }: WorkspaceProps) {
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
-  const [activeView, setActiveView] = useState<
-    | "manuscript"
-    | "story"
-    | "world"
-    | "assets"
-    | "continuity"
-    | "imports"
-    | "changes"
-    | "agents"
-    | "versions"
-  >("manuscript");
-  const activeChapter = workspace.chapters.find(
-    (chapter) => chapter.id === workspace.activeChapterId,
-  );
   const readOnly = workspace.project.accessMode === "read_only";
   const filesystemHealth = workspace.project.filesystemHealth ?? {
     level: "normal" as const,
@@ -137,82 +112,14 @@ export function Workspace({
           recoveryCopying={workspace.recoveryCopying}
         />
 
-        <nav className="workspace-sections" aria-label="作品功能">
-          <button
-            type="button"
-            className={activeView === "agents" ? "is-active" : ""}
-            onClick={() => setActiveView("agents")}
-          >
-            <Bot size={17} />
-            智能创作
-          </button>
-          <button
-            type="button"
-            className={activeView === "manuscript" ? "is-active" : ""}
-            onClick={() => setActiveView("manuscript")}
-          >
-            <BookOpenText size={17} />
-            正文编辑
-          </button>
-          <button
-            type="button"
-            className={activeView === "imports" ? "is-active" : ""}
-            onClick={() => setActiveView("imports")}
-          >
-            <FileSearch2 size={17} />
-            导入分析
-          </button>
-          <button
-            type="button"
-            className={activeView === "story" ? "is-active" : ""}
-            onClick={() => setActiveView("story")}
-          >
-            <Network size={17} />
-            故事架构
-          </button>
-          <button
-            type="button"
-            className={activeView === "world" ? "is-active" : ""}
-            onClick={() => setActiveView("world")}
-          >
-            <UsersRound size={17} />
-            人物与势力
-          </button>
-          <button
-            type="button"
-            className={activeView === "assets" ? "is-active" : ""}
-            onClick={() => setActiveView("assets")}
-          >
-            <Globe2 size={17} />
-            世界设定
-          </button>
-          <button
-            type="button"
-            className={activeView === "continuity" ? "is-active" : ""}
-            onClick={() => setActiveView("continuity")}
-          >
-            <Clock3 size={17} />
-            时间线与事实
-          </button>
-          <button
-            type="button"
-            className={activeView === "changes" ? "is-active" : ""}
-            onClick={() => setActiveView("changes")}
-          >
-            <GitCompareArrows size={17} />
-            候选变更
-          </button>
-          <button
-            type="button"
-            className={activeView === "versions" ? "is-active" : ""}
-            onClick={() => setActiveView("versions")}
-          >
-            <History size={17} />
-            版本历史
-          </button>
-        </nav>
+        <ProjectNavigation
+          currentPage={currentPage}
+          onSelectPage={onSetCurrentPage}
+          pendingReviewCount={workbench?.pendingReviewCount ?? 0}
+          recoverableJobCount={workbench?.recoverableJobCount ?? 0}
+        />
 
-        {activeView === "manuscript" && (
+        {currentPage === "manuscript" && (
           <>
             <div className="chapter-list__header">
               <span>章节</span>
@@ -270,64 +177,24 @@ export function Workspace({
           </div>
         )}
         <fieldset className="workspace-main__content" disabled={readOnly}>
-          {activeView === "imports" ? (
-            <ImportWorkbench
-              client={client}
-              onChaptersImported={onChaptersImported}
-            />
-          ) : activeView === "story" ? (
-            <StoryArchitecture
-              client={client}
-              chapters={workspace.chapters}
-              onOpenChapter={(id) => {
-                setActiveView("manuscript");
-                void onSelectChapter(id);
-              }}
-            />
-          ) : activeView === "world" ? (
-            <StoryWorldWorkbench client={client} chapters={workspace.chapters} />
-          ) : activeView === "assets" ? (
-            <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
-          ) : activeView === "continuity" ? (
-            <ContinuityWorkbench client={client} chapters={workspace.chapters} />
-          ) : activeView === "changes" ? (
-            <ChangeReviewWorkbench
-              client={client}
-              chapters={workspace.chapters}
-              onChapterUpdated={onChapterUpdated}
-            />
-          ) : activeView === "agents" ? (
-            <AgentWorkbench
-              client={client}
-              chapters={workspace.chapters}
-              onOpenChanges={() => setActiveView("changes")}
-            />
-          ) : activeView === "versions" ? (
-            <VersionHistoryWorkbench
-              client={client}
-              project={workspace.project}
-              chapters={workspace.chapters}
-              onChapterUpdated={onChapterUpdated}
-              onWorkspaceRestored={onWorkspaceRestored}
-              onBeforeVersionOperation={onBeforeVersionOperation}
-            />
-          ) : activeChapter ? (
-            <ChapterEditor
-              key={activeChapter.id}
-              chapter={activeChapter}
-              client={client}
-              onChapterUpdated={onChapterUpdated}
-              onFlushAvailable={onFlushAvailable}
-              onFilesystemHealthChanged={onRefreshFilesystemHealth}
-              readOnly={readOnly}
-            />
-          ) : (
-            <div className="editor-empty">
-              <Feather size={36} aria-hidden="true" />
-              <h2>选择一个章节开始创作</h2>
-              <p>章节的短周期草稿会自动保存，正式正文仍由版本提交保护。</p>
-            </div>
-          )}
+          <WorkbenchRouter
+            projection={workbench}
+            page={currentPage}
+            workspace={workspace}
+            client={client}
+            error={error}
+            onCreateChapter={onCreateChapter}
+            onSelectChapter={onSelectChapter}
+            onChapterUpdated={onChapterUpdated}
+            onChaptersImported={onChaptersImported}
+            onWorkspaceRestored={onWorkspaceRestored}
+            onBeforeVersionOperation={onBeforeVersionOperation}
+            onDismissError={onDismissError}
+            onFlushAvailable={onFlushAvailable}
+            onCreateRecoveryCopy={onCreateRecoveryCopy}
+            onRefreshFilesystemHealth={onRefreshFilesystemHealth}
+            onNavigate={onSetCurrentPage}
+          />
         </fieldset>
       </section>
 

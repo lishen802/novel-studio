@@ -129,7 +129,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} />);
 
-    await user.click(screen.getByRole("button", { name: "创建项目" }));
+    await user.click(await screen.findByRole("button", { name: /从一个想法开始/ }));
     await user.type(screen.getByLabelText("书名"), "长夜织境");
     await user.type(screen.getByLabelText("类型"), "东方奇幻");
     await user.type(screen.getByLabelText("简介"), "失落城邦与梦境交叠。");
@@ -155,7 +155,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} />);
 
-    await user.click(screen.getByRole("button", { name: "创建项目" }));
+    await user.click(await screen.findByRole("button", { name: /从一个想法开始/ }));
 
     expect(
       screen.getByRole("heading", { name: "织境 Story Studio" }),
@@ -183,11 +183,13 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
+    // 故事架构 在 作品档案 折叠分组下，需要先展开
+    await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(await screen.findByRole("button", { name: "故事架构" }));
     expect(
       await screen.findByRole("heading", { name: "故事架构" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "正文编辑" }));
+    await user.click(screen.getByRole("button", { name: "正文与章节" }));
     expect(screen.getByText("选择一个章节开始创作")).toBeInTheDocument();
   });
 
@@ -197,7 +199,7 @@ describe("Workspace", () => {
     render(<App client={client} initialProject={client.openProjectResult} />);
 
     await user.click(
-      await screen.findByRole("button", { name: "导入分析" }),
+      await screen.findByRole("button", { name: "导入与续写" }),
     );
 
     expect(
@@ -274,7 +276,7 @@ describe("Workspace", () => {
       await screen.findByRole("heading", { name: original.title }),
     ).toBeInTheDocument();
     await user.click(
-      await screen.findByRole("button", { name: "导入分析" }),
+      await screen.findByRole("button", { name: "导入与续写" }),
     );
     await user.click(
       await screen.findByRole("checkbox", {
@@ -287,7 +289,7 @@ describe("Workspace", () => {
         screen.getByRole("dialog", { name: "确认导入章节" }),
       ).getByRole("button", { name: "确认导入" }),
     );
-    await user.click(screen.getByRole("button", { name: "正文编辑" }));
+    await user.click(screen.getByRole("button", { name: "正文与章节" }));
 
     const chapterList = screen.getByRole("navigation", {
       name: "章节列表",
@@ -307,6 +309,8 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
+    // 人物与势力 在 作品档案 折叠分组下
+    await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(await screen.findByRole("button", { name: "人物与势力" }));
 
     expect(
@@ -319,6 +323,8 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
+    // 世界设定 在 作品档案 折叠分组下
+    await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(await screen.findByRole("button", { name: "世界设定" }));
 
     expect(
@@ -331,6 +337,8 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
+    // 时间线与事实 在 作品档案 折叠分组下
+    await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(
       await screen.findByRole("button", { name: "时间线与事实" }),
     );
@@ -345,6 +353,8 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
+    // 版本历史 在 版本与交付 折叠分组下
+    await user.click(await screen.findByRole("button", { name: "版本与交付" }));
     await user.click(await screen.findByRole("button", { name: "版本历史" }));
 
     expect(
@@ -359,7 +369,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} />);
 
-    await user.click(screen.getByRole("button", { name: "打开项目" }));
+    await user.click(await screen.findByRole("button", { name: /打开项目/ }));
 
     expect(
       await screen.findByRole("heading", { name: "长夜织境" }),
@@ -388,7 +398,7 @@ describe("Workspace", () => {
     client.createProjectError = new Error("磁盘空间不足");
     render(<App client={client} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    fireEvent.click(await screen.findByRole("button", { name: /从一个想法开始/ }));
     fireEvent.change(await screen.findByLabelText("书名"), {
       target: { value: "未完成的书" },
     });
