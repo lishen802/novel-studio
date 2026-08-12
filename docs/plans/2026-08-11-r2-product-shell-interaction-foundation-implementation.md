@@ -867,7 +867,7 @@ git commit -m "feat: add staged project navigation"
 - Modify: `internal/application/appshell/service.go`
 - Modify: `internal/application/appshell/service_test.go`
 
-- [ ] **Step 1: 写面板状态和直接导入入口的失败测试**
+- [x] **Step 1: 写面板状态和直接导入入口的失败测试**
 
 ```tsx
 it("keeps the AI panel hidden during normal writing until Cmd+J", async () => {
@@ -886,13 +886,13 @@ it("opens imported manuscript immediately and shows whole-book archive action", 
 });
 ```
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `cd apps/desktop/frontend && npm test -- --run src/features/workbench src/features/imports src/features/editor src/app/App.test.tsx`
 
 Expected: FAIL，阶段画布、AI 面板和无项目导入生命周期尚不存在。
 
-- [ ] **Step 3: 实现受控 AI 面板状态机**
+- [x] **Step 3: 实现受控 AI 面板状态机**
 
 ```ts
 export type AIPanelMode = "expanded" | "collapsed" | "hidden" | "selection_review";
@@ -905,7 +905,7 @@ type AIPanelDraft = {
 
 默认值由 WorkbenchProjection 给出：idea 展开，proposal 保持作者选择，roadmap 可折叠，batch/writing 隐藏，review 以 selection_review 打开。workspace store 按 project ID 保存未发送输入；切换画布或打开应用设置不能清除。章节选区包含 base revision；正文变化后提交选区意见必须返回 `STALE_SELECTION` 并要求重新选择。
 
-- [ ] **Step 4: 实现首页导入的应用生命周期**
+- [x] **Step 4: 实现首页导入的应用生命周期**
 
 新增 `CreateImportedProjectInput`：源文件、目标父目录、标题、类型和版权确认。appshell 的 `CreateImportedProject` 顺序固定为：校验源文件 → 创建导入型项目并 pin profile → `PrepareManuscriptImport` → 应用全部确定性章节 → 返回 `ProjectView + chapters + WorkbenchProjection`。任一步失败都保留可恢复项目与 import job，不删除作者唯一源文件；重复提交使用 source hash + project ID 幂等。
 
@@ -919,11 +919,11 @@ type CreateImportedProjectResult struct {
 
 R2 不启动抽取任务。`StartWholeBookArchive` binding 返回安全的 `FEATURE_NOT_AVAILABLE`，同时 `ProjectWorkbench.ArchiveStatus` 为 `not_generated`；前端按钮显示“整书档案生成将在后续能力启用”，不能显示完成进度或写入档案。
 
-- [ ] **Step 5: 实现导入后的正文卡与手工写作**
+- [x] **Step 5: 实现导入后的正文卡与手工写作**
 
 导入成功后 active page 强制为 manuscript，选中第一章；作者可直接编辑、保存、新建章节。正文顶部的 `WholeBookArchiveCard` 显示“尚未生成整本小说档案”和按钮；按钮禁用仅由结构化 capability 状态决定，不因缺模型配置伪装成已生成。
 
-- [ ] **Step 6: 覆盖不丢状态、幂等和失败恢复**
+- [x] **Step 6: 覆盖不丢状态、幂等和失败恢复**
 
 ```tsx
 it("preserves unsaved chapter and AI input while toggling panel and settings", async () => {
@@ -974,7 +974,7 @@ func TestStartWholeBookArchiveReturnsFeatureUnavailableWithoutCreatingExtraction
 }
 ```
 
-- [ ] **Step 7: 运行受影响 Go 与前端测试**
+- [x] **Step 7: 运行受影响 Go 与前端测试**
 
 Run: `go test -race -shuffle=on ./internal/application/appshell ./internal/application/workspace ./apps/desktop -count=1`
 
@@ -984,7 +984,7 @@ Run: `cd apps/desktop/frontend && npm test -- --run src/app src/features/workben
 
 Expected: PASS，编辑器输入、AI 输入和 import job 状态均不因重挂载丢失。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add internal/application/appshell apps/desktop/api.go apps/desktop/api_test.go apps/desktop/frontend/src
