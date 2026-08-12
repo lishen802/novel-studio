@@ -20,10 +20,11 @@ function chapter(overrides: Partial<ChapterView> = {}): ChapterView {
 
 function runBase(
   overrides: Partial<AgentRunView> = {},
-): Omit<AgentRunView, "id" | "status" | "errorCode" | "retryOf"> {
+): Omit<AgentRunView, "id" | "status" | "retryOf"> {
   return {
     chapterId: "chapter-1",
     prompt: "续写",
+    errorCode: "",
     errorMessage: "",
     changeSetId: "",
     tokenBudget: 30000,

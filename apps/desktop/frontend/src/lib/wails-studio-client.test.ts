@@ -262,6 +262,27 @@ function installNative(overrides: Record<string, unknown> = {}) {
       archiveStatus: "not_generated",
     })),
     CloseProject: vi.fn(async () => undefined),
+    CreateImportedProject: vi.fn(async () => ({
+      project: {
+        id: "project-1",
+        title: "导入作品",
+        genre: "",
+        summary: "",
+        path: "/books/imported.zjproject",
+        accessMode: "editable",
+        filesystemHealth: { level: "normal", category: "", actions: [] },
+      },
+      chapters: [],
+      workbench: {
+        stage: "manuscript",
+        canvas: "manuscript",
+        aiPanel: "hidden",
+        pendingReviewCount: 0,
+        recoverableJobCount: 0,
+        archiveStatus: "not_generated",
+      },
+    })),
+    StartWholeBookArchive: vi.fn(async () => undefined),
     ...overrides,
   };
   window.go = { main: { DesktopAPI: api } } as typeof window.go;

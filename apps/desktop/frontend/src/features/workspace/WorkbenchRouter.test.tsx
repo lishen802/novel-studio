@@ -88,6 +88,7 @@ function renderRouter({
       onCreateRecoveryCopy={vi.fn()}
       onRefreshFilesystemHealth={vi.fn()}
       onNavigate={vi.fn()}
+      onStartWholeBookArchive={vi.fn()}
     />,
   );
 }
@@ -175,6 +176,7 @@ describe("WorkbenchRouter", () => {
         onCreateRecoveryCopy={vi.fn()}
         onRefreshFilesystemHealth={vi.fn()}
         onNavigate={vi.fn()}
+        onStartWholeBookArchive={vi.fn()}
       />,
     );
     expect(screen.getByRole("heading", { name: "导出与发布" })).toBeVisible();
