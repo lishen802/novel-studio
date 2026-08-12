@@ -101,6 +101,39 @@ func (s *Store) DeleteProvider(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) ProviderInUse(ctx context.Context, providerID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM creative_profile_roles WHERE connection_id = ?
+	`, providerID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check provider in use: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (s *Store) AllProfileIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT profile_id FROM creative_profile_versions ORDER BY profile_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list profile ids: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan profile id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate profile ids: %w", err)
+	}
+	return ids, nil
+}
+
 func (s *Store) Provider(ctx context.Context, id string) (appsettings.ProviderConnection, error) {
 	var (
 		kind, createdAt, updatedAt string
