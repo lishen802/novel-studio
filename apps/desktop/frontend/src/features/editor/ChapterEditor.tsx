@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   RevisionConflictError,
   StudioClientError,
+  type AIPanelSelection,
   type ChapterView,
   type StudioClient,
 } from "../../lib/studio-client";
@@ -13,6 +14,9 @@ type ChapterEditorProps = {
   onChapterUpdated?: (chapter: ChapterView) => void;
   onFlushAvailable?: (flush: (() => Promise<void>) | null) => void;
   onFilesystemHealthChanged?: () => Promise<void>;
+  // 选区意见回调：作者选中文本后点击"告诉 AI 这里有问题"时触发，
+  // 携带 chapterId/baseRevision/start/end/text 五个字段。
+  onSelectionReview?: (selection: AIPanelSelection) => void;
   readOnly?: boolean;
 };
 
@@ -25,6 +29,7 @@ export function ChapterEditor({
   onChapterUpdated,
   onFlushAvailable,
   onFilesystemHealthChanged,
+  onSelectionReview,
   readOnly = false,
 }: ChapterEditorProps) {
   const [body, setBody] = useState(chapter.body);
@@ -54,6 +59,29 @@ const commitNow = useRef<() => Promise<void>>(async () => undefined);
     if (commitTimer.current) clearTimeout(commitTimer.current);
     draftTimer.current = null;
     commitTimer.current = null;
+  };
+
+  // textareaRef 保留对正文输入框的引用，用于在点击"告诉 AI 这里有问题"
+  // 时读取 selectionStart/selectionEnd 并组装 AIPanelSelection。
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // handleSelectionReview 在作者点击"告诉 AI 这里有问题"时读取当前选区，
+  // 携带 chapterId/baseRevision/start/end/text 回调父组件。JSDOM 中
+  // setSelectionRange 不会触发事件，但点击按钮时仍可读取 selectionStart/End。
+  const handleSelectionReview = () => {
+    if (!onSelectionReview) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start === end) return;
+    onSelectionReview({
+      chapterId: chapter.id,
+      baseRevision: revisionRef.current,
+      start,
+      end,
+      text: bodyRef.current.slice(start, end),
+    });
   };
 
   const scheduleSaves = (nextBody: string) => {
@@ -305,6 +333,7 @@ const commitNow = useRef<() => Promise<void>>(async () => undefined);
       )}
 
       <textarea
+        ref={textareaRef}
         autoFocus
         aria-label="章节正文"
         className="chapter-editor__textarea"
@@ -320,6 +349,16 @@ const commitNow = useRef<() => Promise<void>>(async () => undefined);
         placeholder="从这一段开始写下故事……"
         spellCheck={false}
       />
+
+      {onSelectionReview && !readOnly && !showRecovery && !recoveryDeferred && (
+        <button
+          type="button"
+          className="chapter-editor__selection-review"
+          onClick={handleSelectionReview}
+        >
+          告诉 AI 这里有问题
+        </button>
+      )}
 
       {showRecovery && (
         <RecoveryDialog

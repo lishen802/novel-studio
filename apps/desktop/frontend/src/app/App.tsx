@@ -14,6 +14,7 @@ import type {
   StudioClient,
 } from "../lib/studio-client";
 import { wailsStudioClient } from "../lib/wails-studio-client";
+import { ImportWizardDialog } from "../features/imports/ImportWizardDialog";
 import "./styles.css";
 
 type AppProps = {
@@ -33,6 +34,9 @@ export function App({
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("");
   const [summary, setSummary] = useState("");
+  // 首页"导入小说并续写"向导状态：open 时显示对话框，作者依次选择源文件、
+  // 填写书名并确认版权后调用 createImportedProject 一次性进入正文画布。
+  const [importWizardOpen, setImportWizardOpen] = useState(false);
   const flushActiveChapter = useRef<() => Promise<void>>(async () => undefined);
   const pendingChapterFlushes = useRef(new Set<Promise<void>>());
 
@@ -104,12 +108,49 @@ export function App({
   }, [workspaceStore]);
 
   const handleImportManuscript = useCallback(() => {
-    // Import is a project-level flow: open the workspace shell in welcome mode
-    // so ImportWorkbench can take over once a project is open. For now we
-    // delegate to the open project flow; a dedicated import entry will be
-    // wired up in a follow-up task.
-    void workspaceStore.getState().openProject();
-  }, [workspaceStore]);
+    // 打开导入向导：作者依次选择源文件、填写书名并确认版权后，
+    // 调用 createImportedProject 一次性进入正文画布。
+    setImportWizardOpen(true);
+  }, []);
+
+  // 导入向导确认：先获取目标父目录，再调用 createImportedProject。
+  // 成功后通过 loadImportedProject 加载项目、章节和 workbench 投影。
+  const handleImportSubmit = useCallback(
+    async (input: {
+      sourcePath: string;
+      title: string;
+      genre: string;
+      copyrightConfirmed: boolean;
+    }) => {
+      const parentDirectory = await client.chooseProjectParent();
+      if (!parentDirectory) return;
+      const result = await client.createImportedProject({
+        sourcePath: input.sourcePath,
+        parentDirectory,
+        title: input.title,
+        genre: input.genre,
+        copyrightConfirmed: input.copyrightConfirmed,
+      });
+      setImportWizardOpen(false);
+      await workspaceStore.getState().loadImportedProject(result);
+    },
+    [client, workspaceStore],
+  );
+
+  const handleImportCancel = useCallback(() => {
+    setImportWizardOpen(false);
+  }, []);
+
+  // 整书档案生成入口：R2 不启动抽取任务，后端返回 FEATURE_NOT_AVAILABLE。
+  // 错误由 workspace store 统一处理，不在此处伪造完成。
+  const handleStartWholeBookArchive = useCallback(() => {
+    void client.startWholeBookArchive().catch((error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "整书档案生成未就绪。";
+      workspaceStore.getState().clearWorkspaceError();
+      workspaceStore.setState({ workspaceError: message });
+    });
+  }, [client, workspaceStore]);
 
   const handleOpenRecent = useCallback(
     async (projectId: string) => {
@@ -182,6 +223,11 @@ export function App({
 
   if (isProjectMounted) {
     if (workspaceState.status.kind === "ready") {
+      // AI 面板草稿按 project ID 存储：从 workspace store 取出当前项目的
+      // 未发送输入，切换画布或打开设置都不会清除。
+      const projectId = workspaceState.status.project.id;
+      const aiPanelInput =
+        workspaceState.aiPanelDraft[projectId]?.input ?? "";
       return (
         <>
           <Workspace
@@ -190,6 +236,8 @@ export function App({
             client={client}
             currentPage={workspaceState.currentPage}
             workbench={workspaceState.workbench}
+            aiPanelInput={aiPanelInput}
+            pendingSelection={workspaceState.pendingSelection}
             onCreateChapter={workspaceState.createChapter}
             onSelectChapter={workspaceState.selectChapter}
             onChapterUpdated={workspaceState.updateChapter}
@@ -201,6 +249,16 @@ export function App({
             onCreateRecoveryCopy={workspaceState.createRecoveryCopy}
             onRefreshFilesystemHealth={workspaceState.refreshFilesystemHealth}
             onSetCurrentPage={workspaceState.setCurrentPage}
+            onAIPanelInput={(input) =>
+              workspaceStore.getState().setAIPanelInput(projectId, input)
+            }
+            onAIPanelSelection={(selection) =>
+              workspaceStore.getState().setAIPanelSelection(selection)
+            }
+            onClearAIPanelSelection={() =>
+              workspaceStore.getState().clearAIPanelSelection()
+            }
+            onStartWholeBookArchive={handleStartWholeBookArchive}
           />
           {isSettingsOverlayOpen && settingsBootstrap && (
             <div className="dialog-backdrop">
@@ -457,6 +515,14 @@ export function App({
             </div>
           </form>
         </div>
+      )}
+
+      {importWizardOpen && (
+        <ImportWizardDialog
+          client={client}
+          onSubmit={handleImportSubmit}
+          onCancel={handleImportCancel}
+        />
       )}
     </main>
   );

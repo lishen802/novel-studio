@@ -21,6 +21,8 @@ import {
   type CharacterView,
   type CreateOutlineNodeInput,
   type CreateProjectInput,
+  type CreateImportedProjectInput,
+  type CreateImportedProjectResult,
   type CreativeProfileView,
   type ProjectAccessMode,
   type ProjectOpenInput,
@@ -128,10 +130,10 @@ const projectFilesystemHealthSchema = z.object({
 const workbenchProjectionSchema = z.object({
   stage: z.string(),
   canvas: z.string(),
-  aiPanel: z.string(),
+  aiPanel: z.enum(["expanded", "collapsed", "hidden", "selection_review"]),
   pendingReviewCount: z.number(),
   recoverableJobCount: z.number(),
-  archiveStatus: z.string(),
+  archiveStatus: z.enum(["not_generated", "running", "completed", "failed"]),
 }).strict();
 const projectSchema = z.object({
   id: z.string(),
@@ -1190,6 +1192,8 @@ type NativeDesktopAPI = {
   CancelExtractionRun(id: string): Promise<void>;
   RetryExtractionRun(id: string): Promise<unknown>;
   CreateProject(input: CreateProjectInput): Promise<unknown>;
+  CreateImportedProject(input: CreateImportedProjectInput): Promise<unknown>;
+  StartWholeBookArchive(): Promise<void>;
   OpenProject(input: ProjectOpenInput): Promise<unknown>;
   CreateProjectRecoveryCopy(input: RecoveryCopyInput): Promise<unknown>;
   FilesystemHealth(): Promise<unknown>;
@@ -1452,6 +1456,19 @@ const creativeProfileView = (value: unknown): CreativeProfileView =>
 const workbenchProjectionView = (value: unknown): WorkbenchProjection =>
   workbenchProjectionSchema.parse(value);
 
+// 导入型项目创建结果视图：将后端返回的 unknown 通过 zod schema 校验后转为
+// 前端使用的强类型。任一字段缺失或不匹配会抛错，由 safeCall 转为
+// StudioClientError，避免脏数据进入 UI。
+const createImportedProjectResultSchema = z.object({
+  project: projectSchema,
+  chapters: z.array(chapterSchema),
+  workbench: workbenchProjectionSchema,
+}).strict();
+const createImportedProjectResultView = (
+  value: unknown,
+): CreateImportedProjectResult =>
+  createImportedProjectResultSchema.parse(value);
+
 const storyStructureView = (value: unknown): StoryStructureView =>
   storyStructureSchema.parse(value);
 const outlineNodeView = (value: unknown): OutlineNodeView =>
@@ -1634,6 +1651,14 @@ export const wailsStudioClient: StudioClient = {
   },
   async createProject(input) {
     return projectView(await safeCall(() => nativeAPI().CreateProject(input)));
+  },
+  async createImportedProject(input) {
+    return createImportedProjectResultView(
+      await safeCall(() => nativeAPI().CreateImportedProject(input)),
+    );
+  },
+  async startWholeBookArchive() {
+    await safeCall(() => nativeAPI().StartWholeBookArchive());
   },
   async openProject(path, mode: ProjectAccessMode = "editable") {
     return projectOpenResultView(

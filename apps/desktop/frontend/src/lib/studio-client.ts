@@ -117,13 +117,54 @@ export type ApplicationBootstrapView = {
   profiles: CreativeProfileView[];
 };
 
+// 受控 AI 面板状态机：仅由 WorkbenchProjection.aiPanel 决定可见性与形态，
+// 不允许本地组件自行推断。batch/writing 阶段默认 hidden；review 阶段
+// 以 selection_review 打开，作者可在选区上发起意见提交。
+export type AIPanelMode =
+  | "expanded"
+  | "collapsed"
+  | "hidden"
+  | "selection_review";
+
+// 整书档案生成状态。R2 仅允许 not_generated；后续能力阶段才会引入 running
+// 等其它状态。前端按钮不能伪造已完成效果。
+export type ArchiveStatus = "not_generated" | "running" | "completed" | "failed";
+
 export type WorkbenchProjection = {
   stage: string;
   canvas: string;
-  aiPanel: string;
+  aiPanel: AIPanelMode;
   pendingReviewCount: number;
   recoverableJobCount: number;
-  archiveStatus: string;
+  archiveStatus: ArchiveStatus;
+};
+
+// 章节选区：AI 面板 selection_review 模式下携带的正文片段快照。包含
+// baseRevision 用于 staleness 检测；正文变化后提交意见必须返回 STALE_SELECTION。
+export type AIPanelSelection = {
+  chapterId: string;
+  baseRevision: number;
+  start: number;
+  end: number;
+  text: string;
+};
+
+// 首页"导入小说并续写"入口的输入。R2 不启动抽取任务，但创建可恢复项目与
+// import job；copyrightConfirmed 由作者在向导中确认，不在此处推断。
+export type CreateImportedProjectInput = {
+  sourcePath: string;
+  parentDirectory: string;
+  title: string;
+  genre: string;
+  copyrightConfirmed: boolean;
+};
+
+// 导入型项目创建结果：返回完整的项目视图、确定性章节和权威 workbench 投影，
+// 让前端无需再额外调用 listChapters / projectWorkbench 即可进入正文画布。
+export type CreateImportedProjectResult = {
+  project: ProjectView;
+  chapters: ChapterView[];
+  workbench: WorkbenchProjection;
 };
 
 export type ApplicationPreferencesInput = {
@@ -865,6 +906,15 @@ export interface StudioClient {
   cancelExtractionRun(id: string): Promise<void>;
   retryExtractionRun(id: string): Promise<ExtractionRunView>;
   createProject(input: CreateProjectInput): Promise<ProjectView>;
+  // 首页"导入小说并续写"入口：在一个调用内完成校验源文件 → 创建项目 →
+  // 准备导入 → 应用全部确定性章节。任一步失败都返回结构化错误，并保留
+  // 可恢复项目与 import job；重复提交使用 source hash + project ID 幂等。
+  createImportedProject(
+    input: CreateImportedProjectInput,
+  ): Promise<CreateImportedProjectResult>;
+  // 整书档案生成入口。R2 不启动抽取任务，返回安全的 FEATURE_NOT_AVAILABLE
+  // 状态；前端按钮据此展示"将在后续能力启用"，不能伪造完成。
+  startWholeBookArchive(): Promise<void>;
   openProject(
     path: string,
     mode?: ProjectAccessMode,

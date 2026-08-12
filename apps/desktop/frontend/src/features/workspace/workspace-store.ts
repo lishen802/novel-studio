@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type {
+  AIPanelSelection,
   ChapterView,
   CreateProjectInput,
   ProjectAccessMode,
@@ -11,6 +12,14 @@ import type {
 } from "../../lib/studio-client";
 
 type WorkspaceReplacement = Pick<SnapshotRestoreView, "project" | "chapters">;
+
+// AIPanelDraft 保存某个项目下未发送的 AI 面板输入和章节选区。切换画布、
+// 打开应用设置或刷新 workbench 都不能清除这些草稿；提交选区意见时若
+// baseRevision 与当前章节不一致，后端返回 STALE_SELECTION 要求重选。
+export type AIPanelDraft = {
+  input: string;
+  selection?: AIPanelSelection;
+};
 
 // 项目导航分组的二级页面 ID。一级分组固定，二级页面展开在其下；
 // stage/canvas/counts 始终从 client.projectWorkbench() 投影，不在此处推断。
@@ -55,6 +64,12 @@ export type WorkspaceState = {
   currentPage: ProjectPage;
   // 权威工作台投影。loadProject 时拉取，refreshWorkbench 可手动刷新。
   workbench: WorkbenchProjection | null;
+  // AI 面板草稿：按 project ID 存储未发送的输入和章节选区。切换画布、
+  // 打开应用设置或刷新 workbench 都不能清除这些草稿。
+  aiPanelDraft: Record<string, AIPanelDraft>;
+  // 当前是否有待提交的选区意见。selection_review 模式下由 ChapterEditor
+  // 触发 onSelectionReview 写入；AIPanel 据此显示选区元数据和提交入口。
+  pendingSelection: AIPanelSelection | null;
   beginCreate(): Promise<void>;
   cancelCreate(): void;
   createProject(input: Omit<CreateProjectInput, "parentDirectory">): Promise<void>;
@@ -65,6 +80,11 @@ export type WorkspaceState = {
   refreshFilesystemHealth(): Promise<void>;
   cancelProjectOpen(): void;
   loadProject(project: ProjectView): Promise<void>;
+  loadImportedProject(result: {
+    project: ProjectView;
+    chapters: ChapterView[];
+    workbench: WorkbenchProjection;
+  }): Promise<void>;
   createChapter(title: string): Promise<boolean>;
   selectChapter(id: string): Promise<void>;
   updateChapter(chapter: ChapterView): void;
@@ -73,6 +93,10 @@ export type WorkspaceState = {
   clearWorkspaceError(): void;
   setCurrentPage(page: ProjectPage): void;
   refreshWorkbench(): Promise<void>;
+  setAIPanelInput(projectId: string, input: string): void;
+  setAIPanelSelection(selection: AIPanelSelection): void;
+  clearAIPanelSelection(): void;
+  clearAIPanelDraft(projectId: string): void;
 };
 
 function errorMessage(error: unknown): string {
@@ -125,6 +149,8 @@ export function createWorkspaceStore(
     workspaceError: null,
     currentPage: "manuscript",
     workbench: null,
+    aiPanelDraft: {},
+    pendingSelection: null,
 
     async beginCreate() {
       set({ status: { kind: "opening" } });
@@ -315,6 +341,25 @@ export function createWorkspaceStore(
       }
     },
 
+    // loadImportedProject 用于首页"导入小说并续写"入口：client 一次性返回
+    // project + chapters + workbench，无需再额外调用 listChapters/projectWorkbench。
+    // activeChapterId 强制为第一章，currentPage 强制为 manuscript。
+    async loadImportedProject(result) {
+      selectionRequest++;
+      const activeChapterId = result.chapters[0]?.id ?? null;
+      set({
+        status: {
+          kind: "ready",
+          project: result.project,
+          chapters: result.chapters,
+          activeChapterId,
+        },
+        workspaceError: null,
+        currentPage: "manuscript",
+        workbench: result.workbench,
+      });
+    },
+
     async createChapter(title) {
       const current = get().status;
       if (current.kind !== "ready" || current.project.accessMode !== "editable") {
@@ -495,6 +540,41 @@ export function createWorkspaceStore(
       const current = get().status;
       if (current.kind !== "ready") return;
       await refreshWorkbenchForProject(current.project.id);
+    },
+
+    // setAIPanelInput 按 project ID 保存未发送的 AI 面板输入。切换画布、
+    // 打开应用设置或刷新 workbench 都不能清除这些草稿。
+    setAIPanelInput(projectId, input) {
+      set((latest) => ({
+        aiPanelDraft: {
+          ...latest.aiPanelDraft,
+          [projectId]: {
+            ...latest.aiPanelDraft[projectId],
+            input,
+          },
+        },
+      }));
+    },
+
+    // setAIPanelSelection 设置当前待提交的选区意见。ChapterEditor 在作者
+    // 选中文本并点击"告诉 AI 这里有问题"时调用；AIPanel 据此进入
+    // selection_review 模式并显示选区元数据。
+    setAIPanelSelection(selection) {
+      set({ pendingSelection: selection });
+    },
+
+    // clearAIPanelSelection 清除当前选区意见，退出 selection_review 模式。
+    clearAIPanelSelection() {
+      set({ pendingSelection: null });
+    },
+
+    // clearAIPanelDraft 清除某个项目的 AI 面板草稿（输入和选区）。
+    clearAIPanelDraft(projectId) {
+      set((latest) => {
+        const next = { ...latest.aiPanelDraft };
+        delete next[projectId];
+        return { aiPanelDraft: next, pendingSelection: null };
+      });
     },
   };
   });

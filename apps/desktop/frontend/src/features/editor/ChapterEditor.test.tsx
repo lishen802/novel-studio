@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 import { RevisionConflictError } from "../../lib/studio-client";
@@ -354,5 +355,48 @@ describe("ChapterEditor", () => {
     expect(screen.getByRole("textbox", { name: "章节正文" })).not.toHaveAttribute(
       "readonly",
     );
+  });
+
+  it("forwards selection range and revision when the author asks AI to review a passage", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = {
+      ...client.createChapterResult,
+      body: "潮声盖过脚步。",
+      revision: 7,
+    };
+    const onSelectionReview = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChapterEditor
+        chapter={chapter}
+        client={client}
+        onSelectionReview={onSelectionReview}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox", { name: "章节正文" }) as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 2);
+    fireEvent.click(screen.getByRole("button", { name: "告诉 AI 这里有问题" }));
+
+    expect(onSelectionReview).toHaveBeenCalledWith({
+      chapterId: chapter.id,
+      baseRevision: 7,
+      start: 0,
+      end: 2,
+      text: "潮声",
+    });
+  });
+
+  it("hides the selection review trigger when no text is selected", () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = {
+      ...client.createChapterResult,
+      body: "潮声盖过脚步。",
+      revision: 7,
+    };
+    render(<ChapterEditor chapter={chapter} client={client} />);
+    expect(
+      screen.queryByRole("button", { name: "告诉 AI 这里有问题" }),
+    ).not.toBeInTheDocument();
   });
 });

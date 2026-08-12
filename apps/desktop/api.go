@@ -154,6 +154,24 @@ type CreateProjectInput struct {
 	Summary         string `json:"summary"`
 }
 
+// CreateImportedProjectInput 是首页"导入小说并续写"入口的输入。R2 不启动抽取
+// 任务，但创建可恢复项目与 import job；copyrightConfirmed 由作者在向导中确认。
+type CreateImportedProjectInput struct {
+	SourcePath         string `json:"sourcePath"`
+	ParentDirectory    string `json:"parentDirectory"`
+	Title              string `json:"title"`
+	Genre              string `json:"genre"`
+	CopyrightConfirmed bool   `json:"copyrightConfirmed"`
+}
+
+// CreateImportedProjectResult 返回完整的项目视图、确定性章节和权威 workbench
+// 投影，让前端无需再额外调用 listChapters / projectWorkbench 即可进入正文画布。
+type CreateImportedProjectResult struct {
+	Project   workspace.ProjectView           `json:"project"`
+	Chapters  []workspace.ChapterView         `json:"chapters"`
+	Workbench workspace.WorkbenchProjection    `json:"workbench"`
+}
+
 type ProjectOpenMode string
 
 const (
@@ -461,6 +479,38 @@ func (a *DesktopAPI) CreateProject(input CreateProjectInput) (workspace.ProjectV
 		input.Genre,
 		input.Summary,
 	))
+}
+
+// CreateImportedProject 在一个调用内完成校验源文件 → 创建导入型项目 →
+// 准备导入 → 应用全部确定性章节。任一步失败都返回结构化错误，并保留可恢复
+// 项目与 import job；重复提交使用 source hash + project ID 幂等。
+func (a *DesktopAPI) CreateImportedProject(input CreateImportedProjectInput) (CreateImportedProjectResult, error) {
+	if a.shell == nil {
+		return CreateImportedProjectResult{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	result, err := a.shell.CreateImportedProject(a.ctx, appshell.CreateImportedProjectInput{
+		SourcePath:         input.SourcePath,
+		ParentDirectory:    input.ParentDirectory,
+		Title:              input.Title,
+		Genre:              input.Genre,
+		CopyrightConfirmed: input.CopyrightConfirmed,
+	})
+	if err != nil {
+		return CreateImportedProjectResult{
+			Project: result.Project,
+		}, safeDesktopError(err)
+	}
+	return CreateImportedProjectResult{
+		Project:   result.Project,
+		Chapters:  result.Chapters,
+		Workbench: result.Workbench,
+	}, nil
+}
+
+// StartWholeBookArchive 是整书档案生成入口。R2 不启动抽取任务，返回安全的
+// FEATURE_NOT_AVAILABLE；前端按钮据此展示"将在后续能力阶段开放"。
+func (a *DesktopAPI) StartWholeBookArchive() error {
+	return safeDesktopError(errFeatureNotAvailable)
 }
 
 func (a *DesktopAPI) OpenProject(input ProjectOpenInput) (ProjectOpenResultView, error) {

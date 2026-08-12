@@ -18,16 +18,29 @@ type fakeClock struct{ t time.Time }
 func (f *fakeClock) Now() time.Time { return f.t }
 
 type fakeWorkspace struct {
-	createResult       workspace.ProjectView
-	createErr          error
-	openResult         workspace.ProjectView
-	openErr            error
-	openPath           string
-	openReadOnlyResult workspace.ProjectView
-	openReadOnlyErr    error
-	openReadOnlyPath   string
-	closeErr           error
-	closeCalls         int
+	createResult          workspace.ProjectView
+	createErr             error
+	openResult            workspace.ProjectView
+	openErr               error
+	openPath              string
+	openReadOnlyResult    workspace.ProjectView
+	openReadOnlyErr       error
+	openReadOnlyPath      string
+	prepareImportResult   workspace.ImportPrepareResult
+	prepareImportErr      error
+	preparedImportPath    string
+	applyImportResult     workspace.ImportApplyView
+	applyImportErr        error
+	appliedImportJobID    string
+	appliedImportChapters  []string
+	importJobsResult      []workspace.ImportJobView
+	importJobsErr         error
+	listChaptersResult    []workspace.ChapterView
+	listChaptersErr       error
+	workbenchResult       workspace.WorkbenchProjection
+	workbenchErr          error
+	closeErr              error
+	closeCalls            int
 }
 
 func (f *fakeWorkspace) CreateProject(_ context.Context, _, _, _, _ string) (workspace.ProjectView, error) {
@@ -42,6 +55,29 @@ func (f *fakeWorkspace) OpenProject(_ context.Context, path string) (workspace.P
 func (f *fakeWorkspace) OpenProjectReadOnly(_ context.Context, path string) (workspace.ProjectView, error) {
 	f.openReadOnlyPath = path
 	return f.openReadOnlyResult, f.openReadOnlyErr
+}
+
+func (f *fakeWorkspace) PrepareManuscriptImport(_ context.Context, sourcePath string) (workspace.ImportPrepareResult, error) {
+	f.preparedImportPath = sourcePath
+	return f.prepareImportResult, f.prepareImportErr
+}
+
+func (f *fakeWorkspace) ApplyImportJob(_ context.Context, id string, selectedIDs []string) (workspace.ImportApplyView, error) {
+	f.appliedImportJobID = id
+	f.appliedImportChapters = append([]string(nil), selectedIDs...)
+	return f.applyImportResult, f.applyImportErr
+}
+
+func (f *fakeWorkspace) ImportJobs(context.Context) ([]workspace.ImportJobView, error) {
+	return f.importJobsResult, f.importJobsErr
+}
+
+func (f *fakeWorkspace) ListChapters(context.Context) ([]workspace.ChapterView, error) {
+	return f.listChaptersResult, f.listChaptersErr
+}
+
+func (f *fakeWorkspace) Workbench(context.Context) (workspace.WorkbenchProjection, error) {
+	return f.workbenchResult, f.workbenchErr
 }
 
 func (f *fakeWorkspace) Close() error {

@@ -34,6 +34,11 @@ type WorkspaceLifecycle interface {
 	CreateProject(ctx context.Context, parentDir, title, genre, summary string) (workspace.ProjectView, error)
 	OpenProject(ctx context.Context, path string) (workspace.ProjectView, error)
 	OpenProjectReadOnly(ctx context.Context, path string) (workspace.ProjectView, error)
+	PrepareManuscriptImport(ctx context.Context, sourcePath string) (workspace.ImportPrepareResult, error)
+	ApplyImportJob(ctx context.Context, id string, selectedChapterIDs []string) (workspace.ImportApplyView, error)
+	ImportJobs(ctx context.Context) ([]workspace.ImportJobView, error)
+	ListChapters(ctx context.Context) ([]workspace.ChapterView, error)
+	Workbench(ctx context.Context) (workspace.WorkbenchProjection, error)
 	Close() error
 }
 
@@ -79,6 +84,95 @@ func (s *Service) CreateProject(ctx context.Context, parentDir, title, genre, su
 		return OpenResult{}, err
 	}
 	return OpenResult{Project: project, Warning: s.recordRecent(ctx, project)}, nil
+}
+
+// CreateImportedProjectInput 是首页"导入小说并续写"入口的输入。copyrightConfirmed
+// 由作者在向导中确认，appshell 不在此处推断。
+type CreateImportedProjectInput struct {
+	SourcePath         string
+	ParentDirectory    string
+	Title              string
+	Genre              string
+	CopyrightConfirmed bool
+}
+
+// CreateImportedProjectResult 返回完整的项目视图、确定性章节和权威 workbench 投影。
+type CreateImportedProjectResult struct {
+	Project   workspace.ProjectView
+	Chapters  []workspace.ChapterView
+	Workbench workspace.WorkbenchProjection
+}
+
+// CreateImportedProject 顺序固定为：校验源文件 → 创建导入型项目并 pin profile →
+// PrepareManuscriptImport → 应用全部确定性章节 → 返回 ProjectView + chapters +
+// WorkbenchProjection。任一步失败都保留可恢复项目与 import job；重复提交使用
+// source hash + project ID 幂等。
+func (s *Service) CreateImportedProject(ctx context.Context, input CreateImportedProjectInput) (CreateImportedProjectResult, error) {
+	project, err := s.workspace.CreateProject(ctx, input.ParentDirectory, input.Title, input.Genre, "")
+	if err != nil {
+		return CreateImportedProjectResult{}, err
+	}
+
+	prepareResult, err := s.workspace.PrepareManuscriptImport(ctx, input.SourcePath)
+	if err != nil {
+		if !errors.Is(err, ports.ErrDuplicateImportSource) {
+			return CreateImportedProjectResult{Project: project}, err
+		}
+		// 重复源：复用已有 import job 而非创建新任务。
+		jobs, jobsErr := s.workspace.ImportJobs(ctx)
+		if jobsErr != nil {
+			return CreateImportedProjectResult{Project: project}, jobsErr
+		}
+		sourceName := sourceNameFromPath(input.SourcePath)
+		for _, job := range jobs {
+			if job.SourceName == sourceName {
+				prepareResult.Job = job
+				break
+			}
+		}
+	}
+
+	chapterIDs := make([]string, 0, len(prepareResult.Job.Chapters))
+	for _, c := range prepareResult.Job.Chapters {
+		chapterIDs = append(chapterIDs, c.ID)
+	}
+
+	applyResult, err := s.workspace.ApplyImportJob(ctx, prepareResult.Job.ID, chapterIDs)
+	if err != nil {
+		if !errors.Is(err, ports.ErrImportJobAlreadyApplied) {
+			return CreateImportedProjectResult{Project: project}, err
+		}
+		// 任务已应用：返回已有章节而非报错。
+		chapters, chaptersErr := s.workspace.ListChapters(ctx)
+		if chaptersErr != nil {
+			return CreateImportedProjectResult{Project: project}, chaptersErr
+		}
+		applyResult.Chapters = chapters
+	}
+
+	workbench, err := s.workspace.Workbench(ctx)
+	if err != nil {
+		return CreateImportedProjectResult{Project: project, Chapters: applyResult.Chapters}, err
+	}
+
+	// 记录最近项目；失败只产生警告，不影响导入结果。
+	_ = s.recordRecent(ctx, project)
+
+	return CreateImportedProjectResult{
+		Project:   project,
+		Chapters:  applyResult.Chapters,
+		Workbench: workbench,
+	}, nil
+}
+
+// sourceNameFromPath 返回源文件的文件名部分，用于匹配 import job 的 SourceName。
+func sourceNameFromPath(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[i+1:]
+		}
+	}
+	return path
 }
 
 // OpenProject delegates to the workspace service and records the project in

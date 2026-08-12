@@ -23,6 +23,8 @@ import type {
   CreateOutlineNodeInput,
   CreateSceneCardInput,
   CreateStoryLineInput,
+  CreateImportedProjectInput,
+  CreateImportedProjectResult,
   CreativeProfileView,
   DesktopError,
   MenuCommand,
@@ -407,6 +409,11 @@ export class FakeStudioClient implements StudioClient {
     id: string;
     selectedChapterIds: string[];
   }> = [];
+  createImportedProjectCalls: CreateImportedProjectInput[] = [];
+  createImportedProjectResult: CreateImportedProjectResult | null = null;
+  createImportedProjectError: Error | null = null;
+  startWholeBookArchiveCalls = 0;
+  startWholeBookArchiveError: Error | null = null;
   extractionTasksCalls = 0;
   extractionTaskCalls: string[] = [];
   startExtractionRunCalls: ExtractionRunInput[] = [];
@@ -535,6 +542,56 @@ export class FakeStudioClient implements StudioClient {
     );
     this.chaptersResult = [...this.importApplyResult.chapters];
     return this.importApplyResult;
+  }
+
+  // 首页"导入小说并续写"入口的 fake 实现：默认将准备好的章节并入
+  // workbenchProjectionResult；测试可通过设置 createImportedProjectResult
+  // 或 createImportedProjectError 覆盖行为。重复调用使用相同 sourcePath 时
+  // 返回同一 project ID，以模拟后端的 source hash + project ID 幂等。
+  async createImportedProject(
+    input: CreateImportedProjectInput,
+  ): Promise<CreateImportedProjectResult> {
+    this.createImportedProjectCalls.push({ ...input });
+    if (this.createImportedProjectError) {
+      throw this.createImportedProjectError;
+    }
+    if (this.createImportedProjectResult) {
+      this.chaptersResult = [...this.createImportedProjectResult.chapters];
+      return this.createImportedProjectResult;
+    }
+    const project: ProjectView = {
+      ...this.createProjectResult,
+      title: input.title || this.createProjectResult.title,
+      genre: input.genre || this.createProjectResult.genre,
+    };
+    const chapters: ChapterView[] = this.chaptersResult.length
+      ? this.chaptersResult
+      : [{ ...this.createChapterResult, title: input.title || "第一章" }];
+    this.chaptersResult = chapters;
+    return {
+      project,
+      chapters,
+      workbench: {
+        ...this.workbenchProjectionResult,
+        stage: "writing",
+        canvas: "manuscript",
+        aiPanel: "hidden",
+        archiveStatus: "not_generated",
+      },
+    };
+  }
+
+  // 整书档案生成入口的 fake 实现：默认返回安全的 FEATURE_NOT_AVAILABLE，
+  // 与 R2 后端契约一致；测试可通过 startWholeBookArchiveError 模拟其它错误。
+  async startWholeBookArchive(): Promise<void> {
+    this.startWholeBookArchiveCalls++;
+    if (this.startWholeBookArchiveError) {
+      throw this.startWholeBookArchiveError;
+    }
+    throw new StudioClientError(
+      "FEATURE_NOT_AVAILABLE",
+      "整书档案生成将在后续能力阶段开放。",
+    );
   }
 
   async extractionTasks(): Promise<ExtractionTaskView[]> {

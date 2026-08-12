@@ -256,10 +256,10 @@ function installNative(overrides: Record<string, unknown> = {}) {
     ProjectWorkbench: vi.fn(async () => ({
       stage: "manuscript",
       canvas: "",
-      aiPanel: "",
+      aiPanel: "hidden",
       pendingReviewCount: 0,
       recoverableJobCount: 0,
-      archiveStatus: "",
+      archiveStatus: "not_generated",
     })),
     CloseProject: vi.fn(async () => undefined),
     ...overrides,

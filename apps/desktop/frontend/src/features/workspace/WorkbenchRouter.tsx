@@ -1,6 +1,7 @@
 import { Feather, Lightbulb, Package, Sparkles, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
 import type {
+  AIPanelSelection,
   ChapterView,
   SnapshotRestoreView,
   StudioClient,
@@ -16,6 +17,7 @@ import { VersionHistoryWorkbench } from "../revisions/VersionHistoryWorkbench";
 import { BranchWorkbench } from "../revisions/BranchWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
+import { StageCanvas } from "../workbench/StageCanvas";
 import type { ProjectPage, WorkspaceStatus } from "./workspace-store";
 
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
@@ -40,6 +42,10 @@ export type WorkbenchRouterProps = {
   onCreateRecoveryCopy(): Promise<void>;
   onRefreshFilesystemHealth(): Promise<void>;
   onNavigate(page: ProjectPage): void;
+  // 整书档案生成入口：R2 不启动抽取任务，按钮禁用并展示提示。
+  onStartWholeBookArchive(): void;
+  // 章节选区意见回调：作者选中文本后点击"告诉 AI 这里有问题"时触发。
+  onSelectionReview?(selection: AIPanelSelection): void;
 };
 
 // NotReadyCanvas 展示诚实的"未就绪"状态，不伪造已完成内容
@@ -99,6 +105,8 @@ export function WorkbenchRouter({
   onFlushAvailable,
   onRefreshFilesystemHealth,
   onNavigate,
+  onStartWholeBookArchive,
+  onSelectionReview,
 }: WorkbenchRouterProps): ReactNode {
   const activeChapter = workspace.chapters.find(
     (chapter) => chapter.id === workspace.activeChapterId,
@@ -118,22 +126,32 @@ export function WorkbenchRouter({
         />
       );
     }
-    return activeChapter ? (
-      <ChapterEditor
-        key={activeChapter.id}
-        chapter={activeChapter}
-        client={client}
-        onChapterUpdated={onChapterUpdated}
-        onFlushAvailable={onFlushAvailable}
-        onFilesystemHealthChanged={onRefreshFilesystemHealth}
-        readOnly={readOnly}
-      />
-    ) : (
-      <div className="editor-empty">
-        <Feather size={36} aria-hidden="true" />
-        <h2>选择一个章节开始创作</h2>
-        <p>章节的短周期草稿会自动保存，正式正文仍由版本提交保护。</p>
-      </div>
+    // StageCanvas 包裹正文内容，渲染整书档案卡片和章节编辑器。
+    // R2 中 archiveStatus 为 not_generated，按钮禁用，不伪造已完成效果。
+    return (
+      <StageCanvas
+        projection={projection!}
+        onStartWholeBookArchive={onStartWholeBookArchive}
+      >
+        {activeChapter ? (
+          <ChapterEditor
+            key={activeChapter.id}
+            chapter={activeChapter}
+            client={client}
+            onChapterUpdated={onChapterUpdated}
+            onFlushAvailable={onFlushAvailable}
+            onFilesystemHealthChanged={onRefreshFilesystemHealth}
+            onSelectionReview={onSelectionReview}
+            readOnly={readOnly}
+          />
+        ) : (
+          <div className="editor-empty">
+            <Feather size={36} aria-hidden="true" />
+            <h2>选择一个章节开始创作</h2>
+            <p>章节的短周期草稿会自动保存，正式正文仍由版本提交保护。</p>
+          </div>
+        )}
+      </StageCanvas>
     );
   }
 

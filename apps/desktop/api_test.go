@@ -7,8 +7,10 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2151,5 +2153,260 @@ func TestCloseProjectDelegatesToShell(t *testing.T) {
 	}
 	if ws.closeCalls != 1 {
 		t.Fatalf("workspace close calls = %d, want 1", ws.closeCalls)
+	}
+}
+
+// assertDesktopError verifies that err is a *desktopError with the given code.
+func assertDesktopError(t *testing.T, err error, code string) {
+	t.Helper()
+	var safe *desktopError
+	if !errors.As(err, &safe) {
+		t.Fatalf("error = %#v, want desktop error with code %q", err, code)
+	}
+	if string(safe.Code) != code {
+		t.Fatalf("error code = %q, want %q", safe.Code, code)
+	}
+}
+
+// importFakeWorkspace 是一个有状态的 workspace 假实现，用于测试导入型项目
+// 创建的幂等性与失败恢复。它跟踪已创建的项目、导入任务和章节，使重复
+// 调用 CreateProject 返回相同项目、PrepareManuscriptImport 检测重复源、
+// ApplyImportJob 检测已应用的任务。
+type importFakeWorkspace struct {
+	fakeWorkspace
+
+	mu             sync.Mutex
+	project        workspace.ProjectView
+	projectCreated bool
+	importJobs     []workspace.ImportJobView
+	chapters       []workspace.ChapterView
+	applyErr       error
+	workbench      workspace.WorkbenchProjection
+}
+
+func (f *importFakeWorkspace) CreateProject(_ context.Context, parentDir, title, genre, _ string) (workspace.ProjectView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.projectCreated {
+		// 重复提交时返回同一项目，模拟项目已存在于磁盘上。
+		return f.project, nil
+	}
+	f.project = workspace.ProjectView{
+		ID:    "imported-project-1",
+		Title: title,
+		Genre: genre,
+		Path:  filepath.Join(parentDir, title+".zjproject"),
+		Workbench: f.workbench,
+	}
+	f.projectCreated = true
+	return f.project, nil
+}
+
+func (f *importFakeWorkspace) PrepareManuscriptImport(_ context.Context, sourcePath string) (workspace.ImportPrepareResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sourceName := filepath.Base(sourcePath)
+	for _, job := range f.importJobs {
+		if job.SourceName == sourceName {
+			// 重复源在同一个项目内被检测到，appshell 应捕获此错误并复用已有任务。
+			return workspace.ImportPrepareResult{}, ports.ErrDuplicateImportSource
+		}
+	}
+	job := workspace.ImportJobView{
+		ID:         "import-job-1",
+		Status:     "prepared",
+		SourceName: sourceName,
+		Chapters: []workspace.ImportChapterView{
+			{ID: "candidate-1", Title: "第一章 潮声", Selected: false},
+		},
+	}
+	f.importJobs = append(f.importJobs, job)
+	return workspace.ImportPrepareResult{Job: job}, nil
+}
+
+func (f *importFakeWorkspace) ApplyImportJob(_ context.Context, jobID string, selectedIDs []string) (workspace.ImportApplyView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.applyErr != nil {
+		// 模拟应用失败，任务保持 prepared 状态（可恢复）。
+		return workspace.ImportApplyView{}, f.applyErr
+	}
+	for i := range f.importJobs {
+		if f.importJobs[i].ID != jobID {
+			continue
+		}
+		if f.importJobs[i].Status == "applied" {
+			return workspace.ImportApplyView{}, ports.ErrImportJobAlreadyApplied
+		}
+		f.importJobs[i].Status = "applied"
+		f.importJobs[i].SelectedChapterCount = len(selectedIDs)
+		for _, c := range f.importJobs[i].Chapters {
+			f.chapters = append(f.chapters, workspace.ChapterView{
+				ID:        "chapter-" + c.ID,
+				ProjectID: f.project.ID,
+				Title:     c.Title,
+				Body:      "潮声越过防波堤。",
+				Revision:  1,
+			})
+		}
+		return workspace.ImportApplyView{
+			Job:      f.importJobs[i],
+			Chapters: append([]workspace.ChapterView(nil), f.chapters...),
+		}, nil
+	}
+	return workspace.ImportApplyView{}, ports.ErrImportJobMissing
+}
+
+func (f *importFakeWorkspace) ImportJobs(context.Context) ([]workspace.ImportJobView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]workspace.ImportJobView(nil), f.importJobs...), nil
+}
+
+func (f *importFakeWorkspace) ListChapters(context.Context) ([]workspace.ChapterView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]workspace.ChapterView(nil), f.chapters...), nil
+}
+
+func (f *importFakeWorkspace) Workbench(context.Context) (workspace.WorkbenchProjection, error) {
+	return f.workbench, nil
+}
+
+func (f *importFakeWorkspace) ExtractionTasks(context.Context) ([]workspace.ExtractionTaskView, error) {
+	return nil, nil
+}
+
+func (f *importFakeWorkspace) Close() error {
+	return nil
+}
+
+// importedProjectHarness 封装导入型项目测试的公共状态：有状态假 workspace、
+// appshell 服务和 DesktopAPI 实例。create() 使用固定输入调用
+// CreateImportedProject，使各测试可以在相同前提下断言幂等性与恢复行为。
+type importedProjectHarness struct {
+	api      *DesktopAPI
+	ws       *importFakeWorkspace
+	settings *fakeShellSettings
+	clock    *fakeClock
+	input    CreateImportedProjectInput
+}
+
+type importHarnessOption func(*importedProjectHarness)
+
+func withApplyError(err error) importHarnessOption {
+	return func(h *importedProjectHarness) { h.ws.applyErr = err }
+}
+
+func newImportedProjectHarness(t *testing.T, opts ...importHarnessOption) *importedProjectHarness {
+	t.Helper()
+	ws := &importFakeWorkspace{
+		workbench: workspace.WorkbenchProjection{
+			Stage:         projectdomain.StageWriting,
+			Canvas:        "manuscript",
+			AIPanel:       "hidden",
+			ArchiveStatus: "not_generated",
+		},
+	}
+	settings := &fakeShellSettings{}
+	clock := &fakeClock{t: time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC)}
+	shell := appshell.New(ws, settings, clock)
+	api := newDesktopAPI(ws, &fakeDirectoryPicker{})
+	api.shell = shell
+	api.startup(context.Background())
+	h := &importedProjectHarness{
+		api:      api,
+		ws:       ws,
+		settings: settings,
+		clock:    clock,
+		input: CreateImportedProjectInput{
+			SourcePath:         "/books/长夜.md",
+			ParentDirectory:    "/books",
+			Title:              "长夜织境",
+			Genre:              "东方奇幻",
+			CopyrightConfirmed: true,
+		},
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+func (h *importedProjectHarness) create() (CreateImportedProjectResult, error) {
+	return h.api.CreateImportedProject(h.input)
+}
+
+func (h *importedProjectHarness) importJobCount() int {
+	h.ws.mu.Lock()
+	defer h.ws.mu.Unlock()
+	return len(h.ws.importJobs)
+}
+
+func (h *importedProjectHarness) chapterCount() int {
+	h.ws.mu.Lock()
+	defer h.ws.mu.Unlock()
+	return len(h.ws.chapters)
+}
+
+func (h *importedProjectHarness) recoverableImportJobs() int {
+	h.ws.mu.Lock()
+	defer h.ws.mu.Unlock()
+	count := 0
+	for _, job := range h.ws.importJobs {
+		if job.Status == "prepared" {
+			count++
+		}
+	}
+	return count
+}
+
+func (h *importedProjectHarness) extractionTaskCount() int {
+	h.ws.mu.Lock()
+	defer h.ws.mu.Unlock()
+	return len(h.ws.extractionTasksResult)
+}
+
+func TestCreateImportedProjectRetryReusesPreparedJob(t *testing.T) {
+	h := newImportedProjectHarness(t)
+	first, err := h.create()
+	if err != nil {
+		t.Fatalf("first create() error = %v", err)
+	}
+	second, err := h.create()
+	if err != nil {
+		t.Fatalf("second create() error = %v", err)
+	}
+	if first.Project.ID != second.Project.ID {
+		t.Fatalf("retry duplicated project: first=%q second=%q", first.Project.ID, second.Project.ID)
+	}
+	if got := h.importJobCount(); got != 1 {
+		t.Fatalf("importJobCount = %d, want 1", got)
+	}
+	if got := h.chapterCount(); got != len(first.Chapters) {
+		t.Fatalf("chapterCount = %d, want %d", got, len(first.Chapters))
+	}
+}
+
+func TestCreateImportedProjectApplyFailureReturnsRecoverableProject(t *testing.T) {
+	h := newImportedProjectHarness(t, withApplyError(errors.New("write failed")))
+	result, err := h.create()
+	if err == nil {
+		t.Fatal("create() error = nil, want error")
+	}
+	if result.Project.ID == "" {
+		t.Fatal("result.Project.ID is empty, want non-empty recoverable project")
+	}
+	if got := h.recoverableImportJobs(); got != 1 {
+		t.Fatalf("recoverableImportJobs = %d, want 1", got)
+	}
+}
+
+func TestStartWholeBookArchiveReturnsFeatureUnavailableWithoutCreatingExtractionTask(t *testing.T) {
+	h := newImportedProjectHarness(t)
+	err := h.api.StartWholeBookArchive()
+	assertDesktopError(t, err, "FEATURE_NOT_AVAILABLE")
+	if got := h.extractionTaskCount(); got != 0 {
+		t.Fatalf("extraction tasks = %d, want 0", got)
 	}
 }
