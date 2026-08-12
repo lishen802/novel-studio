@@ -28,6 +28,7 @@ type Service struct {
 	leaseMetadata   ports.ProjectLeaseMetadata
 	filesystem      ports.ProjectFilesystemGuard
 	projectDefaults ports.ProjectDefaults
+	legacyImporter  ports.LegacySettingsImporter
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -166,6 +167,17 @@ func (s *Service) ConfigureProjectDefaults(defaults ports.ProjectDefaults) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.projectDefaults = defaults
+}
+
+// ConfigureLegacyImporter installs the port used to migrate a project's legacy
+// agent settings into the application settings database on first editable open.
+// When configured, openProjectEditable exports the project's provider
+// connections and agent profiles, imports them via this port, and pins the
+// resulting profile version. Read-only opens never trigger migration.
+func (s *Service) ConfigureLegacyImporter(importer ports.LegacySettingsImporter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.legacyImporter = importer
 }
 
 func (s *Service) preflightEditable(packageInfo ports.ProjectPackage) (ports.ProjectFilesystemHealth, error) {
@@ -467,6 +479,72 @@ func (s *Service) recoverInterruptedJobs(ctx context.Context, store ports.Projec
 	return nil
 }
 
+// migrateLegacySettingsIfNeeded exports the project's legacy agent settings and
+// imports them into the application settings database, then pins the resulting
+// profile version. It is a no-op when no legacy importer is configured, the
+// store does not support agent records, or the project has no legacy provider
+// connections or agent profiles. The returned selection is zero when migration
+// was skipped so the caller can distinguish "migrated" from "nothing to do".
+func (s *Service) migrateLegacySettingsIfNeeded(
+	ctx context.Context,
+	store ports.ProjectStore,
+	project projectdomain.Project,
+) (ports.ProjectProfileSelection, error) {
+	s.mu.RLock()
+	importer := s.legacyImporter
+	s.mu.RUnlock()
+	if importer == nil {
+		return ports.ProjectProfileSelection{}, nil
+	}
+
+	agentStore, ok := store.(ports.AgentStore)
+	if !ok {
+		return ports.ProjectProfileSelection{}, nil
+	}
+
+	connections, err := agentStore.ListProviderConnections(ctx)
+	if err != nil {
+		return ports.ProjectProfileSelection{}, fmt.Errorf("list legacy provider connections: %w", err)
+	}
+	profiles, err := agentStore.ListAgentProfiles(ctx)
+	if err != nil {
+		return ports.ProjectProfileSelection{}, fmt.Errorf("list legacy agent profiles: %w", err)
+	}
+	if len(connections) == 0 || len(profiles) == 0 {
+		return ports.ProjectProfileSelection{}, nil
+	}
+
+	snapshot, err := exportLegacyAgentSettingsFromStore(ctx, agentStore, project.ID, project.Title)
+	if err != nil {
+		return ports.ProjectProfileSelection{}, err
+	}
+
+	result, err := importer.ImportLegacyProject(ctx, snapshot)
+	if err != nil {
+		return ports.ProjectProfileSelection{}, fmt.Errorf("import legacy agent settings: %w", err)
+	}
+
+	selection := ports.ProjectProfileSelection{
+		ProfileID: result.ProfileID,
+		Version:   result.ProfileVersion,
+	}
+
+	// Pin the migrated profile version into the project database so subsequent
+	// opens skip migration. This is the commit point: if the pin fails, the
+	// caller retries ImportLegacyProject, which is idempotent and returns the
+	// same profile version without creating a duplicate.
+	if ws, ok := store.(workbenchStore); ok {
+		if err := ws.SaveProfileSelection(ctx, projectdomain.ProfileSelection{
+			ProfileID: result.ProfileID,
+			Version:   result.ProfileVersion,
+		}, s.clock.Now()); err != nil {
+			return ports.ProjectProfileSelection{}, fmt.Errorf("pin migrated profile selection: %w", err)
+		}
+	}
+
+	return selection, nil
+}
+
 func (s *Service) OpenProject(ctx context.Context, packagePath string) (ProjectView, error) {
 	if err := s.beginLifecycleOperation(); err != nil {
 		return ProjectView{}, err
@@ -536,9 +614,18 @@ func (s *Service) openProjectEditable(ctx context.Context, packagePath string) (
 	if replaceErr != nil {
 		return ProjectView{}, replaceErr
 	}
-	selection, _, err := readProfileSelection(ctx, store)
+	selection, found, err := readProfileSelection(ctx, store)
 	if err != nil {
 		return ProjectView{}, err
+	}
+	if !found {
+		migrated, migrateErr := s.migrateLegacySettingsIfNeeded(ctx, store, project)
+		if migrateErr != nil {
+			return ProjectView{}, migrateErr
+		}
+		if migrated.ProfileID != "" {
+			selection = migrated
+		}
 	}
 	workbench, err := computeWorkbenchProjection(ctx, store)
 	if err != nil {

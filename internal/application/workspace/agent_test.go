@@ -639,3 +639,274 @@ func (provider usageModelProvider) Generate(
 		OutputTokens:      1,
 	}, nil
 }
+
+// fakeLegacyImporter records calls to ImportLegacyProject for test assertions.
+type fakeLegacyImporter struct {
+	calls     int
+	snapshots []ports.LegacyAgentSettingsSnapshot
+	result    ports.LegacyImportResult
+	err       error
+}
+
+func (f *fakeLegacyImporter) ImportLegacyProject(_ context.Context, snapshot ports.LegacyAgentSettingsSnapshot) (ports.LegacyImportResult, error) {
+	f.calls++
+	f.snapshots = append(f.snapshots, snapshot)
+	return f.result, f.err
+}
+
+// createLegacyProject creates a project with provider connections and agent
+// profiles but no profile selection pin. The returned service is closed; the
+// caller reopens the project path with a fresh service to exercise migration.
+func createLegacyProject(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	credentials := &fakeCredentialStore{secrets: map[string]string{}}
+	service := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(200, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	service.ConfigureAgentRuntime(credentials, &fakeModelProviderFactory{})
+	// Deliberately do NOT call ConfigureProjectDefaults so no pin is written.
+	view, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", "简介")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
+		Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
+		Name: "Anthropic", Kind: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "key-b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []AgentProfileInput{
+		{Role: "planner", ConnectionID: first.ID, Model: "planner", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
+		{Role: "writer", ConnectionID: first.ID, Model: "writer", MaxOutputTokens: 3000, Temperature: 0.7, Enabled: true},
+		{Role: "continuity_reviewer", ConnectionID: second.ID, Model: "reviewer", MaxOutputTokens: 1000, Temperature: 0.1, Enabled: true},
+	} {
+		if _, err := service.SaveAgentProfile(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return view.Path
+}
+
+func TestLegacyOpenTriggersMigrationAndPinsProfile(t *testing.T) {
+	ctx := context.Background()
+	projectPath := createLegacyProject(t)
+
+	importer := &fakeLegacyImporter{
+		result: ports.LegacyImportResult{
+			ProfileID:      "migrated-profile-1",
+			ProfileVersion: 1,
+			ProviderIDs:    []string{"provider-1", "provider-2"},
+		},
+	}
+
+	service := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(300, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	service.ConfigureLegacyImporter(importer)
+	t.Cleanup(func() { _ = service.Close() })
+
+	view, err := service.OpenProject(ctx, projectPath)
+	if err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if importer.calls != 1 {
+		t.Fatalf("importer calls = %d, want 1", importer.calls)
+	}
+	if view.ProfileSelection.ProfileID != "migrated-profile-1" || view.ProfileSelection.Version != 1 {
+		t.Fatalf("selection = %+v, want migrated-profile-1 v1", view.ProfileSelection)
+	}
+	if len(importer.snapshots) != 1 {
+		t.Fatalf("snapshot count = %d", len(importer.snapshots))
+	}
+	snapshot := importer.snapshots[0]
+	if snapshot.ProjectID == "" || snapshot.ProjectTitle != "凡人修仙" {
+		t.Fatalf("snapshot project = %q/%q", snapshot.ProjectID, snapshot.ProjectTitle)
+	}
+	if len(snapshot.Connections) != 2 || len(snapshot.Profiles) != 3 {
+		t.Fatalf("snapshot connections = %d, profiles = %d", len(snapshot.Connections), len(snapshot.Profiles))
+	}
+	if snapshot.SourceDigest == "" {
+		t.Fatal("snapshot source digest is empty")
+	}
+
+	// Reopen: the pin written by the first open must prevent a second migration.
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(400, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	reopened.ConfigureLegacyImporter(importer)
+	t.Cleanup(func() { _ = reopened.Close() })
+
+	reopenedView, err := reopened.OpenProject(ctx, projectPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if importer.calls != 1 {
+		t.Fatalf("importer calls after reopen = %d, want 1 (pin should skip migration)", importer.calls)
+	}
+	if reopenedView.ProfileSelection.ProfileID != "migrated-profile-1" || reopenedView.ProfileSelection.Version != 1 {
+		t.Fatalf("reopen selection = %+v, want migrated-profile-1 v1", reopenedView.ProfileSelection)
+	}
+}
+
+func TestLegacyReadOnlyOpenDoesNotWriteEitherDatabase(t *testing.T) {
+	ctx := context.Background()
+	projectPath := createLegacyProject(t)
+
+	importer := &fakeLegacyImporter{
+		result: ports.LegacyImportResult{
+			ProfileID:      "migrated-profile-1",
+			ProfileVersion: 1,
+			ProviderIDs:    []string{"provider-1", "provider-2"},
+		},
+	}
+
+	readOnly := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(300, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	readOnly.ConfigureLegacyImporter(importer)
+	t.Cleanup(func() { _ = readOnly.Close() })
+
+	if _, err := readOnly.OpenProjectReadOnly(ctx, projectPath); err != nil {
+		t.Fatalf("OpenProjectReadOnly: %v", err)
+	}
+	if importer.calls != 0 {
+		t.Fatalf("importer calls after read-only open = %d, want 0", importer.calls)
+	}
+
+	// Close the read-only service and reopen editable. If the read-only open
+	// had written a pin, the editable open would skip migration. Since it did
+	// not, the editable open must trigger migration now.
+	if err := readOnly.Close(); err != nil {
+		t.Fatal(err)
+	}
+	editable := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(400, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	editable.ConfigureLegacyImporter(importer)
+	t.Cleanup(func() { _ = editable.Close() })
+
+	if _, err := editable.OpenProject(ctx, projectPath); err != nil {
+		t.Fatalf("OpenProject after read-only: %v", err)
+	}
+	if importer.calls != 1 {
+		t.Fatalf("importer calls after editable open = %d, want 1 (read-only must not have written a pin)", importer.calls)
+	}
+}
+
+func TestLegacyOpenAlreadyPinnedSkipsMigration(t *testing.T) {
+	ctx := context.Background()
+
+	// Create the project WITH projectDefaults so a pin is written during
+	// CreateProject. When the project is reopened with a legacy importer
+	// configured, the existing pin must prevent migration.
+	createDefaults := &fakeProjectDefaults{selection: ports.ProjectProfileSelection{ProfileID: "pinned-profile-1", Version: 3}}
+	createService := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(200, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	createService.ConfigureProjectDefaults(createDefaults)
+	createService.ConfigureAgentRuntime(
+		&fakeCredentialStore{secrets: map[string]string{}},
+		&fakeModelProviderFactory{},
+	)
+	view, err := createService.CreateProject(ctx, t.TempDir(), "已固定项目", "修仙", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Add legacy provider connections and profiles so the migration trigger
+	// would fire if the pin did not exist.
+	first, err := createService.SaveProviderConnection(ctx, ProviderConnectionInput{
+		Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := createService.SaveProviderConnection(ctx, ProviderConnectionInput{
+		Name: "Anthropic", Kind: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "key-b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []AgentProfileInput{
+		{Role: "planner", ConnectionID: first.ID, Model: "planner", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
+		{Role: "writer", ConnectionID: first.ID, Model: "writer", MaxOutputTokens: 3000, Temperature: 0.7, Enabled: true},
+		{Role: "continuity_reviewer", ConnectionID: second.ID, Model: "reviewer", MaxOutputTokens: 1000, Temperature: 0.1, Enabled: true},
+	} {
+		if _, err := createService.SaveAgentProfile(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createService.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	importer := &fakeLegacyImporter{
+		result: ports.LegacyImportResult{
+			ProfileID:      "migrated-profile-1",
+			ProfileVersion: 1,
+		},
+	}
+	reopened := NewService(
+		projectfs.Manager{},
+		sqlite.Factory{},
+		license.NoopService{},
+		fixedClock{now: time.Unix(300, 0)},
+		ids.UUIDGenerator{},
+		&fakeSnapshotArchive{},
+	)
+	reopened.ConfigureLegacyImporter(importer)
+	t.Cleanup(func() { _ = reopened.Close() })
+
+	reopenedView, err := reopened.OpenProject(ctx, view.Path)
+	if err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if importer.calls != 0 {
+		t.Fatalf("importer calls = %d, want 0 (pin should skip migration)", importer.calls)
+	}
+	if reopenedView.ProfileSelection.ProfileID != "pinned-profile-1" || reopenedView.ProfileSelection.Version != 3 {
+		t.Fatalf("selection = %+v, want pinned-profile-1 v3", reopenedView.ProfileSelection)
+	}
+}

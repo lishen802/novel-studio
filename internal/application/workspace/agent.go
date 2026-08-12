@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -1312,3 +1313,112 @@ const reviewSchema = `{
 		}}
 	}
 }`
+
+// ExportLegacyAgentSettings exports the active project's agent settings as a
+// non-sensitive snapshot for one-way migration to the application settings
+// database. It reads provider connections, agent profiles, and runtime
+// settings from the active project store and computes a SHA-256 source digest
+// from sorted metadata.
+//
+// API key values are never read or exported. Only the existing CredentialRef
+// strings (opaque references into the OS credential vault) are carried over.
+func (s *Service) ExportLegacyAgentSettings(ctx context.Context, projectID string) (ports.LegacyAgentSettingsSnapshot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return ports.LegacyAgentSettingsSnapshot{}, ErrNoActiveProject
+	}
+	store, ok := s.active.store.(ports.AgentStore)
+	if !ok {
+		return ports.LegacyAgentSettingsSnapshot{}, ErrAgentStoreUnavailable
+	}
+	project, err := s.active.store.Project(ctx)
+	if err != nil {
+		return ports.LegacyAgentSettingsSnapshot{}, err
+	}
+	return exportLegacyAgentSettingsFromStore(ctx, store, project.ID, project.Title)
+}
+
+// exportLegacyAgentSettingsFromStore reads the agent settings from the given
+// store and builds a LegacyAgentSettingsSnapshot. It is shared by
+// ExportLegacyAgentSettings (which reads the active store) and the migration
+// trigger (which reads the candidate store before it becomes active).
+func exportLegacyAgentSettingsFromStore(
+	ctx context.Context,
+	store ports.AgentStore,
+	projectID, projectTitle string,
+) (ports.LegacyAgentSettingsSnapshot, error) {
+	connections, err := store.ListProviderConnections(ctx)
+	if err != nil {
+		return ports.LegacyAgentSettingsSnapshot{}, fmt.Errorf("list legacy provider connections: %w", err)
+	}
+	profiles, err := store.ListAgentProfiles(ctx)
+	if err != nil {
+		return ports.LegacyAgentSettingsSnapshot{}, fmt.Errorf("list legacy agent profiles: %w", err)
+	}
+	settings, err := store.AgentRuntimeSettings(ctx, projectID)
+	if err != nil {
+		return ports.LegacyAgentSettingsSnapshot{}, fmt.Errorf("read legacy runtime settings: %w", err)
+	}
+
+	legacyConnections := make([]ports.LegacyProvider, 0, len(connections))
+	for _, c := range connections {
+		legacyConnections = append(legacyConnections, ports.LegacyProvider{
+			ID:            c.ID,
+			Name:          c.Name,
+			Kind:          string(c.Kind),
+			BaseURL:       c.BaseURL,
+			CredentialRef: c.CredentialRef,
+		})
+	}
+
+	legacyProfiles := make([]ports.LegacyRoleBinding, 0, len(profiles))
+	for _, p := range profiles {
+		legacyProfiles = append(legacyProfiles, ports.LegacyRoleBinding{
+			Role:            string(p.Role),
+			ConnectionID:    p.ConnectionID,
+			Model:           p.Model,
+			MaxOutputTokens: p.MaxOutputTokens,
+			Temperature:     p.Temperature,
+			Enabled:         p.Enabled,
+		})
+	}
+
+	snapshot := ports.LegacyAgentSettingsSnapshot{
+		ProjectID:       projectID,
+		ProjectTitle:    projectTitle,
+		Connections:     legacyConnections,
+		Profiles:        legacyProfiles,
+		MaxRunTokens:    settings.MaxRunTokens,
+		MaxContextChars: settings.MaxContextChars,
+	}
+	snapshot.SourceDigest = computeLegacySourceDigest(snapshot)
+	return snapshot, nil
+}
+
+// computeLegacySourceDigest returns a SHA-256 digest of the project's agent
+// settings metadata. The digest is used for idempotency: if the settings
+// change, the digest changes, and the next import publishes a new profile
+// version. Only non-sensitive metadata is hashed; API key values never enter
+// the digest. The CredentialRef (an opaque reference, not the secret) is
+// included so that a changed credential reference triggers a re-import.
+func computeLegacySourceDigest(snapshot ports.LegacyAgentSettingsSnapshot) string {
+	sortedConns := make([]ports.LegacyProvider, len(snapshot.Connections))
+	copy(sortedConns, snapshot.Connections)
+	sort.Slice(sortedConns, func(i, j int) bool { return sortedConns[i].ID < sortedConns[j].ID })
+
+	sortedProfiles := make([]ports.LegacyRoleBinding, len(snapshot.Profiles))
+	copy(sortedProfiles, snapshot.Profiles)
+	sort.Slice(sortedProfiles, func(i, j int) bool { return sortedProfiles[i].Role < sortedProfiles[j].Role })
+
+	h := sha256.New()
+	for _, c := range sortedConns {
+		fmt.Fprintf(h, "conn|%s|%s|%s|%s\n", c.ID, c.Kind, c.BaseURL, c.CredentialRef)
+	}
+	for _, p := range sortedProfiles {
+		fmt.Fprintf(h, "profile|%s|%s|%s|%d|%g|%t\n",
+			p.Role, p.ConnectionID, p.Model, p.MaxOutputTokens, p.Temperature, p.Enabled)
+	}
+	fmt.Fprintf(h, "settings|%d|%d\n", snapshot.MaxRunTokens, snapshot.MaxContextChars)
+	return hex.EncodeToString(h.Sum(nil))
+}

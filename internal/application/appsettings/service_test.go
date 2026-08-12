@@ -230,7 +230,7 @@ func (r *fakeRepo) MarkProjectMissing(_ context.Context, projectID string, missi
 func (r *fakeRepo) RecordLegacyImport(_ context.Context, projectID, sourceDigest, profileID string, profileVersion int64, _ time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.legacyImports[projectID+"|"+sourceDigest] = fmt.Sprintf("%s:%d", profileID, profileVersion)
+	r.legacyImports[projectID+"|"+sourceDigest] = fmt.Sprintf("%s\x00%d", profileID, profileVersion)
 	return nil
 }
 
@@ -241,10 +241,13 @@ func (r *fakeRepo) LegacyImport(_ context.Context, projectID, sourceDigest strin
 	if !ok {
 		return "", 0, errTestMissing
 	}
-	var pid string
+	parts := strings.SplitN(val, "\x00", 2)
+	if len(parts) != 2 {
+		return "", 0, errTestMissing
+	}
 	var ver int64
-	fmt.Sscanf(val, "%s:%d", &pid, &ver)
-	return pid, ver, nil
+	fmt.Sscanf(parts[1], "%d", &ver)
+	return parts[0], ver, nil
 }
 
 func newServiceHarness(t *testing.T) (*Service, *fakeRepo, *fakeCredentials) {
