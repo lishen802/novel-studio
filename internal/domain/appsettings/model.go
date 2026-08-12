@@ -1,0 +1,176 @@
+package appsettings
+
+import (
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/lishen802/novel-studio/internal/domain/agent"
+)
+
+var (
+	ErrBlankValue       = errors.New("required value must not be blank")
+	ErrInvalidTheme     = errors.New("invalid theme")
+	ErrInvalidVersion   = errors.New("invalid creative profile version")
+	ErrProfileInUse     = errors.New("provider is referenced by a creative profile")
+	ErrInvalidRoleCount = errors.New("creative profile must have exactly planner, writer, and continuity_reviewer roles")
+)
+
+type Theme string
+
+const (
+	ThemeSystem Theme = "system"
+	ThemeLight  Theme = "light"
+	ThemeDark   Theme = "dark"
+)
+
+func (t Theme) Valid() bool {
+	return t == ThemeSystem || t == ThemeLight || t == ThemeDark
+}
+
+type Preferences struct {
+	Theme                    Theme
+	DefaultCreativeProfileID string
+	UpdatedAt                time.Time
+}
+
+type ProviderConnection struct {
+	ID            string
+	Name          string
+	Kind          agent.ProviderKind
+	BaseURL       string
+	CredentialRef string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type RoleBinding struct {
+	Role            agent.AgentRole
+	ConnectionID    string
+	Model           string
+	MaxOutputTokens int
+	Temperature     float64
+	Enabled         bool
+}
+
+type CreativeProfileVersion struct {
+	ProfileID       string
+	Version         int64
+	Name            string
+	Roles           []RoleBinding
+	MaxRunTokens    int
+	MaxContextChars int
+	CreatedAt       time.Time
+}
+
+type RecentProject struct {
+	ProjectID     string
+	Title         string
+	Path          string
+	LastWorkspace string
+	LastOpenedAt  time.Time
+	Missing       bool
+}
+
+func NewPreferences(theme Theme, defaultProfileID string, now time.Time) (Preferences, error) {
+	if !theme.Valid() {
+		return Preferences{}, ErrInvalidTheme
+	}
+	now = now.UTC()
+	return Preferences{
+		Theme:                    theme,
+		DefaultCreativeProfileID: strings.TrimSpace(defaultProfileID),
+		UpdatedAt:                now,
+	}, nil
+}
+
+func NewProviderConnection(id, name string, kind agent.ProviderKind, baseURL, credentialRef string, now time.Time) (ProviderConnection, error) {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	credentialRef = strings.TrimSpace(credentialRef)
+	if id == "" || name == "" || credentialRef == "" {
+		return ProviderConnection{}, ErrBlankValue
+	}
+	if kind != agent.ProviderOpenAI && kind != agent.ProviderAnthropic {
+		return ProviderConnection{}, agent.ErrInvalidProvider
+	}
+	now = now.UTC()
+	return ProviderConnection{
+		ID:            id,
+		Name:          name,
+		Kind:          kind,
+		BaseURL:       strings.TrimSpace(baseURL),
+		CredentialRef: credentialRef,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}, nil
+}
+
+func NewCreativeProfileVersion(
+	profileID string,
+	version int64,
+	name string,
+	roles []RoleBinding,
+	maxRunTokens, maxContextChars int,
+	now time.Time,
+) (CreativeProfileVersion, error) {
+	profileID = strings.TrimSpace(profileID)
+	name = strings.TrimSpace(name)
+	if profileID == "" || name == "" {
+		return CreativeProfileVersion{}, ErrBlankValue
+	}
+	if version < 1 {
+		return CreativeProfileVersion{}, ErrInvalidVersion
+	}
+	if maxRunTokens < 1 || maxContextChars < 1 {
+		return CreativeProfileVersion{}, agent.ErrInvalidBudget
+	}
+	if len(roles) != 3 {
+		return CreativeProfileVersion{}, ErrInvalidRoleCount
+	}
+	byRole := make(map[agent.AgentRole]RoleBinding, 3)
+	for _, r := range roles {
+		if r.Role != agent.RolePlanner && r.Role != agent.RoleWriter && r.Role != agent.RoleContinuityReviewer {
+			return CreativeProfileVersion{}, agent.ErrInvalidRole
+		}
+		if r.ConnectionID == "" || r.Model == "" {
+			return CreativeProfileVersion{}, ErrBlankValue
+		}
+		byRole[r.Role] = r
+	}
+	for _, required := range []agent.AgentRole{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
+		if _, ok := byRole[required]; !ok {
+			return CreativeProfileVersion{}, ErrInvalidRoleCount
+		}
+	}
+	writer := byRole[agent.RoleWriter]
+	reviewer := byRole[agent.RoleContinuityReviewer]
+	if writer.ConnectionID == reviewer.ConnectionID && writer.Model == reviewer.Model {
+		return CreativeProfileVersion{}, agent.ErrReviewerNotIndependent
+	}
+	now = now.UTC()
+	return CreativeProfileVersion{
+		ProfileID:       profileID,
+		Version:         version,
+		Name:            name,
+		Roles:           roles,
+		MaxRunTokens:    maxRunTokens,
+		MaxContextChars: maxContextChars,
+		CreatedAt:       now,
+	}, nil
+}
+
+func NewRecentProject(projectID, title, path string, now time.Time) (RecentProject, error) {
+	projectID = strings.TrimSpace(projectID)
+	title = strings.TrimSpace(title)
+	path = strings.TrimSpace(path)
+	if projectID == "" || title == "" || path == "" {
+		return RecentProject{}, ErrBlankValue
+	}
+	return RecentProject{
+		ProjectID:    projectID,
+		Title:        title,
+		Path:         path,
+		LastOpenedAt: now.UTC(),
+	}, nil
+}
