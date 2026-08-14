@@ -71,12 +71,19 @@ func buildMenu(emit func(string)) *menu.Menu {
 		menu.Text("聚焦 AI 输入", nil, clickFor(emit, menuCmdFocusAI)),
 	)
 
+	helpMenu := menu.NewMenuFromItems(
+		menu.Text("查看使用文档", nil, clickFor(emit, menuCmdAbout)),
+		menu.Separator(),
+		menu.Text("报告问题…", nil, nil),
+	)
+
 	return menu.NewMenuFromItems(
 		appMenu,
 		menu.SubMenu("文件", fileMenu),
 		menu.EditMenu(),
 		menu.SubMenu("显示", viewMenu),
 		menu.WindowMenu(),
+		menu.SubMenu("帮助", helpMenu),
 	)
 }
 
