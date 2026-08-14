@@ -1,15 +1,13 @@
 import { useEffect } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { clsx } from 'clsx';
 import { TitleBar } from './TitleBar';
 import { Sidebar } from './Sidebar';
-import { AiPanel } from './AiPanel';
 import { useApp } from '../store/useApp';
 import { isApplicationWorkspace } from '../store/appFlows';
 
 // Wails 运行时在桌面端通过 window.runtime 注入；dev 浏览器（npm run dev）下不存在。
 interface WailsRuntime {
-  EventsOn: (name: string, cb: (data: { type: string }) => void) => () => void;
+  EventsOn: (name: string, cb: (data: { command?: string; type?: string }) => void) => () => void;
 }
 type WindowWithRuntime = Window & { runtime?: WailsRuntime };
 
@@ -19,11 +17,10 @@ const menuCommandEvent = 'app:menu-command';
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { state, dispatch } = useApp();
+  const { state, dispatch, closeProject, openRecentProject } = useApp();
   const applicationWorkspace = isApplicationWorkspace(location.pathname);
   const hasProject = state.currentProject !== null;
   const showProjectShell = !applicationWorkspace && hasProject;
-  const showAiPanel = showProjectShell && ['/chapters', '/review'].includes(location.pathname);
 
   // 原生菜单（macOS 系统顶部 / Windows 窗口菜单栏）点击后由 Go 侧 emit
   // app:menu-command 事件；此处将稳定命令映射到路由跳转与 store 动作。
@@ -32,7 +29,14 @@ export function Layout() {
     const runtime = (window as WindowWithRuntime).runtime;
     if (!runtime) return;
     const off = runtime.EventsOn(menuCommandEvent, (data) => {
-      switch (data.type) {
+      const command = data.command || data.type || '';
+      if (command.startsWith('open_recent:')) {
+        void openRecentProject(command.slice('open_recent:'.length)).then((opened) => {
+          if (opened) navigate('/chapters');
+        });
+        return;
+      }
+      switch (command) {
         case 'app_settings':
           navigate('/settings');
           break;
@@ -49,8 +53,7 @@ export function Layout() {
           navigate('/?open=1');
           break;
         case 'close_project':
-          dispatch({ type: 'SET_PROJECT', payload: null });
-          navigate('/');
+          void closeProject().then(() => navigate('/'));
           break;
         case 'export':
         case 'project_maintenance':
@@ -66,21 +69,7 @@ export function Layout() {
       }
     });
     return () => off();
-  }, [navigate, dispatch]);
-
-  useEffect(() => {
-    if (!showAiPanel) return;
-    const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'j') {
-        event.preventDefault();
-        dispatch({ type: 'TOGGLE_AI_PANEL' });
-      }
-    };
-    window.addEventListener('keydown', handleShortcut);
-    return () => window.removeEventListener('keydown', handleShortcut);
-  }, [dispatch, showAiPanel]);
+  }, [navigate, dispatch, closeProject, openRecentProject]);
 
   if (!applicationWorkspace && !hasProject) {
     return <Navigate to="/" replace />;
@@ -92,18 +81,13 @@ export function Layout() {
       <div className="flex-1 flex overflow-hidden relative">
         {showProjectShell && <Sidebar />}
         <main
-          className={clsx(
-            'flex-1 overflow-auto bg-atmosphere relative transition-[margin-right] duration-220',
-            showProjectShell && 'ml-[220px]',
-            showAiPanel && state.aiPanelOpen && 'mr-[360px]',
-          )}
+          className={`flex-1 overflow-auto bg-atmosphere relative ${showProjectShell ? 'ml-[220px]' : ''}`}
           style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
         >
           <div className="min-h-full p-6">
             <Outlet />
           </div>
         </main>
-        {showAiPanel && <AiPanel mode={location.pathname === '/review' ? 'review' : 'writing'} />}
       </div>
     </div>
   );

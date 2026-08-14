@@ -1,11 +1,20 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Settings from './Settings';
 import { AppProvider } from '../store/AppContext';
 
 describe('应用级创作方案', () => {
+  beforeEach(() => {
+    window.go = { main: { DesktopAPI: { ApplicationBootstrap: vi.fn().mockResolvedValue({
+      preferences: { theme: 'light', defaultCreativeProfileId: 'profile-1' }, recentProjects: [],
+      providers: [{ id: 'provider-1', name: '主模型', kind: 'openai', baseUrl: '', hasCredential: true, createdAt: '', updatedAt: '' }],
+      profiles: [{ profileId: 'profile-1', version: 1, name: '长篇方案', maxRunTokens: 1000, maxContextChars: 1000, createdAt: '', roles: ['planning', 'writing', 'review', 'memory', 'impact'].map((role) => ({ role, connectionId: 'provider-1', model: 'model', maxOutputTokens: 1000, temperature: 0.5, enabled: true })) }],
+    }) } } };
+  });
+  afterEach(() => { delete window.go; });
+
   it('为规划、写作、审阅、记忆和影响分析分别配置模型，并说明默认只影响新作品', async () => {
     const user = userEvent.setup();
 

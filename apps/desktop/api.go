@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/lishen802/novel-studio/internal/application/appsettings"
@@ -167,9 +168,9 @@ type CreateImportedProjectInput struct {
 // CreateImportedProjectResult 返回完整的项目视图、确定性章节和权威 workbench
 // 投影，让前端无需再额外调用 listChapters / projectWorkbench 即可进入正文画布。
 type CreateImportedProjectResult struct {
-	Project   workspace.ProjectView           `json:"project"`
-	Chapters  []workspace.ChapterView         `json:"chapters"`
-	Workbench workspace.WorkbenchProjection    `json:"workbench"`
+	Project   workspace.ProjectView         `json:"project"`
+	Chapters  []workspace.ChapterView       `json:"chapters"`
+	Workbench workspace.WorkbenchProjection `json:"workbench"`
 }
 
 type ProjectOpenMode string
@@ -270,6 +271,7 @@ type ProviderView struct {
 // connection. The API key is forwarded to the OS credential vault and never
 // persisted in the settings database.
 type ApplicationProviderInput struct {
+	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Kind    string `json:"kind"`
 	BaseURL string `json:"baseUrl"`
@@ -1035,12 +1037,19 @@ func (a *DesktopAPI) SaveApplicationProvider(input ApplicationProviderInput) (Pr
 	if a.settings == nil {
 		return ProviderView{}, safeDesktopError(errFeatureNotAvailable)
 	}
-	conn, err := a.settings.SaveProvider(a.ctx, appsettings.ProviderInput{
+	providerInput := appsettings.ProviderInput{
 		Name:    input.Name,
 		Kind:    toProviderKind(input.Kind),
 		BaseURL: input.BaseURL,
 		APIKey:  input.APIKey,
-	})
+	}
+	var conn appdomain.ProviderConnection
+	var err error
+	if strings.TrimSpace(input.ID) == "" {
+		conn, err = a.settings.SaveProvider(a.ctx, providerInput)
+	} else {
+		conn, err = a.settings.UpdateProvider(a.ctx, input.ID, providerInput)
+	}
 	if err != nil {
 		return ProviderView{}, safeDesktopError(err)
 	}

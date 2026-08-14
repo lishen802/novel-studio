@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { Link2, Users, ArrowRight, Sparkles } from 'lucide-react';
-import { foreshadowing, characters, factions } from '../../mock/data';
-import type { ForeshadowStatus } from '../../types';
+import type { Foreshadowing, ForeshadowStatus } from '../../types';
+import { studio } from '../../api/studio';
 import { Card } from '../../components/ui/Card';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -29,16 +29,51 @@ const statusLabel: Record<ForeshadowStatus, string> = {
 };
 
 export default function Foreshadowing() {
-  const [items, setItems] = useState(foreshadowing);
+  const [items, setItems] = useState<Foreshadowing[]>([]);
+  const [relationNodes, setRelationNodes] = useState<Array<{ id: string; label: string; type: 'character' | 'faction' }>>([]);
+  const [relations, setRelations] = useState<string[]>([]);
 
-  const updateStatus = (id: string, status: ForeshadowStatus) => {
+  useEffect(() => {
+    let active = true;
+    void Promise.all([studio.worldAssets(), studio.storyWorld()]).then(([assets, world]) => {
+      if (!active) return;
+      setItems(assets.hooks.map((item) => ({
+        id: String(item.id || ''), projectId: '', title: String(item.title || ''),
+        description: String(item.setup || ''),
+        status: (['planted', 'growing', 'resolved', 'dropped'].includes(String(item.status)) ? item.status : 'planted') as ForeshadowStatus,
+        linkedChapters: [String(item.plantedChapterId || '')].filter(Boolean),
+        payoffChapterId: String(item.resolvedChapterId || '') || undefined,
+      })));
+      const names = new Map<string, string>();
+      const nodes: Array<{ id: string; label: string; type: 'character' | 'faction' }> = [];
+      world.characters.forEach((item) => {
+        names.set(String(item.id || ''), String(item.name || ''));
+        nodes.push({ id: String(item.id || ''), label: String(item.name || ''), type: 'character' });
+      });
+      world.factions.forEach((item) => {
+        names.set(String(item.id || ''), String(item.name || ''));
+        nodes.push({ id: String(item.id || ''), label: String(item.name || ''), type: 'faction' });
+      });
+      setRelationNodes(nodes);
+      setRelations(world.relationships.map((item) => `${names.get(String(item.sourceCharacterId || '')) || '未知人物'} → ${String(item.label || item.kind || '关系')} → ${names.get(String(item.targetCharacterId || '')) || '未知人物'}`));
+    });
+    return () => { active = false; };
+  }, []);
+
+  const updateStatus = async (id: string, status: ForeshadowStatus) => {
+    const item = items.find((candidate) => candidate.id === id);
+    if (!item) return;
+    await studio.updateForeshadowingHook(id, {
+      title: item.title,
+      setup: item.description,
+      plantedChapterId: item.linkedChapters[0] || '',
+      dueChapterId: '',
+      resolvedChapterId: item.payoffChapterId || '',
+      status,
+      notes: '',
+    });
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, status } : item)));
   };
-
-  const relationNodes = [
-    ...characters.map((c) => ({ id: c.id, label: c.name, type: 'character' as const })),
-    ...factions.map((f) => ({ id: f.id, label: f.name, type: 'faction' as const })),
-  ];
 
   return (
     <div className="space-y-8 animate-fade-up">
@@ -77,7 +112,7 @@ export default function Foreshadowing() {
                   <label className="block text-xs text-text-muted mb-1.5">状态</label>
                   <select
                     value={item.status}
-                    onChange={(e) => updateStatus(item.id, e.target.value as ForeshadowStatus)}
+                    onChange={(e) => void updateStatus(item.id, e.target.value as ForeshadowStatus)}
                     className={clsx(
                       'h-9 px-3 pr-8 bg-surface border border-border rounded-md text-sm text-text',
                       'focus:outline-none focus:ring-2 focus:ring-primary/35',
@@ -130,26 +165,13 @@ export default function Foreshadowing() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-          <div className="p-3 bg-surface rounded-md border border-border flex items-center gap-3">
-            <span className="w-2 h-2 rounded-full bg-info" />
-            <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
-            <span className="text-text-sub">沈知秋受托调查周砚白下落</span>
-          </div>
-          <div className="p-3 bg-surface rounded-md border border-border flex items-center gap-3">
-            <span className="w-2 h-2 rounded-full bg-primary" />
-            <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
-            <span className="text-text-sub">临江商会与江心渔村存在利益冲突</span>
-          </div>
-          <div className="p-3 bg-surface rounded-md border border-border flex items-center gap-3">
-            <span className="w-2 h-2 rounded-full bg-info" />
-            <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
-            <span className="text-text-sub">阿沅父亲失踪牵连灯塔秘密</span>
-          </div>
-          <div className="p-3 bg-surface rounded-md border border-border flex items-center gap-3">
-            <span className="w-2 h-2 rounded-full bg-info" />
-            <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
-            <span className="text-text-sub">赵掌柜隐瞒商会与灯塔往来</span>
-          </div>
+          {relations.map((relation) => (
+            <div key={relation} className="p-3 bg-surface rounded-md border border-border flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full bg-info" />
+              <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
+              <span className="text-text-sub">{relation}</span>
+            </div>
+          ))}
         </div>
       </Card>
     </div>

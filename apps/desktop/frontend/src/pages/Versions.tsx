@@ -14,8 +14,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { Version } from '../types';
-import { versions as initialVersions } from '../mock/data';
-import { fetchVersions, createVersion } from '../api/stubs';
+import { studio } from '../api/studio';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
@@ -37,7 +36,7 @@ const checklistItems = [
 
 export default function Versions() {
   const navigate = useNavigate();
-  const [versions, setVersions] = useState<Version[]>(initialVersions);
+  const [versions, setVersions] = useState<Version[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [label, setLabel] = useState('');
@@ -51,8 +50,16 @@ export default function Versions() {
 
   useEffect(() => {
     let mounted = true;
-    fetchVersions().then((data) => {
-      if (mounted) setVersions(data);
+    studio.snapshots().then((data) => {
+      if (mounted) setVersions(data.map((snapshot) => ({
+        id: snapshot.id,
+        projectId: '',
+        label: snapshot.name,
+        wordCount: 0,
+        createdAt: snapshot.createdAt,
+        note: snapshot.kind === 'manual' ? '手动项目快照' : snapshot.kind,
+        isTagged: true,
+      })));
     });
     return () => {
       mounted = false;
@@ -69,7 +76,16 @@ export default function Versions() {
     if (!label.trim()) return;
     setLoading(true);
     try {
-      const v = await createVersion(label.trim(), note.trim());
+      const snapshot = await studio.createSnapshot(label.trim());
+      const v: Version = {
+        id: snapshot.id,
+        projectId: '',
+        label: snapshot.name,
+        wordCount: 0,
+        createdAt: snapshot.createdAt,
+        note: note.trim() || '手动项目快照',
+        isTagged: true,
+      };
       setVersions((prev) => [v, ...prev]);
       setModalOpen(false);
     } finally {
@@ -159,7 +175,7 @@ export default function Versions() {
                     className="flex items-center gap-3 p-4 bg-surface-elevated border border-border rounded-lg hover:border-primary/40 hover:bg-surface-hover transition-colors text-left"
                   >
                     <fmt.icon className="w-5 h-5 text-primary" />
-                    <span className="text-sm text-text">{fmt.label}</span>
+                    <span className="text-sm text-text">{fmt.label}（尚未就绪）</span>
                   </button>
                 ))}
               </div>
@@ -230,9 +246,9 @@ export default function Versions() {
         {exporting && (
           <div className="text-center py-2">
             <p className="text-sm text-text mb-4">
-              已生成 <strong className="text-primary">{exporting.label}</strong> 导出任务。
+              <strong className="text-primary">{exporting.label}</strong> 尚未接入后端导出能力。
             </p>
-            <p className="text-xs text-text-sub mb-5">文件将保存到项目的“导出”目录中。</p>
+            <p className="text-xs text-text-sub mb-5">当前不会创建文件或伪造导出任务。</p>
             <Button variant="primary" onClick={() => setExporting(null)}>
               知道了
             </Button>

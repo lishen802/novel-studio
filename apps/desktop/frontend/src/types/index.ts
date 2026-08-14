@@ -127,6 +127,7 @@ export interface ModelConfig {
   id: string;
   name: string;
   provider: string;
+  baseUrl?: string;
   modelName: string;
   apiKeyConfigured: boolean;
 }
@@ -165,8 +166,15 @@ export function getActiveModel(settings: AppSettings): ModelConfig {
   return settings.models.find((m) => m.id === settings.activeModelId) || settings.models[0];
 }
 
+import type { ApplicationBootstrapView, ProjectView } from '../api/studio';
+
 export interface AppState {
   currentProject: Project | null;
+  backendProject: ProjectView | null;
+  bootstrap: ApplicationBootstrapView | null;
+  desktopAvailable: boolean;
+  busy: boolean;
+  error: string | null;
   settings: AppSettings;
   aiPanelOpen: boolean;
   importStatus: 'idle' | 'processing' | 'error' | 'done';

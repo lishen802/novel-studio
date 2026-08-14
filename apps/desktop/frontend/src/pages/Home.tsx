@@ -14,8 +14,6 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { useApp } from '../store/useApp';
-import { createOriginalProject, projectRouteForStatus } from '../store/appFlows';
-import { recentProjects as storedRecentProjects } from '../mock/data';
 
 interface RecentProject {
   id: string;
@@ -29,70 +27,47 @@ interface RecentProject {
   color: string;
 }
 
-const demoProjects: RecentProject[] = [
-  {
-    id: 'proj-01',
-    title: '雾中灯塔',
-    subtitle: '民国悬疑长篇',
-    genre: '悬疑 · 民国 · 江南',
-    lastLocation: '正文编辑',
-    lastOpened: '10 分钟前',
-    pendingReviews: 2,
-    recoverableTask: 'AI 为第三章生成了 2 条候选，等待审阅',
-    color: '#3a4a5c',
-  },
-  {
-    id: 'proj-02',
-    title: '东海提灯人',
-    subtitle: '奇幻冒险长篇',
-    genre: '奇幻 · 冒险',
-    lastLocation: '作者审阅',
-    lastOpened: '昨天 16:43',
-    color: '#2d4a5c',
-  },
-  {
-    id: 'proj-03',
-    title: '夏末书简',
-    subtitle: '都市情感长篇',
-    genre: '都市 · 情感',
-    lastLocation: '导入分析中',
-    lastOpened: '8 月 8 日',
-    color: '#5c4a3a',
-  },
-];
-
 export default function Home() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { dispatch } = useApp();
+  const { state, createProject: createBackendProject, openProject, openRecentProject } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
-  const [openProjectOpen, setOpenProjectOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [genre, setGenre] = useState('');
-  const [author, setAuthor] = useState('');
-  const recentProjects = demoProjects;
+  const recentProjects: RecentProject[] = (state.bootstrap?.recentProjects || []).map((project, index) => ({
+    id: project.projectId,
+    title: project.title,
+    subtitle: project.missing ? '项目路径已失效' : project.path,
+    genre: project.path,
+    lastLocation: project.lastWorkspace || '正文与章节',
+    lastOpened: project.lastOpenedAt ? new Date(project.lastOpenedAt).toLocaleString() : '尚无记录',
+    color: ['#3a4a5c', '#2d4a5c', '#5c4a3a'][index % 3],
+  }));
   const latest = recentProjects[0];
 
   useEffect(() => {
     const mode = new URLSearchParams(location.search);
     if (mode.get('new') === '1') setCreateOpen(true);
-    if (mode.get('open') === '1') setOpenProjectOpen(true);
+    if (mode.get('open') === '1') void handleOpenProject();
+    // 查询参数只消费一次，文件选择由系统对话框处理。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
-  const openRecent = (id: string) => {
-    const project = storedRecentProjects.find((item) => item.id === id);
-    if (!project) return;
-    dispatch({ type: 'SET_PROJECT', payload: project });
-    navigate(projectRouteForStatus(project.status));
+  const openRecent = async (id: string, target = '/chapters') => {
+    if (await openRecentProject(id)) navigate(target);
   };
 
-  const createProject = () => {
+  const createProject = async () => {
     if (!title.trim()) return;
-    const project = createOriginalProject({ title, genre, author });
-    dispatch({ type: 'SET_PROJECT', payload: project });
-    setCreateOpen(false);
-    navigate('/cockpit');
+    if (await createBackendProject({ title, genre, author: '' })) {
+      setCreateOpen(false);
+      navigate('/chapters');
+    }
   };
+
+  async function handleOpenProject() {
+    if (await openProject()) navigate('/chapters');
+  }
 
   return (
     <div className="h-full flex animate-fade-up -m-6">
@@ -126,7 +101,7 @@ export default function Home() {
           </button>
 
           <button
-            onClick={() => setOpenProjectOpen(true)}
+            onClick={() => void handleOpenProject()}
             className="w-full group flex items-center justify-between p-3.5 rounded-xl bg-surface-elevated border border-border hover:border-border-strong hover:bg-surface-hover transition-colors text-left"
           >
             <div>
@@ -148,7 +123,8 @@ export default function Home() {
               {recentProjects.map((p) => (
                 <button
                   key={p.id}
-                  onClick={() => openRecent(p.id)}
+                  onClick={() => void openRecent(p.id)}
+                  disabled={state.busy || p.subtitle === '项目路径已失效'}
                   className="w-full text-left p-3 rounded-xl border border-border bg-surface-elevated hover:border-border-strong hover:bg-surface-hover transition-colors group"
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -261,7 +237,7 @@ export default function Home() {
                     <Button
                       variant="primary"
                       size="lg"
-                      onClick={() => openRecent(latest.id)}
+                      onClick={() => void openRecent(latest.id)}
                       className="gap-1"
                     >
                       继续《{latest.title}》
@@ -270,7 +246,7 @@ export default function Home() {
                     <Button
                       variant="ghost"
                       size="lg"
-                      onClick={() => openRecent(latest.id)}
+                      onClick={() => void openRecent(latest.id, '/review')}
                     >
                       去审阅
                     </Button>
@@ -292,7 +268,7 @@ export default function Home() {
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="创建原创作品">
         <div className="space-y-4">
           <p className="text-sm text-text-sub leading-relaxed">
-            先建立本地作品空间，再在驾驶舱里用自然语言讨论创意。未配置模型时，你仍可创建作品与手工写作。
+            先建立本地作品空间，再进入正文页面创建章节。未配置模型时，你仍可创建作品与手工写作。
           </p>
           <div>
             <label className="block text-xs text-text-sub mb-1.5">书名</label>
@@ -302,35 +278,16 @@ export default function Home() {
             <label className="block text-xs text-text-sub mb-1.5">题材（可选）</label>
             <Input value={genre} onChange={(event) => setGenre(event.target.value)} placeholder="例如：武侠" />
           </div>
-          <div>
-            <label className="block text-xs text-text-sub mb-1.5">作者署名（可选）</label>
-            <Input value={author} onChange={(event) => setAuthor(event.target.value)} placeholder="可稍后在项目设置中修改" />
-          </div>
+          {state.error && <p className="text-sm text-danger">{state.error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setCreateOpen(false)}>取消</Button>
-            <Button variant="primary" onClick={createProject} disabled={!title.trim()}>创建并开始构思</Button>
+            <Button variant="primary" onClick={() => void createProject()} disabled={!title.trim() || state.busy}>
+              {state.busy ? '正在创建…' : '创建并开始构思'}
+            </Button>
           </div>
         </div>
       </Modal>
 
-      <Modal open={openProjectOpen} onClose={() => setOpenProjectOpen(false)} title="打开项目">
-        <div className="space-y-3">
-          <p className="text-sm text-text-sub">生产版会在此唤起系统文件选择器；原型中可用已有本地项目演示打开流程。</p>
-          {storedRecentProjects.map((project) => (
-            <button
-              key={project.id}
-              onClick={() => {
-                setOpenProjectOpen(false);
-                openRecent(project.id);
-              }}
-              className="w-full text-left p-3 rounded-lg border border-border hover:border-border-strong hover:bg-surface-hover"
-            >
-              <p className="text-sm font-medium text-text">《{project.title}》</p>
-              <p className="text-xs text-text-sub mt-1">{project.subtitle} · {project.updatedAt}</p>
-            </button>
-          ))}
-        </div>
-      </Modal>
     </div>
   );
 }

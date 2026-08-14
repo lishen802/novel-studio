@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { Users, Flag, User, Swords, Eye, HelpCircle } from 'lucide-react';
-import { characters, factions } from '../../mock/data';
 import type { Character, Faction, CharacterRole, FactionType } from '../../types';
+import { studio } from '../../api/studio';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -44,12 +44,43 @@ type Tab = 'characters' | 'factions';
 export default function Characters() {
   const [activeTab, setActiveTab] = useState<Tab>('characters');
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [factions, setFactions] = useState<Faction[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void studio.storyWorld().then((world) => {
+      if (!active) return;
+      const memberships = new Map(world.memberships.map((item) => [String(item.characterId || ''), String(item.factionId || '')]));
+      setCharacters(world.characters.map((item) => ({
+        id: String(item.id || ''),
+        projectId: '',
+        name: String(item.name || ''),
+        role: (['protagonist', 'supporting', 'antagonist', 'minor'].includes(String(item.role)) ? item.role : 'minor') as CharacterRole,
+        factionId: memberships.get(String(item.id || '')) || undefined,
+        tags: Array.isArray(item.aliases) ? item.aliases.map(String) : [],
+        summary: String(item.summary || ''),
+        appearance: String(item.secret || ''),
+        motivation: String(item.motivation || ''),
+      })));
+      setFactions(world.factions.map((item) => ({
+        id: String(item.id || ''),
+        projectId: '',
+        name: String(item.name || ''),
+        type: 'other' as FactionType,
+        description: String(item.summary || ''),
+        goals: String(item.goal || ''),
+        conflicts: '',
+      })));
+    });
+    return () => { active = false; };
+  }, []);
 
   const factionMap = useMemo(() => {
     const map = new Map<string, Faction>();
     factions.forEach((f) => map.set(f.id, f));
     return map;
-  }, []);
+  }, [factions]);
 
   return (
     <div className="space-y-6 animate-fade-up">

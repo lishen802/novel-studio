@@ -38,6 +38,7 @@ import { useApp } from '../store/useApp';
 import type { ChapterStatus } from '../types';
 import { getActiveModel } from '../types';
 import { canvasPresets } from '../editor';
+import { studio, type ChapterView } from '../api/studio';
 
 interface Chapter {
   id: string;
@@ -60,42 +61,8 @@ interface Candidate {
   original: string;
   result: string;
   applied: boolean;
+  actionable: boolean;
 }
-
-const initialVolumes: Volume[] = [
-  {
-    id: 'v1',
-    title: '第一卷：雾起',
-    chapters: [
-      { id: 'c1', title: '第一章　未寄出的信', order: 1, wordCount: 3240, status: 'approved' },
-      { id: 'c2', title: '第二章　江心岛', order: 2, wordCount: 4100, status: 'review' },
-      { id: 'c3', title: '第三章　灯塔不亮', order: 3, wordCount: 2850, status: 'draft' },
-    ],
-  },
-  {
-    id: 'v2',
-    title: '第二卷：灯芯',
-    chapters: [
-      { id: 'c4', title: '第四章　十七封信', order: 4, wordCount: 0, status: 'empty' },
-      { id: 'c5', title: '第五章　雾中人影', order: 5, wordCount: 1200, status: 'draft' },
-      { id: 'c6', title: '第六章　海图红圈', order: 6, wordCount: 0, status: 'empty' },
-    ],
-  },
-];
-
-const initialContent = `沈知秋抵达江心岛时，雾正从水面升起。
-
-码头上只剩一盏马灯，被风推着晃。船夫不肯靠岸，只把行李扔在栈桥尽头，低声说：“灯塔上的灯，昨夜没亮。”
-
-他抬眼望去，灰色的塔身隐没在雾中，像一只沉默的巨兽。三日前收到的那封信还在内袋里，字迹潦草，末尾只有一句：“请来接替我。”
-
-栈桥的木板在脚下发出空洞的回响。沈知秋走得很慢，每一步都在确认这地方是否还属于人间。雾气带着水草与铁锈混合的气息，黏在衣领和袖口。他忽然停住——栈桥尽头，有人跪在那里。
-
-是个老人，背对着他，肩膀一耸一耸，像是在哭，又像是在笑。
-
-“请问……”
-
-老人没有回头。沈知秋走近两步，才发现那人面前摆着三盏熄灭的油灯，灯芯已经被剪去了一半。`;
 
 const statusVariant: Record<ChapterStatus, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
   approved: 'success',
@@ -119,11 +86,14 @@ export default function Chapters() {
   const navigate = useNavigate();
   const { state, dispatch } = useApp();
   const settings = state.settings;
+  const modelConfigured = getActiveModel(settings).apiKeyConfigured;
   const canvasColor = useMemo(() => canvasPresets.find((p) => p.id === settings.canvasColorId) || canvasPresets[0], [settings.canvasColorId]);
-  const [volumes, setVolumes] = useState<Volume[]>(initialVolumes);
-  const [selectedId, setSelectedId] = useState<string | null>('c3');
-  const [title, setTitle] = useState('第三章　灯塔不亮');
-  const [content, setContent] = useState(initialContent);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [revision, setRevision] = useState(0);
+  const [hydrating, setHydrating] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('saved');
   const [search, setSearch] = useState('');
   const [focusMode, setFocusMode] = useState(false);
@@ -144,20 +114,47 @@ export default function Chapters() {
   const liveWordCount = countWords(content);
 
   useEffect(() => {
-    if (!selected) return;
-    setTitle(selected.title);
-    setContent(selected.id === 'c3' ? initialContent : '');
-    setSaveState('saved');
-  }, [selected]);
+    let active = true;
+    void studio.listChapters().then((items) => {
+      if (!active) return;
+      const chapters = items.map((chapter) => ({
+        id: chapter.id,
+        title: chapter.title,
+        order: chapter.position,
+        wordCount: countWords(chapter.body),
+        status: chapter.body ? 'draft' as const : 'empty' as const,
+      }));
+      setVolumes([{ id: 'manuscript', title: '正文', chapters }]);
+      setSelectedId((current) => current || chapters[0]?.id || null);
+    }).catch(() => setVolumes([]));
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selectedId) return;
+    let active = true;
+    setHydrating(true);
+    void studio.openChapter(selectedId).then((chapter: ChapterView) => {
+      if (!active) return;
+      setTitle(chapter.title);
+      setContent(chapter.hasRecoveryDraft ? chapter.recoveryBody || chapter.body : chapter.body);
+      setRevision(chapter.revision);
+      setSaveState('saved');
+      setHydrating(false);
+    });
+    return () => { active = false; };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selected || hydrating) return;
     const timer = window.setTimeout(() => {
       setSaveState('saving');
-      window.setTimeout(() => setSaveState('saved'), 600);
+      void studio.saveDraft(selected.id, content, revision)
+        .then(() => setSaveState('saved'))
+        .catch(() => setSaveState('idle'));
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [content, title, selected]);
+  }, [content, selected, revision, hydrating]);
 
   const filteredVolumes = useMemo(() => {
     if (!search.trim()) return volumes;
@@ -184,17 +181,35 @@ export default function Chapters() {
     });
   };
 
-  const runAiAction = (type: Candidate['type'], label: string, result: string) => {
-    if (!selection) return;
-    const candidate: Candidate = {
-      id: `can-${Date.now()}`,
-      type,
-      label,
-      original: selection.text,
-      result,
-      applied: false,
-    };
-    setCandidates((prev) => [candidate, ...prev]);
+  const runAiAction = (type: Candidate['type'], label: string) => {
+    if (!selection || !selected) return;
+    if (!modelConfigured) {
+      navigate('/settings');
+      return;
+    }
+    const selectedText = selection.text;
+    setAiLoading(true);
+    void studio.createChapterAgentRun(selected.id, `${label}\n\n选中文字：\n${selectedText}`)
+      .then((run) => studio.executeAgentRun(String(run.id)))
+      .then(() => {
+        const candidate: Candidate = {
+          id: `job-${Date.now()}`,
+          type,
+          label,
+          original: selectedText,
+          result: '任务已提交。完成后请在“审阅与候选”中查看并决定是否应用。',
+          applied: false,
+          actionable: false,
+        };
+        setCandidates((previous) => [candidate, ...previous]);
+      })
+      .catch((reason) => {
+        setCandidates((previous) => [{
+          id: `job-error-${Date.now()}`, type: 'review', label: '任务提交失败', original: '',
+          result: reason instanceof Error ? reason.message : '无法提交创作任务', applied: false, actionable: false,
+        }, ...previous]);
+      })
+      .finally(() => setAiLoading(false));
     setAiOpen(true);
     setSelection(null);
     editorRef.current?.focus();
@@ -204,39 +219,52 @@ export default function Chapters() {
     if (!selection) return;
     switch (action) {
       case 'explain':
-        runAiAction('explain', '解释这段', '这段通过栈桥、马灯、雾等意象，建立沈知秋登岛时的不安氛围，同时为后续“灯塔不亮”的核心悬念做铺垫。老人与三盏熄灯的细节暗示岛上已有不寻常之事发生。');
+        runAiAction('explain', '解释这段');
         break;
       case 'polish':
-        runAiAction('polish', '润色', '沈知秋踏上江心岛时，雾正贴着水面漫上来。码头上只剩一盏马灯，被风吹得晃个不停。船夫不肯靠岸，只把行李往栈桥尽头一扔，低声道：“灯塔上的灯，昨夜没亮。”');
+        runAiAction('polish', '润色');
         break;
       case 'rewrite':
-        runAiAction('rewrite', '改写', '雾气从江心漫向岸边，像一层湿透的棉絮。沈知秋站在船头，看着码头上那盏孤零零的马灯。船夫说：“灯塔昨夜没亮。”他没有抬头，只把行李推过甲板。');
+        runAiAction('rewrite', '改写');
         break;
       case 'mark':
-        runAiAction('mark', '标记问题', '【氛围与节奏】“像一只沉默的巨兽”此处比喻略显常见，建议换用更克制的意象，或改为角色主观感受。');
+        runAiAction('mark', '标记问题');
         break;
       case 'review':
-        runAiAction('review', '交给 AI 审阅', '【审阅意见】开篇信息密度适中，但“三日前收到的那封信”可提前点出具体委托内容，增强主角动机。建议保留雾、灯、老人的视觉层次，它们有效构建了悬疑氛围。');
+        runAiAction('review', '交给 AI 审阅');
         break;
     }
   };
 
-  const sendAiInstruction = () => {
-    if (!aiInput.trim()) return;
+  const sendAiInstruction = async () => {
+    if (!aiInput.trim() || !selected) return;
+    if (!modelConfigured) {
+      navigate('/settings');
+      return;
+    }
     setAiLoading(true);
-    window.setTimeout(() => {
+    try {
+      const run = await studio.createChapterAgentRun(selected.id, aiInput.trim());
+      await studio.executeAgentRun(String(run.id));
       const candidate: Candidate = {
         id: `can-${Date.now()}`,
-        type: 'rewrite',
-        label: '按指令生成',
+        type: 'review',
+        label: 'AI 任务已启动',
         original: '',
-        result: `【按指令：${aiInput}】\n\n沈知秋没有立刻回答。他蹲下身，用手指抹了抹灯盏边缘的油渍——是新的。有人在他到来之前刚刚熄灭这些灯，也许就是为了让他看见这一幕。`,
+        result: '任务已在后台运行。完成后会作为可审阅变更集出现，不会直接覆盖正文。',
         applied: false,
+        actionable: false,
       };
       setCandidates((prev) => [candidate, ...prev]);
       setAiInput('');
+    } catch (reason) {
+      setCandidates((prev) => [{
+        id: `can-error-${Date.now()}`, type: 'review', label: '任务提交失败', original: '',
+        result: reason instanceof Error ? reason.message : '无法提交创作任务', applied: false, actionable: false,
+      }, ...prev]);
+    } finally {
       setAiLoading(false);
-    }, 900);
+    }
   };
 
   const applyCandidate = (id: string, partial?: string) => {
@@ -255,20 +283,40 @@ export default function Chapters() {
     setCandidates((prev) => prev.filter((c) => c.id !== id));
   };
 
-  const createChapter = () => {
+  /** 显式提交正文 revision；恢复草稿仍由自动保存维护。 */
+  const commitCurrentChapter = async () => {
+    if (!selected) return;
+    setSaveState('saving');
+    try {
+      const committed = await studio.commitChapter(selected.id, content, revision);
+      setRevision(committed.revision);
+      setSaveState('saved');
+      setVolumes((previous) => previous.map((volume) => ({
+        ...volume,
+        chapters: volume.chapters.map((chapter) => chapter.id === selected.id
+          ? { ...chapter, wordCount: countWords(committed.body), status: committed.body ? 'draft' : 'empty' }
+          : chapter),
+      })));
+    } catch {
+      setSaveState('idle');
+    }
+  };
+
+  const createChapter = async () => {
+    const created = await studio.createChapter(`第 ${chapters.length + 1} 章　新章节`);
     const newChapter: Chapter = {
-      id: `c-${Date.now()}`,
-      title: `第 ${chapters.length + 1} 章　新章节`,
-      order: chapters.length + 1,
+      id: created.id,
+      title: created.title,
+      order: created.position,
       wordCount: 0,
       status: 'empty',
     };
-    setVolumes((prev) => {
-      const copy = [...prev];
-      copy[copy.length - 1].chapters.push(newChapter);
-      return copy;
-    });
-    setSelectedId(newChapter.id);
+    setVolumes((previous) => previous.length
+      ? previous.map((volume, index) => index === previous.length - 1
+        ? { ...volume, chapters: [...volume.chapters, newChapter] }
+        : volume)
+      : [{ id: 'manuscript', title: '正文', chapters: [newChapter] }]);
+    setSelectedId(created.id);
   };
 
   const startResize = (e: React.MouseEvent) => {
@@ -313,7 +361,7 @@ export default function Chapters() {
               className="pl-9 h-8 text-sm"
             />
           </div>
-          <Button variant="default" size="sm" onClick={createChapter} className="w-full gap-1">
+          <Button variant="default" size="sm" onClick={() => void createChapter()} className="w-full gap-1">
             <Plus className="w-4 h-4" />
             新建章节
           </Button>
@@ -370,13 +418,13 @@ export default function Chapters() {
         ) : (
           <>
             {/* Model warning */}
-            {!getActiveModel(state.settings).apiKeyConfigured && (
+            {!modelConfigured && (
               <div
                 data-testid="model-configuration-notice"
                 className="px-5 py-2 bg-model-notice border-b border-model-notice-border text-text flex items-center gap-3"
               >
                 <AlertCircle className="w-4 h-4 text-warning shrink-0" />
-                <p className="text-sm text-text-sub flex-1">尚未配置 AI 模型，创作助手与浮动操作仅展示示例。</p>
+                <p className="text-sm text-text-sub flex-1">尚未配置 AI 模型，请先完成模型连接后再提交创作任务。</p>
                 <Button size="sm" onClick={() => navigate('/settings')}>前往配置</Button>
               </div>
             )}
@@ -555,6 +603,10 @@ export default function Chapters() {
               </div>
 
               <div className="flex items-center gap-3 text-xs text-text-sub">
+                <Button variant="default" size="sm" onClick={() => void commitCurrentChapter()}>
+                  <Save className="w-3.5 h-3.5" />
+                  保存正文
+                </Button>
                 <span className="flex items-center gap-1.5">
                   {saveState === 'saving' ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -565,7 +617,7 @@ export default function Chapters() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  版本 v0.3
+                  正文修订 {revision}
                 </span>
                 <span className="font-medium text-text">{liveWordCount.toLocaleString()} 字</span>
               </div>
@@ -584,7 +636,8 @@ export default function Chapters() {
               >
                 <Input
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  readOnly
+                  title="当前后端尚未提供章节重命名命令"
                   className="text-2xl font-display font-semibold bg-transparent border-0 shadow-none px-0 mb-6 focus:ring-0 placeholder:text-text-muted"
                   style={{ color: canvasColor.text }}
                   placeholder="章节标题"
@@ -665,7 +718,7 @@ export default function Chapters() {
               <Button
                 variant="primary"
                 size="sm"
-                onClick={sendAiInstruction}
+                  onClick={() => void sendAiInstruction()}
                 disabled={aiLoading || !aiInput.trim()}
                 className="w-full gap-1"
               >
@@ -693,7 +746,7 @@ export default function Chapters() {
                       <p className="text-[11px] text-text-muted mb-1">候选</p>
                       <p className="text-sm text-text leading-relaxed whitespace-pre-wrap bg-surface-hover p-2 rounded">{c.result}</p>
                     </div>
-                    {!c.applied && (
+                    {!c.applied && c.actionable && (
                       <div className="flex items-center gap-2">
                         <Button variant="primary" size="sm" onClick={() => applyCandidate(c.id)} className="gap-1">
                           <Check className="w-3.5 h-3.5" />

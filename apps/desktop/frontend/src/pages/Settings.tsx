@@ -11,8 +11,9 @@ import { canvasPresets } from '../editor';
 import type { MarginSize } from '../editor';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Input, Textarea } from '../components/ui/Input';
+import { Input } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { studio } from '../api/studio';
 
 type TabKey = 'model' | 'writing' | 'templates' | 'appearance' | 'advanced';
 
@@ -24,17 +25,6 @@ const tabs: { key: TabKey; label: string; icon: typeof Cpu }[] = [
   { key: 'advanced', label: '高级', icon: SlidersHorizontal },
 ];
 
-interface AuthorTemplate {
-  id: string;
-  name: string;
-  content: string;
-}
-
-const initialTemplates: AuthorTemplate[] = [
-  { id: 't1', name: '场景描写模板', content: '先写环境，再写人物动作，最后写心理反应。' },
-  { id: 't2', name: '对话模板', content: '一句台词 + 一个动作细节 + 一句潜台词。' },
-];
-
 const creativeRoleLabels: Record<CreativeRole, string> = {
   planning: '规划',
   writing: '写作',
@@ -44,7 +34,7 @@ const creativeRoleLabels: Record<CreativeRole, string> = {
 };
 
 export default function Settings() {
-  const { state, saveSettings } = useApp();
+  const { state, saveSettings, refreshBootstrap } = useApp();
   const [activeTab, setActiveTab] = useState<TabKey>('model');
   const [saved, setSaved] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -71,10 +61,6 @@ export default function Settings() {
   const [backupCount, setBackupCount] = useState(10);
   const [language, setLanguage] = useState('zh-CN');
 
-  const [templates, setTemplates] = useState<AuthorTemplate[]>(initialTemplates);
-  const [newTemplateName, setNewTemplateName] = useState('');
-  const [newTemplateContent, setNewTemplateContent] = useState('');
-
   useEffect(() => {
     setModels(state.settings.models);
     setActiveModelId(state.settings.activeModelId);
@@ -97,12 +83,13 @@ export default function Settings() {
     const id = `m-${Date.now()}`;
     setModels((prev) => [
       ...prev,
-      { id, name: `模型 ${prev.length + 1}`, provider: 'OpenAI 兼容', modelName: '', apiKeyConfigured: false },
+      { id, name: `模型 ${prev.length + 1}`, provider: 'openai', baseUrl: 'https://api.openai.com/v1', modelName: '', apiKeyConfigured: false },
     ]);
     setActiveModelId(id);
   };
 
-  const deleteModel = (id: string) => {
+  const deleteModel = async (id: string) => {
+    if (!id.startsWith('m-')) await studio.deleteApplicationProvider(id);
     setModels((prev) => {
       const next = prev.filter((m) => m.id !== id);
       if (activeModelId === id) {
@@ -112,17 +99,30 @@ export default function Settings() {
     });
   };
 
-  const handleTestConnection = (id: string) => {
+  const handleTestConnection = async (id: string) => {
     setTestingId(id);
     setTestOkId(null);
-    setTimeout(() => {
+    try {
+      if (id.startsWith('m-')) throw new Error('请先保存连接');
+      await studio.testApplicationProvider(id);
       setTestingId(null);
       setTestOkId(id);
       setTimeout(() => setTestOkId(null), 3000);
-    }, 1200);
+    } finally {
+      setTestingId(null);
+    }
   };
 
   const handleSave = async () => {
+    for (const model of models) {
+      await studio.saveApplicationProvider({
+        id: model.id.startsWith('m-') ? '' : model.id,
+        name: model.name,
+        kind: model.provider,
+        baseUrl: model.baseUrl || '',
+        apiKey: apiKeys[model.id] || '',
+      });
+    }
     const next: AppSettings = {
       models: models.map((m) => ({
         ...m,
@@ -140,6 +140,7 @@ export default function Settings() {
       indent,
     };
     await saveSettings(next);
+    await refreshBootstrap();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -155,27 +156,48 @@ export default function Settings() {
   };
 
   /** 将当前编辑方案发布为下一版本，避免静默改变已经创建的作品。 */
-  const publishNextProfileVersion = () => {
+  const publishNextProfileVersion = async () => {
     if (!selectedProfile) return;
+    const roles = Object.entries(selectedProfile.roleModels).map(([role, connectionId]) => {
+      const model = models.find((item) => item.id === connectionId);
+      return {
+        role,
+        connectionId,
+        model: model?.modelName || '',
+        maxOutputTokens: 4096,
+        temperature: role === 'review' ? 0.2 : 0.7,
+        enabled: true,
+      };
+    });
+    const published = await studio.publishCreativeProfile({
+      profileId: selectedProfile.id,
+      name: selectedProfile.name,
+      roles,
+      maxRunTokens: 100000,
+      maxContextChars: 120000,
+    });
     setCreativeProfiles((profiles) => profiles.map((profile) => (
       profile.id === selectedProfile.id
-        ? { ...profile, version: profile.version + 1, published: true }
+        ? { ...profile, version: published.version, published: true }
         : profile
     )));
+    setDefaultCreativeProfileId(published.profileId);
   };
 
-  const addTemplate = () => {
-    if (!newTemplateName.trim() || !newTemplateContent.trim()) return;
-    setTemplates((prev) => [
-      ...prev,
-      { id: `t-${Date.now()}`, name: newTemplateName.trim(), content: newTemplateContent.trim() },
-    ]);
-    setNewTemplateName('');
-    setNewTemplateContent('');
-  };
-
-  const deleteTemplate = (id: string) => {
-    setTemplates((prev) => prev.filter((t) => t.id !== id));
+  /** 创建待发布的本地方案草稿；只有点击发布后才写入后端。 */
+  const createProfileDraft = () => {
+    const id = `profile-${Date.now()}`;
+    const connectionId = activeModelId;
+    const profile: CreativeProfile = {
+      id,
+      name: '长篇创作方案',
+      version: 0,
+      published: false,
+      roleModels: { planning: connectionId, writing: connectionId, review: connectionId, memory: connectionId, impact: connectionId },
+    };
+    setCreativeProfiles([profile]);
+    setSelectedProfileId(id);
+    setDefaultCreativeProfileId('');
   };
 
   return (
@@ -270,11 +292,17 @@ export default function Settings() {
                     onChange={(e) => updateModel(activeModel.id, { provider: e.target.value })}
                     className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
                   >
-                    <option>OpenAI 兼容</option>
-                    <option>Anthropic</option>
-                    <option>本地模型</option>
-                    <option>Azure OpenAI</option>
+                    <option value="openai">OpenAI 兼容</option>
+                    <option value="anthropic">Anthropic</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-text-sub mb-1.5">接口地址</label>
+                  <Input
+                    value={activeModel.baseUrl || ''}
+                    onChange={(e) => updateModel(activeModel.id, { baseUrl: e.target.value })}
+                    placeholder="https://api.openai.com/v1"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs text-text-sub mb-1.5">模型名称</label>
@@ -298,7 +326,7 @@ export default function Settings() {
                     <Button
                       variant="default"
                       size="sm"
-                      onClick={() => handleTestConnection(activeModel.id)}
+                      onClick={() => void handleTestConnection(activeModel.id)}
                       disabled={testingId === activeModel.id}
                     >
                       <TestTube className="w-4 h-4" />
@@ -307,7 +335,7 @@ export default function Settings() {
                     {testOkId === activeModel.id && <span className="text-sm text-success">连接成功</span>}
                   </div>
                   {models.length > 1 && (
-                    <Button variant="ghost" size="sm" className="gap-1 text-danger hover:text-danger" onClick={() => deleteModel(activeModel.id)}>
+                    <Button variant="ghost" size="sm" className="gap-1 text-danger hover:text-danger" onClick={() => void deleteModel(activeModel.id)}>
                       <Trash2 className="w-4 h-4" />
                       删除
                     </Button>
@@ -356,7 +384,7 @@ export default function Settings() {
                   >
                     {defaultCreativeProfileId === selectedProfile.id ? '当前默认' : '设为默认'}
                   </Button>
-                  <Button variant="default" size="sm" onClick={publishNextProfileVersion}>发布下一版本</Button>
+                  <Button variant="default" size="sm" onClick={() => void publishNextProfileVersion()}>发布下一版本</Button>
                 </div>
               </div>
 
@@ -389,40 +417,20 @@ export default function Settings() {
           </div>
         )}
 
+        {activeTab === 'writing' && !selectedProfile && (
+          <Card className="max-w-2xl space-y-4">
+            <h2 className="text-base font-medium text-text">还没有创作方案</h2>
+            <p className="text-sm text-text-sub">先保存至少一个模型连接，再创建方案草稿并为五类角色选择模型。点击“发布下一版本”后才会写入后端。</p>
+            <Button variant="primary" onClick={createProfileDraft} disabled={!models.length}>
+              <Plus className="w-4 h-4" />创建方案草稿
+            </Button>
+          </Card>
+        )}
+
         {activeTab === 'templates' && (
-          <Card className="max-w-2xl space-y-5">
-            <div className="space-y-3">
-              {templates.length === 0 && <p className="text-sm text-text-muted">暂无作者模板。</p>}
-              {templates.map((t) => (
-                <div key={t.id} className="p-3 bg-surface rounded-md border border-border group">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-text">{t.name}</span>
-                    <Button variant="ghost" size="sm" className="px-2 opacity-0 group-hover:opacity-100" onClick={() => deleteTemplate(t.id)}>
-                      <Trash2 className="w-4 h-4 text-danger" />
-                    </Button>
-                  </div>
-                  <p className="text-sm text-text-sub">{t.content}</p>
-                </div>
-              ))}
-            </div>
-            <div className="border-t border-border pt-4 space-y-3">
-              <p className="text-xs text-text-muted">添加新模板</p>
-              <Input
-                value={newTemplateName}
-                onChange={(e) => setNewTemplateName(e.target.value)}
-                placeholder="模板名称"
-              />
-              <Textarea
-                value={newTemplateContent}
-                onChange={(e) => setNewTemplateContent(e.target.value)}
-                rows={2}
-                placeholder="模板内容..."
-              />
-              <Button variant="default" size="sm" onClick={addTemplate} disabled={!newTemplateName.trim() || !newTemplateContent.trim()}>
-                <Plus className="w-4 h-4" />
-                添加模板
-              </Button>
-            </div>
+          <Card className="max-w-2xl space-y-3">
+            <h2 className="text-base font-medium text-text">作者模板尚未接入</h2>
+            <p className="text-sm leading-6 text-text-sub">当前后端没有作者模板的保存与读取接口，因此这里不会再显示或保存仅存在于内存中的示例模板。</p>
           </Card>
         )}
 

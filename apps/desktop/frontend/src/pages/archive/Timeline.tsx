@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { timeline, characters } from '../../mock/data';
+import { useEffect, useMemo, useState } from 'react';
+import type { TimelineEvent } from '../../types';
+import { studio } from '../../api/studio';
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -9,25 +10,66 @@ interface Fact {
   id: string;
   content: string;
   source: string;
+  category: string;
+  status: string;
+  confidence: number;
+  validFromEventId: string;
+  validUntilEventId: string;
 }
 
-const initialFacts: Fact[] = [
-  { id: 'f1', content: '江心灯塔由临江商会接管维护后，守塔人失踪传闻频发。', source: '民国二十三年事件' },
-  { id: 'f2', content: '周砚白在民国二十六年七月后失去踪迹。', source: '日志签名记录' },
-  { id: 'f3', content: '阿沅父亲的失踪与灯塔区域有直接关联。', source: '民国二十四年事件' },
-];
-
 export default function TimelinePage() {
-  const [facts, setFacts] = useState<Fact[]>(initialFacts);
+  const [facts, setFacts] = useState<Fact[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [characters, setCharacters] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([studio.continuity(), studio.storyWorld()]).then(([continuity, world]) => {
+      if (!active) return;
+      const eventLinks = new Map<string, string[]>();
+      continuity.eventLinks.forEach((link) => {
+        if (String(link.targetType) !== 'character') return;
+        const list = eventLinks.get(String(link.eventId)) || [];
+        list.push(String(link.targetId));
+        eventLinks.set(String(link.eventId), list);
+      });
+      setTimeline(continuity.events.map((event) => ({
+        id: String(event.id || ''), projectId: '', date: String(event.storyTime || event.storyOrder || ''),
+        event: String(event.title || event.summary || ''),
+        importance: Number(event.narrativeOrder || 0) <= 1 ? 'major' : 'minor',
+        linkedCharacters: eventLinks.get(String(event.id || '')) || [], linkedChapters: [],
+      })));
+      setFacts(continuity.facts.map((fact) => ({
+        id: String(fact.id || ''), content: String(fact.text || ''), source: String(fact.origin || ''),
+        category: String(fact.category || ''), status: String(fact.status || ''),
+        confidence: Number(fact.confidence || 0), validFromEventId: String(fact.validFromEventId || ''),
+        validUntilEventId: String(fact.validUntilEventId || ''),
+      })));
+      setCharacters(world.characters.map((item) => ({ id: String(item.id || ''), name: String(item.name || '') })));
+    });
+    return () => { active = false; };
+  }, []);
 
   const characterMap = useMemo(() => {
     const map = new Map<string, string>();
     characters.forEach((c) => map.set(c.id, c.name));
     return map;
-  }, []);
+  }, [characters]);
 
   const updateFact = (id: string, patch: Partial<Fact>) => {
     setFacts((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  };
+
+  const persistFact = async (fact: Fact) => {
+    await studio.updateFact(fact.id, {
+      text: fact.content,
+      category: fact.category,
+      origin: fact.source,
+      status: fact.status,
+      confidence: fact.confidence,
+      validFromEventId: fact.validFromEventId,
+      validUntilEventId: fact.validUntilEventId,
+    });
   };
 
   return (
@@ -129,6 +171,7 @@ export default function TimelinePage() {
                       <Input
                         value={fact.content}
                         onChange={(e) => updateFact(fact.id, { content: e.target.value })}
+                        onBlur={() => void persistFact(fact)}
                         className="h-8 text-sm"
                       />
                     </td>
@@ -136,6 +179,7 @@ export default function TimelinePage() {
                       <Input
                         value={fact.source}
                         onChange={(e) => updateFact(fact.id, { source: e.target.value })}
+                        onBlur={() => void persistFact(fact)}
                         className="h-8 text-sm"
                       />
                     </td>

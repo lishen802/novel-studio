@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { Search, Globe, BookMarked, Flame, Sparkles, Settings2 } from 'lucide-react';
-import { worldEntries } from '../../mock/data';
-import type { WorldCategory } from '../../types';
+import type { WorldCategory, WorldEntry } from '../../types';
+import { studio } from '../../api/studio';
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -34,6 +34,32 @@ const importanceVariant: Record<'core' | 'secondary' | 'detail', 'warning' | 'in
 export default function World() {
   const [activeTab, setActiveTab] = useState<'all' | 'geography' | 'history' | 'culture' | 'system'>('all');
   const [query, setQuery] = useState('');
+  const [worldEntries, setWorldEntries] = useState<WorldEntry[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void studio.worldAssets().then((assets) => {
+      if (!active) return;
+      const regions: WorldEntry[] = assets.regions.map((item) => ({
+        id: String(item.id || ''), projectId: '', category: 'geography',
+        title: String(item.name || ''), content: String(item.summary || ''), importance: 'core',
+      }));
+      const locations: WorldEntry[] = assets.locations.map((item) => ({
+        id: String(item.id || ''), projectId: '', category: 'geography',
+        title: String(item.name || ''), content: String(item.summary || ''), importance: 'secondary',
+      }));
+      const rules: WorldEntry[] = assets.rules.map((item) => ({
+        id: String(item.id || ''), projectId: '', category: 'magic',
+        title: String(item.name || ''), content: String(item.description || ''), importance: 'core',
+      }));
+      const items: WorldEntry[] = assets.items.map((item) => ({
+        id: String(item.id || ''), projectId: '', category: 'culture',
+        title: String(item.name || ''), content: String(item.summary || ''), importance: 'detail',
+      }));
+      setWorldEntries([...regions, ...locations, ...rules, ...items]);
+    });
+    return () => { active = false; };
+  }, []);
 
   const filtered = useMemo(() => {
     return worldEntries.filter((entry) => {
@@ -48,7 +74,7 @@ export default function World() {
         entry.content.toLowerCase().includes(q);
       return matchesTab && matchesSearch;
     });
-  }, [activeTab, query]);
+  }, [activeTab, query, worldEntries]);
 
   return (
     <div className="space-y-6 animate-fade-up">

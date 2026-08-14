@@ -1863,6 +1863,7 @@ type fakeAppSettingsRepo struct {
 	recent       []appdomain.RecentProject
 	profileVer   appdomain.CreativeProfileVersion
 	profileFound bool
+	upserted     appdomain.ProviderConnection
 }
 
 func (r *fakeAppSettingsRepo) Preferences(context.Context) (appdomain.Preferences, error) {
@@ -1871,11 +1872,18 @@ func (r *fakeAppSettingsRepo) Preferences(context.Context) (appdomain.Preference
 func (r *fakeAppSettingsRepo) SavePreferences(context.Context, appdomain.Preferences) error {
 	return nil
 }
-func (r *fakeAppSettingsRepo) UpsertProvider(context.Context, appdomain.ProviderConnection) error {
+
+func (r *fakeAppSettingsRepo) UpsertProvider(_ context.Context, provider appdomain.ProviderConnection) error {
+	r.upserted = provider
 	return nil
 }
-func (r *fakeAppSettingsRepo) Provider(context.Context, string) (appdomain.ProviderConnection, error) {
-	return appdomain.ProviderConnection{}, nil
+func (r *fakeAppSettingsRepo) Provider(_ context.Context, id string) (appdomain.ProviderConnection, error) {
+	for _, provider := range r.providers {
+		if provider.ID == id {
+			return provider, nil
+		}
+	}
+	return appdomain.ProviderConnection{}, errors.New("not found")
 }
 func (r *fakeAppSettingsRepo) Providers(context.Context) ([]appdomain.ProviderConnection, error) {
 	return r.providers, nil
@@ -2009,6 +2017,33 @@ func TestBootstrapNeverSerializesCredentialValue(t *testing.T) {
 	}
 	if len(view.Providers) != 1 || !view.Providers[0].HasCredential {
 		t.Fatalf("provider should have credential: %#v", view.Providers)
+	}
+}
+
+func TestSaveApplicationProviderUpdatesExistingConnection(t *testing.T) {
+	existing := appdomain.ProviderConnection{
+		ID: "provider-1", Name: "旧名称", Kind: agentdomain.ProviderOpenAI,
+		BaseURL: "https://old.example/v1", CredentialRef: "app-provider:provider-1",
+		CreatedAt: time.Date(2026, time.August, 10, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, time.August, 10, 10, 0, 0, 0, time.UTC),
+	}
+	repo := &fakeAppSettingsRepo{providers: []appdomain.ProviderConnection{existing}}
+	creds := &fakeCredentialStore{secrets: map[string]string{existing.CredentialRef: "old-secret"}}
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.settings = newTestAppSettingsService(repo, creds)
+	api.startup(context.Background())
+
+	view, err := api.SaveApplicationProvider(ApplicationProviderInput{
+		ID: existing.ID, Name: "新名称", Kind: "openai", BaseURL: "https://new.example/v1", APIKey: "new-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.ID != existing.ID || repo.upserted.Name != "新名称" || repo.upserted.BaseURL != "https://new.example/v1" {
+		t.Fatalf("updated provider = %#v, view = %#v", repo.upserted, view)
+	}
+	if creds.secrets[existing.CredentialRef] != "new-secret" {
+		t.Fatal("updated API key was not stored in the credential vault")
 	}
 }
 
@@ -2266,10 +2301,10 @@ func (f *importFakeWorkspace) CreateProject(_ context.Context, parentDir, title,
 		return f.project, nil
 	}
 	f.project = workspace.ProjectView{
-		ID:    "imported-project-1",
-		Title: title,
-		Genre: genre,
-		Path:  filepath.Join(parentDir, title+".zjproject"),
+		ID:        "imported-project-1",
+		Title:     title,
+		Genre:     genre,
+		Path:      filepath.Join(parentDir, title+".zjproject"),
 		Workbench: f.workbench,
 	}
 	f.projectCreated = true
