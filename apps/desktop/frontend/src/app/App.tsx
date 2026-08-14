@@ -275,9 +275,7 @@ export function App({
     }
     // Project mode but workspace is mid-transition: fall back to a loading shell.
     return (
-      <main className="app-shell">
-        <div className="app-shell__glow app-shell__glow--left" />
-        <div className="app-shell__glow app-shell__glow--right" />
+      <main className="light-app-shell">
         <section className="welcome-card" aria-live="polite">
           <div className="product-mark" aria-hidden="true">
             <BookOpenText size={30} strokeWidth={1.65} />
@@ -323,9 +321,7 @@ export function App({
   // Loading state: bootstrap not yet fetched and no error to surface.
   if (appState.status.kind === "loading" && !bootstrap) {
     return (
-      <main className="app-shell">
-        <div className="app-shell__glow app-shell__glow--left" />
-        <div className="app-shell__glow app-shell__glow--right" />
+      <main className="light-app-shell">
         <section className="welcome-card" aria-live="polite">
           <div className="product-mark" aria-hidden="true">
             <BookOpenText size={30} strokeWidth={1.65} />
@@ -339,9 +335,7 @@ export function App({
   }
 
   return (
-    <main className={bootstrap ? "home-app-shell" : "app-shell"}>
-      {!bootstrap && <div className="app-shell__glow app-shell__glow--left" />}
-      {!bootstrap && <div className="app-shell__glow app-shell__glow--right" />}
+    <main className="light-app-shell">
 
       {bootstrap ? (
         <HomeScreen

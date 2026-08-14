@@ -57,9 +57,7 @@ export function ApplicationSettings({
   const [profileAnnouncement, setProfileAnnouncement] = useState<
     string | null
   >(null);
-  const [theme, setTheme] = useState(bootstrap.preferences.theme);
-  const [themeSaving, setThemeSaving] = useState(false);
-  const [themeNotice, setThemeNotice] = useState<string | null>(null);
+  const theme = bootstrap.preferences.theme;
   const [defaultProfileId, setDefaultProfileId] = useState(
     bootstrap.preferences.defaultCreativeProfileId,
   );
@@ -142,26 +140,6 @@ export function ApplicationSettings({
       setProfileError(error instanceof Error ? error.message : "发布失败");
     } finally {
       setProfileSaving(false);
-    }
-  };
-
-  const submitTheme = async (next: ApplicationPreferencesInput["theme"]) => {
-    if (themeSaving) return;
-    setTheme(next);
-    setThemeSaving(true);
-    setThemeNotice(null);
-    try {
-      await client.saveApplicationPreferences({
-        theme: next,
-        defaultCreativeProfileId: defaultProfileId,
-      });
-      onSavedPreferences({ theme: next, defaultCreativeProfileId: defaultProfileId });
-    } catch (error) {
-      setThemeNotice(
-        error instanceof Error ? error.message : "保存外观偏好失败",
-      );
-    } finally {
-      setThemeSaving(false);
     }
   };
 
@@ -485,22 +463,9 @@ export function ApplicationSettings({
 
       <section className="application-settings__section">
         <h3>外观</h3>
-        <div className="theme-selector">
-          {(["system", "light", "dark"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={theme === value}
-              disabled={themeSaving}
-              onClick={() => void submitTheme(value)}
-            >
-              {themeLabel(value)}
-            </button>
-          ))}
-        </div>
-        {themeNotice && (
-          <p className="entry-error">{themeNotice}</p>
-        )}
+        <p className="application-settings__notice">
+          当前应用固定使用浅色文学工作台。
+        </p>
       </section>
 
       <section className="application-settings__section">
@@ -512,12 +477,6 @@ export function ApplicationSettings({
       </section>
     </section>
   );
-}
-
-function themeLabel(theme: "system" | "light" | "dark"): string {
-  if (theme === "light") return "浅色";
-  if (theme === "dark") return "深色";
-  return "跟随系统";
 }
 
 type ProfileDraft = {

@@ -1,6 +1,18 @@
 :root {
-  color: #202431;
-  background: #171c2c;
+  color-scheme: light;
+  --color-bg: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f8f9fa;
+  --color-border: #e8eaed;
+  --color-border-strong: #d1d5db;
+  --color-text: #1f2937;
+  --color-text-sub: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-primary: #1a1f2e;
+  --color-primary-hover: #2d3548;
+  --color-primary-subtle: rgba(26, 31, 46, 0.08);
+  color: var(--color-text);
+  background: var(--color-bg);
   font-family:
     Inter,
     ui-sans-serif,
@@ -304,49 +316,13 @@ button:disabled {
   opacity: 0.58;
 }
 
-.app-shell {
-  position: relative;
+.light-app-shell {
   display: grid;
   min-height: 100vh;
   place-items: center;
   overflow: hidden;
   padding: 48px 24px;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    radial-gradient(circle at 50% -20%, #343c58 0%, #1d2336 42%, #151a29 100%);
-  background-size:
-    32px 32px,
-    32px 32px,
-    auto;
-}
-
-.app-shell__glow {
-  position: absolute;
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  filter: blur(110px);
-  opacity: 0.22;
-  pointer-events: none;
-}
-
-.app-shell__glow--left {
-  left: -180px;
-  top: -140px;
-  background: #d9a56f;
-}
-
-.app-shell__glow--right {
-  right: -180px;
-  bottom: -180px;
-  background: #6f7fb2;
-}
-
-.home-app-shell {
-  min-height: 100vh;
-  overflow: hidden;
-  background: #f4f6f8;
+  background: var(--color-bg);
 }
 
 .home-shell {
@@ -644,19 +620,12 @@ button:disabled {
   position: relative;
   width: min(100%, 640px);
   padding: clamp(36px, 6vw, 64px);
-  border: 1px solid rgba(255, 248, 232, 0.13);
-  border-radius: 30px;
-  color: #f7f1e6;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  color: var(--color-text);
   text-align: center;
-  background: linear-gradient(
-    145deg,
-    rgba(42, 48, 70, 0.92),
-    rgba(28, 33, 51, 0.88)
-  );
-  box-shadow:
-    0 32px 80px rgba(4, 7, 16, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(22px);
+  background: var(--color-surface);
+  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.12);
 }
 
 .product-mark {
@@ -696,7 +665,7 @@ button:disabled {
 .welcome-card__description {
   max-width: 500px;
   margin: 24px auto 0;
-  color: #b9bdc9;
+  color: var(--color-text-sub);
   font-size: 1rem;
   line-height: 1.85;
 }
@@ -775,28 +744,30 @@ button:disabled {
 }
 
 .welcome-actions button:focus-visible {
-  outline: 3px solid rgba(240, 199, 146, 0.42);
+  outline: 3px solid #204c7a;
   outline-offset: 3px;
 }
 
 .primary-action {
-  color: #28231f;
-  background: #e8bd86;
-  box-shadow: 0 12px 30px rgba(215, 158, 91, 0.2);
+  color: #ffffff;
+  background: var(--color-primary);
+  box-shadow: 0 6px 16px rgba(31, 41, 55, 0.14);
 }
 
 .primary-action:hover {
-  background: #f0ca9a;
+  background: var(--color-primary-hover);
 }
 
 .secondary-action {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #f1eadf;
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-sub);
+  background: var(--color-surface);
 }
 
 .secondary-action:hover {
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-hover);
 }
 
 .local-first-note {

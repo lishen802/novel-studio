@@ -55,14 +55,14 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the home screen directly in a full-window shell", async () => {
+  it("renders the home screen directly in the full-window light shell", async () => {
     const client = new FakeStudioClient();
     render(<App client={client} />);
 
     await screen.findByRole("heading", { name: "织境 Story Studio" });
 
-    expect(document.querySelector("main.home-app-shell")).toBeInTheDocument();
-    expect(document.querySelector("main.home-app-shell .app-shell__glow")).toBeNull();
+    expect(document.querySelector("main.light-app-shell")).toBeInTheDocument();
+    expect(document.querySelector("main.light-app-shell .app-shell__glow")).toBeNull();
   });
 
   it("offers a retry when the initial application bootstrap fails", async () => {

@@ -124,37 +124,27 @@ describe("ApplicationSettings", () => {
     expect(onPublishedProfile).toHaveBeenCalledWith(2);
   });
 
-  it("saves theme preference and updates the active selector", async () => {
+  it("keeps the application in the fixed light theme when reading a legacy preference", () => {
     const client = new FakeStudioClient();
-    const user = userEvent.setup();
-    const onSavedPreferences = vi.fn();
+    const bootstrap: ApplicationBootstrapView = {
+      ...baseBootstrap,
+      preferences: { ...baseBootstrap.preferences, theme: "dark" },
+    };
     render(
       <ApplicationSettings
-        bootstrap={baseBootstrap}
+        bootstrap={bootstrap}
         client={client}
-        onSavedPreferences={onSavedPreferences}
+        onSavedPreferences={vi.fn()}
         onSavedProvider={vi.fn()}
         onPublishedProfile={vi.fn()}
         onClose={vi.fn()}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "深色" }));
-
-    expect(client.saveApplicationPreferencesCalls).toEqual([
-      {
-        theme: "dark",
-        defaultCreativeProfileId: "",
-      },
-    ]);
-    expect(onSavedPreferences).toHaveBeenCalledWith({
-      theme: "dark",
-      defaultCreativeProfileId: "",
-    });
-    expect(screen.getByRole("button", { name: "深色" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByText("当前应用固定使用浅色文学工作台。")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "深色" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "跟随系统" })).not.toBeInTheDocument();
+    expect(client.saveApplicationPreferencesCalls).toHaveLength(0);
   });
 
   it("announces future-project scope when setting default creative profile", async () => {
