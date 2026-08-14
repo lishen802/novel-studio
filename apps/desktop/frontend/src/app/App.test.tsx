@@ -55,6 +55,16 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders the home screen directly in a full-window shell", async () => {
+    const client = new FakeStudioClient();
+    render(<App client={client} />);
+
+    await screen.findByRole("heading", { name: "织境 Story Studio" });
+
+    expect(document.querySelector("main.home-app-shell")).toBeInTheDocument();
+    expect(document.querySelector("main.home-app-shell .app-shell__glow")).toBeNull();
+  });
+
   it("offers a retry when the initial application bootstrap fails", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapError = new Error("无法读取配置");

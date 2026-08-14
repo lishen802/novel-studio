@@ -339,9 +339,9 @@ export function App({
   }
 
   return (
-    <main className="app-shell">
-      <div className="app-shell__glow app-shell__glow--left" />
-      <div className="app-shell__glow app-shell__glow--right" />
+    <main className={bootstrap ? "home-app-shell" : "app-shell"}>
+      {!bootstrap && <div className="app-shell__glow app-shell__glow--left" />}
+      {!bootstrap && <div className="app-shell__glow app-shell__glow--right" />}
 
       {bootstrap ? (
         <HomeScreen
