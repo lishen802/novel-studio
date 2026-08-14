@@ -150,6 +150,47 @@ describe("WorkbenchRouter", () => {
     expect(screen.getByText("尚未在当前阶段提供")).toBeInTheDocument();
   });
 
+  it("places archive and delivery secondary navigation in the content area", () => {
+    const { rerender } = renderRouter({
+      page: "story",
+      projection: manuscriptProjection(),
+    });
+
+    expect(screen.getByRole("navigation", { name: "作品档案" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "故事架构" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    rerender(
+      <WorkbenchRouter
+        projection={manuscriptProjection()}
+        page="versions"
+        workspace={readyWorkspace([chapter()]).workspace}
+        client={readyWorkspace([chapter()]).client}
+        error={null}
+        onCreateChapter={vi.fn()}
+        onSelectChapter={vi.fn()}
+        onChapterUpdated={vi.fn()}
+        onChaptersImported={vi.fn()}
+        onWorkspaceRestored={vi.fn()}
+        onBeforeVersionOperation={vi.fn()}
+        onDismissError={vi.fn()}
+        onFlushAvailable={vi.fn()}
+        onCreateRecoveryCopy={vi.fn()}
+        onRefreshFilesystemHealth={vi.fn()}
+        onNavigate={vi.fn()}
+        onStartWholeBookArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("navigation", { name: "版本与交付" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "版本历史" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("shows honest unavailable page for foreshadowing, export, and maintenance", () => {
     const { rerender } = renderRouter({
       page: "foreshadowing",

@@ -17,6 +17,21 @@ import type { ProjectPage, WorkspaceStatus } from "./workspace-store";
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
 type WorkspaceReplacement = Pick<SnapshotRestoreView, "project" | "chapters">;
 
+function hasSectionNavigation(page: ProjectPage): boolean {
+  return [
+    "proposal",
+    "story",
+    "characters",
+    "world",
+    "continuity",
+    "foreshadowing",
+    "versions",
+    "branches",
+    "export",
+    "maintenance",
+  ].includes(page);
+}
+
 type WorkspaceProps = {
   workspace: ReadyWorkspace;
   error: string | null;
@@ -85,6 +100,11 @@ export function Workspace({
   >(null);
   const readOnly = workspace.project.accessMode === "read_only";
 
+  // 面板开关只属于当前作品；切换项目后必须重新遵循新项目的权威投影。
+  useEffect(() => {
+    setAIPanelOverride(null);
+  }, [workspace.project.id]);
+
   // 计算当前生效的 AI 面板 mode：有待提交选区时强制 selection_review；
   // 否则使用用户覆盖值；最后回退到 workbench 投影的默认 mode。
   const workbenchAIMode = workbench?.aiPanel ?? "hidden";
@@ -136,7 +156,9 @@ export function Workspace({
   };
 
   return (
-    <main className="workspace-shell">
+    <main
+      className={`workspace-shell${effectiveAIMode !== "hidden" ? " workspace-shell--with-ai workspace-shell--three-columns" : ""}`}
+    >
       <aside className="chapter-sidebar">
         <header className="workspace-brand">
           <span className="workspace-brand__mark" aria-hidden="true">
@@ -148,7 +170,7 @@ export function Workspace({
           </div>
         </header>
 
-        <section className="project-summary">
+        <section className="project-summary" aria-label="当前作品摘要">
           <p className="eyebrow">当前作品</p>
           <h1>{workspace.project.title}</h1>
           <p>{workspace.project.genre || "未设置类型"}</p>
@@ -220,6 +242,7 @@ export function Workspace({
       <section
         className={`workspace-main${readOnly ? " workspace-main--read-only" : ""}`}
         aria-readonly={readOnly || undefined}
+        aria-label="正文内容"
       >
         {error && !showNewChapter && (
           <div className="workspace-alert" role="alert">
@@ -229,28 +252,54 @@ export function Workspace({
             </button>
           </div>
         )}
-        <fieldset className="workspace-main__content" disabled={readOnly}>
-          <WorkbenchRouter
-            projection={workbench}
-            page={currentPage}
-            workspace={workspace}
-            client={client}
-            error={error}
-            onCreateChapter={onCreateChapter}
-            onSelectChapter={onSelectChapter}
-            onChapterUpdated={onChapterUpdated}
-            onChaptersImported={onChaptersImported}
-            onWorkspaceRestored={onWorkspaceRestored}
-            onBeforeVersionOperation={onBeforeVersionOperation}
-            onDismissError={onDismissError}
-            onFlushAvailable={onFlushAvailable}
-            onCreateRecoveryCopy={onCreateRecoveryCopy}
-            onRefreshFilesystemHealth={onRefreshFilesystemHealth}
-            onNavigate={onSetCurrentPage}
-            onStartWholeBookArchive={onStartWholeBookArchive}
-            onSelectionReview={onAIPanelSelection}
-          />
-        </fieldset>
+        {/* 档案/交付页面将二级导航置于只读写入边界外，保持可浏览。 */}
+        <div className="workspace-main__content">
+          {hasSectionNavigation(currentPage) ? (
+            <WorkbenchRouter
+              projection={workbench}
+              page={currentPage}
+              workspace={workspace}
+              client={client}
+              error={error}
+              onCreateChapter={onCreateChapter}
+              onSelectChapter={onSelectChapter}
+              onChapterUpdated={onChapterUpdated}
+              onChaptersImported={onChaptersImported}
+              onWorkspaceRestored={onWorkspaceRestored}
+              onBeforeVersionOperation={onBeforeVersionOperation}
+              onDismissError={onDismissError}
+              onFlushAvailable={onFlushAvailable}
+              onCreateRecoveryCopy={onCreateRecoveryCopy}
+              onRefreshFilesystemHealth={onRefreshFilesystemHealth}
+              onNavigate={onSetCurrentPage}
+              onStartWholeBookArchive={onStartWholeBookArchive}
+              onSelectionReview={onAIPanelSelection}
+            />
+          ) : (
+            <fieldset disabled={readOnly}>
+              <WorkbenchRouter
+                projection={workbench}
+                page={currentPage}
+                workspace={workspace}
+                client={client}
+                error={error}
+                onCreateChapter={onCreateChapter}
+                onSelectChapter={onSelectChapter}
+                onChapterUpdated={onChapterUpdated}
+                onChaptersImported={onChaptersImported}
+                onWorkspaceRestored={onWorkspaceRestored}
+                onBeforeVersionOperation={onBeforeVersionOperation}
+                onDismissError={onDismissError}
+                onFlushAvailable={onFlushAvailable}
+                onCreateRecoveryCopy={onCreateRecoveryCopy}
+                onRefreshFilesystemHealth={onRefreshFilesystemHealth}
+                onNavigate={onSetCurrentPage}
+                onStartWholeBookArchive={onStartWholeBookArchive}
+                onSelectionReview={onAIPanelSelection}
+              />
+            </fieldset>
+          )}
+        </div>
       </section>
 
       <AIPanel
@@ -261,11 +310,8 @@ export function Workspace({
         selection={pendingSelection}
         onSelectionReview={onAIPanelSelection}
         onDismissSelection={onClearAIPanelSelection}
-        onSubmitSelectionReview={(payload) => {
-          // R2 不实现选区意见提交：清除选区并返回结构化未实现状态。
-          // 后续能力阶段会接入 STALE_SELECTION 校验与 agent 提交。
-          onClearAIPanelSelection();
-        }}
+        // 关闭仅更新展示状态；输入草稿继续由 workspace store 保留。
+        onClose={() => setAIPanelOverride("hidden")}
       />
 
       {showNewChapter && (

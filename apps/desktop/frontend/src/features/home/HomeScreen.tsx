@@ -11,6 +11,7 @@ type HomeScreenProps = {
   onOpenProject(): void;
   onImportManuscript(): void;
   onOpenRecent(project: RecentProjectView): void;
+  onReviewRecent(project: RecentProjectView): void;
 };
 
 export function HomeScreen({
@@ -20,11 +21,13 @@ export function HomeScreen({
   onOpenProject,
   onImportManuscript,
   onOpenRecent,
+  onReviewRecent,
 }: HomeScreenProps) {
   const recent = bootstrap.recentProjects;
   const hasRecent = recent.length > 0;
   const featured = recent[0];
 
+  // 将后端工作区标识转换为首页可读的最近位置。
   const workspaceLabel = (workspace: string) => {
     if (workspace === "manuscript") return "正文编辑";
     if (workspace === "review") return "作者审阅";
@@ -63,13 +66,22 @@ export function HomeScreen({
                     aria-label={`打开 ${project.title}`}
                     onClick={() => onOpenRecent(project)}
                   >
-                    <span className="recent-project-card__title">{project.title}</span>
-                    <span className="recent-project-card__meta">
-                      {project.missing
-                        ? "路径不可用"
-                        : project.lastOpenedAt
-                          ? `上次打开于 ${project.lastOpenedAt}`
-                          : "尚未打开"}
+                    <span
+                      className="recent-project-card__cover"
+                      aria-hidden="true"
+                    />
+                    <span className="recent-project-card__details">
+                      <span className="recent-project-card__title">{project.title}</span>
+                      <span className="recent-project-card__workspace">
+                        最近工作区：{workspaceLabel(project.lastWorkspace)}
+                      </span>
+                      <span className="recent-project-card__meta">
+                        {project.missing
+                          ? "路径不可用"
+                          : project.lastOpenedAt
+                            ? `上次打开于 ${project.lastOpenedAt}`
+                            : "尚未打开"}
+                      </span>
                     </span>
                   </button>
                 </li>
@@ -84,21 +96,45 @@ export function HomeScreen({
       <section className="home-content" aria-label="首页内容">
         {featured ? (
           <div className="home-featured-project">
-            <p className="eyebrow">继续最近作品</p>
-            <h1>{featured.title}</h1>
-            <p className="home-content__description">
-              上次位置：{workspaceLabel(featured.lastWorkspace)}
-            </p>
-            <p className="home-featured-project__path">{featured.path}</p>
-            <button
-              type="button"
-              className="primary-action home-continue-action"
-              disabled={busy || featured.missing}
-              onClick={() => onOpenRecent(featured)}
-            >
-              <BookOpenText size={19} aria-hidden="true" />
-              继续《{featured.title}》
-            </button>
+            <div className="home-featured-project__card">
+              <p className="eyebrow">最近继续</p>
+              <div className="home-featured-project__summary">
+                <span className="home-featured-project__cover" aria-hidden="true" />
+                <div>
+                  <h1>{featured.title}</h1>
+                  <p className="home-featured-project__workspace">
+                    上次位置：{workspaceLabel(featured.lastWorkspace)}
+                  </p>
+                  <p className="home-featured-project__time">
+                    {featured.lastOpenedAt
+                      ? `上次打开：${featured.lastOpenedAt}`
+                      : "尚未打开"}
+                  </p>
+                  {featured.missing ? (
+                    <p className="home-featured-project__unavailable">路径不可用，暂时无法继续</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="home-featured-project__actions">
+                <button
+                  type="button"
+                  className="primary-action home-continue-action"
+                  disabled={busy || featured.missing}
+                  onClick={() => onOpenRecent(featured)}
+                >
+                  <BookOpenText size={19} aria-hidden="true" />
+                  继续《{featured.title}》
+                </button>
+                <button
+                  type="button"
+                  className="secondary-action home-review-action"
+                  disabled={busy || featured.missing}
+                  onClick={() => onReviewRecent(featured)}
+                >
+                  去审阅
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="home-empty-state">

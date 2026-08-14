@@ -18,6 +18,7 @@ import { BranchWorkbench } from "../revisions/BranchWorkbench";
 import { StoryArchitecture } from "../story/StoryArchitecture";
 import { StoryWorldWorkbench } from "../world/StoryWorldWorkbench";
 import { StageCanvas } from "../workbench/StageCanvas";
+import { WorkspaceSectionTabs } from "./WorkspaceSectionTabs";
 import type { ProjectPage, WorkspaceStatus } from "./workspace-store";
 
 type ReadyWorkspace = Extract<WorkspaceStatus, { kind: "ready" }>;
@@ -89,6 +90,39 @@ function UnavailablePage({
       <p className="workbench-canvas__reason">尚未在当前阶段提供</p>
       <p className="workbench-canvas__hint">{description}</p>
     </section>
+  );
+}
+
+// 在档案与交付页顶部放置内容区二级标签，避免将细分功能塞回项目侧栏。
+function SectionPage({
+  section,
+  page,
+  readOnly,
+  allowReadOnlyNavigation = false,
+  onNavigate,
+  children,
+}: {
+  section: "archive" | "delivery";
+  page: ProjectPage;
+  readOnly: boolean;
+  allowReadOnlyNavigation?: boolean;
+  onNavigate(page: ProjectPage): void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="workspace-section-page">
+      <WorkspaceSectionTabs
+        section={section}
+        currentPage={page}
+        onSelectPage={onNavigate}
+      />
+      <fieldset
+        className="workspace-section-page__content"
+        disabled={readOnly && !allowReadOnlyNavigation}
+      >
+        {children}
+      </fieldset>
+    </div>
   );
 }
 
@@ -184,80 +218,113 @@ export function WorkbenchRouter({
 
     case "story":
       return (
-        <StoryArchitecture
-          client={client}
-          chapters={workspace.chapters}
-          onOpenChapter={(id) => {
-            onNavigate("manuscript");
-            void onSelectChapter(id);
-          }}
-        />
+        <SectionPage
+          section="archive"
+          page={page}
+          readOnly={readOnly}
+          allowReadOnlyNavigation
+          onNavigate={onNavigate}
+        >
+          <StoryArchitecture
+            client={client}
+            chapters={workspace.chapters}
+            readOnly={readOnly}
+            onOpenChapter={(id) => {
+              onNavigate("manuscript");
+              void onSelectChapter(id);
+            }}
+          />
+        </SectionPage>
       );
 
     case "characters":
-      return <StoryWorldWorkbench client={client} chapters={workspace.chapters} />;
+      return (
+        <SectionPage section="archive" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <StoryWorldWorkbench client={client} chapters={workspace.chapters} />
+        </SectionPage>
+      );
 
     case "world":
-      return <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />;
+      return (
+        <SectionPage section="archive" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <WorldAssetsWorkbench client={client} chapters={workspace.chapters} />
+        </SectionPage>
+      );
 
     case "continuity":
-      return <ContinuityWorkbench client={client} chapters={workspace.chapters} />;
+      return (
+        <SectionPage section="archive" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <ContinuityWorkbench client={client} chapters={workspace.chapters} />
+        </SectionPage>
+      );
 
     case "versions":
       return (
-        <VersionHistoryWorkbench
-          client={client}
-          project={workspace.project}
-          chapters={workspace.chapters}
-          onChapterUpdated={onChapterUpdated}
-          onWorkspaceRestored={onWorkspaceRestored}
-          onBeforeVersionOperation={onBeforeVersionOperation}
-        />
+        <SectionPage section="delivery" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <VersionHistoryWorkbench
+            client={client}
+            project={workspace.project}
+            chapters={workspace.chapters}
+            onChapterUpdated={onChapterUpdated}
+            onWorkspaceRestored={onWorkspaceRestored}
+            onBeforeVersionOperation={onBeforeVersionOperation}
+          />
+        </SectionPage>
       );
 
     case "branches":
       return (
-        <BranchWorkbench
-          client={client}
-          onBeforeVersionOperation={onBeforeVersionOperation}
-          onWorkspaceChanged={(result) => onWorkspaceRestored(result)}
-        />
+        <SectionPage section="delivery" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <BranchWorkbench
+            client={client}
+            onBeforeVersionOperation={onBeforeVersionOperation}
+            onWorkspaceChanged={(result) => onWorkspaceRestored(result)}
+          />
+        </SectionPage>
       );
 
     case "proposal":
       return (
-        <UnavailablePage
-          icon={Lightbulb}
-          title="故事提案"
-          description="三套原创方向与提案生成将在后续能力阶段开放。"
-        />
+        <SectionPage section="archive" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <UnavailablePage
+            icon={Lightbulb}
+            title="故事提案"
+            description="三套原创方向与提案生成将在后续能力阶段开放。"
+          />
+        </SectionPage>
       );
 
     case "foreshadowing":
       return (
-        <UnavailablePage
-          icon={Sparkles}
-          title="伏笔与回收"
-          description="独立的伏笔追踪与回收看板将随档案能力一起提供。"
-        />
+        <SectionPage section="archive" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <UnavailablePage
+            icon={Sparkles}
+            title="伏笔与回收"
+            description="独立的伏笔追踪与回收看板将随档案能力一起提供。"
+          />
+        </SectionPage>
       );
 
     case "export":
       return (
-        <UnavailablePage
-          icon={Package}
-          title="导出与发布"
-          description="导出到常见文稿格式的能力将在后续阶段交付。"
-        />
+        <SectionPage section="delivery" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <UnavailablePage
+            icon={Package}
+            title="导出与发布"
+            description="导出到常见文稿格式的能力将在后续阶段交付。"
+          />
+        </SectionPage>
       );
 
     case "maintenance":
       return (
-        <UnavailablePage
-          icon={Wrench}
-          title="项目维护"
-          description="项目维护工具将在后续阶段交付。"
-        />
+        <SectionPage section="delivery" page={page} readOnly={readOnly} onNavigate={onNavigate}>
+          <UnavailablePage
+            icon={Wrench}
+            title="项目维护"
+            description="项目维护工具将在后续阶段交付。"
+          />
+        </SectionPage>
       );
 
     default:

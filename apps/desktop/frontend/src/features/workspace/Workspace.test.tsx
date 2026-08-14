@@ -11,8 +11,114 @@ import { describe, expect, it, vi } from "vitest";
 import { App } from "../../app/App";
 import { FakeStudioClient } from "../../lib/fake-studio-client";
 import { StudioClientError } from "../../lib/studio-client";
+import { Workspace } from "./Workspace";
 
 describe("Workspace", () => {
+  it("resets a closed AI panel when the workspace changes to a project with an expanded projection", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const projectB = {
+      ...client.openProjectResult,
+      id: "project-2",
+      title: "雾港来信",
+      path: "/books/雾港来信.zjproject",
+    };
+    const props = {
+      error: null,
+      client,
+      currentPage: "manuscript" as const,
+      workbench: {
+        stage: "writing" as const,
+        canvas: "manuscript" as const,
+        aiPanel: "expanded" as const,
+        pendingReviewCount: 0,
+        recoverableJobCount: 0,
+        archiveStatus: "not_generated" as const,
+      },
+      aiPanelInput: "",
+      pendingSelection: null,
+      onCreateChapter: vi.fn(async () => false),
+      onSelectChapter: vi.fn(async () => undefined),
+      onChapterUpdated: vi.fn(),
+      onChaptersImported: vi.fn(),
+      onWorkspaceRestored: vi.fn(),
+      onBeforeVersionOperation: vi.fn(async () => undefined),
+      onDismissError: vi.fn(),
+      onFlushAvailable: vi.fn(),
+      onCreateRecoveryCopy: vi.fn(async () => undefined),
+      onRefreshFilesystemHealth: vi.fn(async () => undefined),
+      onSetCurrentPage: vi.fn(),
+      onAIPanelInput: vi.fn(),
+      onAIPanelSelection: vi.fn(),
+      onClearAIPanelSelection: vi.fn(),
+      onStartWholeBookArchive: vi.fn(),
+    };
+    const user = userEvent.setup();
+    const view = render(
+      <Workspace
+        {...props}
+        workspace={{
+          kind: "ready",
+          project: client.openProjectResult,
+          chapters: [],
+          activeChapterId: null,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "关闭 AI 面板" }));
+    expect(
+      screen.queryByRole("complementary", { name: "AI 创作" }),
+    ).not.toBeInTheDocument();
+
+    view.rerender(
+      <Workspace
+        {...props}
+        workspace={{
+          kind: "ready",
+          project: projectB,
+          chapters: [],
+          activeChapterId: null,
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("complementary", { name: "AI 创作" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows project context, chapters, manuscript and AI creation as three workspace regions", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    client.workbenchProjectionResult = {
+      stage: "writing",
+      canvas: "manuscript",
+      aiPanel: "hidden",
+      pendingReviewCount: 0,
+      recoverableJobCount: 0,
+      archiveStatus: "not_generated",
+    };
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: /第一章/ }));
+    expect(
+      screen.getByRole("region", { name: "当前作品摘要" }),
+    ).toHaveTextContent(client.openProjectResult.title);
+    expect(
+      screen.getByRole("navigation", { name: "章节列表" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "正文内容" })).toBeInTheDocument();
+
+    await user.keyboard("{Meta>}j{/Meta}");
+    expect(
+      await screen.findByRole("complementary", { name: "AI 创作" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveClass(
+      "workspace-shell--three-columns",
+    );
+  });
+
   it("updates the persistent filesystem risk after a disk-full chapter commit failure", async () => {
     const client = FakeStudioClient.withReadyProject();
     client.chaptersResult = [client.createChapterResult];
@@ -114,6 +220,78 @@ describe("Workspace", () => {
     expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveAttribute("readonly");
   });
 
+  it("keeps archive and delivery navigation available in a read-only workspace", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.openProjectResult = { ...client.openProjectResult, accessMode: "read_only" };
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: "作品档案" }));
+    const createOutline = await screen.findByRole("button", {
+      name: "新建大纲节点",
+    });
+    expect(createOutline).toBeDisabled();
+    await user.click(createOutline);
+    expect(client.createOutlineNodeCalls).toHaveLength(0);
+    await user.click(await screen.findByRole("button", { name: "人物与势力" }));
+    expect(await screen.findByRole("heading", { name: "人物与势力" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "版本与交付" }));
+    const createSnapshot = await screen.findByRole("button", {
+      name: "创建命名快照",
+    });
+    expect(createSnapshot).toBeDisabled();
+    await user.click(createSnapshot);
+    expect(client.createSnapshotCalls).toHaveLength(0);
+    await user.click(await screen.findByRole("button", { name: "分支管理" }));
+    expect(await screen.findByRole("heading", { name: "剧情分支" })).toBeInTheDocument();
+    const createBranch = screen.getByRole("button", { name: "新建剧情分支" });
+    expect(createBranch).toBeDisabled();
+    await user.click(createBranch);
+    expect(client.createBranchCalls).toHaveLength(0);
+  });
+
+  it("allows read-only story architecture to open a linked chapter without enabling writes", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const chapter = { ...client.createChapterResult, body: "只读正文" };
+    client.openProjectResult = {
+      ...client.openProjectResult,
+      accessMode: "read_only",
+    };
+    client.chaptersResult = [chapter];
+    client.storyStructureResult = {
+      outlineNodes: [
+        {
+          id: "chapter-node",
+          parentId: "",
+          level: "chapter",
+          title: "第一章规划",
+          summary: "",
+          goal: "",
+          conflict: "",
+          outcome: "",
+          position: 1,
+          chapterId: chapter.id,
+        },
+      ],
+      storyLines: [],
+      storyLineLinks: [],
+      sceneCards: [],
+    };
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: "作品档案" }));
+    await user.click(
+      await screen.findByRole("button", { name: "打开章节：第一章规划" }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "第一章" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveAttribute(
+      "readonly",
+    );
+  });
+
   it("creates a project once and enters an empty workspace", async () => {
     const client = new FakeStudioClient();
     client.projectParent = "/books";
@@ -184,9 +362,8 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    // 故事架构 在 作品档案 折叠分组下，需要先展开
+    // 作品档案是直达入口，故事架构是其默认内容页。
     await user.click(await screen.findByRole("button", { name: "作品档案" }));
-    await user.click(await screen.findByRole("button", { name: "故事架构" }));
     expect(
       await screen.findByRole("heading", { name: "故事架构" }),
     ).toBeInTheDocument();
@@ -310,7 +487,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    // 人物与势力 在 作品档案 折叠分组下
+    // 作品档案直达故事架构，细分页面由内容区标签承载。
     await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(await screen.findByRole("button", { name: "人物与势力" }));
 
@@ -324,7 +501,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    // 世界设定 在 作品档案 折叠分组下
+    // 世界设定位于作品档案的内容区标签。
     await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(await screen.findByRole("button", { name: "世界设定" }));
 
@@ -338,7 +515,7 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    // 时间线与事实 在 作品档案 折叠分组下
+    // 时间线与事实位于作品档案的内容区标签。
     await user.click(await screen.findByRole("button", { name: "作品档案" }));
     await user.click(
       await screen.findByRole("button", { name: "时间线与事实" }),
@@ -354,9 +531,8 @@ describe("Workspace", () => {
     const user = userEvent.setup();
     render(<App client={client} initialProject={client.openProjectResult} />);
 
-    // 版本历史 在 版本与交付 折叠分组下
+    // 版本与交付直达版本历史。
     await user.click(await screen.findByRole("button", { name: "版本与交付" }));
-    await user.click(await screen.findByRole("button", { name: "版本历史" }));
 
     expect(
       await screen.findByRole("heading", { name: "版本历史" }),

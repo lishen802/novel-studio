@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useStore } from "zustand";
 import { Workspace } from "../features/workspace/Workspace";
 import { ProjectLeaseConflictCard } from "../features/workspace/ProjectLeaseConflictCard";
-import { createWorkspaceStore } from "../features/workspace/workspace-store";
+import {
+  createWorkspaceStore,
+  type ProjectPage,
+} from "../features/workspace/workspace-store";
 import { HomeScreen } from "../features/home/HomeScreen";
 import { ApplicationSettings } from "../features/settings/ApplicationSettings";
 import { createAppShellStore } from "./app-shell-store";
@@ -153,8 +156,8 @@ export function App({
   }, [client, workspaceStore]);
 
   const handleOpenRecent = useCallback(
-    (projectId: string) => {
-      void workspaceStore.getState().openRecentProject(projectId);
+    (projectId: string, targetPage: ProjectPage = "manuscript") => {
+      void workspaceStore.getState().openRecentProject(projectId, targetPage);
     },
     [workspaceStore],
   );
@@ -348,6 +351,7 @@ export function App({
           onOpenProject={handleOpenProject}
           onImportManuscript={handleImportManuscript}
           onOpenRecent={(project) => void handleOpenRecent(project.projectId)}
+          onReviewRecent={(project) => void handleOpenRecent(project.projectId, "changes")}
         />
       ) : (
         <section className="welcome-card" aria-labelledby="product-title">

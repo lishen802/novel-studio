@@ -74,7 +74,7 @@ export type WorkspaceState = {
   cancelCreate(): void;
   createProject(input: Omit<CreateProjectInput, "parentDirectory">): Promise<void>;
   openProject(): Promise<void>;
-  openRecentProject(projectId: string): Promise<void>;
+  openRecentProject(projectId: string, targetPage?: ProjectPage): Promise<void>;
   retryProjectOpen(): Promise<void>;
   openProjectReadOnly(): Promise<void>;
   createRecoveryCopy(): Promise<void>;
@@ -192,6 +192,7 @@ export function createWorkspaceStore(
           workspaceError: null,
           currentPage: "manuscript",
           workbench: null,
+          pendingSelection: null,
         });
         void refreshWorkbenchForProject(project.id);
       } catch (error) {
@@ -215,7 +216,8 @@ export function createWorkspaceStore(
     },
 
     // 最近项目打开使用请求序号隔离并发结果，迟到的旧请求不得覆盖新工作区。
-    async openRecentProject(projectId) {
+    // targetPage 只决定前端初始画布，不改变后端项目打开契约。
+    async openRecentProject(projectId, targetPage = "manuscript") {
       const request = ++selectionRequest;
       set({ status: { kind: "opening" } });
       try {
@@ -235,8 +237,9 @@ export function createWorkspaceStore(
             activeChapterId: null,
           },
           workspaceError: null,
-          currentPage: "manuscript",
+          currentPage: targetPage,
           workbench: null,
+          pendingSelection: null,
         });
         void refreshWorkbenchForProject(result.project.id);
       } catch (error) {
@@ -367,6 +370,7 @@ export function createWorkspaceStore(
           workspaceError: null,
           currentPage: "manuscript",
           workbench: null,
+          pendingSelection: null,
         });
         void refreshWorkbenchForProject(project.id);
       } catch (error) {
@@ -390,6 +394,7 @@ export function createWorkspaceStore(
         workspaceError: null,
         currentPage: "manuscript",
         workbench: result.workbench,
+        pendingSelection: null,
       });
     },
 
@@ -556,6 +561,7 @@ export function createWorkspaceStore(
           workspaceError: null,
           currentPage: "manuscript" as const,
           workbench: null,
+          pendingSelection: null,
         };
       });
       void refreshWorkbenchForProject(result.project.id);

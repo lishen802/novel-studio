@@ -91,6 +91,25 @@ describe("App", () => {
     expect(client.openRecentProjectCalls).toEqual(["recent-1"]);
   });
 
+  it("opens a recent project directly in change review from the review action", async () => {
+    const client = new FakeStudioClient();
+    client.applicationBootstrapResult.recentProjects = [{
+      projectId: "recent-1",
+      title: "长夜织境",
+      path: "/books/长夜织境.zjproject",
+      lastWorkspace: "manuscript",
+      lastOpenedAt: "2026-08-10T08:00:00Z",
+      missing: false,
+    }];
+    const user = userEvent.setup();
+    render(<App client={client} />);
+
+    await user.click(await screen.findByRole("button", { name: "去审阅" }));
+
+    expect(client.openRecentProjectCalls).toEqual(["recent-1"]);
+    expect(await screen.findByRole("heading", { name: "候选变更" })).toBeVisible();
+  });
+
   it("returns home after dismissing a recent-project open error", async () => {
     const client = new FakeStudioClient();
     client.applicationBootstrapResult.recentProjects = [{
@@ -324,4 +343,41 @@ describe("App", () => {
       screen.getByRole("textbox", { name: "给 AI 的说明" }),
     ).toHaveValue("保持第三人称");
   });
+
+  it("keeps chapter and AI drafts after closing and reopening the AI panel", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    client.chaptersResult = [client.createChapterResult];
+    client.workbenchProjectionResult = {
+      stage: "writing",
+      canvas: "manuscript",
+      aiPanel: "hidden",
+      pendingReviewCount: 0,
+      recoverableJobCount: 0,
+      archiveStatus: "not_generated",
+    };
+    const user = userEvent.setup();
+    render(<App client={client} initialProject={client.openProjectResult} />);
+
+    await user.click(await screen.findByRole("button", { name: /第一章/ }));
+    await user.type(screen.getByRole("textbox", { name: "章节正文" }), "正文草稿");
+    await user.keyboard("{Meta>}j{/Meta}");
+    await user.type(
+      await screen.findByRole("textbox", { name: "给 AI 的说明" }),
+      "保持第三人称",
+    );
+
+    await user.click(screen.getByRole("button", { name: "关闭 AI 面板" }));
+    expect(
+      screen.queryByRole("complementary", { name: "AI 创作" }),
+    ).not.toBeInTheDocument();
+
+    await user.keyboard("{Meta>}j{/Meta}");
+    expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveValue(
+      "正文草稿",
+    );
+    expect(screen.getByRole("textbox", { name: "给 AI 的说明" })).toHaveValue(
+      "保持第三人称",
+    );
+  });
+
 });

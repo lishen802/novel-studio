@@ -9,12 +9,22 @@ import type {
   StudioClient,
 } from "../../lib/studio-client";
 
-type Props = { client: StudioClient; chapters: ChapterView[]; onOpenChapter(id: string): void };
+type Props = {
+  client: StudioClient;
+  chapters: ChapterView[];
+  readOnly?: boolean;
+  onOpenChapter(id: string): void;
+};
 const emptyStructure: StoryStructureView = { outlineNodes: [], storyLines: [], storyLineLinks: [], sceneCards: [] };
 const levelNames: Record<OutlineLevel, string> = { book: "全书", volume: "分卷", arc: "故事弧", chapter: "章节", scene: "场景" };
 const nextLevel: Partial<Record<OutlineLevel, OutlineLevel>> = { book: "volume", volume: "arc", arc: "chapter", chapter: "scene" };
 
-export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
+export function StoryArchitecture({
+  client,
+  chapters,
+  readOnly = false,
+  onOpenChapter,
+}: Props) {
   const [structure, setStructure] = useState(emptyStructure);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +70,7 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
 
   const createOutline = async (event: FormEvent) => {
     event.preventDefault();
+    if (readOnly) return;
     const input: CreateOutlineNodeInput = { parentId, level: outlineLevel, title, summary, goal, conflict, outcome, chapterId: outlineLevel === "chapter" ? chapterId : "" };
     try { await client.createOutlineNode(input); resetForm(); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法创建大纲节点"); }
@@ -67,12 +78,14 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
 
   const createLine = async (event: FormEvent) => {
     event.preventDefault();
+    if (readOnly) return;
     try { await client.createStoryLine({ name: title, summary }); resetForm(); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法创建故事线"); }
   };
 
   const createCard = async (event: FormEvent) => {
     event.preventDefault();
+    if (readOnly) return;
     try {
       await client.createSceneCard({ chapterId, outlineNodeId: parentId, title, pov, location, goal, conflict, outcome });
       resetForm(); await load();
@@ -80,6 +93,7 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
   };
 
   const linkStoryLine = async (storyLineId: string) => {
+    if (readOnly) return;
     const outlineNodeId = linkTargets[storyLineId];
     if (!outlineNodeId) return;
     try {
@@ -92,11 +106,13 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
   };
 
   const moveOutline = async (id: string, direction: "up" | "down") => {
+    if (readOnly) return;
     try { await client.moveOutlineNode(id, direction); await load(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法调整节点顺序"); }
   };
 
   const confirmArchive = async () => {
+    if (readOnly) return;
     if (!archiveTarget) return;
     try {
       await client.archiveOutlineNode(archiveTarget.id);
@@ -116,9 +132,9 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
           <div><strong>{node.title}</strong>{node.summary && <p>{node.summary}</p>}</div>
           <div className="outline-node-actions">
             {node.chapterId && <button type="button" onClick={() => onOpenChapter(node.chapterId)} aria-label={`打开章节：${node.title}`}>打开正文</button>}
-            <button type="button" onClick={() => void moveOutline(node.id, "up")} aria-label={`上移：${node.title}`}><ArrowUp size={14} /></button>
-            <button type="button" onClick={() => void moveOutline(node.id, "down")} aria-label={`下移：${node.title}`}><ArrowDown size={14} /></button>
-            <button type="button" onClick={() => setArchiveTarget(node)} aria-label={`归档：${node.title}`}><Archive size={14} /></button>
+            <button type="button" disabled={readOnly} onClick={() => void moveOutline(node.id, "up")} aria-label={`上移：${node.title}`}><ArrowUp size={14} /></button>
+            <button type="button" disabled={readOnly} onClick={() => void moveOutline(node.id, "down")} aria-label={`下移：${node.title}`}><ArrowDown size={14} /></button>
+            <button type="button" disabled={readOnly} onClick={() => setArchiveTarget(node)} aria-label={`归档：${node.title}`}><Archive size={14} /></button>
           </div>
         </div>
         {renderBranch(node.id, depth + 1)}
@@ -130,9 +146,9 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
       <header className="story-header">
         <div><p className="eyebrow">Story Engineering</p><h2>故事架构</h2><p>让章节、场景和故事线共享同一套可追踪结构。</p></div>
         <div className="story-actions">
-          <button type="button" onClick={() => setDialog("outline")}><Plus size={16} />新建大纲节点</button>
-          <button type="button" onClick={() => setDialog("line")}><Route size={16} />新建故事线</button>
-          <button type="button" disabled={!chapters.length || !sceneNodes.length} onClick={() => setDialog("card")}><ScrollText size={16} />新建场景卡</button>
+          <button type="button" disabled={readOnly} onClick={() => setDialog("outline")}><Plus size={16} />新建大纲节点</button>
+          <button type="button" disabled={readOnly} onClick={() => setDialog("line")}><Route size={16} />新建故事线</button>
+          <button type="button" disabled={readOnly || !chapters.length || !sceneNodes.length} onClick={() => setDialog("card")}><ScrollText size={16} />新建场景卡</button>
         </div>
       </header>
       {error && <div className="story-error" role="alert">{error}</div>}
@@ -142,7 +158,7 @@ export function StoryArchitecture({ client, chapters, onOpenChapter }: Props) {
           <article className="story-panel"><h3><GitBranch size={18} />故事线</h3>{structure.storyLines.length ? structure.storyLines.map((line) => {
             const linked = new Set(structure.storyLineLinks.filter((link) => link.storyLineId === line.id).map((link) => link.outlineNodeId));
             const candidates = structure.outlineNodes.filter((node) => !linked.has(node.id));
-            return <div className="story-line-card" key={line.id}><strong>{line.name}</strong><span>{line.status === "planned" ? "规划中" : line.status}</span><p>{line.summary || "还没有故事线说明"}</p><div className="story-line-nodes">{structure.storyLineLinks.filter((link) => link.storyLineId === line.id).map((link) => <span key={link.outlineNodeId}>{structure.outlineNodes.find((node) => node.id === link.outlineNodeId)?.title}</span>)}</div>{candidates.length > 0 && <div className="story-line-linker"><label><span className="sr-only">{line.name}关联节点</span><select aria-label={`${line.name}关联节点`} value={linkTargets[line.id] ?? ""} onChange={(event) => setLinkTargets((current) => ({ ...current, [line.id]: event.target.value }))}><option value="">选择轨迹节点</option>{candidates.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></label><button type="button" aria-label={`关联${line.name}`} disabled={!linkTargets[line.id]} onClick={() => void linkStoryLine(line.id)}>关联</button></div>}</div>;
+            return <div className="story-line-card" key={line.id}><strong>{line.name}</strong><span>{line.status === "planned" ? "规划中" : line.status}</span><p>{line.summary || "还没有故事线说明"}</p><div className="story-line-nodes">{structure.storyLineLinks.filter((link) => link.storyLineId === line.id).map((link) => <span key={link.outlineNodeId}>{structure.outlineNodes.find((node) => node.id === link.outlineNodeId)?.title}</span>)}</div>{candidates.length > 0 && <div className="story-line-linker"><label><span className="sr-only">{line.name}关联节点</span><select aria-label={`${line.name}关联节点`} disabled={readOnly} value={linkTargets[line.id] ?? ""} onChange={(event) => setLinkTargets((current) => ({ ...current, [line.id]: event.target.value }))}><option value="">选择轨迹节点</option>{candidates.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></label><button type="button" aria-label={`关联${line.name}`} disabled={readOnly || !linkTargets[line.id]} onClick={() => void linkStoryLine(line.id)}>关联</button></div>}</div>;
           }) : <p className="story-empty">故事线用于串联跨章节的发展轨迹。</p>}</article>
           <article className="story-panel"><h3><ScrollText size={18} />场景卡</h3>{structure.sceneCards.length ? structure.sceneCards.map((card) => <div className="scene-card" key={card.id}><strong>{card.title}</strong><span>{chapters.find((chapter) => chapter.id === card.chapterId)?.title}</span><p>{card.goal || "尚未设置场景目标"}</p></div>) : <p className="story-empty">为场景节点补充目标、冲突与结果。</p>}</article>
         </div>

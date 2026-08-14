@@ -40,6 +40,7 @@ describe("HomeScreen", () => {
         onOpenProject={vi.fn()}
         onImportManuscript={vi.fn()}
         onOpenRecent={vi.fn()}
+        onReviewRecent={vi.fn()}
       />,
     );
 
@@ -61,7 +62,7 @@ describe("HomeScreen", () => {
     expect(within(content).getByText(/还没有最近作品/)).toBeInTheDocument();
   });
 
-  it("lists recent projects with their last opened time", () => {
+  it("renders the recent-project cover, workspace and time in the prototype card layout", () => {
     render(
       <HomeScreen
         bootstrap={bootstrapWithRecent}
@@ -70,13 +71,21 @@ describe("HomeScreen", () => {
         onOpenProject={vi.fn()}
         onImportManuscript={vi.fn()}
         onOpenRecent={vi.fn()}
+        onReviewRecent={vi.fn()}
       />,
     );
 
     const navigation = screen.getByRole("complementary", { name: "首页导航" });
     const content = screen.getByRole("region", { name: "首页内容" });
     expect(within(navigation).getByRole("button", { name: "打开 长夜织境" })).toBeVisible();
+    const cover = navigation.querySelector(".recent-project-card__cover");
+    expect(cover).toHaveAttribute("aria-hidden", "true");
+    expect(within(navigation).queryByRole("img")).not.toBeInTheDocument();
+    expect(within(navigation).getByText("最近工作区：正文编辑")).toBeVisible();
     expect(within(content).getByRole("heading", { name: "长夜织境" })).toBeVisible();
+    expect(within(content).getByText("最近继续")).toBeVisible();
+    expect(within(content).getByText("上次位置：正文编辑")).toBeVisible();
+    expect(within(content).getByText("上次打开：2026-08-10T08:00:00Z")).toBeVisible();
     expect(within(content).getByRole("button", { name: "继续《长夜织境》" })).toBeVisible();
     expect(
       screen.getByText(/上次打开于 2026-08-10T08:00:00Z/),
@@ -93,6 +102,7 @@ describe("HomeScreen", () => {
         onOpenProject={vi.fn()}
         onImportManuscript={vi.fn()}
         onOpenRecent={onOpenRecent}
+        onReviewRecent={vi.fn()}
       />,
     );
 
@@ -112,6 +122,7 @@ describe("HomeScreen", () => {
         onOpenProject={vi.fn()}
         onImportManuscript={vi.fn()}
         onOpenRecent={vi.fn()}
+        onReviewRecent={vi.fn()}
       />,
     );
 
@@ -129,7 +140,7 @@ describe("HomeScreen", () => {
     ).toBeDisabled();
   });
 
-  it("shows path unavailable for missing recent projects", () => {
+  it("shows path unavailable and disables continuing a missing recent project", () => {
     const missingBootstrap: ApplicationBootstrapView = {
       ...emptyBootstrap,
       recentProjects: [{ ...recentProject, missing: true }],
@@ -142,9 +153,11 @@ describe("HomeScreen", () => {
         onOpenProject={vi.fn()}
         onImportManuscript={vi.fn()}
         onOpenRecent={vi.fn()}
+        onReviewRecent={vi.fn()}
       />,
     );
 
     expect(screen.getByText("路径不可用")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续《长夜织境》" })).toBeDisabled();
   });
 });

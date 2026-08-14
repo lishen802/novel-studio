@@ -43,6 +43,10 @@ describe("AIPanel", () => {
     );
     const textarea = screen.getByRole("textbox", { name: "给 AI 的说明" });
     expect(textarea).toHaveValue("保持第三人称");
+    expect(screen.getByRole("heading", { name: "AI 创作" })).toBeInTheDocument();
+    expect(
+      screen.getByText("AI 创作能力尚未就绪，不会生成候选或改写正文。"),
+    ).toBeInTheDocument();
     await user.type(textarea, "。");
     expect(onInput).toHaveBeenLastCalledWith("保持第三人称。");
   });
@@ -97,11 +101,14 @@ describe("AIPanel", () => {
     expect(screen.getByText("Revision 7 · 字符 0–2")).toBeInTheDocument();
     expect(screen.getByText("潮声")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "提交选区意见" }),
+      screen.getByRole("button", { name: "取消选区意见" }),
     ).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "关闭 AI 面板" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("submits selection review and dismisses on success", async () => {
+  it("keeps selection review unsubmitted until the capability is ready", async () => {
     const onSubmitSelectionReview = vi.fn();
     const onDismissSelection = vi.fn();
     const user = userEvent.setup();
@@ -124,11 +131,13 @@ describe("AIPanel", () => {
         onSubmitSelectionReview={onSubmitSelectionReview}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "提交选区意见" }));
-    expect(onSubmitSelectionReview).toHaveBeenCalledWith({
-      selection,
-      input: "重写这一段",
-    });
+    expect(
+      screen.getByText("选区意见提交将在后续阶段提供；当前不会生成或提交 AI 请求。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "提交选区意见" }),
+    ).not.toBeInTheDocument();
+    expect(onSubmitSelectionReview).not.toHaveBeenCalled();
   });
 
   it("allows the author to dismiss the selection review", async () => {

@@ -60,6 +60,28 @@ function readyClient() {
 }
 
 describe("VersionHistoryWorkbench", () => {
+  it("keeps branch management in its dedicated delivery tab", async () => {
+    const client = readyClient();
+    render(
+      <VersionHistoryWorkbench
+        client={client}
+        project={client.openProjectResult}
+        chapters={[chapter]}
+        onChapterUpdated={vi.fn()}
+        onWorkspaceRestored={vi.fn()}
+        onBeforeVersionOperation={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "版本历史" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "剧情分支" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "新建剧情分支" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("compares an old revision and restores it only after confirmation", async () => {
     const client = readyClient();
     const onChapterUpdated = vi.fn();

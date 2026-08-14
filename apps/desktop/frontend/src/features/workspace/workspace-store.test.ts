@@ -9,6 +9,36 @@ import type {
 import { createWorkspaceStore } from "./workspace-store";
 
 describe("workspace store", () => {
+  it("opens a recent project at its requested workspace page", async () => {
+    const client = new FakeStudioClient();
+    const store = createWorkspaceStore(client);
+
+    await store.getState().openRecentProject("recent-1", "changes");
+
+    expect(store.getState().currentPage).toBe("changes");
+  });
+
+  it("clears a pending selection when a different project loads", async () => {
+    const client = FakeStudioClient.withReadyProject();
+    const store = createWorkspaceStore(client);
+    await store.getState().loadProject(client.openProjectResult);
+    store.getState().setAIPanelSelection({
+      chapterId: "chapter-1",
+      baseRevision: 1,
+      start: 0,
+      end: 2,
+      text: "潮声",
+    });
+
+    await store.getState().loadProject({
+      ...client.openProjectResult,
+      id: "project-2",
+      title: "雾港来信",
+    });
+
+    expect(store.getState().pendingSelection).toBeNull();
+  });
+
   it("ignores a stale recent-project failure after a newer open succeeds", async () => {
     const client = new FakeStudioClient();
     let rejectFirst: ((error: Error) => void) | undefined;
