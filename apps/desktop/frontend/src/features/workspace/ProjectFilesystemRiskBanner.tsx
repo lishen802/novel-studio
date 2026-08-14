@@ -20,7 +20,7 @@ export function ProjectFilesystemRiskBanner({
 
   return (
     <aside
-      className={`project-filesystem-risk project-filesystem-risk--${health.level}`}
+      className={`project-filesystem-risk notice notice--${degraded ? "danger" : "info"} project-filesystem-risk--${health.level}`}
       role="status"
     >
       <div>

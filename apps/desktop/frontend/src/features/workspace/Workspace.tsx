@@ -157,7 +157,7 @@ export function Workspace({
 
   return (
     <main
-      className={`workspace-shell${effectiveAIMode !== "hidden" ? " workspace-shell--with-ai workspace-shell--three-columns" : ""}`}
+      className={`workspace-shell workspace-shell--light${effectiveAIMode !== "hidden" ? " workspace-shell--with-ai workspace-shell--three-columns" : ""}`}
     >
       <aside className="chapter-sidebar">
         <header className="workspace-brand">
@@ -177,7 +177,7 @@ export function Workspace({
         </section>
 
         {readOnly && (
-          <p className="workspace-read-only-notice" role="status">
+          <p className="workspace-read-only-notice notice notice--warning" role="status">
             只读模式：可查看，不会写入或更新恢复数据。
           </p>
         )}

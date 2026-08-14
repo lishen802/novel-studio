@@ -1126,6 +1126,105 @@ button:disabled {
   grid-template-columns: 290px minmax(0, 1fr) minmax(300px, 360px);
 }
 
+.workspace-shell--light {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.workspace-shell--light .chapter-sidebar,
+.workspace-shell--light .ai-panel {
+  color: var(--color-text);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  box-shadow: none;
+}
+
+.workspace-shell--light .workspace-brand,
+.workspace-shell--light .workspace-sections,
+.workspace-shell--light .chapter-list__header {
+  border-color: var(--color-border);
+}
+
+.workspace-shell--light .workspace-brand__mark {
+  color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+.workspace-shell--light .workspace-brand span,
+.workspace-shell--light .project-summary > p:last-child,
+.workspace-shell--light .chapter-list__header,
+.workspace-shell--light .workspace-sections button,
+.workspace-shell--light .chapter-list > button,
+.workspace-shell--light .chapter-list > button span {
+  color: var(--color-text-sub);
+}
+
+.workspace-shell--light .workspace-sections button:hover,
+.workspace-shell--light .chapter-list > button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.workspace-shell--light .workspace-sections button.is-active,
+.workspace-shell--light .chapter-list > button.is-active {
+  color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+.workspace-shell--light .chapter-list__header button,
+.workspace-shell--light .chapter-empty button {
+  color: var(--color-primary);
+}
+
+.workspace-shell--light .workspace-main {
+  background: var(--color-bg);
+}
+
+.notice {
+  border: 1px solid;
+  border-radius: 9px;
+}
+
+.workspace-shell--light .notice--warning {
+  color: #b45309;
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.workspace-shell--light .notice--info {
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.workspace-shell--light .notice--danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.workspace-shell--light .ai-panel__header {
+  border-color: var(--color-border);
+}
+
+.workspace-shell--light .ai-panel__header > div {
+  color: var(--color-primary);
+}
+
+.workspace-shell--light .ai-panel__header h2,
+.workspace-shell--light .ai-panel textarea {
+  color: var(--color-text);
+}
+
+.workspace-shell--light .ai-panel__close:hover {
+  background: var(--color-surface-hover);
+}
+
+.workspace-shell--light .ai-panel textarea {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
 .chapter-sidebar {
   display: flex;
   min-height: 100vh;

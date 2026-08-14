@@ -117,6 +117,7 @@ describe("Workspace", () => {
     expect(screen.getByRole("main")).toHaveClass(
       "workspace-shell--three-columns",
     );
+    expect(screen.getByRole("main")).toHaveClass("workspace-shell--light");
   });
 
   it("updates the persistent filesystem risk after a disk-full chapter commit failure", async () => {
@@ -146,7 +147,9 @@ describe("Workspace", () => {
         }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent("项目写入遇到风险");
+    const riskNotice = await screen.findByRole("status");
+    expect(riskNotice).toHaveTextContent("项目写入遇到风险");
+    expect(riskNotice).toHaveClass("notice--danger");
     expect(screen.getByRole("button", { name: "创建恢复副本" })).toBeEnabled();
     expect(filesystemHealth).toHaveBeenCalledOnce();
   });
@@ -215,7 +218,9 @@ describe("Workspace", () => {
 
     await user.click(await screen.findByRole("button", { name: /第一章/ }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("只读模式");
+    const readOnlyNotice = screen.getByRole("status");
+    expect(readOnlyNotice).toHaveTextContent("只读模式");
+    expect(readOnlyNotice).toHaveClass("notice--warning");
     expect(screen.getByRole("button", { name: "新建章节" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "章节正文" })).toHaveAttribute("readonly");
   });
