@@ -855,11 +855,11 @@ button:disabled {
   width: min(100%, 720px);
   max-height: calc(100vh - 80px);
   padding: 32px;
-  border: 1px solid rgba(255, 248, 232, 0.14);
-  border-radius: 22px;
-  color: #f7f1e6;
-  background: #282e42;
-  box-shadow: 0 28px 80px rgba(2, 4, 12, 0.56);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.12);
   overflow: auto;
 }
 
@@ -884,7 +884,7 @@ button:disabled {
 
 .application-settings__section h3 {
   margin: 0;
-  color: #f0c792;
+  color: var(--color-text);
   font-size: 1rem;
   font-weight: 650;
 }
@@ -892,7 +892,7 @@ button:disabled {
 .application-settings__section p,
 .application-settings__notice {
   margin: 0;
-  color: #aeb4c4;
+  color: var(--color-text-sub);
   font-size: 0.82rem;
   line-height: 1.6;
 }
@@ -906,7 +906,7 @@ button:disabled {
 .provider-form label {
   display: grid;
   gap: 6px;
-  color: #d4d7df;
+  color: var(--color-text-sub);
   font-size: 0.8rem;
   font-weight: 650;
 }
@@ -914,10 +914,10 @@ button:disabled {
 .provider-form input,
 .application-settings select {
   min-height: 38px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  background: rgba(10, 13, 23, 0.35);
-  color: #f8f2e8;
+  background: var(--color-surface);
+  color: var(--color-text);
   padding: 9px 11px;
   font: inherit;
 }
@@ -941,9 +941,9 @@ button:disabled {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-surface-hover);
 }
 
 .provider-list__item-info {
@@ -954,11 +954,11 @@ button:disabled {
 
 .provider-list__item-name {
   font-weight: 650;
-  color: #f7f1e6;
+  color: var(--color-text);
 }
 
 .provider-list__item-meta {
-  color: #a6a1b4;
+  color: var(--color-text-muted);
   font-size: 0.76rem;
 }
 
@@ -1018,13 +1018,13 @@ button:disabled {
 }
 
 .profile-form__notice {
-  color: #c9b388;
+  color: var(--color-text-sub);
   font-size: 0.78rem;
 }
 
 .entry-error {
   margin: 18px 0 0;
-  color: #f3b3a6;
+  color: #b91c1c;
   font-size: 0.9rem;
 }
 
@@ -1035,18 +1035,18 @@ button:disabled {
   inset: 0;
   place-items: center;
   padding: 24px;
-  background: rgba(8, 11, 20, 0.72);
+  background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(12px);
 }
 
 .project-dialog {
   width: min(100%, 520px);
   padding: 32px;
-  border: 1px solid rgba(255, 248, 232, 0.14);
-  border-radius: 22px;
-  color: #f7f1e6;
-  background: #282e42;
-  box-shadow: 0 28px 80px rgba(2, 4, 12, 0.56);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.12);
 }
 
 .project-dialog h2 {
@@ -1058,7 +1058,7 @@ button:disabled {
 
 .dialog-path,
 .project-dialog > p:not(.eyebrow, .entry-error) {
-  color: #aeb4c4;
+  color: var(--color-text-sub);
   line-height: 1.6;
 }
 
@@ -1066,7 +1066,7 @@ button:disabled {
   display: grid;
   gap: 8px;
   margin-top: 18px;
-  color: #d4d7df;
+  color: var(--color-text-sub);
   font-size: 0.85rem;
   font-weight: 650;
 }
@@ -1074,11 +1074,11 @@ button:disabled {
 .project-dialog input,
 .project-dialog textarea {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   outline: none;
-  color: #f8f2e8;
-  background: rgba(10, 13, 23, 0.35);
+  color: var(--color-text);
+  background: var(--color-surface);
 }
 
 .project-dialog input {
@@ -1093,8 +1093,14 @@ button:disabled {
 
 .project-dialog input:focus,
 .project-dialog textarea:focus {
-  border-color: rgba(232, 189, 134, 0.65);
-  box-shadow: 0 0 0 3px rgba(232, 189, 134, 0.11);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-subtle);
+}
+
+.notice--danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 .dialog-actions {
@@ -5395,4 +5401,120 @@ button:disabled {
   .home-entry-actions button {
     transition: none;
   }
+}
+
+/* 原型的反馈面板始终使用浅色语义底色，不随各工作区的内容配色变化。 */
+.import-alert.notice--danger,
+.notice--danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+/* 全局浅色收口：这些容器由既有功能组件复用，不能再保留深色表单或暖褐大底。 */
+.project-dialog--light,
+.project-dialog {
+  color: var(--color-text);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+.project-dialog--light input,
+.project-dialog--light textarea,
+.project-dialog--light select,
+.project-dialog input,
+.project-dialog textarea,
+.project-dialog select {
+  color: var(--color-text);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+.project-dialog--light input:focus,
+.project-dialog--light textarea:focus,
+.project-dialog--light select:focus,
+.project-dialog input:focus,
+.project-dialog textarea:focus,
+.project-dialog select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-subtle);
+}
+
+.project-dialog .recovery-comparison article {
+  border-color: var(--color-border);
+  background: var(--color-surface-hover);
+}
+
+.project-dialog .recovery-comparison p {
+  color: var(--color-text-sub);
+}
+
+.project-dialog .recovery-comparison strong {
+  color: var(--color-primary);
+}
+
+.project-dialog .recovery-warning {
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+}
+
+.workspace-shell--light .workspace-alert,
+.workspace-shell--light .editor-alert {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+  box-shadow: 0 8px 18px rgba(31, 41, 55, 0.08);
+}
+
+.workspace-shell--light .workspace-alert button,
+.workspace-shell--light .editor-alert button {
+  color: #b91c1c;
+  background: transparent;
+}
+
+.workspace-shell--light .story-architecture,
+.workspace-shell--light .continuity-workbench,
+.workspace-shell--light .world-workbench,
+.workspace-shell--light .assets-workbench,
+.workspace-shell--light .import-workbench {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.workspace-shell--light .import-heading,
+.workspace-shell--light .import-source-card,
+.workspace-shell--light .import-volume,
+.workspace-shell--light .import-task-list {
+  border-color: var(--color-border);
+}
+
+.workspace-shell--light .import-source-card,
+.workspace-shell--light .import-volume,
+.workspace-shell--light .import-task-list {
+  background: var(--color-surface);
+  box-shadow: 0 4px 12px rgba(31, 41, 55, 0.06);
+}
+
+.workspace-shell--light .import-heading p:last-child,
+.workspace-shell--light .import-task-list small,
+.workspace-shell--light .import-state,
+.workspace-shell--light .import-selection-bar p,
+.workspace-shell--light .import-metadata dt {
+  color: var(--color-text-sub);
+}
+
+.workspace-shell--light .import-heading .primary-action,
+.workspace-shell--light .import-actions .primary-action {
+  color: #ffffff;
+  background: var(--color-primary);
+}
+
+.workspace-shell--light .import-task-list button.is-active {
+  border-color: rgba(26, 31, 46, 0.18);
+  background: var(--color-primary-subtle);
+}
+
+.workspace-shell--light .import-metadata div {
+  background: var(--color-surface-hover);
 }

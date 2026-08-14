@@ -371,13 +371,13 @@ export function App({
       {bootstrap && workspaceError && (
         <div className="dialog-backdrop">
           <section
-            className="project-dialog"
+            className="project-dialog project-dialog--light"
             role="alertdialog"
             aria-label="项目操作错误"
           >
             <p className="eyebrow">项目操作错误</p>
             <h2>无法继续</h2>
-            <p role="alert" className="entry-error">
+            <p role="alert" className="entry-error notice notice--danger">
               {workspaceError}
             </p>
             {publishedRecoveryPath && (
@@ -398,10 +398,10 @@ export function App({
 
       {error && (
         <div className="dialog-backdrop">
-          <section className="project-dialog" role="alertdialog" aria-label="应用错误">
+          <section className="project-dialog project-dialog--light" role="alertdialog" aria-label="应用错误">
             <p className="eyebrow">应用错误</p>
             <h2>无法继续</h2>
-            {error && <p role="alert" className="entry-error">{error}</p>}
+            {error && <p role="alert" className="entry-error notice notice--danger">{error}</p>}
             <div className="dialog-actions">
               <button
                 type="button"
@@ -453,7 +453,7 @@ export function App({
       {pendingParentDirectory && (
         <div className="dialog-backdrop">
           <form
-            className="project-dialog"
+            className="project-dialog project-dialog--light"
             role="dialog"
             aria-label="创建小说项目"
             onSubmit={submitProject}
@@ -485,7 +485,7 @@ export function App({
               />
             </label>
             {workspaceErrorMessage && (
-              <p role="alert" className="entry-error">
+              <p role="alert" className="entry-error notice notice--danger">
                 {workspaceErrorMessage}
               </p>
             )}

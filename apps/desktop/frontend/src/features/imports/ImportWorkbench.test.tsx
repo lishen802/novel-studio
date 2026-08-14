@@ -105,9 +105,11 @@ describe("ImportWorkbench", () => {
       <ImportWorkbench client={client} onChaptersImported={vi.fn()} />,
     );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "导入操作失败，请重试。",
     );
+    expect(alert).toHaveClass("notice--danger");
     expect(screen.queryByText(/SELECT|\/Users\/author/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

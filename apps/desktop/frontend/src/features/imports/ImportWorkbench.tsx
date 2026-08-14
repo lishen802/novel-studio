@@ -428,7 +428,7 @@ export function ImportWorkbench({
       </header>
 
       {error && (
-        <div className="import-alert" role="alert">
+        <div className="import-alert notice notice--danger" role="alert">
           <span>{error}</span>
           <button
             type="button"

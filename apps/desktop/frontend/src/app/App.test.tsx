@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -138,7 +138,10 @@ describe("App", () => {
     render(<App client={client} />);
 
     await user.click(await screen.findByRole("button", { name: "打开 旧作品" }));
-    expect(await screen.findByRole("alertdialog", { name: "项目操作错误" })).toBeVisible();
+    const dialog = await screen.findByRole("alertdialog", { name: "项目操作错误" });
+    expect(dialog).toBeVisible();
+    expect(dialog).toHaveClass("project-dialog--light");
+    expect(within(dialog).getByRole("alert")).toHaveClass("notice--danger");
     await user.click(screen.getByRole("button", { name: "关闭" }));
 
     expect(screen.queryByRole("alertdialog", { name: "项目操作错误" })).not.toBeInTheDocument();
