@@ -193,6 +193,7 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
 
 export const studio = {
   available: () => Boolean(window.go?.main?.DesktopAPI),
+  completeClose: () => call<void>('CompleteClose'),
   applicationBootstrap: () => call<ApplicationBootstrapView>('ApplicationBootstrap'),
   saveApplicationPreferences: (input: Record<string, unknown>) => call<void>('SaveApplicationPreferences', input),
   saveApplicationProvider: (input: Record<string, unknown>) => call<ProviderView>('SaveApplicationProvider', input),

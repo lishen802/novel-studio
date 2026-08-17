@@ -70,7 +70,7 @@ export default function Home() {
   }
 
   return (
-    <div className="h-full flex animate-fade-up -m-6">
+    <div className="h-[calc(100%+3rem)] flex animate-fade-up -m-6">
       {/* Left panel */}
       <aside className="w-[300px] shrink-0 border-r border-border bg-surface flex flex-col shadow-[1px_0_0_0_rgba(0,0,0,0.03)]">
         <div className="p-4 space-y-3">

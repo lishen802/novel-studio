@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Settings } from 'lucide-react';
 import { useApp } from '../store/useApp';
 
-// 顶部状态栏：仅承载应用名与模型配置提示。
+// 顶部状态栏：仅承载模型配置提示，应用名交给系统菜单栏显示。
 // 应用菜单由 Wails 原生菜单统一承载——
 // macOS 渲染到系统顶部菜单栏，Windows 渲染到窗口菜单栏，
 // 此处不再用 JSX 重复绘制下拉菜单，避免与原生菜单冲突。
@@ -32,8 +32,6 @@ export function TitleBar() {
       className="h-10 bg-surface border-b border-border flex items-center pl-[86px] pr-4 select-none shrink-0 z-40"
       style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
     >
-      <span className="text-sm font-medium text-text">织境 Story Studio</span>
-
       <div className="ml-auto flex items-center gap-2">
         {modelButton}
       </div>

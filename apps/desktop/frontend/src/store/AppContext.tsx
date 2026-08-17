@@ -1,9 +1,15 @@
-import React, { useCallback, useEffect, useReducer } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef } from 'react';
 import type { AppState, AppSettings, Project, ProjectStatus } from '../types';
 import type { ApplicationBootstrapView, ProjectView } from '../api/studio';
 import { defaultSettings } from './defaultSettings';
 import { studio } from '../api/studio';
 import { AppContext, type AppAction } from './appContextValue';
+
+interface WailsRuntime {
+  EventsOn: (name: string, callback: () => void) => () => void;
+}
+
+type WindowWithRuntime = Window & { runtime?: WailsRuntime };
 
 /** 将后端权威项目投影转换为当前原型页面所需的展示模型。 */
 function projectModel(project: ProjectView): Project {
@@ -117,6 +123,33 @@ function errorMessage(error: unknown): string {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
+  const beforeCloseHandler = useRef<(() => Promise<void>) | null>(null);
+  const closing = useRef(false);
+
+  // 页面可注册退出前刷新动作；正文编辑器用它落盘尚未触发防抖保存的内容。
+  const registerBeforeClose = useCallback((handler: () => Promise<void>) => {
+    beforeCloseHandler.current = handler;
+    return () => {
+      if (beforeCloseHandler.current === handler) beforeCloseHandler.current = null;
+    };
+  }, []);
+
+  // 原生关闭按钮和“退出”菜单共用同一条链路，保证先保存再通知后端放行。
+  const requestApplicationClose = useCallback(async () => {
+    if (closing.current || !studio.available()) return;
+    closing.current = true;
+    try {
+      await beforeCloseHandler.current?.();
+    } catch (error) {
+      dispatch({ type: 'SET_ERROR', payload: errorMessage(error) });
+    }
+    try {
+      await studio.completeClose();
+    } catch (error) {
+      closing.current = false;
+      dispatch({ type: 'SET_ERROR', payload: errorMessage(error) });
+    }
+  }, []);
 
   const refreshBootstrap = useCallback(async () => {
     if (!studio.available()) return;
@@ -217,6 +250,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const runtime = (window as WindowWithRuntime).runtime;
+    if (!runtime) return;
+    const off = runtime.EventsOn('app:before-close', () => {
+      void requestApplicationClose();
+    });
+    return () => off();
+  }, [requestApplicationClose]);
+
   return (
     <AppContext.Provider value={{
       state,
@@ -228,6 +270,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       openProject,
       openRecentProject,
       closeProject,
+      registerBeforeClose,
+      requestApplicationClose,
     }}>
       {children}
     </AppContext.Provider>

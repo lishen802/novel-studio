@@ -73,7 +73,7 @@ export default function Review() {
   }
 
   return (
-    <div className="h-full flex animate-fade-up -m-6">
+    <div className="h-[calc(100%+3rem)] flex animate-fade-up -m-6">
       <aside className="w-[280px] shrink-0 border-r border-border bg-surface p-4 overflow-auto">
         <h1 className="text-base font-medium text-text mb-1">审阅与候选</h1>
         <p className="text-xs text-text-sub mb-4">所有内容均来自项目中的持久化 ChangeSet。</p>

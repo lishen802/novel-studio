@@ -84,7 +84,7 @@ function countWords(text: string) {
 
 export default function Chapters() {
   const navigate = useNavigate();
-  const { state, dispatch } = useApp();
+  const { state, dispatch, registerBeforeClose } = useApp();
   const settings = state.settings;
   const modelConfigured = getActiveModel(settings).apiKeyConfigured;
   const canvasColor = useMemo(() => canvasPresets.find((p) => p.id === settings.canvasColorId) || canvasPresets[0], [settings.canvasColorId]);
@@ -155,6 +155,12 @@ export default function Chapters() {
     }, 800);
     return () => window.clearTimeout(timer);
   }, [content, selected, revision, hydrating]);
+
+  useEffect(() => {
+    if (!selected || hydrating) return;
+    // 窗口关闭可能早于 800ms 防抖保存，退出前显式刷新当前正文草稿。
+    return registerBeforeClose(() => studio.saveDraft(selected.id, content, revision));
+  }, [content, selected, revision, hydrating, registerBeforeClose]);
 
   const filteredVolumes = useMemo(() => {
     if (!search.trim()) return volumes;
@@ -344,7 +350,7 @@ export default function Chapters() {
   const canNext = selectedIndex >= 0 && selectedIndex < chapters.length - 1;
 
   return (
-    <div className="h-full flex animate-fade-up -m-6">
+    <div className="h-[calc(100%+3rem)] flex animate-fade-up -m-6">
       {/* Left chapter tree */}
       <aside className="w-[260px] shrink-0 flex flex-col border-r border-border bg-surface">
         <div className="p-4 border-b border-border space-y-3">

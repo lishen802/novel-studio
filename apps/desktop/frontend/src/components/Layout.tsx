@@ -17,7 +17,7 @@ const menuCommandEvent = 'app:menu-command';
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { state, dispatch, closeProject, openRecentProject } = useApp();
+  const { state, dispatch, closeProject, openRecentProject, requestApplicationClose } = useApp();
   const applicationWorkspace = isApplicationWorkspace(location.pathname);
   const hasProject = state.currentProject !== null;
   const showProjectShell = !applicationWorkspace && hasProject;
@@ -63,13 +63,16 @@ export function Layout() {
         case 'focus_ai':
           dispatch({ type: 'TOGGLE_AI_PANEL' });
           break;
-        // about/check_for_updates/quit_application/open_recent:* 暂由原生处理或后续接入。
+        case 'quit_application':
+          void requestApplicationClose();
+          break;
+        // about/check_for_updates 暂由原生处理或后续接入。
         default:
           break;
       }
     });
     return () => off();
-  }, [navigate, dispatch, closeProject, openRecentProject]);
+  }, [navigate, dispatch, closeProject, openRecentProject, requestApplicationClose]);
 
   if (!applicationWorkspace && !hasProject) {
     return <Navigate to="/" replace />;
@@ -84,7 +87,7 @@ export function Layout() {
           className={`flex-1 overflow-auto bg-atmosphere relative ${showProjectShell ? 'ml-[220px]' : ''}`}
           style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
         >
-          <div className="min-h-full p-6">
+          <div data-testid="route-viewport" className="h-full min-h-full p-6">
             <Outlet />
           </div>
         </main>

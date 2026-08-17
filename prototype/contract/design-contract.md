@@ -119,7 +119,9 @@
 - Active item gets `bg-primary-subtle text-primary` and a 3px left accent bar.
 
 ### Settings Access
-- Application settings is reachable only from the app menu (织境 Story Studio → 应用设置) at `/settings`.
+- Application settings is reachable from the top model-status button or app menu at `/settings`.
+- Settings uses a Codex-style two-column layout: a fixed 260px category sidebar with “返回应用”, search, and vertical categories; the right pane contains the active category, scrollable content, and an in-pane save footer.
+- “返回应用” returns to the current project manuscript when a project is open, otherwise to Home.
 - Project settings is reachable only from File → 项目设置 (`/project-settings`).
 
 ## Page List
@@ -139,7 +141,7 @@
 | 5e | 时间线与事实    | Timeline & facts                                                       | Timeline, FactTable                     | —                                     |
 | 5f | 伏笔与关系      | Foreshadowing & relationship graph                                     | ForeshadowList, RelationMap (simplified)| —                                     |
 | 6  | Versions        | Versions & delivery: snapshots, export, manuscript                     | VersionTimeline, ExportActions          | —                                     |
-| 7  | Settings        | Application settings: model, plan, templates, appearance, advanced     | SettingsTabs, FormGroups                | —                                     |
+| 7  | Settings        | Application settings: model, plan, templates, appearance, advanced     | SettingsSidebar, Search, FormGroups     | /chapters or /                        |
 | 8  | ProjectSettings | Project-level settings only                                            | FormGroups                              | —                                     |
 
 ### Stateful Views (embedded inside pages as needed)

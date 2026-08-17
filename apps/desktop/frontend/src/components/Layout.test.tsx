@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Layout } from './Layout';
 import { AppProvider } from '../store/AppContext';
 
@@ -12,9 +12,29 @@ Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe('应用与项目工作区边界', () => {
+  it('macOS 窗口标题栏不重复显示软件名称', () => {
+    vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <AppProvider>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route path="settings" element={<h1>应用设置内容</h1>} />
+            </Route>
+          </Routes>
+        </AppProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('织境 Story Studio')).toBeNull();
+    expect(screen.getByRole('button', { name: '未配置模型' })).toBeTruthy();
+  });
+
   it('应用设置不渲染当前作品侧栏或项目级 AI 面板', () => {
     render(
       <MemoryRouter initialEntries={['/settings']}>
@@ -29,6 +49,7 @@ describe('应用与项目工作区边界', () => {
     );
 
     expect(screen.getByRole('heading', { name: '应用设置内容' })).toBeTruthy();
+    expect(screen.getByTestId('route-viewport').className).toContain('h-full');
     expect(screen.queryByText('当前作品')).toBeNull();
     expect(screen.queryByTitle('打开 AI 面板')).toBeNull();
   });

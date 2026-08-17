@@ -32,6 +32,7 @@ describe('应用与项目工作区边界', () => {
     );
 
     expect(screen.getByRole('heading', { name: '应用设置内容' })).toBeTruthy();
+    expect(screen.getByTestId('route-viewport').className).toContain('h-full');
     expect(screen.queryByText('当前作品')).toBeNull();
     expect(screen.queryByTitle('打开 AI 面板')).toBeNull();
   });

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
   Cpu, Feather, FileText, Palette, SlidersHorizontal, Save, Check,
-  AlertTriangle, TestTube, Trash2, Plus,
+  AlertTriangle, TestTube, Trash2, Plus, ArrowLeft, Search,
 } from 'lucide-react';
 import { useApp } from '../store/useApp';
 import type { AppSettings, CreativeProfile, CreativeRole, ModelConfig } from '../types';
@@ -25,6 +26,14 @@ const tabs: { key: TabKey; label: string; icon: typeof Cpu }[] = [
   { key: 'advanced', label: '高级', icon: SlidersHorizontal },
 ];
 
+const tabDescriptions: Record<TabKey, string> = {
+  model: '管理模型服务、接口地址与凭据。',
+  writing: '为规划、写作、审阅等职责分配模型。',
+  templates: '管理作者常用的创作模板。',
+  appearance: '调整主题、正文画布与排版。',
+  advanced: '设置自动保存、备份和界面语言。',
+};
+
 const creativeRoleLabels: Record<CreativeRole, string> = {
   planning: '规划',
   writing: '写作',
@@ -34,8 +43,10 @@ const creativeRoleLabels: Record<CreativeRole, string> = {
 };
 
 export default function Settings() {
+  const navigate = useNavigate();
   const { state, saveSettings, refreshBootstrap } = useApp();
   const [activeTab, setActiveTab] = useState<TabKey>('model');
+  const [search, setSearch] = useState('');
   const [saved, setSaved] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testOkId, setTestOkId] = useState<string | null>(null);
@@ -49,6 +60,8 @@ export default function Settings() {
   const [defaultCreativeProfileId, setDefaultCreativeProfileId] = useState(state.settings.defaultCreativeProfileId);
   const [selectedProfileId, setSelectedProfileId] = useState(state.settings.defaultCreativeProfileId);
   const selectedProfile = creativeProfiles.find((profile) => profile.id === selectedProfileId) || creativeProfiles[0];
+  const activeTabMeta = tabs.find((tab) => tab.key === activeTab) || tabs[0];
+  const visibleTabs = tabs.filter((tab) => `${tab.label}${tabDescriptions[tab.key]}`.includes(search.trim()));
 
   const [theme, setTheme] = useState(state.settings.theme);
   const [fontSize, setFontSize] = useState(state.settings.fontSize);
@@ -201,14 +214,28 @@ export default function Settings() {
   };
 
   return (
-    <div className="h-full flex flex-col animate-fade-up">
-      <div className="mb-6">
-        <h1 className="text-2xl font-display text-text mb-1">应用设置</h1>
-        <p className="text-sm text-text-sub">配置模型、创作偏好与界面选项。</p>
-      </div>
-
-      <div className="flex gap-2 border-b border-border mb-6 overflow-x-auto">
-        {tabs.map((tab) => {
+    <div className="h-[calc(100%+3rem)] -m-6 flex overflow-hidden bg-surface animate-fade-up">
+      <aside className="w-[260px] shrink-0 border-r border-border bg-surface px-4 py-5 flex flex-col">
+        <button
+          onClick={() => navigate(state.currentProject ? '/chapters' : '/')}
+          className="flex items-center gap-2 px-2 py-2 mb-4 rounded-md text-sm text-text-sub hover:text-text hover:bg-surface-hover transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          返回应用
+        </button>
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索设置…"
+            aria-label="搜索设置"
+            className="pl-9 rounded-full bg-surface-hover"
+          />
+        </div>
+        <p className="px-2 mb-2 text-xs font-medium text-text-muted uppercase tracking-wider">应用</p>
+        <nav className="space-y-1">
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
           return (
@@ -216,23 +243,32 @@ export default function Settings() {
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left',
                 isActive
-                  ? 'text-primary border-primary'
-                  : 'text-text-sub border-transparent hover:text-text hover:border-border-strong',
+                  ? 'text-text bg-primary-subtle'
+                  : 'text-text-sub hover:text-text hover:bg-surface-hover',
               )}
             >
               <Icon className="w-4 h-4" />
               {tab.label}
               {tab.key === 'model' && !activeModel.apiKeyConfigured && !apiKeys[activeModel.id]?.trim() && (
-                <StatusBadge variant="warning" className="ml-1">未配置</StatusBadge>
+                <span className="ml-auto w-2 h-2 rounded-full bg-warning" title="未配置" />
               )}
             </button>
           );
         })}
-      </div>
+        </nav>
+        {visibleTabs.length === 0 && <p className="px-3 py-4 text-sm text-text-muted">没有匹配的设置</p>}
+      </aside>
 
-      <div className="flex-1 min-h-0 overflow-auto pr-1 pb-6">
+      <section className="flex-1 min-w-0 flex flex-col bg-atmosphere">
+        <header className="w-full max-w-5xl mx-auto px-10 pt-9 pb-6">
+          <h1 className="text-3xl font-display text-text">{activeTabMeta.label}</h1>
+          <p className="text-sm text-text-sub mt-2">{tabDescriptions[activeTab]}</p>
+        </header>
+
+        <div className="flex-1 min-h-0 overflow-auto px-10 pb-8">
+          <div className="w-full max-w-5xl mx-auto">
         {activeTab === 'model' && (
           <div className="max-w-3xl space-y-5">
             {!activeModel.apiKeyConfigured && !apiKeys[activeModel.id]?.trim() && (
@@ -599,18 +635,22 @@ export default function Settings() {
             </div>
           </Card>
         )}
-      </div>
+          </div>
+        </div>
 
-      <div className="pt-4 border-t border-border flex justify-end">
-        <Button
-          variant={saved ? 'default' : 'primary'}
-          onClick={handleSave}
-          className={saved ? 'text-success border-success/30' : ''}
-        >
-          {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          {saved ? '已保存' : '保存设置'}
-        </Button>
-      </div>
+        <footer className="border-t border-border bg-surface/90 px-10 py-4">
+          <div className="max-w-5xl mx-auto flex justify-end">
+            <Button
+              variant={saved ? 'default' : 'primary'}
+              onClick={handleSave}
+              className={saved ? 'text-success border-success/30' : ''}
+            >
+              {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+              {saved ? '已保存' : '保存设置'}
+            </Button>
+          </div>
+        </footer>
+      </section>
     </div>
   );
 }

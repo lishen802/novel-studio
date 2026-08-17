@@ -25,6 +25,8 @@ export interface AppCtxValue {
   openProject: () => Promise<boolean>;
   openRecentProject: (projectId: string) => Promise<boolean>;
   closeProject: () => Promise<void>;
+  registerBeforeClose: (handler: () => Promise<void>) => () => void;
+  requestApplicationClose: () => Promise<void>;
 }
 
 export const AppContext = createContext<AppCtxValue | undefined>(undefined);

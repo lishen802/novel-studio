@@ -17,6 +17,8 @@ describe('应用级创作方案', () => {
       </MemoryRouter>,
     );
 
+    expect(screen.getByRole('button', { name: '返回应用' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: '搜索设置' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '创作方案' }));
 
     expect(await screen.findByText('角色分配')).toBeTruthy();

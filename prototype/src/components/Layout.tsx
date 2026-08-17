@@ -46,7 +46,7 @@ export function Layout() {
           )}
           style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
         >
-          <div className="min-h-full p-6">
+          <div data-testid="route-viewport" className="h-full min-h-full p-6">
             <Outlet />
           </div>
         </main>
