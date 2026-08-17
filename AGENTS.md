@@ -26,6 +26,7 @@
 - Add concise Chinese comments to key functions explaining their purpose; all code comments must be in Chinese.
 - For large features or changes spanning multiple modules, database schema, or major product capabilities, create an isolated Git worktree automatically without requesting confirmation.
 - After a large feature is complete and verified, merge its feature branch into `main` automatically without requesting confirmation.
+- After any requested change is complete and proportionally verified, automatically create a scoped Git commit without waiting for a separate commit request. Include only files belonging to the completed change, preserve unrelated worktree changes, and do not push unless the user explicitly asks.
 - Never commit API keys, model credentials, signing certificates, user manuscripts, or local databases.
 - Keep the accepted prototype operational; production frontend must follow the prototype's visual and interaction design.
 - Wails v3 is not the production baseline while it remains Alpha. Re-evaluate it through a new architecture decision after a stable release.
