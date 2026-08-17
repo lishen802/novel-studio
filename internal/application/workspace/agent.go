@@ -369,60 +369,67 @@ func (s *Service) createChapterAgentRunLocked(
 	if err != nil {
 		return AgentRunView{}, err
 	}
-	if s.credentials == nil || s.providers == nil {
+	if s.profileResolver == nil {
 		return AgentRunView{}, ErrAgentRuntimeUnavailable
 	}
 	chapter, err := s.active.store.Chapter(ctx, strings.TrimSpace(chapterID))
 	if err != nil {
 		return AgentRunView{}, err
 	}
-	profiles, err := store.ListAgentProfiles(ctx)
+
+	// 读取项目锁定的方案版本；项目未锁定方案时 AI 功能不可用。
+	selection, found, err := readProfileSelection(ctx, s.active.store)
 	if err != nil {
 		return AgentRunView{}, err
 	}
-	if err := agentdomain.ValidateAuthoringProfiles(profiles); err != nil {
-		return AgentRunView{}, err
+	if !found || strings.TrimSpace(selection.ProfileID) == "" {
+		return AgentRunView{}, ErrProjectProfileNotConfigured
 	}
-	settings, err := store.AgentRuntimeSettings(ctx, chapter.ProjectID)
+
+	// 按确切版本解析，不读取当前默认方案或最新版本，并检查角色、连接与凭据。
+	resolved, err := s.profileResolver.ResolveCreativeProfile(ctx, selection.ProfileID, selection.Version)
 	if err != nil {
 		return AgentRunView{}, err
 	}
-	byRole := make(map[agentdomain.AgentRole]agentdomain.AgentProfile, len(profiles))
+
 	maxOutputTokens := 0
-	for _, profile := range profiles {
-		byRole[profile.Role] = profile
-		if profile.Enabled {
-			maxOutputTokens += profile.MaxOutputTokens
-		}
-		connection, err := store.ProviderConnection(ctx, profile.ConnectionID)
-		if err != nil {
-			return AgentRunView{}, err
-		}
-		if _, err := s.credentials.Get(ctx, connection.CredentialRef); err != nil {
-			return AgentRunView{}, fmt.Errorf("missing credential for %s: %w", profile.Role, err)
-		}
+	for _, role := range resolved.Roles {
+		maxOutputTokens += role.MaxOutputTokens
 	}
-	run, err := agentdomain.NewChapterDraftRun(
-		s.ids.NewID(), chapter.ProjectID, chapter.ID, chapter.Revision, prompt,
-		[]agentdomain.RunStepSpec{
-			{ID: s.ids.NewID(), Role: agentdomain.RolePlanner, ProfileID: byRole[agentdomain.RolePlanner].ID},
-			{ID: s.ids.NewID(), Role: agentdomain.RoleWriter, ProfileID: byRole[agentdomain.RoleWriter].ID},
-			{ID: s.ids.NewID(), Role: agentdomain.RoleContinuityReviewer, ProfileID: byRole[agentdomain.RoleContinuityReviewer].ID},
-		},
-		s.clock.Now(),
-	)
-	if err != nil {
-		return AgentRunView{}, err
-	}
-	if maxOutputTokens > settings.MaxRunTokens {
+	if maxOutputTokens > resolved.MaxRunTokens {
 		return AgentRunView{}, fmt.Errorf(
 			"%w: role output limits total %d, budget %d",
 			ErrTokenBudgetExceeded,
 			maxOutputTokens,
-			settings.MaxRunTokens,
+			resolved.MaxRunTokens,
 		)
 	}
-	run, err = run.WithBudgets(settings.MaxRunTokens, settings.MaxContextChars)
+
+	specs := make([]agentdomain.RunStepSpec, len(resolved.Roles))
+	for index, role := range resolved.Roles {
+		specs[index] = agentdomain.RunStepSpec{
+			ID:                     s.ids.NewID(),
+			Role:                   role.Role,
+			CreativeProfileID:      resolved.ProfileID,
+			CreativeProfileVersion: resolved.Version,
+			ProviderConnectionID:   role.ConnectionID,
+			ProviderName:           role.ProviderName,
+			ProviderKind:           role.ProviderKind,
+			BaseURL:                role.BaseURL,
+			CredentialRef:          role.CredentialRef,
+			Model:                  role.Model,
+			MaxOutputTokens:        role.MaxOutputTokens,
+			Temperature:            role.Temperature,
+		}
+	}
+
+	run, err := agentdomain.NewChapterDraftRun(
+		s.ids.NewID(), chapter.ProjectID, chapter.ID, chapter.Revision, prompt, specs, s.clock.Now(),
+	)
+	if err != nil {
+		return AgentRunView{}, err
+	}
+	run, err = run.WithBudgets(resolved.MaxRunTokens, resolved.MaxContextChars)
 	if err != nil {
 		return AgentRunView{}, err
 	}
@@ -624,23 +631,21 @@ func (s *Service) runAgentPipeline(
 		return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 
-	profiles, err := store.ListAgentProfiles(ctx)
-	if err != nil {
-		return failed(err)
-	}
-	profileByID := make(map[string]agentdomain.AgentProfile, len(profiles))
-	for _, profile := range profiles {
-		profileByID[profile.ID] = profile
-	}
 	var plan, draft, review string
 	for index := range run.Steps {
 		step := run.Steps[index]
-		profile := profileByID[step.ProfileID]
-		connection, err := store.ProviderConnection(ctx, profile.ConnectionID)
-		if err != nil {
-			return failed(err)
+		// 执行阶段只读取冻结快照与凭据库，不重新解析可变的应用设置。
+		if strings.TrimSpace(step.Model) == "" || strings.TrimSpace(step.CredentialRef) == "" {
+			return failed(errors.New("agent run step is missing frozen provider configuration"))
 		}
-		apiKey, err := s.credentials.Get(ctx, connection.CredentialRef)
+		connection := agentdomain.ProviderConnection{
+			ID:            step.ProviderConnectionID,
+			Name:          step.ProviderName,
+			Kind:          step.ProviderKind,
+			BaseURL:       step.BaseURL,
+			CredentialRef: step.CredentialRef,
+		}
+		apiKey, err := s.credentials.Get(ctx, step.CredentialRef)
 		if err != nil {
 			return failed(err)
 		}
@@ -664,7 +669,7 @@ func (s *Service) runAgentPipeline(
 			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		s.notifyJobUpdated(ctx, store, run.ID, agentdomain.JobKindAgent)
-		request := agentRequest(step.Role, profile, run.Prompt, contextJSON, plan, draft)
+		request := agentRequest(step.Role, step.Model, step.MaxOutputTokens, step.Temperature, run.Prompt, contextJSON, plan, draft)
 		generated, err := provider.Generate(ctx, apiKey, request, func(delta string) {
 			step.Output += delta
 		})
@@ -1152,12 +1157,14 @@ func unrecoveredForeshadowingHooks(
 
 func agentRequest(
 	role agentdomain.AgentRole,
-	profile agentdomain.AgentProfile,
+	model string,
+	maxOutputTokens int,
+	temperature float64,
 	goal, contextJSON, plan, draft string,
 ) ports.ModelGenerateRequest {
 	request := ports.ModelGenerateRequest{
-		Model: profile.Model, MaxOutputTokens: profile.MaxOutputTokens,
-		Temperature: profile.Temperature,
+		Model: model, MaxOutputTokens: maxOutputTokens,
+		Temperature: temperature,
 	}
 	switch role {
 	case agentdomain.RolePlanner:

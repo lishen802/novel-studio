@@ -132,14 +132,22 @@ export interface ModelConfig {
   apiKeyConfigured: boolean;
 }
 
-export type CreativeRole = 'planning' | 'writing' | 'review' | 'memory' | 'impact';
+export type CreativeRole = 'planner' | 'writer' | 'continuity_reviewer';
+
+/** 创作方案中单个角色的模型绑定，模型名称属于角色绑定而非连接。 */
+export interface CreativeProfileRole {
+  connectionId: string;
+  model: string;
+  maxOutputTokens: number;
+  temperature: number;
+}
 
 export interface CreativeProfile {
   id: string;
   name: string;
   version: number;
   published: boolean;
-  roleModels: Record<CreativeRole, string>;
+  roles: Record<CreativeRole, CreativeProfileRole>;
 }
 
 export interface ProjectProfileSelection {

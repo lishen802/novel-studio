@@ -71,12 +71,10 @@ export const defaultSettings: AppSettings = {
       name: '长篇创作默认方案',
       version: 1,
       published: true,
-      roleModels: {
-        planning: 'model-openai',
-        writing: 'model-openai',
-        review: 'model-claude',
-        memory: 'model-openai',
-        impact: 'model-claude',
+      roles: {
+        planner: { connectionId: 'model-openai', model: 'gpt-4.1', maxOutputTokens: 4096, temperature: 0.7 },
+        writer: { connectionId: 'model-openai', model: 'gpt-4.1', maxOutputTokens: 4096, temperature: 0.7 },
+        continuity_reviewer: { connectionId: 'model-claude', model: 'claude-sonnet', maxOutputTokens: 4096, temperature: 0.2 },
       },
     },
   ],

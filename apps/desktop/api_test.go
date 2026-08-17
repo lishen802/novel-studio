@@ -1904,6 +1904,12 @@ func (r *fakeAppSettingsRepo) LatestProfileVersion(context.Context, string) (app
 	}
 	return r.profileVer, nil
 }
+func (r *fakeAppSettingsRepo) ListLatestProfiles(context.Context) ([]appdomain.CreativeProfileVersion, error) {
+	if !r.profileFound {
+		return nil, nil
+	}
+	return []appdomain.CreativeProfileVersion{r.profileVer}, nil
+}
 func (r *fakeAppSettingsRepo) RecordRecentProject(context.Context, appdomain.RecentProject) error {
 	return nil
 }

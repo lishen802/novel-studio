@@ -29,6 +29,7 @@ type Service struct {
 	filesystem      ports.ProjectFilesystemGuard
 	projectDefaults ports.ProjectDefaults
 	legacyImporter  ports.LegacySettingsImporter
+	profileResolver ports.CreativeProfileResolver
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -178,6 +179,15 @@ func (s *Service) ConfigureLegacyImporter(importer ports.LegacySettingsImporter)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.legacyImporter = importer
+}
+
+// ConfigureCreativeProfileResolver installs the read-only port used to resolve a
+// project's pinned creative profile version into a run freeze snapshot. AgentRun
+// creation fails cleanly when it is not configured.
+func (s *Service) ConfigureCreativeProfileResolver(resolver ports.CreativeProfileResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileResolver = resolver
 }
 
 func (s *Service) preflightEditable(packageInfo ports.ProjectPackage) (ports.ProjectFilesystemHealth, error) {

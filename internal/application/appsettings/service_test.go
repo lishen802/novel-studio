@@ -26,10 +26,13 @@ func (f *fakeIDGenerator) NewID() string {
 }
 
 type fakeCredentials struct {
-	mu       sync.Mutex
-	saved    map[string]string
-	deleted  []string
-	getError error
+	mu         sync.Mutex
+	saved      map[string]string
+	deleted    []string
+	getError   error
+	saveError  error
+	saveCalls  int
+	failSaveOn int
 }
 
 func newFakeCredentials() *fakeCredentials {
@@ -39,6 +42,10 @@ func newFakeCredentials() *fakeCredentials {
 func (f *fakeCredentials) Save(_ context.Context, ref, secret string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.saveCalls++
+	if f.failSaveOn > 0 && f.saveCalls == f.failSaveOn {
+		return f.saveError
+	}
 	f.saved[ref] = secret
 	return nil
 }
@@ -72,6 +79,7 @@ type fakeRepo struct {
 	recent        []appdomain.RecentProject
 	legacyImports map[string]string
 	upsertError   error
+	deleteError   error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -130,6 +138,9 @@ func (r *fakeRepo) Providers(_ context.Context) ([]appdomain.ProviderConnection,
 func (r *fakeRepo) DeleteProvider(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.deleteError != nil {
+		return r.deleteError
+	}
 	for i, p := range r.providers {
 		if p.ID == id {
 			r.providers = append(r.providers[:i], r.providers[i+1:]...)
@@ -191,6 +202,22 @@ func (r *fakeRepo) LatestProfileVersion(_ context.Context, profileID string) (ap
 		return appdomain.CreativeProfileVersion{}, errTestMissing
 	}
 	return latest, nil
+}
+
+func (r *fakeRepo) ListLatestProfiles(_ context.Context) ([]appdomain.CreativeProfileVersion, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	latestByID := make(map[string]appdomain.CreativeProfileVersion)
+	for _, v := range r.profiles {
+		if existing, ok := latestByID[v.ProfileID]; !ok || v.Version > existing.Version {
+			latestByID[v.ProfileID] = v
+		}
+	}
+	result := make([]appdomain.CreativeProfileVersion, 0, len(latestByID))
+	for _, v := range latestByID {
+		result = append(result, v)
+	}
+	return result, nil
 }
 
 func (r *fakeRepo) RecordRecentProject(_ context.Context, rp appdomain.RecentProject) error {
@@ -470,3 +497,200 @@ func TestHasCredentialReturnsFalseWhenVaultMissingSecret(t *testing.T) {
 var errTestMissing = errors.New("record not found")
 
 var _ ports.ProjectDefaults = (*Service)(nil)
+var _ ports.ProviderProber = (*Service)(nil)
+var _ ports.CreativeProfileResolver = (*Service)(nil)
+
+type fakeProvider struct {
+	result ports.ModelGenerateResult
+	err    error
+}
+
+func (f *fakeProvider) Generate(_ context.Context, _ string, _ ports.ModelGenerateRequest, _ func(string)) (ports.ModelGenerateResult, error) {
+	return f.result, f.err
+}
+
+type fakeProviderFactory struct {
+	provider ports.ModelProvider
+	err      error
+}
+
+func (f *fakeProviderFactory) New(_ agent.ProviderConnection) (ports.ModelProvider, error) {
+	return f.provider, f.err
+}
+
+func TestProbeProviderReturnsUsageAndLatency(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	svc.ConfigureProviders(&fakeProviderFactory{provider: &fakeProvider{
+		result: ports.ModelGenerateResult{ProviderRequestID: "req-1", InputTokens: 5, OutputTokens: 2},
+	}})
+	result, err := svc.ProbeProvider(context.Background(), provider.ID, "gpt-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ProviderRequestID != "req-1" || result.InputTokens != 5 || result.OutputTokens != 2 {
+		t.Fatalf("unexpected probe result: %#v", result)
+	}
+	if result.Model != "gpt-test" || result.ProviderID != provider.ID {
+		t.Fatalf("unexpected probe identity: %#v", result)
+	}
+}
+
+func TestProbeProviderMissingCredentialReturnsErrCredentialMissing(t *testing.T) {
+	svc, _, creds := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	svc.ConfigureProviders(&fakeProviderFactory{provider: &fakeProvider{}})
+	creds.getError = errors.New("not found")
+	_, err := svc.ProbeProvider(context.Background(), provider.ID, "gpt-test")
+	if !errors.Is(err, ErrCredentialMissing) {
+		t.Fatalf("error = %v, want ErrCredentialMissing", err)
+	}
+}
+
+func TestProbeProviderBlankModelRejected(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	svc.ConfigureProviders(&fakeProviderFactory{provider: &fakeProvider{}})
+	_, err := svc.ProbeProvider(context.Background(), provider.ID, "  ")
+	if !errors.Is(err, ErrInvalidProfileInput) {
+		t.Fatalf("error = %v, want ErrInvalidProfileInput", err)
+	}
+}
+
+func TestProbeProviderPropagatesProviderError(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	svc.ConfigureProviders(&fakeProviderFactory{provider: &fakeProvider{err: errors.New("provider failed")}})
+	if _, err := svc.ProbeProvider(context.Background(), provider.ID, "gpt-test"); err == nil {
+		t.Fatal("ProbeProvider succeeded")
+	}
+}
+
+func TestUpdateProviderRestoresOldCredentialWhenMetadataFails(t *testing.T) {
+	svc, repo, creds := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	repo.upsertError = errors.New("write failed")
+	_, err := svc.UpdateProvider(context.Background(), provider.ID, ProviderInput{
+		Name: "OpenAI", Kind: agent.ProviderOpenAI,
+		BaseURL: "https://api.openai.com/v1", APIKey: "new-secret",
+	})
+	if err == nil {
+		t.Fatal("UpdateProvider succeeded")
+	}
+	if got := creds.saved[provider.CredentialRef]; got != "secret" {
+		t.Fatalf("credential after rollback = %q, want old secret", got)
+	}
+}
+
+func TestUpdateProviderCredentialRollbackFailureReturnsRollbackError(t *testing.T) {
+	svc, repo, creds := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	repo.upsertError = errors.New("write failed")
+	creds.saveError = errors.New("vault unavailable")
+	creds.failSaveOn = 3 // 首次写入新凭据成功，回滚写入旧凭据失败。
+	_, err := svc.UpdateProvider(context.Background(), provider.ID, ProviderInput{
+		Name: "OpenAI", Kind: agent.ProviderOpenAI,
+		BaseURL: "https://api.openai.com/v1", APIKey: "new-secret",
+	})
+	if !errors.Is(err, ErrCredentialRollback) {
+		t.Fatalf("error = %v, want ErrCredentialRollback", err)
+	}
+}
+
+func TestDeleteProviderRemovesCredential(t *testing.T) {
+	svc, _, creds := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	if err := svc.DeleteProvider(context.Background(), provider.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := creds.saved[provider.CredentialRef]; ok {
+		t.Fatal("credential still present after delete")
+	}
+}
+
+func TestDeleteProviderRestoresCredentialWhenMetadataFails(t *testing.T) {
+	svc, repo, creds := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	repo.deleteError = errors.New("delete failed")
+	if err := svc.DeleteProvider(context.Background(), provider.ID); err == nil {
+		t.Fatal("DeleteProvider succeeded")
+	}
+	if got := creds.saved[provider.CredentialRef]; got != "secret" {
+		t.Fatalf("credential after rollback = %q, want old secret", got)
+	}
+}
+
+func TestResolveCreativeProfileReturnsConnectionMetadata(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	v := mustPublish(t, svc, profileUsing(provider.ID))
+	resolved, err := svc.ResolveCreativeProfile(context.Background(), v.ProfileID, v.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ProfileID != v.ProfileID || resolved.Version != v.Version {
+		t.Fatalf("resolved identity = %s@%d", resolved.ProfileID, resolved.Version)
+	}
+	if resolved.MaxRunTokens != v.MaxRunTokens || resolved.MaxContextChars != v.MaxContextChars {
+		t.Fatalf("resolved budgets = %d/%d", resolved.MaxRunTokens, resolved.MaxContextChars)
+	}
+	if len(resolved.Roles) != 3 {
+		t.Fatalf("resolved roles = %d", len(resolved.Roles))
+	}
+	for _, role := range resolved.Roles {
+		if role.ConnectionID != provider.ID || role.CredentialRef != provider.CredentialRef {
+			t.Fatalf("role %s metadata = %#v", role.Role, role)
+		}
+		if role.ProviderName != provider.Name || role.Model == "" {
+			t.Fatalf("role %s model/name = %q/%q", role.Role, role.ProviderName, role.Model)
+		}
+	}
+}
+
+func TestResolveCreativeProfileMissingCredential(t *testing.T) {
+	svc, _, creds := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	v := mustPublish(t, svc, profileUsing(provider.ID))
+	creds.getError = errors.New("not found")
+	if _, err := svc.ResolveCreativeProfile(context.Background(), v.ProfileID, v.Version); !errors.Is(err, ErrCredentialMissing) {
+		t.Fatalf("error = %v, want ErrCredentialMissing", err)
+	}
+}
+
+func TestResolveCreativeProfileNotFound(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	if _, err := svc.ResolveCreativeProfile(context.Background(), "missing", 1); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("error = %v, want ErrProfileNotFound", err)
+	}
+}
+
+func TestLatestProfilesReturnsLatestVersionPerProfile(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	mustPublish(t, svc, profileInput("方案 A", "writer-a1"))
+	mustPublish(t, svc, profileInput("方案 A", "writer-a2"))
+	second := ProfileInput{
+		ProfileID: "profile-2", Name: "方案 B",
+		MaxRunTokens: 30000, MaxContextChars: 120000,
+		Roles: []RoleInput{
+			{Role: agent.RolePlanner, ConnectionID: "conn-1", Model: "planner-model", MaxOutputTokens: 1000, Temperature: 0.7, Enabled: true},
+			{Role: agent.RoleWriter, ConnectionID: "conn-1", Model: "writer-b1", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
+			{Role: agent.RoleContinuityReviewer, ConnectionID: "conn-1", Model: "reviewer-model", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
+		},
+	}
+	mustPublish(t, svc, second)
+
+	profiles, err := svc.LatestProfiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("latest profiles = %d, want 2", len(profiles))
+	}
+	byID := map[string]appdomain.CreativeProfileVersion{}
+	for _, p := range profiles {
+		byID[p.ProfileID] = p
+	}
+	if byID["profile-1"].Version != 2 || byID["profile-2"].Version != 1 {
+		t.Fatalf("latest versions = %d/%d", byID["profile-1"].Version, byID["profile-2"].Version)
+	}
+}

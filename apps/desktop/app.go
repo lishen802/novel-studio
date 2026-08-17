@@ -64,8 +64,10 @@ func newApp() *App {
 
 	appSettingsService := newAppSettingsService(clock, idGenerator)
 	if appSettingsService != nil {
+		appSettingsService.ConfigureProviders(providers.NewFactory(http.DefaultClient))
 		workspaceService.ConfigureProjectDefaults(appSettingsService)
 		workspaceService.ConfigureLegacyImporter(appSettingsService)
+		workspaceService.ConfigureCreativeProfileResolver(appSettingsService)
 	}
 
 	var shell *appshell.Service

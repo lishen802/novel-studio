@@ -313,6 +313,82 @@ func (s *Store) LatestProfileVersion(ctx context.Context, profileID string) (app
 	return s.ProfileVersion(ctx, profileID, version)
 }
 
+// ListLatestProfiles 用一次查询返回每个 profile_id 的最新版本及其角色绑定，
+// 避免上层循环逐方案调用 LatestProfileVersion 造成 N+1 查询。
+func (s *Store) ListLatestProfiles(ctx context.Context) ([]appsettings.CreativeProfileVersion, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT v.profile_id, v.version, v.name, v.max_run_tokens, v.max_context_chars, v.created_at,
+		       r.role, r.connection_id, r.model, r.max_output_tokens, r.temperature, r.enabled
+		FROM creative_profile_versions v
+		JOIN (SELECT profile_id, MAX(version) AS max_version FROM creative_profile_versions GROUP BY profile_id) latest
+		  ON v.profile_id = latest.profile_id AND v.version = latest.max_version
+		LEFT JOIN creative_profile_roles r
+		  ON r.profile_id = v.profile_id AND r.version = v.version
+		ORDER BY v.profile_id ASC, r.role ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list latest profiles: %w", err)
+	}
+	defer rows.Close()
+
+	byID := make(map[string]*appsettings.CreativeProfileVersion)
+	order := make([]string, 0)
+	for rows.Next() {
+		var (
+			profileID                          string
+			version                            int64
+			name                               string
+			maxRunTokens, maxContextChars      int
+			createdAt                          string
+			roleStr, connectionID, model       sql.NullString
+			maxOutputTokens, enabled           sql.NullInt64
+			temperature                        sql.NullFloat64
+		)
+		if err := rows.Scan(
+			&profileID, &version, &name, &maxRunTokens, &maxContextChars, &createdAt,
+			&roleStr, &connectionID, &model, &maxOutputTokens, &temperature, &enabled,
+		); err != nil {
+			return nil, fmt.Errorf("scan latest profile: %w", err)
+		}
+		profile, ok := byID[profileID]
+		if !ok {
+			created, err := parseTime(createdAt)
+			if err != nil {
+				return nil, fmt.Errorf("parse latest profile created_at: %w", err)
+			}
+			byID[profileID] = &appsettings.CreativeProfileVersion{
+				ProfileID:       profileID,
+				Version:         version,
+				Name:            name,
+				MaxRunTokens:    maxRunTokens,
+				MaxContextChars: maxContextChars,
+				CreatedAt:       created,
+			}
+			order = append(order, profileID)
+			profile = byID[profileID]
+		}
+		if roleStr.Valid {
+			profile.Roles = append(profile.Roles, appsettings.RoleBinding{
+				Role:            agent.AgentRole(roleStr.String),
+				ConnectionID:    connectionID.String,
+				Model:           model.String,
+				MaxOutputTokens: int(maxOutputTokens.Int64),
+				Temperature:     temperature.Float64,
+				Enabled:         enabled.Int64 == 1,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate latest profiles: %w", err)
+	}
+
+	result := make([]appsettings.CreativeProfileVersion, 0, len(order))
+	for _, id := range order {
+		result = append(result, *byID[id])
+	}
+	return result, nil
+}
+
 func (s *Store) RecordRecentProject(ctx context.Context, rp appsettings.RecentProject) error {
 	missing := 0
 	if rp.Missing {

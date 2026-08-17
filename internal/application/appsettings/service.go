@@ -17,6 +17,11 @@ var (
 	ErrProfileNotFound     = errors.New("creative profile not found")
 	ErrProviderNotFound    = errors.New("provider not found")
 	ErrInvalidProfileInput = errors.New("invalid creative profile input")
+	// ErrCredentialRollback 表示元数据写入失败后旧凭据未能自动恢复；此时连接
+	// 显示为"凭据需要重新输入"，需要作者重新保存 API Key。
+	ErrCredentialRollback = errors.New("credential rollback failed")
+	// ErrCredentialMissing 表示 API Key 未保存或凭据库不可用。
+	ErrCredentialMissing = errors.New("provider credential missing")
 )
 
 // ProviderInput carries the data needed to create or update a provider
@@ -54,12 +59,20 @@ type RoleInput struct {
 type Service struct {
 	repo        ports.AppSettingsRepository
 	credentials ports.CredentialStore
+	providers   ports.ModelProviderFactory
 	clock       ports.Clock
 	ids         ports.IDGenerator
 }
 
 func NewService(repo ports.AppSettingsRepository, credentials ports.CredentialStore, clock ports.Clock, ids ports.IDGenerator) *Service {
 	return &Service{repo: repo, credentials: credentials, clock: clock, ids: ids}
+}
+
+// ConfigureProviders installs the model provider factory used for real
+// connection tests. It is separate from NewService so existing callers keep
+// their construction contract.
+func (s *Service) ConfigureProviders(providers ports.ModelProviderFactory) {
+	s.providers = providers
 }
 
 func (s *Service) Preferences(ctx context.Context) (appdomain.Preferences, error) {
@@ -103,6 +116,9 @@ func (s *Service) UpdateProvider(ctx context.Context, providerID string, input P
 		return appdomain.ProviderConnection{}, ErrProviderNotFound
 	}
 
+	// 读取旧凭据，供元数据写入失败时恢复。
+	oldSecret, oldErr := s.credentials.Get(ctx, existing.CredentialRef)
+
 	now := s.clock.Now()
 	conn, err := appdomain.NewProviderConnection(existing.ID, input.Name, input.Kind, input.BaseURL, existing.CredentialRef, now)
 	if err != nil {
@@ -110,13 +126,21 @@ func (s *Service) UpdateProvider(ctx context.Context, providerID string, input P
 	}
 	conn.CreatedAt = existing.CreatedAt
 
+	secretChanged := false
 	if input.APIKey != "" {
 		if err := s.credentials.Save(ctx, existing.CredentialRef, input.APIKey); err != nil {
 			return appdomain.ProviderConnection{}, fmt.Errorf("update credential: %w", err)
 		}
+		secretChanged = true
 	}
 
 	if err := s.repo.UpsertProvider(ctx, conn); err != nil {
+		// 元数据写入失败时恢复旧凭据；恢复失败返回独立的凭据回滚错误。
+		if secretChanged {
+			if rollbackErr := s.restoreCredential(ctx, existing.CredentialRef, oldSecret, oldErr); rollbackErr != nil {
+				return appdomain.ProviderConnection{}, fmt.Errorf("%w: %v", ErrCredentialRollback, rollbackErr)
+			}
+		}
 		return appdomain.ProviderConnection{}, fmt.Errorf("update provider metadata: %w", err)
 	}
 
@@ -124,7 +148,7 @@ func (s *Service) UpdateProvider(ctx context.Context, providerID string, input P
 }
 
 func (s *Service) DeleteProvider(ctx context.Context, providerID string) error {
-	_, err := s.repo.Provider(ctx, providerID)
+	conn, err := s.repo.Provider(ctx, providerID)
 	if err != nil {
 		return ErrProviderNotFound
 	}
@@ -137,11 +161,29 @@ func (s *Service) DeleteProvider(ctx context.Context, providerID string) error {
 		return ErrProviderInUse
 	}
 
+	// 读取旧凭据用于删除失败时的恢复，随后先删凭据、再删元数据。
+	oldSecret, oldErr := s.credentials.Get(ctx, conn.CredentialRef)
+	if err := s.credentials.Delete(ctx, conn.CredentialRef); err != nil {
+		return fmt.Errorf("delete credential: %w", err)
+	}
+
 	if err := s.repo.DeleteProvider(ctx, providerID); err != nil {
+		if rollbackErr := s.restoreCredential(ctx, conn.CredentialRef, oldSecret, oldErr); rollbackErr != nil {
+			return fmt.Errorf("%w: %v", ErrCredentialRollback, rollbackErr)
+		}
 		return fmt.Errorf("delete provider: %w", err)
 	}
 
 	return nil
+}
+
+// restoreCredential 把凭据恢复为旧值。旧凭据存在时重新写入；旧凭据缺失时删除
+// 新写入的凭据，保证凭据库与元数据保持一致。
+func (s *Service) restoreCredential(ctx context.Context, ref, oldSecret string, oldErr error) error {
+	if oldErr == nil {
+		return s.credentials.Save(ctx, ref, oldSecret)
+	}
+	return s.credentials.Delete(ctx, ref)
 }
 
 func (s *Service) PublishCreativeProfile(ctx context.Context, input ProfileInput) (appdomain.CreativeProfileVersion, error) {
@@ -188,6 +230,54 @@ func (s *Service) ProfileVersion(ctx context.Context, profileID string, version 
 
 func (s *Service) LatestProfileVersion(ctx context.Context, profileID string) (appdomain.CreativeProfileVersion, error) {
 	return s.repo.LatestProfileVersion(ctx, profileID)
+}
+
+// LatestProfiles returns the newest version of every creative profile in a
+// single repository query, so the settings page can list all profiles without
+// looping at the Wails layer.
+func (s *Service) LatestProfiles(ctx context.Context) ([]appdomain.CreativeProfileVersion, error) {
+	return s.repo.ListLatestProfiles(ctx)
+}
+
+// ResolveCreativeProfile implements ports.CreativeProfileResolver. It reads a
+// profile version by exact ID and version, then joins each role binding to its
+// non-sensitive connection metadata. It verifies every role's credential exists
+// in the OS vault without reading the secret value, so a project can never pin
+// a profile that points at a missing or unusable connection.
+func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, version int64) (agent.ResolvedCreativeProfile, error) {
+	profile, err := s.repo.ProfileVersion(ctx, strings.TrimSpace(profileID), version)
+	if err != nil {
+		return agent.ResolvedCreativeProfile{}, ErrProfileNotFound
+	}
+
+	resolved := agent.ResolvedCreativeProfile{
+		ProfileID:       profile.ProfileID,
+		Version:         profile.Version,
+		MaxRunTokens:    profile.MaxRunTokens,
+		MaxContextChars: profile.MaxContextChars,
+		Roles:           make([]agent.ResolvedRole, 0, len(profile.Roles)),
+	}
+	for _, role := range profile.Roles {
+		conn, err := s.repo.Provider(ctx, role.ConnectionID)
+		if err != nil {
+			return agent.ResolvedCreativeProfile{}, fmt.Errorf("%w: connection %s", ErrProviderNotFound, role.ConnectionID)
+		}
+		if _, err := s.credentials.Get(ctx, conn.CredentialRef); err != nil {
+			return agent.ResolvedCreativeProfile{}, fmt.Errorf("%w: role %s", ErrCredentialMissing, role.Role)
+		}
+		resolved.Roles = append(resolved.Roles, agent.ResolvedRole{
+			Role:            role.Role,
+			ConnectionID:    conn.ID,
+			ProviderName:    conn.Name,
+			ProviderKind:    conn.Kind,
+			BaseURL:         conn.BaseURL,
+			CredentialRef:   conn.CredentialRef,
+			Model:           role.Model,
+			MaxOutputTokens: role.MaxOutputTokens,
+			Temperature:     role.Temperature,
+		})
+	}
+	return resolved, nil
 }
 
 func (s *Service) SetDefaultProfile(ctx context.Context, profileID string) error {
@@ -238,6 +328,61 @@ func (s *Service) DefaultProfileSelection(ctx context.Context) (ports.ProjectPro
 func (s *Service) HasCredential(ctx context.Context, provider appdomain.ProviderConnection) bool {
 	_, err := s.credentials.Get(ctx, provider.CredentialRef)
 	return err == nil
+}
+
+// probeTimeout 是真实连接测试的默认超时。
+const probeTimeout = 20 * time.Second
+
+// ProbeProvider 对已保存连接发起一次真实、最小费用的模型请求，验证鉴权、
+// 模型名称与调用协议可用。它不保存响应正文，也不自动重试到其他连接或模型。
+func (s *Service) ProbeProvider(ctx context.Context, providerID, model string) (ports.ProviderProbeResult, error) {
+	if s.providers == nil {
+		return ports.ProviderProbeResult{}, fmt.Errorf("model provider factory unavailable")
+	}
+	conn, err := s.repo.Provider(ctx, strings.TrimSpace(providerID))
+	if err != nil {
+		return ports.ProviderProbeResult{}, ErrProviderNotFound
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ports.ProviderProbeResult{}, fmt.Errorf("%w: model is required", ErrInvalidProfileInput)
+	}
+
+	apiKey, err := s.credentials.Get(ctx, conn.CredentialRef)
+	if err != nil {
+		return ports.ProviderProbeResult{}, ErrCredentialMissing
+	}
+
+	provider, err := s.providers.New(agent.ProviderConnection{Kind: conn.Kind, BaseURL: conn.BaseURL})
+	if err != nil {
+		return ports.ProviderProbeResult{}, err
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	started := s.clock.Now()
+	result, err := provider.Generate(probeCtx, apiKey, ports.ModelGenerateRequest{
+		Model:           model,
+		System:          "Return a concise acknowledgement.",
+		Input:           "Connection test.",
+		MaxOutputTokens: 16,
+		Temperature:     0,
+	}, nil)
+	if err != nil {
+		return ports.ProviderProbeResult{}, err
+	}
+
+	return ports.ProviderProbeResult{
+		ProviderID:        conn.ID,
+		ProviderName:      conn.Name,
+		Kind:              string(conn.Kind),
+		Model:             model,
+		ProviderRequestID: result.ProviderRequestID,
+		InputTokens:       result.InputTokens,
+		OutputTokens:      result.OutputTokens,
+		Latency:           s.clock.Now().Sub(started),
+	}, nil
 }
 
 // now is a convenience for tests that need to assert timestamps.

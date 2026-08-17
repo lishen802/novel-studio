@@ -278,6 +278,29 @@ type ApplicationProviderInput struct {
 	APIKey  string `json:"apiKey"`
 }
 
+// ProviderTestInput carries the saved connection ID and the model to test. The
+// model is an input to a single test request and is not persisted as part of
+// the connection.
+type ProviderTestInput struct {
+	ProviderID string `json:"providerId"`
+	Model      string `json:"model"`
+}
+
+// ProviderTestView is the safe result of a real connection test. It never
+// includes the response body or the API key.
+type ProviderTestView struct {
+	ProviderID        string `json:"providerId"`
+	ProviderName      string `json:"providerName"`
+	ProviderKind      string `json:"providerKind"`
+	Model             string `json:"model"`
+	Status            string `json:"status"`
+	LatencyMs         int64  `json:"latencyMs"`
+	ProviderRequestID string `json:"providerRequestId"`
+	InputTokens       int    `json:"inputTokens"`
+	OutputTokens      int    `json:"outputTokens"`
+	TestedAt          string `json:"testedAt"`
+}
+
 // RoleBindingView is the safe projection of a role binding in a creative
 // profile version.
 type RoleBindingView struct {
@@ -992,11 +1015,13 @@ func (a *DesktopAPI) ApplicationBootstrap() (ApplicationBootstrapView, error) {
 		})
 	}
 
-	profiles := make([]CreativeProfileView, 0)
-	if prefs.DefaultCreativeProfileID != "" {
-		if latest, err := a.settings.LatestProfileVersion(ctx, prefs.DefaultCreativeProfileID); err == nil {
-			profiles = append(profiles, creativeProfileView(latest))
-		}
+	latestProfiles, err := a.settings.LatestProfiles(ctx)
+	if err != nil {
+		return ApplicationBootstrapView{}, safeDesktopError(err)
+	}
+	profiles := make([]CreativeProfileView, 0, len(latestProfiles))
+	for _, latest := range latestProfiles {
+		profiles = append(profiles, creativeProfileView(latest))
 	}
 
 	return ApplicationBootstrapView{
@@ -1023,9 +1048,8 @@ func (a *DesktopAPI) SaveApplicationPreferences(input ApplicationPreferencesInpu
 	if input.Theme != "" {
 		prefs.Theme = appdomain.Theme(input.Theme)
 	}
-	if input.DefaultCreativeProfileID != "" {
-		prefs.DefaultCreativeProfileID = input.DefaultCreativeProfileID
-	}
+	// 空字符串表示清除默认方案，必须始终处理，不能因空值跳过更新。
+	prefs.DefaultCreativeProfileID = input.DefaultCreativeProfileID
 	prefs.UpdatedAt = time.Now().UTC()
 	return safeDesktopError(a.settings.SavePreferences(a.ctx, prefs))
 }
@@ -1073,24 +1097,28 @@ func (a *DesktopAPI) DeleteApplicationProvider(id string) error {
 	return safeDesktopError(a.settings.DeleteProvider(a.ctx, id))
 }
 
-// TestApplicationProvider verifies that a credential exists for the provider.
-func (a *DesktopAPI) TestApplicationProvider(id string) error {
+// TestApplicationProvider 对已保存连接发起一次真实、最小费用的模型请求，返回
+// 延迟、请求 ID 与 Token 用量；不保存响应正文，也不回显 API Key。
+func (a *DesktopAPI) TestApplicationProvider(input ProviderTestInput) (ProviderTestView, error) {
 	if a.settings == nil {
-		return safeDesktopError(errFeatureNotAvailable)
+		return ProviderTestView{}, safeDesktopError(errFeatureNotAvailable)
 	}
-	conn, err := a.settings.Providers(a.ctx)
+	result, err := a.settings.ProbeProvider(a.ctx, input.ProviderID, input.Model)
 	if err != nil {
-		return safeDesktopError(err)
+		return ProviderTestView{}, safeDesktopError(err)
 	}
-	for _, p := range conn {
-		if p.ID == id {
-			if a.settings.HasCredential(a.ctx, p) {
-				return nil
-			}
-			return safeDesktopError(errors.New("provider credential not found"))
-		}
-	}
-	return safeDesktopError(appsettings.ErrProviderNotFound)
+	return ProviderTestView{
+		ProviderID:        result.ProviderID,
+		ProviderName:      result.ProviderName,
+		ProviderKind:      result.Kind,
+		Model:             result.Model,
+		Status:            "succeeded",
+		LatencyMs:         result.Latency.Milliseconds(),
+		ProviderRequestID: result.ProviderRequestID,
+		InputTokens:       result.InputTokens,
+		OutputTokens:      result.OutputTokens,
+		TestedAt:          formatDesktopTime(time.Now().UTC()),
+	}, nil
 }
 
 // PublishCreativeProfile publishes a new version of a creative profile.

@@ -17,7 +17,6 @@ import (
 
 func TestAgentAuthoringCreatesReviewableChapterChangeSet(t *testing.T) {
 	ctx := context.Background()
-	credentials := &fakeCredentialStore{secrets: map[string]string{}}
 	providerFactory := &fakeModelProviderFactory{
 		outputs: map[string]string{
 			"planner-model":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
@@ -25,53 +24,26 @@ func TestAgentAuthoringCreatesReviewableChapterChangeSet(t *testing.T) {
 			"reviewer-model": `{"approved":true,"summary":"未发现连续性冲突","issues":[]}`,
 		},
 	}
-	ids := &sequenceIDs{ids: []string{
-		"project-1", "chapter-1",
-		"provider-1", "provider-2",
-		"profile-1", "profile-2", "profile-3",
-		"run-1", "step-1", "step-2", "step-3",
-		"artifact-context", "artifact-plan", "artifact-draft", "artifact-review",
-		"change-set-1", "operation-1",
-	}}
-	service := NewService(
-		projectfs.Manager{},
-		sqlite.Factory{},
-		license.NoopService{},
-		fixedClock{now: time.Unix(200, 0)},
-		ids,
-		&fakeSnapshotArchive{},
-	)
-	service.ConfigureAgentRuntime(credentials, providerFactory)
+	resolved := defaultResolvedProfile()
+	for index := range resolved.Roles {
+		switch resolved.Roles[index].Role {
+		case agentdomain.RolePlanner:
+			resolved.Roles[index].Model = "planner-model"
+		case agentdomain.RoleWriter:
+			resolved.Roles[index].Model = "writer-model"
+		case agentdomain.RoleContinuityReviewer:
+			resolved.Roles[index].Model = "reviewer-model"
+		}
+	}
+	service := newAgentServiceWithResolver(t, providerFactory, resolved)
+	defer service.Close()
 	project, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", "墨老企图夺舍主角")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
 	chapter, err := service.CreateChapter(ctx, "第一章")
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	openAI, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
-		Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key-a",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	anthropic, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
-		Name: "Anthropic", Kind: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "key-b",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, input := range []AgentProfileInput{
-		{Role: "planner", ConnectionID: openAI.ID, Model: "planner-model", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
-		{Role: "writer", ConnectionID: openAI.ID, Model: "writer-model", MaxOutputTokens: 3000, Temperature: 0.7, Enabled: true},
-		{Role: "continuity_reviewer", ConnectionID: anthropic.ID, Model: "reviewer-model", MaxOutputTokens: 1000, Temperature: 0.1, Enabled: true},
-	} {
-		if _, err := service.SaveAgentProfile(ctx, input); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章，保持克制的第三人称。")
@@ -116,14 +88,10 @@ func TestAgentAuthoringCreatesReviewableChapterChangeSet(t *testing.T) {
 }
 
 func TestCreateChapterAgentRunRejectsConfiguredOutputAboveBudget(t *testing.T) {
-	service, chapter := configuredAgentService(t, failingModelProviderFactory{})
+	resolved := defaultResolvedProfile()
+	resolved.MaxRunTokens = 4999
+	service, chapter := configuredAgentServiceWithProfile(t, failingModelProviderFactory{}, resolved)
 	defer service.Close()
-	if _, err := service.SaveAgentRuntimeSettings(context.Background(), AgentRuntimeSettingsInput{
-		MaxRunTokens:    4999,
-		MaxContextChars: 120000,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作"); !errors.Is(err, ErrTokenBudgetExceeded) {
 		t.Fatalf("CreateChapterAgentRun() error = %v, want ErrTokenBudgetExceeded", err)
 	}
@@ -131,14 +99,10 @@ func TestCreateChapterAgentRunRejectsConfiguredOutputAboveBudget(t *testing.T) {
 
 func TestAgentRunStopsBeforeNextStepWhenActualUsageExhaustsBudget(t *testing.T) {
 	providerFactory := &usageModelProviderFactory{}
-	service, chapter := configuredAgentService(t, providerFactory)
+	resolved := defaultResolvedProfile()
+	resolved.MaxRunTokens = 5000
+	service, chapter := configuredAgentServiceWithProfile(t, providerFactory, resolved)
 	defer service.Close()
-	if _, err := service.SaveAgentRuntimeSettings(context.Background(), AgentRuntimeSettingsInput{
-		MaxRunTokens:    5000,
-		MaxContextChars: 120000,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
 	if err != nil {
 		t.Fatal(err)
@@ -161,14 +125,11 @@ func TestAgentRunStopsBeforeNextStepWhenActualUsageExhaustsBudget(t *testing.T) 
 
 func TestAgentRunRejectsRequiredContextAboveBudgetBeforeProviderCall(t *testing.T) {
 	providerFactory := &usageModelProviderFactory{}
-	service, chapter := configuredAgentService(t, providerFactory)
+	resolved := defaultResolvedProfile()
+	resolved.MaxRunTokens = 5000
+	resolved.MaxContextChars = 1
+	service, chapter := configuredAgentServiceWithProfile(t, providerFactory, resolved)
 	defer service.Close()
-	if _, err := service.SaveAgentRuntimeSettings(context.Background(), AgentRuntimeSettingsInput{
-		MaxRunTokens:    5000,
-		MaxContextChars: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
 	if err != nil {
 		t.Fatal(err)
@@ -430,13 +391,45 @@ func TestCreateProjectCancelsActiveAgentRunBeforeReplacingWorkspace(t *testing.T
 	}
 }
 
-func configuredAgentService(
+type fakeCreativeProfileResolver struct {
+	resolved agentdomain.ResolvedCreativeProfile
+	err      error
+}
+
+func (r *fakeCreativeProfileResolver) ResolveCreativeProfile(_ context.Context, _ string, _ int64) (agentdomain.ResolvedCreativeProfile, error) {
+	if r.err != nil {
+		return agentdomain.ResolvedCreativeProfile{}, r.err
+	}
+	return r.resolved, nil
+}
+
+// defaultResolvedProfile 返回与测试 Provider 工厂输出模型一致的三角色方案。
+func defaultResolvedProfile() agentdomain.ResolvedCreativeProfile {
+	return agentdomain.ResolvedCreativeProfile{
+		ProfileID:       "pinned-profile",
+		Version:         1,
+		MaxRunTokens:    30000,
+		MaxContextChars: 120000,
+		Roles: []agentdomain.ResolvedRole{
+			{Role: agentdomain.RolePlanner, ConnectionID: "conn-1", ProviderName: "第一连接", ProviderKind: agentdomain.ProviderOpenAI, BaseURL: "https://api.openai.com/v1", CredentialRef: "provider:conn-1", Model: "planner", MaxOutputTokens: 1000, Temperature: 0.2},
+			{Role: agentdomain.RoleWriter, ConnectionID: "conn-1", ProviderName: "第一连接", ProviderKind: agentdomain.ProviderOpenAI, BaseURL: "https://api.openai.com/v1", CredentialRef: "provider:conn-1", Model: "writer", MaxOutputTokens: 3000, Temperature: 0.7},
+			{Role: agentdomain.RoleContinuityReviewer, ConnectionID: "conn-2", ProviderName: "第二连接", ProviderKind: agentdomain.ProviderAnthropic, BaseURL: "https://api.anthropic.com", CredentialRef: "provider:conn-2", Model: "reviewer", MaxOutputTokens: 1000, Temperature: 0.1},
+		},
+	}
+}
+
+// newAgentServiceWithResolver 构造一个已配置凭据、Provider 工厂、方案解析器与
+// 默认方案钉定的工作区服务，供 AgentRun 测试复用。
+func newAgentServiceWithResolver(
 	t *testing.T,
 	providerFactory ports.ModelProviderFactory,
-) (*Service, ChapterView) {
+	resolved agentdomain.ResolvedCreativeProfile,
+) *Service {
 	t.Helper()
-	ctx := context.Background()
-	credentials := &fakeCredentialStore{secrets: map[string]string{}}
+	credentials := &fakeCredentialStore{secrets: map[string]string{
+		"provider:conn-1": "key-a",
+		"provider:conn-2": "key-b",
+	}}
 	service := NewService(
 		projectfs.Manager{},
 		sqlite.Factory{},
@@ -446,6 +439,20 @@ func configuredAgentService(
 		&fakeSnapshotArchive{},
 	)
 	service.ConfigureAgentRuntime(credentials, providerFactory)
+	service.ConfigureCreativeProfileResolver(&fakeCreativeProfileResolver{resolved: resolved})
+	service.ConfigureProjectDefaults(&fakeProjectDefaults{
+		selection: ports.ProjectProfileSelection{ProfileID: resolved.ProfileID, Version: resolved.Version},
+	})
+	return service
+}
+
+func configuredAgentService(
+	t *testing.T,
+	providerFactory ports.ModelProviderFactory,
+) (*Service, ChapterView) {
+	t.Helper()
+	ctx := context.Background()
+	service := newAgentServiceWithResolver(t, providerFactory, defaultResolvedProfile())
 	if _, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", "简介"); err != nil {
 		t.Fatal(err)
 	}
@@ -453,26 +460,23 @@ func configuredAgentService(
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
-		Name: "第一连接", Kind: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key-a",
-	})
-	if err != nil {
+	return service, chapter
+}
+
+func configuredAgentServiceWithProfile(
+	t *testing.T,
+	providerFactory ports.ModelProviderFactory,
+	resolved agentdomain.ResolvedCreativeProfile,
+) (*Service, ChapterView) {
+	t.Helper()
+	ctx := context.Background()
+	service := newAgentServiceWithResolver(t, providerFactory, resolved)
+	if _, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", "简介"); err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.SaveProviderConnection(ctx, ProviderConnectionInput{
-		Name: "第二连接", Kind: "anthropic", BaseURL: "https://api.anthropic.com", APIKey: "key-b",
-	})
+	chapter, err := service.CreateChapter(ctx, "第一章")
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, input := range []AgentProfileInput{
-		{Role: "planner", ConnectionID: first.ID, Model: "planner", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
-		{Role: "writer", ConnectionID: first.ID, Model: "writer", MaxOutputTokens: 3000, Temperature: 0.7, Enabled: true},
-		{Role: "continuity_reviewer", ConnectionID: second.ID, Model: "reviewer", MaxOutputTokens: 1000, Temperature: 0.1, Enabled: true},
-	} {
-		if _, err := service.SaveAgentProfile(ctx, input); err != nil {
-			t.Fatal(err)
-		}
 	}
 	return service, chapter
 }

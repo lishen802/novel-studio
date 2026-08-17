@@ -57,7 +57,12 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
     name: profile.name,
     version: profile.version,
     published: true,
-    roleModels: Object.fromEntries(profile.roles.map((role) => [role.role, role.connectionId])),
+    roles: Object.fromEntries(profile.roles.map((role) => [role.role, {
+      connectionId: role.connectionId,
+      model: role.model,
+      maxOutputTokens: role.maxOutputTokens,
+      temperature: role.temperature,
+    }])),
   })) as AppSettings['creativeProfiles'];
   return {
     ...previous,

@@ -620,9 +620,12 @@ func scanAgentRun(scanner rowScanner) (agentdomain.AgentRun, error) {
 
 func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdomain.AgentRunStep, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, run_id, role, profile_id, position, status, output,
+		SELECT id, run_id, role, COALESCE(profile_id, ''), position, status, output,
 			error_code, error_message, started_at, completed_at, created_at, updated_at,
-			provider_request_id, input_tokens, output_tokens
+			provider_request_id, input_tokens, output_tokens,
+			creative_profile_id, creative_profile_version, provider_connection_id,
+			provider_name, provider_kind, base_url, credential_ref, model,
+			max_output_tokens, temperature
 		FROM agent_run_steps WHERE run_id = ? ORDER BY position
 	`, runID)
 	if err != nil {
@@ -639,6 +642,9 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			&step.Status, &step.Output, &step.ErrorCode, &step.ErrorMessage,
 			&startedAt, &completedAt, &createdAt, &updatedAt,
 			&step.ProviderRequestID, &step.InputTokens, &step.OutputTokens,
+			&step.CreativeProfileID, &step.CreativeProfileVersion, &step.ProviderConnectionID,
+			&step.ProviderName, &step.ProviderKind, &step.BaseURL, &step.CredentialRef, &step.Model,
+			&step.MaxOutputTokens, &step.Temperature,
 		); err != nil {
 			return nil, err
 		}
@@ -665,14 +671,21 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.AgentR
 		INSERT INTO agent_run_steps(
 			id, run_id, role, profile_id, position, status, output,
 			error_code, error_message, started_at, completed_at, created_at, updated_at,
-			provider_request_id, input_tokens, output_tokens
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			provider_request_id, input_tokens, output_tokens,
+			creative_profile_id, creative_profile_version, provider_connection_id,
+			provider_name, provider_kind, base_url, credential_ref, model,
+			max_output_tokens, temperature
+		) VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		step.ID, step.RunID, step.Role, step.ProfileID, step.Position, step.Status,
 		step.Output, step.ErrorCode, step.ErrorMessage,
 		nullableTime(step.StartedAt), nullableTime(step.CompletedAt),
 		formatTime(step.CreatedAt), formatTime(step.UpdatedAt),
 		step.ProviderRequestID, step.InputTokens, step.OutputTokens,
+		step.CreativeProfileID, step.CreativeProfileVersion, step.ProviderConnectionID,
+		step.ProviderName, step.ProviderKind, step.BaseURL, step.CredentialRef, step.Model,
+		step.MaxOutputTokens, step.Temperature,
 	)
 	if err != nil {
 		return databaseOperationError("create agent run step", err)

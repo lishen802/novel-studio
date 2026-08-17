@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/lishen802/novel-studio/internal/application/appsettings"
 	"github.com/lishen802/novel-studio/internal/application/appshell"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
@@ -21,6 +22,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
+	"github.com/lishen802/novel-studio/internal/providers"
 )
 
 type desktopErrorCode string
@@ -84,6 +86,22 @@ const (
 	errorProjectRelocateRequired    desktopErrorCode = "PROJECT_RELOCATE_REQUIRED"
 	errorFeatureNotAvailable        desktopErrorCode = "FEATURE_NOT_AVAILABLE"
 	errorStaleSelection             desktopErrorCode = "STALE_SELECTION"
+
+	// R2.1 模型基础设施稳定错误码。Provider 适配器负责把 HTTP 状态、响应错误
+	// 类型与网络错误转换为领域错误，桌面层只转换为安全中文提示。
+	errorProviderNotFound        desktopErrorCode = "PROVIDER_NOT_FOUND"
+	errorProviderCredentialMiss  desktopErrorCode = "PROVIDER_CREDENTIAL_MISSING"
+	errorProviderInUse           desktopErrorCode = "PROVIDER_IN_USE"
+	errorProviderUnauthorized    desktopErrorCode = "PROVIDER_UNAUTHORIZED"
+	errorProviderModelNotFound   desktopErrorCode = "PROVIDER_MODEL_NOT_FOUND"
+	errorProviderQuotaExceeded   desktopErrorCode = "PROVIDER_QUOTA_EXCEEDED"
+	errorProviderRateLimited     desktopErrorCode = "PROVIDER_RATE_LIMITED"
+	errorProviderNetworkFailed   desktopErrorCode = "PROVIDER_NETWORK_FAILED"
+	errorProviderContentRejected desktopErrorCode = "PROVIDER_CONTENT_REJECTED"
+	errorProviderIncompatible    desktopErrorCode = "PROVIDER_INCOMPATIBLE"
+	errorCredentialRollback      desktopErrorCode = "CREDENTIAL_ROLLBACK_FAILED"
+	errorCreativeProfileInvalid  desktopErrorCode = "CREATIVE_PROFILE_INVALID"
+	errorCreativeProfileMissing  desktopErrorCode = "CREATIVE_PROFILE_NOT_FOUND"
 )
 
 var (
@@ -116,6 +134,34 @@ func safeDesktopError(err error) error {
 		code, message = errorOperationCancelled, "操作已取消。"
 	case errors.Is(err, context.DeadlineExceeded):
 		code, message = errorOperationTimeout, "操作超时，请重试。"
+	case errors.Is(err, providers.ErrAuthentication):
+		code, message = errorProviderUnauthorized, "API Key 无效或无权访问该模型。"
+	case errors.Is(err, providers.ErrModelNotFound):
+		code, message = errorProviderModelNotFound, "模型名称不存在或当前账户不可用。"
+	case errors.Is(err, providers.ErrQuotaExceeded):
+		code, message = errorProviderQuotaExceeded, "模型额度不足或账单受限。"
+	case errors.Is(err, providers.ErrRateLimited):
+		code, message = errorProviderRateLimited, "请求过于频繁，已被限流，请稍后重试。"
+	case errors.Is(err, providers.ErrNetwork):
+		code, message = errorProviderNetworkFailed, "网络连接失败，请检查网络或代理设置。"
+	case errors.Is(err, providers.ErrContentRejected):
+		code, message = errorProviderContentRejected, "请求被模型内容政策拒绝。"
+	case errors.Is(err, providers.ErrIncompatible):
+		code, message = errorProviderIncompatible, "接口地址与所选模型服务不兼容。"
+	case errors.Is(err, appsettings.ErrProviderNotFound):
+		code, message = errorProviderNotFound, "模型连接已被删除或页面数据已过期。"
+	case errors.Is(err, appsettings.ErrCredentialMissing):
+		code, message = errorProviderCredentialMiss, "API Key 未保存或系统凭据库不可用，请重新输入。"
+	case errors.Is(err, appsettings.ErrProviderInUse):
+		code, message = errorProviderInUse, "该模型连接仍被创作方案引用，请先调整方案后再删除。"
+	case errors.Is(err, appsettings.ErrCredentialRollback):
+		code, message = errorCredentialRollback, "配置保存失败且旧凭据未能自动恢复，请重新输入 API Key。"
+	case errors.Is(err, appsettings.ErrProfileNotFound):
+		code, message = errorCreativeProfileMissing, "项目锁定的创作方案版本不存在。"
+	case errors.Is(err, workspace.ErrProjectProfileNotConfigured):
+		code, message = errorCreativeProfileMissing, "项目尚未配置创作方案，请先在应用设置中发布并设为默认方案。"
+	case errors.Is(err, appsettings.ErrInvalidProfileInput):
+		code, message = errorCreativeProfileInvalid, "创作方案必须恰好包含规划、写作和审阅三个角色，且配置合法。"
 	case errors.Is(err, appshell.ErrProjectRelocateRequired):
 		code, message = errorProjectRelocateRequired, "项目文件已移动或删除，请重新定位项目。"
 	case errors.Is(err, errFeatureNotAvailable):

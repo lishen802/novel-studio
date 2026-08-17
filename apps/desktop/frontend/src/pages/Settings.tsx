@@ -15,6 +15,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { studio } from '../api/studio';
+import type { ProviderTestView } from '../api/studio';
 
 type TabKey = 'model' | 'writing' | 'templates' | 'appearance' | 'advanced';
 
@@ -35,11 +36,9 @@ const tabDescriptions: Record<TabKey, string> = {
 };
 
 const creativeRoleLabels: Record<CreativeRole, string> = {
-  planning: '规划',
-  writing: '写作',
-  review: '审阅',
-  memory: '记忆',
-  impact: '影响分析',
+  planner: '规划',
+  writer: '写作',
+  continuity_reviewer: '审阅',
 };
 
 export default function Settings() {
@@ -50,6 +49,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testOkId, setTestOkId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<ProviderTestView | null>(null);
 
   const [models, setModels] = useState<ModelConfig[]>(state.settings.models);
   const [activeModelId, setActiveModelId] = useState(state.settings.activeModelId);
@@ -115,10 +115,11 @@ export default function Settings() {
   const handleTestConnection = async (id: string) => {
     setTestingId(id);
     setTestOkId(null);
+    setTestResult(null);
     try {
       if (id.startsWith('m-')) throw new Error('请先保存连接');
-      await studio.testApplicationProvider(id);
-      setTestingId(null);
+      const result = await studio.testApplicationProvider({ providerId: id, model: activeModel.modelName });
+      setTestResult(result);
       setTestOkId(id);
       setTimeout(() => setTestOkId(null), 3000);
     } finally {
@@ -158,12 +159,22 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  /** 更新方案中的单一角色，项目仍可在文件菜单中进行局部覆盖。 */
-  const updateProfileRole = (role: CreativeRole, modelId: string) => {
+  /** 更新方案中的单一角色的模型连接。 */
+  const updateProfileRole = (role: CreativeRole, connectionId: string) => {
     if (!selectedProfile) return;
     setCreativeProfiles((profiles) => profiles.map((profile) => (
       profile.id === selectedProfile.id
-        ? { ...profile, roleModels: { ...profile.roleModels, [role]: modelId } }
+        ? { ...profile, roles: { ...profile.roles, [role]: { ...profile.roles[role], connectionId } } }
+        : profile
+    )));
+  };
+
+  /** 更新方案中单一角色的模型名称；模型名称属于角色绑定而非连接。 */
+  const updateProfileRoleModel = (role: CreativeRole, model: string) => {
+    if (!selectedProfile) return;
+    setCreativeProfiles((profiles) => profiles.map((profile) => (
+      profile.id === selectedProfile.id
+        ? { ...profile, roles: { ...profile.roles, [role]: { ...profile.roles[role], model } } }
         : profile
     )));
   };
@@ -171,14 +182,14 @@ export default function Settings() {
   /** 将当前编辑方案发布为下一版本，避免静默改变已经创建的作品。 */
   const publishNextProfileVersion = async () => {
     if (!selectedProfile) return;
-    const roles = Object.entries(selectedProfile.roleModels).map(([role, connectionId]) => {
-      const model = models.find((item) => item.id === connectionId);
+    const roles = (Object.keys(creativeRoleLabels) as CreativeRole[]).map((role) => {
+      const binding = selectedProfile.roles[role];
       return {
         role,
-        connectionId,
-        model: model?.modelName || '',
-        maxOutputTokens: 4096,
-        temperature: role === 'review' ? 0.2 : 0.7,
+        connectionId: binding?.connectionId || '',
+        model: binding?.model || '',
+        maxOutputTokens: binding?.maxOutputTokens || 4096,
+        temperature: binding?.temperature ?? (role === 'continuity_reviewer' ? 0.2 : 0.7),
         enabled: true,
       };
     });
@@ -206,7 +217,11 @@ export default function Settings() {
       name: '长篇创作方案',
       version: 0,
       published: false,
-      roleModels: { planning: connectionId, writing: connectionId, review: connectionId, memory: connectionId, impact: connectionId },
+      roles: {
+        planner: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.7 },
+        writer: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.7 },
+        continuity_reviewer: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.2 },
+      },
     };
     setCreativeProfiles([profile]);
     setSelectedProfileId(id);
@@ -368,7 +383,9 @@ export default function Settings() {
                       <TestTube className="w-4 h-4" />
                       {testingId === activeModel.id ? '测试中...' : '测试连接'}
                     </Button>
-                    {testOkId === activeModel.id && <span className="text-sm text-success">连接成功</span>}
+                    {testOkId === activeModel.id && testResult && (
+                      <span className="text-sm text-success">连接成功 · {testResult.latencyMs}ms · {testResult.outputTokens} tokens</span>
+                    )}
                   </div>
                   {models.length > 1 && (
                     <Button variant="ghost" size="sm" className="gap-1 text-danger hover:text-danger" onClick={() => void deleteModel(activeModel.id)}>
@@ -432,19 +449,25 @@ export default function Settings() {
                 <h3 className="text-sm font-medium text-text mb-3">角色分配</h3>
                 <div className="space-y-3">
                   {(Object.keys(creativeRoleLabels) as CreativeRole[]).map((role) => (
-                    <div key={role} className="grid grid-cols-[100px_1fr] gap-3 items-center">
+                    <div key={role} className="grid grid-cols-[100px_1fr_1fr] gap-3 items-center">
                       <label htmlFor={`role-${role}`} className="text-sm text-text-sub">{creativeRoleLabels[role]}</label>
                       <select
                         id={`role-${role}`}
                         aria-label={creativeRoleLabels[role]}
-                        value={selectedProfile.roleModels[role]}
+                        value={selectedProfile.roles[role].connectionId}
                         onChange={(event) => updateProfileRole(role, event.target.value)}
                         className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
                       >
                         {models.map((model) => (
-                          <option key={model.id} value={model.id}>{model.name} · {model.modelName || '未命名模型'}</option>
+                          <option key={model.id} value={model.id}>{model.name}</option>
                         ))}
                       </select>
+                      <Input
+                        value={selectedProfile.roles[role].model}
+                        onChange={(event) => updateProfileRoleModel(role, event.target.value)}
+                        placeholder="模型名称"
+                        aria-label={`${creativeRoleLabels[role]}模型`}
+                      />
                     </div>
                   ))}
                 </div>

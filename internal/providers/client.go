@@ -17,10 +17,24 @@ import (
 )
 
 var (
+	// ErrAuthentication 表示 API Key 无效或无权访问（401/403）。
 	ErrAuthentication = errors.New("provider authentication failed")
-	ErrRateLimited    = errors.New("provider rate limited")
-	ErrProvider       = errors.New("provider request failed")
-	ErrInvalidStream  = errors.New("invalid provider stream")
+	// ErrRateLimited 表示请求被限流（429）。
+	ErrRateLimited = errors.New("provider rate limited")
+	// ErrQuotaExceeded 表示额度不足或账单受限（402 或带 quota/billing 的 429）。
+	ErrQuotaExceeded = errors.New("provider quota exceeded")
+	// ErrModelNotFound 表示模型名称不存在或账户不可用（404 且指明 model）。
+	ErrModelNotFound = errors.New("provider model not found")
+	// ErrContentRejected 表示 Provider 内容政策拒绝。
+	ErrContentRejected = errors.New("provider content rejected")
+	// ErrNetwork 表示 DNS、TLS、代理或其他网络层失败。
+	ErrNetwork = errors.New("provider network failed")
+	// ErrIncompatible 表示接口协议与所选 Provider 类型不兼容（例如端点 404）。
+	ErrIncompatible = errors.New("provider incompatible")
+	// ErrProvider 表示未细分的 Provider 请求失败。
+	ErrProvider = errors.New("provider request failed")
+	// ErrInvalidStream 表示流式响应格式损坏。
+	ErrInvalidStream = errors.New("invalid provider stream")
 )
 
 type GenerateRequest = ports.ModelGenerateRequest
@@ -139,12 +153,11 @@ func (client *OpenAIClient) post(
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrProvider, err)
+		return nil, classifyNetworkError(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		defer response.Body.Close()
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
-		return nil, classifyStatus(response.StatusCode)
+		return nil, classifyStatus(response.StatusCode, readErrorBody(response.Body))
 	}
 	return response, nil
 }
@@ -196,12 +209,11 @@ func (client *AnthropicClient) Generate(
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := client.httpClient.Do(httpRequest)
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("%w: %w", ErrProvider, err)
+		return GenerateResult{}, classifyNetworkError(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		defer response.Body.Close()
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
-		return GenerateResult{}, classifyStatus(response.StatusCode)
+		return GenerateResult{}, classifyStatus(response.StatusCode, readErrorBody(response.Body))
 	}
 	defer response.Body.Close()
 
@@ -290,15 +302,68 @@ func readSSE(reader io.Reader, handle func(event string, data []byte) error) err
 	return flush()
 }
 
-func classifyStatus(status int) error {
-	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
+// classifyStatus 把 Provider 的 HTTP 状态与错误响应体转换为稳定的领域错误。
+// 它只返回哨兵错误，绝不把响应正文、请求正文或密钥带入错误字符串，以免被
+// 前端或日志捕获。
+func classifyStatus(status int, body []byte) error {
+	message := strings.ToLower(string(body))
+	has := func(keys ...string) bool {
+		for _, key := range keys {
+			if strings.Contains(message, key) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return ErrAuthentication
-	case http.StatusTooManyRequests:
+	case status == http.StatusNotFound:
+		if has("model_not_found", "not_found_error", "model not found", "no such model") {
+			return ErrModelNotFound
+		}
+		return ErrIncompatible
+	case status == http.StatusPaymentRequired:
+		return ErrQuotaExceeded
+	case status == http.StatusTooManyRequests:
+		if has("quota", "insufficient_quota", "billing") {
+			return ErrQuotaExceeded
+		}
 		return ErrRateLimited
+	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
+		if has("content", "policy", "safety", "moderation", "refusal", "unsafe") {
+			return ErrContentRejected
+		}
+		return ErrProvider
+	case status >= 500:
+		if has("overloaded") {
+			return ErrRateLimited
+		}
+		return ErrProvider
 	default:
 		return fmt.Errorf("%w: HTTP %d", ErrProvider, status)
 	}
+}
+
+// classifyNetworkError 把网络层错误转换为领域错误。上下文取消与超时原样返回，
+// 使调用方仍能通过 errors.Is 区分 context.Canceled 与 context.DeadlineExceeded；
+// 其余 DNS、TLS、代理等失败统一归为 ErrNetwork。
+func classifyNetworkError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrNetwork, err)
+}
+
+// readErrorBody 有界读取错误响应体，供分类使用；超过 64 KiB 的部分被丢弃，
+// 避免恶意或异常的大响应占用内存。
+func readErrorBody(body io.Reader) []byte {
+	limited := io.LimitReader(body, 64*1024)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func joinURL(baseURL, path string) string {

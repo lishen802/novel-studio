@@ -218,3 +218,43 @@ func TestFactoryCreatesProtocolSpecificClient(t *testing.T) {
 		t.Fatalf("Anthropic factory error = %v", err)
 	}
 }
+
+func TestClassifyStatusMapsStableProviderErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   error
+	}{
+		{"unauthorized", http.StatusUnauthorized, "", ErrAuthentication},
+		{"forbidden", http.StatusForbidden, "", ErrAuthentication},
+		{"model not found (openai)", http.StatusNotFound, `{"error":{"code":"model_not_found"}}`, ErrModelNotFound},
+		{"model not found (anthropic)", http.StatusNotFound, `{"type":"error","error":{"type":"not_found_error"}}`, ErrModelNotFound},
+		{"incompatible endpoint", http.StatusNotFound, "Not Found", ErrIncompatible},
+		{"quota 402", http.StatusPaymentRequired, "", ErrQuotaExceeded},
+		{"rate limited", http.StatusTooManyRequests, `{"error":{"type":"rate_limit_error"}}`, ErrRateLimited},
+		{"quota via 429", http.StatusTooManyRequests, `{"error":{"type":"insufficient_quota"}}`, ErrQuotaExceeded},
+		{"content rejected", http.StatusBadRequest, `{"error":{"type":"invalid_request_error","message":"content policy violation"}}`, ErrContentRejected},
+		{"server overloaded", http.StatusInternalServerError, `{"error":{"type":"overloaded_error"}}`, ErrRateLimited},
+		{"generic server error", http.StatusInternalServerError, "", ErrProvider},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := classifyStatus(test.status, []byte(test.body)); !errors.Is(got, test.want) {
+				t.Fatalf("classifyStatus(%d, %q) = %v, want %v", test.status, test.body, got, test.want)
+			}
+		})
+	}
+}
+
+func TestClassifyNetworkErrorPreservesCancellation(t *testing.T) {
+	if got := classifyNetworkError(context.Canceled); !errors.Is(got, context.Canceled) {
+		t.Fatalf("canceled = %v", got)
+	}
+	if got := classifyNetworkError(context.DeadlineExceeded); !errors.Is(got, context.DeadlineExceeded) {
+		t.Fatalf("deadline = %v", got)
+	}
+	if got := classifyNetworkError(errors.New("dial tcp: lookup failed")); !errors.Is(got, ErrNetwork) {
+		t.Fatalf("network = %v, want ErrNetwork", got)
+	}
+}

@@ -52,6 +52,19 @@ export interface ProviderView {
   updatedAt: string;
 }
 
+export interface ProviderTestView {
+  providerId: string;
+  providerName: string;
+  providerKind: string;
+  model: string;
+  status: string;
+  latencyMs: number;
+  providerRequestId: string;
+  inputTokens: number;
+  outputTokens: number;
+  testedAt: string;
+}
+
 export interface RoleBindingView {
   role: string;
   connectionId: string;
@@ -198,7 +211,8 @@ export const studio = {
   saveApplicationPreferences: (input: Record<string, unknown>) => call<void>('SaveApplicationPreferences', input),
   saveApplicationProvider: (input: Record<string, unknown>) => call<ProviderView>('SaveApplicationProvider', input),
   deleteApplicationProvider: (id: string) => call<void>('DeleteApplicationProvider', id),
-  testApplicationProvider: (id: string) => call<void>('TestApplicationProvider', id),
+  testApplicationProvider: (input: { providerId: string; model: string }) =>
+    call<ProviderTestView>('TestApplicationProvider', input),
   publishCreativeProfile: (input: Record<string, unknown>) => call<CreativeProfileView>('PublishCreativeProfile', input),
 
   chooseProjectParent: () => call<string>('ChooseProjectParent'),

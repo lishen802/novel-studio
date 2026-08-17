@@ -227,7 +227,43 @@ const (
 type RunStepSpec struct {
 	ID        string
 	Role      AgentRole
-	ProfileID string
+	ProfileID string // 旧项目级智能体档案 ID；R2.1 新运行留空。
+
+	// R2.1 运行冻结快照字段：新运行必填，旧运行留空。
+	CreativeProfileID      string
+	CreativeProfileVersion int64
+	ProviderConnectionID   string
+	ProviderName           string
+	ProviderKind           ProviderKind
+	BaseURL                string
+	CredentialRef          string
+	Model                  string
+	MaxOutputTokens        int
+	Temperature            float64
+}
+
+// ResolvedRole 是一次运行冻结快照中单个角色实际使用的连接、模型与参数。
+// 它只包含非敏感元数据与凭据引用，不包含 API Key。
+type ResolvedRole struct {
+	Role            AgentRole
+	ConnectionID    string
+	ProviderName    string
+	ProviderKind    ProviderKind
+	BaseURL         string
+	CredentialRef   string
+	Model           string
+	MaxOutputTokens int
+	Temperature     float64
+}
+
+// ResolvedCreativeProfile 是项目锁定创作方案的解析结果，包含预算与三个角色
+// 的实际绑定。它由应用设置服务按确切版本解析，供创建运行冻结快照使用。
+type ResolvedCreativeProfile struct {
+	ProfileID       string
+	Version         int64
+	MaxRunTokens    int
+	MaxContextChars int
+	Roles           []ResolvedRole
 }
 
 type AgentRunStep struct {
@@ -247,6 +283,19 @@ type AgentRunStep struct {
 	CompletedAt       *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+
+	// R2.1 运行冻结快照字段：创建运行后，执行阶段只读取这些冻结值与凭据库，
+	// 不再解析可变的应用设置，避免作者修改连接或方案后影响已创建任务。
+	CreativeProfileID      string
+	CreativeProfileVersion int64
+	ProviderConnectionID   string
+	ProviderName           string
+	ProviderKind           ProviderKind
+	BaseURL                string
+	CredentialRef          string
+	Model                  string
+	MaxOutputTokens        int
+	Temperature            float64
 }
 
 type AgentRun struct {
@@ -294,7 +343,15 @@ func NewChapterDraftRun(
 	now = now.UTC()
 	steps := make([]AgentRunStep, len(specs))
 	for index, spec := range specs {
-		if strings.TrimSpace(spec.ID) == "" || strings.TrimSpace(spec.ProfileID) == "" || spec.Role != expected[index] {
+		if strings.TrimSpace(spec.ID) == "" || spec.Role != expected[index] {
+			return AgentRun{}, ErrInvalidRun
+		}
+		// 旧运行要求项目级智能体档案 ID；R2.1 新运行要求冻结快照字段完整。
+		if strings.TrimSpace(spec.ProfileID) == "" &&
+			(strings.TrimSpace(spec.CreativeProfileID) == "" ||
+				strings.TrimSpace(spec.ProviderConnectionID) == "" ||
+				strings.TrimSpace(spec.CredentialRef) == "" ||
+				strings.TrimSpace(spec.Model) == "") {
 			return AgentRun{}, ErrInvalidRun
 		}
 		steps[index] = AgentRunStep{
@@ -304,6 +361,18 @@ func NewChapterDraftRun(
 			ProfileID: strings.TrimSpace(spec.ProfileID),
 			Position:  index + 1,
 			Status:    StepQueued,
+
+			CreativeProfileID:      strings.TrimSpace(spec.CreativeProfileID),
+			CreativeProfileVersion: spec.CreativeProfileVersion,
+			ProviderConnectionID:   strings.TrimSpace(spec.ProviderConnectionID),
+			ProviderName:           spec.ProviderName,
+			ProviderKind:           spec.ProviderKind,
+			BaseURL:                spec.BaseURL,
+			CredentialRef:          strings.TrimSpace(spec.CredentialRef),
+			Model:                  strings.TrimSpace(spec.Model),
+			MaxOutputTokens:        spec.MaxOutputTokens,
+			Temperature:            spec.Temperature,
+
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
