@@ -18,7 +18,7 @@
 - `expected.json`：升级后必须保留的业务哨兵；
 - `README.md`：fixture 版本、来源、合成规则和覆盖的迁移链。
 
-`internal/testsupport/legacyproject` 在测试临时目录读取这些规格生成 `.zjproject`，不向仓库写入二进制数据库。详见[旧项目迁移测试基线](../docs/testing/legacy-project-migration.md)。
+`internal/testsupport/legacyproject` 在测试临时目录读取这些规格生成 `.zjproject`，不向仓库写入二进制数据库。迁移与恢复约束见[产品设计与技术架构](../docs/product/architecture.md)，具体行为以测试代码为准。
 
 本地检查：
 

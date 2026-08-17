@@ -2,7 +2,7 @@
 
 - 状态：当前唯一权威需求文档
 - 适用版本：首个可商业交付的 Windows/macOS 桌面版本
-- 相关文档：[产品与交互设计](design.md)、[系统技术设计](../architecture/system-design.md)、[文档索引](../README.md)
+- 相关文档：[产品设计与技术架构](architecture.md)、[开发路线图](roadmap.md)
 
 ## 1. 产品定义
 

@@ -25,7 +25,7 @@ wails doctor
 
 ## 可复制的验证与运行命令
 
-完整命令顺序、CI Job 分工和 fixture 隐私规则见[自动化测试基线](docs/testing/automated-test-baseline.md)。
+产品约束、测试原则和质量门槛见[产品设计与技术架构](docs/product/architecture.md)。具体验证命令以仓库脚本和 CI 配置为准。
 
 首次安装正式前端依赖并构建嵌入资源：
 
@@ -100,7 +100,7 @@ React 只能调用 `StudioClient`；Wails API 只能转发应用服务；持久�
 └── snapshots/
 ```
 
-当前正文、章节、revision、恢复草稿、导入任务和已实现的结构化故事资产存放在 `project.db`；不可变的导入原文副本存放在 `imports/`；剧情分支注册表和完整分支头存放在 `branches/`；命名快照及恢复前自动快照存放在 `snapshots/`。备份、迁移或跨平台传递时必须复制整个 `.zjproject` 目录，不能只复制正在使用的数据库文件。异常处理见[项目恢复与数据保护](docs/operations/project-recovery.md)。
+当前正文、章节、revision、恢复草稿、导入任务和已实现的结构化故事资产存放在 `project.db`；不可变的导入原文副本存放在 `imports/`；剧情分支注册表和完整分支头存放在 `branches/`；命名快照及恢复前自动快照存放在 `snapshots/`。备份、迁移或跨平台传递时必须复制整个 `.zjproject` 目录，不能只复制正在使用的数据库文件。恢复和数据保护原则见[产品设计与技术架构](docs/product/architecture.md)。
 
 ## 隐私与安全规则
 
@@ -121,4 +121,4 @@ React 只能调用 `StudioClient`；Wails API 只能转发应用服务；持久�
 - 当前构建未完成正式 Windows 签名、macOS Developer ID 签名/公证、安装器与自动升级。
 - Rust、CGO/FFI、云端必需依赖和 Wails v3 均不在当前基线内。
 
-开始新任务前先阅读[接手说明](docs/handoff/START-HERE.md)。双平台人工验收使用[P0 基础验收清单](docs/testing/foundation-acceptance.md)。
+开始新任务前阅读[产品需求](docs/product/requirements.md)、[产品设计与技术架构](docs/product/architecture.md)和[开发路线图](docs/product/roadmap.md)。当前大型功能还需阅读 `docs/features/R<阶段>/` 下对应的中文功能设计文档。
