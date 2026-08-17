@@ -36,9 +36,8 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useApp } from '../store/useApp';
 import type { ChapterStatus } from '../types';
-import { getActiveModel } from '../types';
 import { canvasPresets } from '../editor';
-import { studio, type ChapterView } from '../api/studio';
+import { studio, type AgentRunView, type ChapterView } from '../api/studio';
 
 interface Chapter {
   id: string;
@@ -82,11 +81,45 @@ function countWords(text: string) {
   return text.replace(/\s/g, '').length;
 }
 
+function runStatusLabel(status: string) {
+  switch (status) {
+    case 'queued': return '排队中';
+    case 'running': return '创作中';
+    case 'completed': return '已完成';
+    case 'failed': return '失败';
+    case 'cancelled': return '已取消';
+    case 'recoverable': return '需恢复';
+    default: return status;
+  }
+}
+
+function stepStatusLabel(status: string) {
+  switch (status) {
+    case 'queued': return '等待中';
+    case 'running': return '进行中';
+    case 'completed': return '完成';
+    case 'failed': return '失败';
+    case 'cancelled': return '已取消';
+    default: return status;
+  }
+}
+
+function roleLabel(role: string) {
+  switch (role) {
+    case 'planner': return '规划';
+    case 'writer': return '写作';
+    case 'continuity_reviewer': return '审阅';
+    default: return role;
+  }
+}
+
 export default function Chapters() {
   const navigate = useNavigate();
   const { state, dispatch, registerBeforeClose } = useApp();
   const settings = state.settings;
-  const modelConfigured = getActiveModel(settings).apiKeyConfigured;
+  // AI 功能仅在项目锁定创作方案后可用；方案锁定来自后端项目投影，不再依赖
+  // 已废弃的"当前激活模型"概念。
+  const profileConfigured = Boolean(state.backendProject?.profileSelection?.profileId);
   const canvasColor = useMemo(() => canvasPresets.find((p) => p.id === settings.canvasColorId) || canvasPresets[0], [settings.canvasColorId]);
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -102,6 +135,9 @@ export default function Chapters() {
   const [aiInput, setAiInput] = useState('');
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [activeRun, setActiveRun] = useState<AgentRunView | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -162,6 +198,11 @@ export default function Chapters() {
     return registerBeforeClose(() => studio.saveDraft(selected.id, content, revision));
   }, [content, selected, revision, hydrating, registerBeforeClose]);
 
+  // 组件卸载时停止运行状态轮询。
+  useEffect(() => () => {
+    if (pollRef.current) clearTimeout(pollRef.current);
+  }, []);
+
   const filteredVolumes = useMemo(() => {
     if (!search.trim()) return volumes;
     return volumes
@@ -187,16 +228,46 @@ export default function Chapters() {
     });
   };
 
+  /** 轮询运行状态直到终态，实时更新步骤与用量。 */
+  const observeRun = (runId: string) => {
+    const tick = async () => {
+      try {
+        const run = await studio.agentRun(runId);
+        setActiveRun(run);
+        if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') return;
+      } catch {
+        return;
+      }
+      pollRef.current = setTimeout(tick, 1200);
+    };
+    void tick();
+  };
+
+  /** 取消正在运行的创作任务；结果仍保留为候选/变更集，不覆盖正文。 */
+  const cancelRun = async () => {
+    if (!activeRun) return;
+    setCancelBusy(true);
+    try {
+      await studio.cancelAgentRun(activeRun.id);
+      setActiveRun(await studio.agentRun(activeRun.id));
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
   const runAiAction = (type: Candidate['type'], label: string) => {
     if (!selection || !selected) return;
-    if (!modelConfigured) {
+    if (!profileConfigured) {
       navigate('/settings');
       return;
     }
     const selectedText = selection.text;
     setAiLoading(true);
     void studio.createChapterAgentRun(selected.id, `${label}\n\n选中文字：\n${selectedText}`)
-      .then((run) => studio.executeAgentRun(String(run.id)))
+      .then((run) => studio.executeAgentRun(String(run.id)).then((executed) => {
+        setActiveRun(executed);
+        observeRun(String(executed.id));
+      }))
       .then(() => {
         const candidate: Candidate = {
           id: `job-${Date.now()}`,
@@ -244,14 +315,16 @@ export default function Chapters() {
 
   const sendAiInstruction = async () => {
     if (!aiInput.trim() || !selected) return;
-    if (!modelConfigured) {
+    if (!profileConfigured) {
       navigate('/settings');
       return;
     }
     setAiLoading(true);
     try {
       const run = await studio.createChapterAgentRun(selected.id, aiInput.trim());
-      await studio.executeAgentRun(String(run.id));
+      const executed = await studio.executeAgentRun(String(run.id));
+      setActiveRun(executed);
+      observeRun(String(executed.id));
       const candidate: Candidate = {
         id: `can-${Date.now()}`,
         type: 'review',
@@ -424,13 +497,13 @@ export default function Chapters() {
         ) : (
           <>
             {/* Model warning */}
-            {!modelConfigured && (
+            {!profileConfigured && (
               <div
                 data-testid="model-configuration-notice"
                 className="px-5 py-2 bg-model-notice border-b border-model-notice-border text-text flex items-center gap-3"
               >
                 <AlertCircle className="w-4 h-4 text-warning shrink-0" />
-                <p className="text-sm text-text-sub flex-1">尚未配置 AI 模型，请先完成模型连接后再提交创作任务。</p>
+                <p className="text-sm text-text-sub flex-1">本项目尚未配置创作方案，请先在应用设置中发布并设为默认方案。</p>
                 <Button size="sm" onClick={() => navigate('/settings')}>前往配置</Button>
               </div>
             )}
@@ -732,6 +805,40 @@ export default function Chapters() {
                 发送给 AI
               </Button>
             </div>
+
+            {activeRun && (
+              <div className="space-y-3">
+                <h4 className="text-xs font-medium text-text-sub uppercase tracking-wider">创作任务</h4>
+                <div className="p-3 border border-border rounded-lg space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-text">{runStatusLabel(activeRun.status)}</span>
+                    {(activeRun.status === 'running' || activeRun.status === 'queued') && (
+                      <Button variant="ghost" size="sm" onClick={() => void cancelRun()} disabled={cancelBusy} className="text-danger hover:text-danger">
+                        {cancelBusy ? '取消中…' : '取消'}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="text-xs text-text-sub">
+                    预算 {activeRun.tokenBudget} · 已用 {activeRun.inputTokens + activeRun.outputTokens} tokens
+                  </div>
+                  <div className="space-y-1">
+                    {activeRun.steps.map((step) => (
+                      <div key={step.id} className="flex items-center gap-2 text-xs">
+                        <span className="text-text-muted">{roleLabel(step.role)}</span>
+                        <span className="text-text-sub">{stepStatusLabel(step.status)}</span>
+                        {(step.inputTokens + step.outputTokens) > 0 && (
+                          <span className="text-text-muted">· {step.inputTokens + step.outputTokens} tokens</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {activeRun.errorMessage && <p className="text-xs text-danger">{activeRun.errorMessage}</p>}
+                  {activeRun.status === 'completed' && activeRun.changeSetId && (
+                    <p className="text-xs text-success">已生成可审阅变更集，请在“审阅与候选”中查看。</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {candidates.length > 0 && (
               <div className="space-y-3">

@@ -164,6 +164,61 @@ export interface ContinuityView {
   consistencyIssues: Array<Record<string, unknown>>;
 }
 
+export interface AgentRunStepView {
+  id: string;
+  role: string;
+  position: number;
+  status: string;
+  output: string;
+  errorCode: string;
+  errorMessage: string;
+  providerRequestId: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface AgentRunView {
+  id: string;
+  chapterId: string;
+  prompt: string;
+  status: string;
+  errorCode: string;
+  errorMessage: string;
+  changeSetId: string;
+  retryOf: string;
+  tokenBudget: number;
+  contextCharBudget: number;
+  inputTokens: number;
+  outputTokens: number;
+  contextChars: number;
+  contextTruncated: boolean;
+  steps: AgentRunStepView[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobSnapshotView {
+  jobId: string;
+  jobKind: string;
+  projectId: string;
+  status: string;
+  maxSequence: number;
+  earliestReplayableSequence: number;
+  inputTokens: number;
+  outputTokens: number;
+  pendingAction: string;
+  terminalInfo: string;
+  steps: Array<Record<string, unknown>>;
+  updatedAt: string;
+}
+
+export interface JobEventsPageView {
+  events: Array<Record<string, unknown>>;
+  nextCursor: number;
+  hasMore: boolean;
+  snapshotRequired: boolean;
+}
+
 type NativeMethod = (...args: unknown[]) => Promise<unknown>;
 type NativeDesktopAPI = Record<string, NativeMethod>;
 
@@ -276,7 +331,14 @@ export const studio = {
   startWholeBookArchive: () => call<void>('StartWholeBookArchive'),
 
   createChapterAgentRun: (chapterId: string, prompt: string) =>
-    call<Record<string, unknown>>('CreateChapterAgentRun', chapterId, prompt),
-  executeAgentRun: (id: string) => call<Record<string, unknown>>('ExecuteAgentRun', id),
-  getJobSnapshot: (id: string) => call<Record<string, unknown>>('GetJobSnapshot', id),
+    call<AgentRunView>('CreateChapterAgentRun', chapterId, prompt),
+  executeAgentRun: (id: string) => call<AgentRunView>('ExecuteAgentRun', id),
+  cancelAgentRun: (id: string) => call<void>('CancelAgentRun', id),
+  retryAgentRun: (id: string) => call<AgentRunView>('RetryAgentRun', id),
+  agentRun: (id: string) => call<AgentRunView>('AgentRun', id),
+  agentRuns: () => call<AgentRunView[]>('AgentRuns'),
+  getJobSnapshot: (id: string) => call<JobSnapshotView>('GetJobSnapshot', id),
+  getJobEvents: (jobId: string, afterSequence: number, limit: number) =>
+    call<JobEventsPageView>('GetJobEvents', jobId, afterSequence, limit),
+  listRecoverableJobs: () => call<Array<Record<string, unknown>>>('ListRecoverableJobs'),
 };
