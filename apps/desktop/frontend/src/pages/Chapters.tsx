@@ -137,6 +137,8 @@ export default function Chapters() {
   const [aiLoading, setAiLoading] = useState(false);
   const [activeRun, setActiveRun] = useState<AgentRunView | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [runPollError, setRunPollError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -203,6 +205,27 @@ export default function Chapters() {
     if (pollRef.current) clearTimeout(pollRef.current);
   }, []);
 
+  // 重新进入页面时恢复当前章节未完成的创作任务，继续轮询直到终态。
+  useEffect(() => {
+    if (!selected) return;
+    let cancelled = false;
+    void studio.agentRuns().then((runs) => {
+      if (cancelled) return;
+      const active = runs.find((run) => (
+        run.chapterId === selected.id &&
+        (run.status === 'queued' || run.status === 'running')
+      ));
+      if (active) {
+        setActiveRun(active);
+        observeRun(active.id);
+      }
+    }).catch(() => {
+      // 恢复失败不阻塞编辑，作者可重新发起任务。
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
   const filteredVolumes = useMemo(() => {
     if (!search.trim()) return volumes;
     return volumes
@@ -234,8 +257,17 @@ export default function Chapters() {
       try {
         const run = await studio.agentRun(runId);
         setActiveRun(run);
-        if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') return;
-      } catch {
+        setRunPollError(null);
+        // recoverable 也是终态：运行被中断但可恢复，需要作者主动重试，不应继续轮询。
+        if (
+          run.status === 'completed' ||
+          run.status === 'failed' ||
+          run.status === 'cancelled' ||
+          run.status === 'recoverable'
+        ) return;
+      } catch (error) {
+        // 轮询异常不静默吞掉，展示给作者以便发现后端不可达或鉴权失败等问题。
+        setRunPollError(error instanceof Error ? error.message : '无法获取运行状态');
         return;
       }
       pollRef.current = setTimeout(tick, 1200);
@@ -252,6 +284,23 @@ export default function Chapters() {
       setActiveRun(await studio.agentRun(activeRun.id));
     } finally {
       setCancelBusy(false);
+    }
+  };
+
+  /** 重试被中断或失败的运行；后端会基于冻结快照重新创建并执行。 */
+  const retryRun = async () => {
+    if (!activeRun) return;
+    setRetryBusy(true);
+    setRunPollError(null);
+    try {
+      const retried = await studio.retryAgentRun(activeRun.id);
+      const executed = await studio.executeAgentRun(String(retried.id));
+      setActiveRun(executed);
+      observeRun(String(executed.id));
+    } catch (error) {
+      setRunPollError(error instanceof Error ? error.message : '重试运行失败');
+    } finally {
+      setRetryBusy(false);
     }
   };
 
@@ -812,27 +861,41 @@ export default function Chapters() {
                 <div className="p-3 border border-border rounded-lg space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-text">{runStatusLabel(activeRun.status)}</span>
-                    {(activeRun.status === 'running' || activeRun.status === 'queued') && (
-                      <Button variant="ghost" size="sm" onClick={() => void cancelRun()} disabled={cancelBusy} className="text-danger hover:text-danger">
-                        {cancelBusy ? '取消中…' : '取消'}
-                      </Button>
-                    )}
+                    <div className="flex gap-2">
+                      {(activeRun.status === 'running' || activeRun.status === 'queued') && (
+                        <Button variant="ghost" size="sm" onClick={() => void cancelRun()} disabled={cancelBusy} className="text-danger hover:text-danger">
+                          {cancelBusy ? '取消中…' : '取消'}
+                        </Button>
+                      )}
+                      {(activeRun.status === 'recoverable' || activeRun.status === 'failed') && (
+                        <Button variant="ghost" size="sm" onClick={() => void retryRun()} disabled={retryBusy}>
+                          {retryBusy ? '重试中…' : '重试'}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   <div className="text-xs text-text-sub">
                     预算 {activeRun.tokenBudget} · 已用 {activeRun.inputTokens + activeRun.outputTokens} tokens
                   </div>
                   <div className="space-y-1">
                     {activeRun.steps.map((step) => (
-                      <div key={step.id} className="flex items-center gap-2 text-xs">
+                      <div key={step.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                         <span className="text-text-muted">{roleLabel(step.role)}</span>
                         <span className="text-text-sub">{stepStatusLabel(step.status)}</span>
+                        {step.model && (
+                          <span className="text-text-muted">· {step.providerName || step.providerKind} / {step.model}</span>
+                        )}
                         {(step.inputTokens + step.outputTokens) > 0 && (
                           <span className="text-text-muted">· {step.inputTokens + step.outputTokens} tokens</span>
                         )}
                       </div>
                     ))}
                   </div>
+                  {runPollError && <p className="text-xs text-danger">轮询运行状态失败：{runPollError}</p>}
                   {activeRun.errorMessage && <p className="text-xs text-danger">{activeRun.errorMessage}</p>}
+                  {activeRun.status === 'recoverable' && (
+                    <p className="text-xs text-warning">运行被中断，可重新发起以继续。</p>
+                  )}
                   {activeRun.status === 'completed' && activeRun.changeSetId && (
                     <p className="text-xs text-success">已生成可审阅变更集，请在“审阅与候选”中查看。</p>
                   )}

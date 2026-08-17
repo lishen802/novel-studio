@@ -77,6 +77,12 @@ type AgentRunStepView struct {
 	ProviderRequestID string `json:"providerRequestId"`
 	InputTokens       int    `json:"inputTokens"`
 	OutputTokens      int    `json:"outputTokens"`
+	// 冻结快照字段：暴露步骤实际使用的模型与 Provider，供作者核对运行来源。
+	ProviderName    string  `json:"providerName"`
+	ProviderKind    string  `json:"providerKind"`
+	Model           string  `json:"model"`
+	MaxOutputTokens int     `json:"maxOutputTokens"`
+	Temperature     float64 `json:"temperature"`
 }
 
 type AgentRunView struct {
@@ -1259,6 +1265,11 @@ func agentRunView(run agentdomain.AgentRun) AgentRunView {
 			ErrorCode: step.ErrorCode, ErrorMessage: step.ErrorMessage,
 			ProviderRequestID: step.ProviderRequestID,
 			InputTokens:       step.InputTokens, OutputTokens: step.OutputTokens,
+			ProviderName:      step.ProviderName,
+			ProviderKind:      string(step.ProviderKind),
+			Model:             step.Model,
+			MaxOutputTokens:   step.MaxOutputTokens,
+			Temperature:       step.Temperature,
 		})
 	}
 	return AgentRunView{

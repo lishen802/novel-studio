@@ -87,7 +87,7 @@ func NewProviderConnection(
 	if kind != ProviderOpenAI && kind != ProviderAnthropic {
 		return ProviderConnection{}, ErrInvalidProvider
 	}
-	normalizedURL, err := normalizeEndpoint(baseURL)
+	normalizedURL, err := NormalizeEndpoint(baseURL)
 	if err != nil {
 		return ProviderConnection{}, err
 	}
@@ -104,7 +104,9 @@ func NewProviderConnection(
 	}, nil
 }
 
-func normalizeEndpoint(raw string) (string, error) {
+// NormalizeEndpoint 规范化 Provider Base URL：远程地址必须 HTTPS，仅本机地址允许 HTTP。
+// 应用设置领域与项目级 Provider 共用此规则，避免 API Key 通过明文 HTTP 发送。
+func NormalizeEndpoint(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" || parsed.Path == "" && parsed.Scheme == "" {
 		return "", ErrInvalidEndpoint

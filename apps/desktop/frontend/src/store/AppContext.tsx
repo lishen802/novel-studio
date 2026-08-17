@@ -63,15 +63,21 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
       maxOutputTokens: role.maxOutputTokens,
       temperature: role.temperature,
     }])),
+    maxRunTokens: profile.maxRunTokens,
+    maxContextChars: profile.maxContextChars,
   })) as AppSettings['creativeProfiles'];
+  // 默认方案必须忠实反映后端返回值：后端清空就是清空，不能用第一个方案回退，
+  // 否则“取消默认”操作会在 bootstrap 刷新后被静默撤销。
+  const defaultProfileId = bootstrap.preferences.defaultCreativeProfileId || '';
+  const defaultProfile = profiles.find((p) => p.id === defaultProfileId);
   return {
     ...previous,
     theme: (bootstrap.preferences.theme as AppSettings['theme']) || previous.theme,
     models,
     activeModelId: models[0]?.id || '',
     creativeProfiles: profiles,
-    defaultCreativeProfileId: bootstrap.preferences.defaultCreativeProfileId || profiles[0]?.id || '',
-    writingPlan: profiles[0]?.name || '尚未配置创作方案',
+    defaultCreativeProfileId: defaultProfileId,
+    writingPlan: defaultProfile?.name || '尚未配置创作方案',
   };
 }
 

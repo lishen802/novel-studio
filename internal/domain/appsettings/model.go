@@ -94,12 +94,18 @@ func NewProviderConnection(id, name string, kind agent.ProviderKind, baseURL, cr
 	if kind != agent.ProviderOpenAI && kind != agent.ProviderAnthropic {
 		return ProviderConnection{}, agent.ErrInvalidProvider
 	}
+	// 复用 agent 领域的安全规则：远程地址必须 HTTPS，仅本机地址允许 HTTP，
+	// 防止 API Key 通过明文 HTTP 连接发送。
+	normalizedURL, err := agent.NormalizeEndpoint(baseURL)
+	if err != nil {
+		return ProviderConnection{}, err
+	}
 	now = now.UTC()
 	return ProviderConnection{
 		ID:            id,
 		Name:          name,
 		Kind:          kind,
-		BaseURL:       strings.TrimSpace(baseURL),
+		BaseURL:       normalizedURL,
 		CredentialRef: credentialRef,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -138,10 +144,11 @@ func NewCreativeProfileVersion(
 		}
 		byRole[r.Role] = r
 	}
+	// 规范化角色顺序为 planner → writer → continuity_reviewer，避免上游传入字母序导致
+	// 后续 AgentRun 校验失败。AgentRun.NewChapterDraftRun 严格按位置匹配角色。
+	orderedRoles := make([]RoleBinding, 0, 3)
 	for _, required := range []agent.AgentRole{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
-		if _, ok := byRole[required]; !ok {
-			return CreativeProfileVersion{}, ErrInvalidRoleCount
-		}
+		orderedRoles = append(orderedRoles, byRole[required])
 	}
 	writer := byRole[agent.RoleWriter]
 	reviewer := byRole[agent.RoleContinuityReviewer]
@@ -153,7 +160,7 @@ func NewCreativeProfileVersion(
 		ProfileID:       profileID,
 		Version:         version,
 		Name:            name,
-		Roles:           roles,
+		Roles:           orderedRoles,
 		MaxRunTokens:    maxRunTokens,
 		MaxContextChars: maxContextChars,
 		CreatedAt:       now,

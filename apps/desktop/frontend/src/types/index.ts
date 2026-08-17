@@ -148,6 +148,10 @@ export interface CreativeProfile {
   version: number;
   published: boolean;
   roles: Record<CreativeRole, CreativeProfileRole>;
+  /** 运行 Token 预算；发布时冻结到方案版本。 */
+  maxRunTokens?: number;
+  /** 上下文字符预算；发布时冻结到方案版本。 */
+  maxContextChars?: number;
 }
 
 export interface ProjectProfileSelection {

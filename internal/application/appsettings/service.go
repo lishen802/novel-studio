@@ -257,6 +257,10 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 		MaxContextChars: profile.MaxContextChars,
 		Roles:           make([]agent.ResolvedRole, 0, len(profile.Roles)),
 	}
+	// 持久化层按 role ASC 排序会得到 continuity_reviewer → planner → writer，
+	// 但 AgentRun 严格按位置校验 planner → writer → continuity_reviewer。
+	// 此处按规范顺序重排，保证无论 DB 读取顺序如何，下游都能正确创建运行。
+	resolvedByRole := make(map[agent.AgentRole]agent.ResolvedRole, len(profile.Roles))
 	for _, role := range profile.Roles {
 		conn, err := s.repo.Provider(ctx, role.ConnectionID)
 		if err != nil {
@@ -265,7 +269,7 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 		if _, err := s.credentials.Get(ctx, conn.CredentialRef); err != nil {
 			return agent.ResolvedCreativeProfile{}, fmt.Errorf("%w: role %s", ErrCredentialMissing, role.Role)
 		}
-		resolved.Roles = append(resolved.Roles, agent.ResolvedRole{
+		resolvedByRole[role.Role] = agent.ResolvedRole{
 			Role:            role.Role,
 			ConnectionID:    conn.ID,
 			ProviderName:    conn.Name,
@@ -275,7 +279,14 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 			Model:           role.Model,
 			MaxOutputTokens: role.MaxOutputTokens,
 			Temperature:     role.Temperature,
-		})
+		}
+	}
+	for _, required := range []agent.AgentRole{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
+		r, ok := resolvedByRole[required]
+		if !ok {
+			return agent.ResolvedCreativeProfile{}, fmt.Errorf("%w: role %s", ErrInvalidProfileInput, required)
+		}
+		resolved.Roles = append(resolved.Roles, r)
 	}
 	return resolved, nil
 }

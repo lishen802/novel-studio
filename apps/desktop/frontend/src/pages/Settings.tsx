@@ -6,7 +6,7 @@ import {
   AlertTriangle, TestTube, Trash2, Plus, ArrowLeft, Search,
 } from 'lucide-react';
 import { useApp } from '../store/useApp';
-import type { AppSettings, CreativeProfile, CreativeRole, ModelConfig } from '../types';
+import type { AppSettings, CreativeProfile, CreativeProfileRole, CreativeRole, ModelConfig } from '../types';
 import { getActiveModel } from '../types';
 import { canvasPresets } from '../editor';
 import type { MarginSize } from '../editor';
@@ -47,9 +47,12 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabKey>('model');
   const [search, setSearch] = useState('');
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [settingError, setSettingError] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testOkId, setTestOkId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<ProviderTestView | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   const [models, setModels] = useState<ModelConfig[]>(state.settings.models);
   const [activeModelId, setActiveModelId] = useState(state.settings.activeModelId);
@@ -102,61 +105,122 @@ export default function Settings() {
   };
 
   const deleteModel = async (id: string) => {
-    if (!id.startsWith('m-')) await studio.deleteApplicationProvider(id);
-    setModels((prev) => {
-      const next = prev.filter((m) => m.id !== id);
-      if (activeModelId === id) {
-        setActiveModelId(next[0]?.id || '');
+    const target = models.find((m) => m.id === id);
+    if (!target) return;
+    // 删除前必须确认：被方案引用时后端会拒绝，但作者主动删除连接属于破坏性操作。
+    if (!window.confirm(`确认删除连接“${target.name}”？此操作不可撤销。`)) return;
+    setDeleteBusyId(id);
+    setSettingError(null);
+    try {
+      if (!id.startsWith('m-')) {
+        await studio.deleteApplicationProvider(id);
       }
-      return next;
-    });
+      setModels((prev) => {
+        const next = prev.filter((m) => m.id !== id);
+        if (activeModelId === id) {
+          setActiveModelId(next[0]?.id || '');
+        }
+        return next;
+      });
+      setApiKeys((prev) => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (error) {
+      setSettingError(error instanceof Error ? error.message : '删除连接失败');
+    } finally {
+      setDeleteBusyId(null);
+    }
   };
 
   const handleTestConnection = async (id: string) => {
     setTestingId(id);
     setTestOkId(null);
     setTestResult(null);
+    setSettingError(null);
     try {
-      if (id.startsWith('m-')) throw new Error('请先保存连接');
+      if (id.startsWith('m-')) throw new Error('请先保存连接，再测试。');
+      if (!activeModel.modelName.trim()) throw new Error('请先填写模型名称。');
       const result = await studio.testApplicationProvider({ providerId: id, model: activeModel.modelName });
       setTestResult(result);
       setTestOkId(id);
       setTimeout(() => setTestOkId(null), 3000);
+    } catch (error) {
+      setSettingError(error instanceof Error ? error.message : '连接测试失败');
     } finally {
       setTestingId(null);
     }
   };
 
   const handleSave = async () => {
-    for (const model of models) {
-      await studio.saveApplicationProvider({
-        id: model.id.startsWith('m-') ? '' : model.id,
-        name: model.name,
-        kind: model.provider,
-        baseUrl: model.baseUrl || '',
-        apiKey: apiKeys[model.id] || '',
-      });
+    setSaving(true);
+    setSettingError(null);
+    try {
+      // 逐个保存连接，并用后端返回的真实 ID 替换临时 m- 前缀 ID，避免后续操作引用
+      // 已失效的本地占位 ID。
+      const idMapping = new Map<string, string>();
+      for (const model of models) {
+        const saved = await studio.saveApplicationProvider({
+          id: model.id.startsWith('m-') ? '' : model.id,
+          name: model.name,
+          kind: model.provider,
+          baseUrl: model.baseUrl || '',
+          apiKey: apiKeys[model.id] || '',
+        });
+        idMapping.set(model.id, saved.id);
+      }
+      setModels((prev) => prev.map((m) => {
+        const newId = idMapping.get(m.id);
+        return newId && newId !== m.id
+          ? { ...m, id: newId, apiKeyConfigured: m.apiKeyConfigured || (apiKeys[m.id]?.trim().length ?? 0) > 0 }
+          : { ...m, apiKeyConfigured: m.apiKeyConfigured || (apiKeys[m.id]?.trim().length ?? 0) > 0 };
+      }));
+      // 角色绑定中可能引用了临时 ID，保存后需要映射到真实 ID。
+      setCreativeProfiles((prev) => prev.map((profile) => ({
+        ...profile,
+        roles: Object.fromEntries(
+          (Object.keys(profile.roles) as CreativeRole[]).map((role) => {
+            const binding = profile.roles[role];
+            const mapped = idMapping.get(binding.connectionId);
+            return [role, mapped ? { ...binding, connectionId: mapped } : binding];
+          }),
+        ) as Record<CreativeRole, CreativeProfileRole>,
+      })));
+      // 同步 activeModelId 与 selectedProfile 引用。
+      setActiveModelId((prev) => idMapping.get(prev) || prev);
+      // API Key 已经写入凭据库，不再保留在 React 状态中，避免内存中残留明文密钥。
+      setApiKeys({});
+      const next: AppSettings = {
+        models: models.map((m) => {
+          const newId = idMapping.get(m.id) || m.id;
+          return {
+            ...m,
+            id: newId,
+            apiKeyConfigured: m.apiKeyConfigured || (apiKeys[m.id]?.trim().length ?? 0) > 0,
+          };
+        }),
+        activeModelId: idMapping.get(activeModelId) || activeModelId,
+        creativeProfiles,
+        defaultCreativeProfileId,
+        writingPlan: selectedProfile?.name || state.settings.writingPlan,
+        theme,
+        fontSize,
+        lineHeight,
+        canvasColorId,
+        marginSize,
+        indent,
+      };
+      await saveSettings(next);
+      await refreshBootstrap();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      setSettingError(error instanceof Error ? error.message : '保存设置失败');
+    } finally {
+      setSaving(false);
     }
-    const next: AppSettings = {
-      models: models.map((m) => ({
-        ...m,
-        apiKeyConfigured: m.apiKeyConfigured || apiKeys[m.id]?.trim().length > 0,
-      })),
-      activeModelId,
-      creativeProfiles,
-      defaultCreativeProfileId,
-      writingPlan: selectedProfile?.name || state.settings.writingPlan,
-      theme,
-      fontSize,
-      lineHeight,
-      canvasColorId,
-      marginSize,
-      indent,
-    };
-    await saveSettings(next);
-    await refreshBootstrap();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
   };
 
   /** 更新方案中的单一角色的模型连接。 */
@@ -179,6 +243,27 @@ export default function Settings() {
     )));
   };
 
+  /** 更新方案中单一角色的生成参数（最大输出 Token、温度）。 */
+  const updateProfileRoleParam = (
+    role: CreativeRole,
+    patch: Partial<Pick<CreativeProfileRole, 'maxOutputTokens' | 'temperature'>>,
+  ) => {
+    if (!selectedProfile) return;
+    setCreativeProfiles((profiles) => profiles.map((profile) => (
+      profile.id === selectedProfile.id
+        ? { ...profile, roles: { ...profile.roles, [role]: { ...profile.roles[role], ...patch } } }
+        : profile
+    )));
+  };
+
+  /** 更新方案级运行预算。 */
+  const updateProfileBudget = (patch: Partial<Pick<CreativeProfile, 'maxRunTokens' | 'maxContextChars'>>) => {
+    if (!selectedProfile) return;
+    setCreativeProfiles((profiles) => profiles.map((profile) => (
+      profile.id === selectedProfile.id ? { ...profile, ...patch } : profile
+    )));
+  };
+
   /** 将当前编辑方案发布为下一版本，避免静默改变已经创建的作品。 */
   const publishNextProfileVersion = async () => {
     if (!selectedProfile) return;
@@ -193,19 +278,23 @@ export default function Settings() {
         enabled: true,
       };
     });
-    const published = await studio.publishCreativeProfile({
-      profileId: selectedProfile.id,
-      name: selectedProfile.name,
-      roles,
-      maxRunTokens: 100000,
-      maxContextChars: 120000,
-    });
-    setCreativeProfiles((profiles) => profiles.map((profile) => (
-      profile.id === selectedProfile.id
-        ? { ...profile, version: published.version, published: true }
-        : profile
-    )));
-    setDefaultCreativeProfileId(published.profileId);
+    setSettingError(null);
+    try {
+      const published = await studio.publishCreativeProfile({
+        profileId: selectedProfile.id,
+        name: selectedProfile.name,
+        roles,
+        maxRunTokens: selectedProfile.maxRunTokens || 30000,
+        maxContextChars: selectedProfile.maxContextChars || 120000,
+      });
+      setCreativeProfiles((profiles) => profiles.map((profile) => (
+        profile.id === selectedProfile.id
+          ? { ...profile, version: published.version, published: true, maxRunTokens: selectedProfile.maxRunTokens || 30000, maxContextChars: selectedProfile.maxContextChars || 120000 }
+          : profile
+      )));
+    } catch (error) {
+      setSettingError(error instanceof Error ? error.message : '发布方案失败');
+    }
   };
 
   /** 创建待发布的本地方案草稿；只有点击发布后才写入后端。 */
@@ -222,10 +311,11 @@ export default function Settings() {
         writer: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.7 },
         continuity_reviewer: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.2 },
       },
+      maxRunTokens: 30000,
+      maxContextChars: 120000,
     };
-    setCreativeProfiles([profile]);
+    setCreativeProfiles((prev) => [...prev, profile]);
     setSelectedProfileId(id);
-    setDefaultCreativeProfileId('');
   };
 
   return (
@@ -388,9 +478,15 @@ export default function Settings() {
                     )}
                   </div>
                   {models.length > 1 && (
-                    <Button variant="ghost" size="sm" className="gap-1 text-danger hover:text-danger" onClick={() => void deleteModel(activeModel.id)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 text-danger hover:text-danger"
+                      onClick={() => void deleteModel(activeModel.id)}
+                      disabled={deleteBusyId === activeModel.id}
+                    >
                       <Trash2 className="w-4 h-4" />
-                      删除
+                      {deleteBusyId === activeModel.id ? '删除中...' : '删除'}
                     </Button>
                   )}
                 </div>
@@ -420,6 +516,9 @@ export default function Settings() {
                   {defaultCreativeProfileId === profile.id && <p className="text-xs text-primary mt-1">默认方案</p>}
                 </button>
               ))}
+              <Button variant="ghost" size="sm" className="w-full justify-center" onClick={createProfileDraft} disabled={!models.length}>
+                <Plus className="w-4 h-4" />新增方案
+              </Button>
             </Card>
 
             <Card className="space-y-6">
@@ -432,10 +531,11 @@ export default function Settings() {
                   <Button
                     variant={defaultCreativeProfileId === selectedProfile.id ? 'default' : 'primary'}
                     size="sm"
-                    disabled={defaultCreativeProfileId === selectedProfile.id}
-                    onClick={() => setDefaultCreativeProfileId(selectedProfile.id)}
+                    onClick={() => setDefaultCreativeProfileId(
+                      defaultCreativeProfileId === selectedProfile.id ? '' : selectedProfile.id,
+                    )}
                   >
-                    {defaultCreativeProfileId === selectedProfile.id ? '当前默认' : '设为默认'}
+                    {defaultCreativeProfileId === selectedProfile.id ? '取消默认' : '设为默认'}
                   </Button>
                   <Button variant="default" size="sm" onClick={() => void publishNextProfileVersion()}>发布下一版本</Button>
                 </div>
@@ -447,30 +547,90 @@ export default function Settings() {
 
               <section>
                 <h3 className="text-sm font-medium text-text mb-3">角色分配</h3>
-                <div className="space-y-3">
-                  {(Object.keys(creativeRoleLabels) as CreativeRole[]).map((role) => (
-                    <div key={role} className="grid grid-cols-[100px_1fr_1fr] gap-3 items-center">
-                      <label htmlFor={`role-${role}`} className="text-sm text-text-sub">{creativeRoleLabels[role]}</label>
-                      <select
-                        id={`role-${role}`}
-                        aria-label={creativeRoleLabels[role]}
-                        value={selectedProfile.roles[role].connectionId}
-                        onChange={(event) => updateProfileRole(role, event.target.value)}
-                        className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
-                      >
-                        {models.map((model) => (
-                          <option key={model.id} value={model.id}>{model.name}</option>
-                        ))}
-                      </select>
-                      <Input
-                        value={selectedProfile.roles[role].model}
-                        onChange={(event) => updateProfileRoleModel(role, event.target.value)}
-                        placeholder="模型名称"
-                        aria-label={`${creativeRoleLabels[role]}模型`}
-                      />
-                    </div>
-                  ))}
+                <div className="space-y-4">
+                  {(Object.keys(creativeRoleLabels) as CreativeRole[]).map((role) => {
+                    const binding = selectedProfile.roles[role];
+                    return (
+                      <div key={role} className="rounded-lg border border-border bg-surface px-3 py-3 space-y-2">
+                        <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-center">
+                          <label htmlFor={`role-${role}`} className="text-sm text-text-sub">{creativeRoleLabels[role]}</label>
+                          <select
+                            id={`role-${role}`}
+                            aria-label={creativeRoleLabels[role]}
+                            value={binding.connectionId}
+                            onChange={(event) => updateProfileRole(role, event.target.value)}
+                            className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
+                          >
+                            {models.map((model) => (
+                              <option key={model.id} value={model.id}>{model.name}</option>
+                            ))}
+                          </select>
+                          <Input
+                            value={binding.model}
+                            onChange={(event) => updateProfileRoleModel(role, event.target.value)}
+                            placeholder="模型名称"
+                            aria-label={`${creativeRoleLabels[role]}模型`}
+                          />
+                        </div>
+                        <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-center">
+                          <span className="text-xs text-text-sub">生成参数</span>
+                          <label className="flex items-center gap-2 text-xs text-text-sub">
+                            <span className="shrink-0">最大输出</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={binding.maxOutputTokens}
+                              onChange={(event) => updateProfileRoleParam(role, { maxOutputTokens: Math.max(1, Number(event.target.value) || 0) })}
+                              aria-label={`${creativeRoleLabels[role]}最大输出 Token`}
+                              className="h-8"
+                            />
+                            <span className="shrink-0">tokens</span>
+                          </label>
+                          <label className="flex items-center gap-2 text-xs text-text-sub">
+                            <span className="shrink-0">温度</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={2}
+                              step={0.1}
+                              value={binding.temperature}
+                              onChange={(event) => updateProfileRoleParam(role, { temperature: Math.min(2, Math.max(0, Number(event.target.value) || 0)) })}
+                              aria-label={`${creativeRoleLabels[role]}温度`}
+                              className="h-8"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-medium text-text mb-3">运行预算</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 text-sm text-text-sub">
+                    <span className="shrink-0 w-28">运行 Token 预算</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={selectedProfile.maxRunTokens || 30000}
+                      onChange={(event) => updateProfileBudget({ maxRunTokens: Math.max(1, Number(event.target.value) || 0) })}
+                      aria-label="运行 Token 预算"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-text-sub">
+                    <span className="shrink-0 w-28">上下文字符预算</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={selectedProfile.maxContextChars || 120000}
+                      onChange={(event) => updateProfileBudget({ maxContextChars: Math.max(1, Number(event.target.value) || 0) })}
+                      aria-label="上下文字符预算"
+                    />
+                  </label>
+                </div>
+                <p className="text-xs text-text-muted mt-2">三个角色的最大输出 Token 之和不能超过运行 Token 预算，否则创建运行时会被拒绝。</p>
               </section>
             </Card>
           </div>
@@ -479,7 +639,7 @@ export default function Settings() {
         {activeTab === 'writing' && !selectedProfile && (
           <Card className="max-w-2xl space-y-4">
             <h2 className="text-base font-medium text-text">还没有创作方案</h2>
-            <p className="text-sm text-text-sub">先保存至少一个模型连接，再创建方案草稿并为五类角色选择模型。点击“发布下一版本”后才会写入后端。</p>
+            <p className="text-sm text-text-sub">先保存至少一个模型连接，再创建方案草稿并为三类角色（规划、写作、审阅）选择模型。点击“发布下一版本”后才会写入后端。</p>
             <Button variant="primary" onClick={createProfileDraft} disabled={!models.length}>
               <Plus className="w-4 h-4" />创建方案草稿
             </Button>
@@ -662,14 +822,23 @@ export default function Settings() {
         </div>
 
         <footer className="border-t border-border bg-surface/90 px-10 py-4">
-          <div className="max-w-5xl mx-auto flex justify-end">
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+            {settingError ? (
+              <p className="text-sm text-danger flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span className="truncate">{settingError}</span>
+              </p>
+            ) : (
+              <span />
+            )}
             <Button
               variant={saved ? 'default' : 'primary'}
               onClick={handleSave}
+              disabled={saving}
               className={saved ? 'text-success border-success/30' : ''}
             >
               {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              {saved ? '已保存' : '保存设置'}
+              {saved ? '已保存' : saving ? '保存中...' : '保存设置'}
             </Button>
           </div>
         </footer>

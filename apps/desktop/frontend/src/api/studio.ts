@@ -175,6 +175,12 @@ export interface AgentRunStepView {
   providerRequestId: string;
   inputTokens: number;
   outputTokens: number;
+  // 冻结快照字段：步骤实际使用的模型与 Provider。
+  providerName: string;
+  providerKind: string;
+  model: string;
+  maxOutputTokens: number;
+  temperature: number;
 }
 
 export interface AgentRunView {

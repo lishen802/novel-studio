@@ -84,6 +84,11 @@ func (client *OpenAIClient) Generate(
 		"max_output_tokens": request.MaxOutputTokens,
 		"stream":            true,
 	}
+	// 发送方案冻结的温度，使 writer/reviewer 等角色的生成参数真正生效。
+	// temperature=0 通常用于探测或刻意使用 Provider 默认值，此时不发送。
+	if request.Temperature > 0 {
+		payload["temperature"] = request.Temperature
+	}
 	if len(request.JSONSchema) > 0 {
 		var schema any
 		if err := json.Unmarshal(request.JSONSchema, &schema); err != nil {
