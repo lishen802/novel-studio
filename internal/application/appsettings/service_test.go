@@ -287,6 +287,20 @@ func newServiceHarness(t *testing.T) (*Service, *fakeRepo, *fakeCredentials) {
 	return svc, repo, creds
 }
 
+// seedDefaultConnection 预置一个带凭据的 conn-1 连接：profileInput 默认引用它，
+// 发布校验现在要求连接存在且凭据已配置，否则会直接返回 ErrProviderNotFound。
+func seedDefaultConnection(t *testing.T, svc *Service, repo *fakeRepo, creds *fakeCredentials) {
+	t.Helper()
+	seedConn, err := appdomain.NewProviderConnection("conn-1", "OpenAI", agent.ProviderOpenAI, "https://api.openai.com/v1", "app-provider:conn-1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertProvider(context.Background(), seedConn); err != nil {
+		t.Fatal(err)
+	}
+	creds.saved["app-provider:conn-1"] = "secret"
+}
+
 func mustPublish(t *testing.T, svc *Service, input ProfileInput) appdomain.CreativeProfileVersion {
 	t.Helper()
 	v, err := svc.PublishCreativeProfile(context.Background(), input)
@@ -341,7 +355,8 @@ func sameWriterReviewerInput() ProfileInput {
 }
 
 func TestPublishDefaultProfileCreatesNewVersionWithoutChangingOldVersion(t *testing.T) {
-	svc, _, _ := newServiceHarness(t)
+	svc, repo, creds := newServiceHarness(t)
+	seedDefaultConnection(t, svc, repo, creds)
 	v1 := mustPublish(t, svc, profileInput("默认方案", "writer-model-v1"))
 	v2 := mustPublish(t, svc, profileInput("默认方案", "writer-model-v2"))
 	if v1.Version != 1 || v2.Version != 2 {
@@ -409,7 +424,8 @@ func TestDeleteProviderRejectsProfileReferences(t *testing.T) {
 }
 
 func TestPublishProfileRejectsSameWriterAndReviewerModel(t *testing.T) {
-	svc, _, _ := newServiceHarness(t)
+	svc, repo, creds := newServiceHarness(t)
+	seedDefaultConnection(t, svc, repo, creds)
 	_, err := svc.PublishCreativeProfile(context.Background(), sameWriterReviewerInput())
 	if !errors.Is(err, agent.ErrReviewerNotIndependent) {
 		t.Fatalf("error = %v, want ErrReviewerNotIndependent", err)
@@ -417,7 +433,8 @@ func TestPublishProfileRejectsSameWriterAndReviewerModel(t *testing.T) {
 }
 
 func TestPreferencesDefaultChangeDoesNotMutatePublishedVersions(t *testing.T) {
-	svc, _, _ := newServiceHarness(t)
+	svc, repo, creds := newServiceHarness(t)
+	seedDefaultConnection(t, svc, repo, creds)
 	v1 := mustPublish(t, svc, profileInput("方案 A", "writer-a"))
 	v2 := mustPublish(t, svc, profileInput("方案 B", "writer-b"))
 	if err := svc.SetDefaultProfile(context.Background(), v2.ProfileID); err != nil {
@@ -435,7 +452,8 @@ func TestPreferencesDefaultChangeDoesNotMutatePublishedVersions(t *testing.T) {
 }
 
 func TestDefaultProfileSelectionReturnsLatestVersion(t *testing.T) {
-	svc, _, _ := newServiceHarness(t)
+	svc, repo, creds := newServiceHarness(t)
+	seedDefaultConnection(t, svc, repo, creds)
 	v1 := mustPublish(t, svc, profileInput("默认方案", "writer-v1"))
 	mustPublish(t, svc, profileInput("默认方案", "writer-v2"))
 	if err := svc.SetDefaultProfile(context.Background(), v1.ProfileID); err != nil {
@@ -665,7 +683,8 @@ func TestResolveCreativeProfileNotFound(t *testing.T) {
 }
 
 func TestLatestProfilesReturnsLatestVersionPerProfile(t *testing.T) {
-	svc, _, _ := newServiceHarness(t)
+	svc, repo, creds := newServiceHarness(t)
+	seedDefaultConnection(t, svc, repo, creds)
 	mustPublish(t, svc, profileInput("方案 A", "writer-a1"))
 	mustPublish(t, svc, profileInput("方案 A", "writer-a2"))
 	second := ProfileInput{

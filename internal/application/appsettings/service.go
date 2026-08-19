@@ -191,6 +191,26 @@ func (s *Service) PublishCreativeProfile(ctx context.Context, input ProfileInput
 		return appdomain.CreativeProfileVersion{}, ErrInvalidProfileInput
 	}
 
+	// 发布前校验每个角色引用的连接存在且凭据已配置，避免发布一个指向
+	// 已删除连接或无凭据的方案；作者在发布时就能发现问题，而不是等到运行时。
+	providers, err := s.repo.Providers(ctx)
+	if err != nil {
+		return appdomain.CreativeProfileVersion{}, fmt.Errorf("load providers: %w", err)
+	}
+	providerByID := make(map[string]appdomain.ProviderConnection, len(providers))
+	for _, p := range providers {
+		providerByID[p.ID] = p
+	}
+	for _, r := range input.Roles {
+		conn, ok := providerByID[r.ConnectionID]
+		if !ok {
+			return appdomain.CreativeProfileVersion{}, fmt.Errorf("%w: connection %s", ErrProviderNotFound, r.ConnectionID)
+		}
+		if _, err := s.credentials.Get(ctx, conn.CredentialRef); err != nil {
+			return appdomain.CreativeProfileVersion{}, fmt.Errorf("%w: role %s", ErrCredentialMissing, r.Role)
+		}
+	}
+
 	// Determine the next version number.
 	var nextVersion int64 = 1
 	if latest, err := s.repo.LatestProfileVersion(ctx, input.ProfileID); err == nil {
@@ -214,7 +234,9 @@ func (s *Service) PublishCreativeProfile(ctx context.Context, input ProfileInput
 		roles, input.MaxRunTokens, input.MaxContextChars, s.clock.Now(),
 	)
 	if err != nil {
-		return appdomain.CreativeProfileVersion{}, err
+		// 方案领域校验错误（角色缺失、预算非法、审阅不独立等）统一包装为
+		// ErrInvalidProfileInput，桌面层映射为 CREATIVE_PROFILE_INVALID。
+		return appdomain.CreativeProfileVersion{}, fmt.Errorf("%w: %w", ErrInvalidProfileInput, err)
 	}
 
 	if err := s.repo.PublishProfileVersion(ctx, v); err != nil {
@@ -292,11 +314,19 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 }
 
 func (s *Service) SetDefaultProfile(ctx context.Context, profileID string) error {
+	profileID = strings.TrimSpace(profileID)
+	// 非空默认方案必须对应一个已发布的最新版本，否则后续创建新项目时
+	// 解析默认方案会读不到版本并失败。空值表示清除默认，允许通过。
+	if profileID != "" {
+		if _, err := s.repo.LatestProfileVersion(ctx, profileID); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidProfileInput, profileID)
+		}
+	}
 	prefs, err := s.repo.Preferences(ctx)
 	if err != nil {
 		return fmt.Errorf("read preferences: %w", err)
 	}
-	prefs.DefaultCreativeProfileID = strings.TrimSpace(profileID)
+	prefs.DefaultCreativeProfileID = profileID
 	prefs.UpdatedAt = s.clock.Now()
 	return s.repo.SavePreferences(ctx, prefs)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
@@ -162,6 +163,10 @@ func safeDesktopError(err error) error {
 		code, message = errorCreativeProfileMissing, "项目尚未配置创作方案，请先在应用设置中发布并设为默认方案。"
 	case errors.Is(err, appsettings.ErrInvalidProfileInput):
 		code, message = errorCreativeProfileInvalid, "创作方案必须恰好包含规划、写作和审阅三个角色，且配置合法。"
+	case errors.Is(err, appdomain.ErrInvalidRoleCount), errors.Is(err, appdomain.ErrInvalidVersion):
+		code, message = errorCreativeProfileInvalid, "创作方案角色数量或版本不合法。"
+	case errors.Is(err, agentdomain.ErrInvalidRole), errors.Is(err, agentdomain.ErrReviewerNotIndependent), errors.Is(err, agentdomain.ErrInvalidProfile):
+		code, message = errorCreativeProfileInvalid, "创作方案角色配置不合法，审阅必须与写作使用不同连接或模型。"
 	case errors.Is(err, appshell.ErrProjectRelocateRequired):
 		code, message = errorProjectRelocateRequired, "项目文件已移动或删除，请重新定位项目。"
 	case errors.Is(err, errFeatureNotAvailable):

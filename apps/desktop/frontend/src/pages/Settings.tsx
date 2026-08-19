@@ -356,7 +356,7 @@ export default function Settings() {
             >
               <Icon className="w-4 h-4" />
               {tab.label}
-              {tab.key === 'model' && !activeModel.apiKeyConfigured && !apiKeys[activeModel.id]?.trim() && (
+              {tab.key === 'model' && activeModel && !activeModel.apiKeyConfigured && !apiKeys[activeModel.id]?.trim() && (
                 <span className="ml-auto w-2 h-2 rounded-full bg-warning" title="未配置" />
               )}
             </button>
@@ -374,7 +374,18 @@ export default function Settings() {
 
         <div className="flex-1 min-h-0 overflow-auto px-10 pb-8">
           <div className="w-full max-w-5xl mx-auto">
-        {activeTab === 'model' && (
+        {activeTab === 'model' && models.length === 0 && (
+          <Card className="max-w-3xl p-10 flex flex-col items-center text-center">
+            <Cpu className="w-10 h-10 text-text-muted mb-3" />
+            <h3 className="text-lg font-medium text-text">还没有模型连接</h3>
+            <p className="text-sm text-text-sub mt-2 mb-5">添加第一个模型连接以启用 AI 创作能力。</p>
+            <Button variant="primary" size="sm" onClick={addModel}>
+              <Plus className="w-4 h-4" />新增连接
+            </Button>
+          </Card>
+        )}
+
+        {activeTab === 'model' && models.length > 0 && (
           <div className="max-w-3xl space-y-5">
             {!activeModel.apiKeyConfigured && !apiKeys[activeModel.id]?.trim() && (
               <div className="flex items-start gap-3 p-3 bg-warning/10 border border-warning/20 rounded-md text-sm">
@@ -462,22 +473,22 @@ export default function Settings() {
                     placeholder={activeModel.apiKeyConfigured ? '已配置 · 重新输入可覆盖' : '输入 API Key...'}
                   />
                 </div>
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center gap-3">
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => void handleTestConnection(activeModel.id)}
-                      disabled={testingId === activeModel.id}
-                    >
-                      <TestTube className="w-4 h-4" />
-                      {testingId === activeModel.id ? '测试中...' : '测试连接'}
-                    </Button>
-                    {testOkId === activeModel.id && testResult && (
-                      <span className="text-sm text-success">连接成功 · {testResult.latencyMs}ms · {testResult.outputTokens} tokens</span>
-                    )}
-                  </div>
-                  {models.length > 1 && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => void handleTestConnection(activeModel.id)}
+                        disabled={testingId === activeModel.id}
+                      >
+                        <TestTube className="w-4 h-4" />
+                        {testingId === activeModel.id ? '测试中...' : '测试连接'}
+                      </Button>
+                      {testOkId === activeModel.id && testResult && (
+                        <span className="text-sm text-success">连接成功 · {testResult.latencyMs}ms · {testResult.outputTokens} tokens</span>
+                      )}
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -488,7 +499,8 @@ export default function Settings() {
                       <Trash2 className="w-4 h-4" />
                       {deleteBusyId === activeModel.id ? '删除中...' : '删除'}
                     </Button>
-                  )}
+                  </div>
+                  <p className="text-xs text-text-muted">测试将产生一次极低额度的真实模型调用。</p>
                 </div>
               </Card>
             </div>
@@ -531,6 +543,9 @@ export default function Settings() {
                   <Button
                     variant={defaultCreativeProfileId === selectedProfile.id ? 'default' : 'primary'}
                     size="sm"
+                    // 未发布草稿禁止设为默认：后端持久化默认方案前会校验最新版本存在，
+                    // 草稿 version=0 还没有持久化版本，设为默认会被后端拒绝。
+                    disabled={!selectedProfile.published && defaultCreativeProfileId !== selectedProfile.id}
                     onClick={() => setDefaultCreativeProfileId(
                       defaultCreativeProfileId === selectedProfile.id ? '' : selectedProfile.id,
                     )}
