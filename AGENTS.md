@@ -22,6 +22,7 @@
 - Keep Go domain, application, persistence, agent runtime, provider adapters, platform adapters, and UI boundaries explicit.
 - Keep Wails bindings thin; React components must not call persistence or model providers directly.
 - Use test-driven development for production features and verify Windows/macOS implications.
+- Keep Go code idiomatic and cohesive in line with Effective Go and Go Code Review Comments: avoid package-name stuttering in exported identifiers, define small interfaces at the consumer, keep files and types focused, wrap errors with actionable context using `%w`, and before commit require `gofmt`, `go vet`, and affected-package tests to pass; cross-package or concurrent changes must additionally pass full-repository tests and targeted `go test -race`.
 - For small, narrowly scoped feature optimizations and maintenance changes, do not create planning or implementation documents. Explain the impact and obtain confirmation in conversation, then implement directly on the current branch.
 - Add concise Chinese comments to key functions explaining their purpose; all code comments must be in Chinese.
 - For large features or changes spanning multiple modules, database schema, or major product capabilities, create an isolated Git worktree automatically without requesting confirmation.
