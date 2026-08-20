@@ -1049,7 +1049,7 @@ func (a *DesktopAPI) SaveApplicationPreferences(input ApplicationPreferencesInpu
 		prefs.Theme = appdomain.Theme(input.Theme)
 	}
 	// 空字符串表示清除默认方案，必须始终处理，不能因空值跳过更新。
-	newDefault := input.DefaultCreativeProfileID
+	newDefault := strings.TrimSpace(input.DefaultCreativeProfileID)
 	// 生产入口必须复用 SetDefaultProfile 的已发布校验，否则前端虽然禁用了
 	// 未发布草稿的"设为默认"，后端约束仍可被直接调用绕过。
 	if newDefault != prefs.DefaultCreativeProfileID {

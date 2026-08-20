@@ -1859,6 +1859,7 @@ func TestWailsJobEventNotifierEmitsPayload(t *testing.T) {
 // tests. It returns canned data without touching SQLite.
 type fakeAppSettingsRepo struct {
 	prefs        appdomain.Preferences
+	savedPrefs   appdomain.Preferences
 	providers    []appdomain.ProviderConnection
 	recent       []appdomain.RecentProject
 	profileVer   appdomain.CreativeProfileVersion
@@ -1869,7 +1870,8 @@ type fakeAppSettingsRepo struct {
 func (r *fakeAppSettingsRepo) Preferences(context.Context) (appdomain.Preferences, error) {
 	return r.prefs, nil
 }
-func (r *fakeAppSettingsRepo) SavePreferences(context.Context, appdomain.Preferences) error {
+func (r *fakeAppSettingsRepo) SavePreferences(_ context.Context, prefs appdomain.Preferences) error {
+	r.savedPrefs = prefs
 	return nil
 }
 
@@ -2082,6 +2084,28 @@ func TestBootstrapReturnsRecentProjectsAndPreferences(t *testing.T) {
 	}
 	if len(view.RecentProjects) != 1 || view.RecentProjects[0].Title != "长夜" {
 		t.Fatalf("recent projects = %#v", view.RecentProjects)
+	}
+}
+
+func TestSaveApplicationPreferencesNormalizesDefaultProfileID(t *testing.T) {
+	repo := &fakeAppSettingsRepo{
+		prefs:        appdomain.Preferences{Theme: appdomain.ThemeSystem},
+		profileFound: true,
+		profileVer:   appdomain.CreativeProfileVersion{ProfileID: "profile-1", Version: 1},
+	}
+	api := newDesktopAPI(&fakeWorkspace{}, &fakeDirectoryPicker{})
+	api.settings = newTestAppSettingsService(repo, &fakeCredentialStore{})
+	api.startup(context.Background())
+
+	err := api.SaveApplicationPreferences(ApplicationPreferencesInput{
+		Theme:                    "dark",
+		DefaultCreativeProfileID: "  profile-1  ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.savedPrefs.DefaultCreativeProfileID != "profile-1" {
+		t.Fatalf("saved default profile id = %q, want normalized id", repo.savedPrefs.DefaultCreativeProfileID)
 	}
 }
 

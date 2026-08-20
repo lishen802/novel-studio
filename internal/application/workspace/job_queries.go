@@ -56,11 +56,11 @@ type JobStepStateView struct {
 // the caller should align the cursor to it and re-request instead of using
 // NextCursor (which is 0 in that case, resetting the cursor and looping forever).
 type JobEventsPageView struct {
-	Events                    []JobEventView `json:"events"`
-	NextCursor                uint64         `json:"nextCursor"`
-	HasMore                   bool           `json:"hasMore"`
-	SnapshotRequired          bool           `json:"snapshotRequired"`
-	EarliestReplayableSequence uint64        `json:"earliestReplayableSequence,omitempty"`
+	Events                     []JobEventView `json:"events"`
+	NextCursor                 uint64         `json:"nextCursor"`
+	HasMore                    bool           `json:"hasMore"`
+	SnapshotRequired           bool           `json:"snapshotRequired"`
+	EarliestReplayableSequence uint64         `json:"earliestReplayableSequence,omitempty"`
 }
 
 // JobSummaryView is the lightweight recoverable-jobs listing row. Agent runs

@@ -170,18 +170,26 @@ export default function Chapters() {
     maxContextChars: number;
   } | null>(null);
   const [runPreviewLoading, setRunPreviewLoading] = useState(false);
+  const [runPreviewError, setRunPreviewError] = useState(false);
+  const [runPreviewReloadKey, setRunPreviewReloadKey] = useState(0);
 
   useEffect(() => {
     if (!pendingRun) {
       setRunPreview(null);
+      setRunPreviewError(false);
+      setRunPreviewLoading(false);
       return;
     }
     const selection = state.backendProject?.profileSelection;
     if (!selection?.profileId || selection.version == null) {
       setRunPreview(null);
+      setRunPreviewError(true);
+      setRunPreviewLoading(false);
       return;
     }
     let active = true;
+    setRunPreview(null);
+    setRunPreviewError(false);
     setRunPreviewLoading(true);
     void studio.getProfileVersion(selection.profileId, selection.version).then((profile: CreativeProfileView) => {
       if (!active) return;
@@ -204,14 +212,17 @@ export default function Chapters() {
         maxContextChars: profile.maxContextChars,
       });
     }).catch(() => {
-      if (active) setRunPreview(null);
+      if (active) {
+        setRunPreview(null);
+        setRunPreviewError(true);
+      }
     }).finally(() => {
       if (active) setRunPreviewLoading(false);
     });
     return () => { active = false; };
     // 依赖 pendingRun 和项目锁定方案：弹窗打开时拉取，关闭时清空。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingRun, state.backendProject?.profileSelection]);
+  }, [pendingRun, runPreviewReloadKey, state.backendProject?.profileSelection]);
 
   useEffect(() => {
     let active = true;
@@ -482,7 +493,8 @@ export default function Chapters() {
 
   /** 运行前确认通过后，真正创建并执行 AgentRun；结果仍进入候选区，不覆盖正文。 */
   const confirmRun = async () => {
-    if (!pendingRun || !selected) return;
+    // 精确方案预览是付费调用前置条件；函数守卫和按钮禁用共同防止绕过确认。
+    if (!pendingRun || !selected || !runPreview || runPreviewLoading) return;
     const { prompt, label } = pendingRun;
     setPendingRun(null);
     setAiLoading(true);
@@ -1124,12 +1136,25 @@ export default function Chapters() {
                 <div>上下文字符预算：{runPreview.maxContextChars}</div>
               </div>
             </>
+          ) : runPreviewError ? (
+            <div className="flex items-center justify-between gap-3 p-3 border border-danger/20 bg-danger/5 rounded-md">
+              <p className="text-sm text-text-sub">无法加载方案预览，已阻止真实模型调用。请重试或检查模型设置。</p>
+              <Button variant="default" size="sm" onClick={() => setRunPreviewReloadKey((key) => key + 1)}>
+                <RefreshCw className="w-4 h-4" />
+                重试加载
+              </Button>
+            </div>
           ) : (
-            <p className="text-sm text-text-sub">无法加载方案预览信息，仍可继续运行。</p>
+            <p className="text-sm text-text-sub">尚未取得方案预览，暂不能运行。</p>
           )}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" size="sm" onClick={() => setPendingRun(null)}>取消</Button>
-            <Button variant="primary" size="sm" onClick={() => void confirmRun()} disabled={aiLoading}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void confirmRun()}
+              disabled={aiLoading || runPreviewLoading || !runPreview}
+            >
               {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               确认运行
             </Button>

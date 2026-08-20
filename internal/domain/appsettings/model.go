@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	ErrBlankValue             = errors.New("required value must not be blank")
-	ErrInvalidTheme           = errors.New("invalid theme")
-	ErrInvalidVersion         = errors.New("invalid creative profile version")
-	ErrProfileInUse           = errors.New("provider is referenced by a creative profile")
-	ErrInvalidRoleCount       = errors.New("creative profile must have exactly planner, writer, and continuity_reviewer roles")
+	ErrBlankValue              = errors.New("required value must not be blank")
+	ErrInvalidTheme            = errors.New("invalid theme")
+	ErrInvalidVersion          = errors.New("invalid creative profile version")
+	ErrProfileInUse            = errors.New("provider is referenced by a creative profile")
+	ErrInvalidRoleCount        = errors.New("creative profile must have exactly planner, writer, and continuity_reviewer roles")
 	ErrInvalidGenerationParams = errors.New("creative profile role has invalid generation parameters")
 )
 
