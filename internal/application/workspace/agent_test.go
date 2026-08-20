@@ -151,7 +151,7 @@ func TestAgentRunRejectsRequiredContextAboveBudgetBeforeProviderCall(t *testing.
 }
 
 func TestCreateChapterAgentRunRequiresIndependentReviewer(t *testing.T) {
-	profiles := []agentdomain.AgentProfile{
+	profiles := []agentdomain.Profile{
 		{Role: agentdomain.RolePlanner, ConnectionID: "one", Model: "model", Enabled: true},
 		{Role: agentdomain.RoleWriter, ConnectionID: "one", Model: "model", Enabled: true},
 		{Role: agentdomain.RoleContinuityReviewer, ConnectionID: "one", Model: "model", Enabled: true},

@@ -126,7 +126,7 @@ func (s *Store) DeleteProviderConnection(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Store) UpsertAgentProfile(ctx context.Context, profile agentdomain.AgentProfile) error {
+func (s *Store) UpsertAgentProfile(ctx context.Context, profile agentdomain.Profile) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO agent_profiles(
 			id, project_id, role, connection_id, model, max_output_tokens,
@@ -150,7 +150,7 @@ func (s *Store) UpsertAgentProfile(ctx context.Context, profile agentdomain.Agen
 	return nil
 }
 
-func (s *Store) ListAgentProfiles(ctx context.Context) ([]agentdomain.AgentProfile, error) {
+func (s *Store) ListAgentProfiles(ctx context.Context) ([]agentdomain.Profile, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, role, connection_id, model, max_output_tokens,
 			temperature, enabled, created_at, updated_at
@@ -162,7 +162,7 @@ func (s *Store) ListAgentProfiles(ctx context.Context) ([]agentdomain.AgentProfi
 		return nil, databaseOperationError("list agent profiles", err)
 	}
 	defer rows.Close()
-	result := make([]agentdomain.AgentProfile, 0)
+	result := make([]agentdomain.Profile, 0)
 	for rows.Next() {
 		profile, err := scanAgentProfile(rows)
 		if err != nil {
@@ -173,23 +173,23 @@ func (s *Store) ListAgentProfiles(ctx context.Context) ([]agentdomain.AgentProfi
 	return result, rows.Err()
 }
 
-func (s *Store) AgentProfile(ctx context.Context, id string) (agentdomain.AgentProfile, error) {
+func (s *Store) AgentProfile(ctx context.Context, id string) (agentdomain.Profile, error) {
 	profile, err := scanAgentProfile(s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, role, connection_id, model, max_output_tokens,
 			temperature, enabled, created_at, updated_at
 		FROM agent_profiles WHERE id = ?
 	`, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return agentdomain.AgentProfile{}, fmt.Errorf("%w: agent profile %s", ErrAgentRecordMissing, id)
+		return agentdomain.Profile{}, fmt.Errorf("%w: agent profile %s", ErrAgentRecordMissing, id)
 	}
 	return profile, err
 }
 
-func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) error {
-	return s.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{Run: run})
+func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.Run) error {
+	return s.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run})
 }
 
-func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.AgentRunBundle) error {
+func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.RunBundle) error {
 	run := bundle.Run
 	if err := validateAgentRunBundle(bundle); err != nil {
 		return err
@@ -265,7 +265,7 @@ func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.Age
 	return nil
 }
 
-func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun, drafts ...agentdomain.JobEventDraft) error {
+func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.Run, drafts ...agentdomain.JobEventDraft) error {
 	if len(drafts) == 0 {
 		result, err := execUpdateAgentRun(ctx, s.db, run)
 		if err != nil {
@@ -302,7 +302,7 @@ func (s *Store) UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun, dr
 // so UpdateAgentRun can reuse it both for the legacy single-statement path and
 // for the transactional path that also appends events and refreshes the
 // snapshot.
-func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.AgentRun) (sql.Result, error) {
+func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.Run) (sql.Result, error) {
 	return exec.ExecContext(ctx, `
 		UPDATE agent_runs SET
 			status = ?, error_code = ?, error_message = ?,
@@ -326,7 +326,7 @@ func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.Ag
 	)
 }
 
-func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, error) {
+func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.Run, error) {
 	run, err := scanAgentRun(s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
@@ -338,16 +338,16 @@ func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, 
 		FROM agent_runs WHERE id = ?
 	`, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return agentdomain.AgentRun{}, fmt.Errorf("%w: agent run %s", ErrAgentRecordMissing, id)
+		return agentdomain.Run{}, fmt.Errorf("%w: agent run %s", ErrAgentRecordMissing, id)
 	}
 	if err != nil {
-		return agentdomain.AgentRun{}, err
+		return agentdomain.Run{}, err
 	}
 	run.Steps, err = s.listAgentRunSteps(ctx, id)
 	return run, err
 }
 
-func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.AgentRun, error) {
+func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Run, error) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
@@ -365,7 +365,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Age
 		return nil, databaseOperationError("list agent runs", err)
 	}
 	defer rows.Close()
-	result := make([]agentdomain.AgentRun, 0)
+	result := make([]agentdomain.Run, 0)
 	for rows.Next() {
 		run, err := scanAgentRun(rows)
 		if err != nil {
@@ -385,7 +385,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Age
 	return result, nil
 }
 
-func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRunStep, drafts ...agentdomain.JobEventDraft) error {
+func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.RunStep, drafts ...agentdomain.JobEventDraft) error {
 	if len(drafts) == 0 {
 		result, err := execUpdateAgentRunStep(ctx, s.db, step)
 		if err != nil {
@@ -393,10 +393,10 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 		}
 		return requireAffected(result, "agent run step", step.ID)
 	}
-	return s.SaveAgentStepBundle(ctx, agentdomain.AgentStepBundle{Step: step}, drafts...)
+	return s.SaveAgentStepBundle(ctx, agentdomain.StepBundle{Step: step}, drafts...)
 }
 
-func (s *Store) SaveAgentStepBundle(ctx context.Context, bundle agentdomain.AgentStepBundle, drafts ...agentdomain.JobEventDraft) error {
+func (s *Store) SaveAgentStepBundle(ctx context.Context, bundle agentdomain.StepBundle, drafts ...agentdomain.JobEventDraft) error {
 	step := bundle.Step
 	if err := validateAgentStepBundle(bundle); err != nil {
 		return err
@@ -473,7 +473,7 @@ func refreshAgentRunUsageFromSteps(ctx context.Context, exec txExecutor, runID, 
 
 // execUpdateAgentRunStep runs the step-row UPDATE against exec (a *sql.DB or
 // *sql.Tx) so UpdateAgentRunStep can reuse it for both code paths.
-func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdomain.AgentRunStep) (sql.Result, error) {
+func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdomain.RunStep) (sql.Result, error) {
 	if step.Capability != "" {
 		step.Output = agentdomain.BoundedStepPreview(step.Output)
 	}
@@ -499,14 +499,14 @@ func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdoma
 	)
 }
 
-func (s *Store) CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error {
+func (s *Store) CreateAgentArtifact(ctx context.Context, artifact agentdomain.Artifact) error {
 	if err := artifact.Validate(); err != nil {
 		return err
 	}
 	return insertAgentArtifact(ctx, s.db, artifact)
 }
 
-func (s *Store) ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.AgentArtifact, error) {
+func (s *Store) ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.Artifact, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, run_id, COALESCE(step_id, ''), kind, content, sha256, created_at
 		FROM agent_artifacts WHERE run_id = ? ORDER BY created_at, id
@@ -515,9 +515,9 @@ func (s *Store) ListAgentArtifacts(ctx context.Context, runID string) ([]agentdo
 		return nil, databaseOperationError("list agent artifacts", err)
 	}
 	defer rows.Close()
-	result := make([]agentdomain.AgentArtifact, 0)
+	result := make([]agentdomain.Artifact, 0)
 	for rows.Next() {
-		var artifact agentdomain.AgentArtifact
+		var artifact agentdomain.Artifact
 		var createdAt string
 		if err := rows.Scan(
 			&artifact.ID, &artifact.RunID, &artifact.StepID, &artifact.Kind,
@@ -649,8 +649,8 @@ func scanProviderConnection(scanner rowScanner) (agentdomain.ProviderConnection,
 	return connection, err
 }
 
-func scanAgentProfile(scanner rowScanner) (agentdomain.AgentProfile, error) {
-	var profile agentdomain.AgentProfile
+func scanAgentProfile(scanner rowScanner) (agentdomain.Profile, error) {
+	var profile agentdomain.Profile
 	var createdAt, updatedAt string
 	err := scanner.Scan(
 		&profile.ID, &profile.ProjectID, &profile.Role, &profile.ConnectionID, &profile.Model,
@@ -666,8 +666,8 @@ func scanAgentProfile(scanner rowScanner) (agentdomain.AgentProfile, error) {
 	return profile, err
 }
 
-func scanAgentRun(scanner rowScanner) (agentdomain.AgentRun, error) {
-	var run agentdomain.AgentRun
+func scanAgentRun(scanner rowScanner) (agentdomain.Run, error) {
+	var run agentdomain.Run
 	var createdAt, updatedAt string
 	var startedAt, completedAt sql.NullString
 	err := scanner.Scan(
@@ -696,7 +696,7 @@ func scanAgentRun(scanner rowScanner) (agentdomain.AgentRun, error) {
 	return run, err
 }
 
-func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdomain.AgentRunStep, error) {
+func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdomain.RunStep, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, run_id, role, COALESCE(profile_id, ''), position, status, output,
 			error_code, error_message, started_at, completed_at, created_at, updated_at,
@@ -713,9 +713,9 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]agentdomain.AgentRunStep, 0)
+	result := make([]agentdomain.RunStep, 0)
 	for rows.Next() {
-		var step agentdomain.AgentRunStep
+		var step agentdomain.RunStep
 		var startedAt, completedAt sql.NullString
 		var createdAt, updatedAt string
 		if err := rows.Scan(
@@ -752,7 +752,7 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 	return result, rows.Err()
 }
 
-func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.AgentRunStep) error {
+func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.RunStep) error {
 	if step.Capability != "" {
 		step.Output = agentdomain.BoundedStepPreview(step.Output)
 	}

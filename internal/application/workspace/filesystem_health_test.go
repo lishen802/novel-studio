@@ -526,7 +526,7 @@ type filesystemFailingSQLiteStore struct {
 	extractionTaskErr     error
 }
 
-func (s *filesystemFailingSQLiteStore) CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error {
+func (s *filesystemFailingSQLiteStore) CreateAgentArtifact(ctx context.Context, artifact agentdomain.Artifact) error {
 	if s.agentArtifactErr != nil {
 		return s.agentArtifactErr
 	}

@@ -289,7 +289,7 @@ func (s *Store) ProfileVersion(ctx context.Context, profileID string, version in
 		if err := rows.Scan(&roleStr, &r.ConnectionID, &r.Model, &r.MaxOutputTokens, &r.Temperature, &enabled); err != nil {
 			return appsettings.CreativeProfileVersion{}, fmt.Errorf("scan profile role: %w", err)
 		}
-		r.Role = agent.AgentRole(roleStr)
+		r.Role = agent.Role(roleStr)
 		r.Enabled = enabled == 1
 		v.Roles = append(v.Roles, r)
 	}
@@ -369,7 +369,7 @@ func (s *Store) ListLatestProfiles(ctx context.Context) ([]appsettings.CreativeP
 		}
 		if roleStr.Valid {
 			profile.Roles = append(profile.Roles, appsettings.RoleBinding{
-				Role:            agent.AgentRole(roleStr.String),
+				Role:            agent.Role(roleStr.String),
 				ConnectionID:    connectionID.String,
 				Model:           model.String,
 				MaxOutputTokens: int(maxOutputTokens.Int64),

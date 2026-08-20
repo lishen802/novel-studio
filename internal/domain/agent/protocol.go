@@ -137,7 +137,7 @@ func (binding VersionBinding) Validate() error {
 }
 
 type ExecutionBinding struct {
-	RoleSlot             AgentRole    `json:"role_slot"`
+	RoleSlot             Role    `json:"role_slot"`
 	ProviderConnectionID string       `json:"provider_connection_id"`
 	ProviderName         string       `json:"provider_name"`
 	ProviderKind         ProviderKind `json:"provider_kind"`
@@ -178,8 +178,8 @@ func (budget TaskBudget) Validate() error {
 	return nil
 }
 
-// AgentTaskEnvelope 冻结一次智能体步骤所需的全部可重放输入，但绝不携带明文凭据。
-type AgentTaskEnvelope struct {
+// TaskEnvelope 冻结一次智能体步骤所需的全部可重放输入，但绝不携带明文凭据。
+type TaskEnvelope struct {
 	TaskID               string           `json:"task_id"`
 	RunID                string           `json:"run_id"`
 	StepID               string           `json:"step_id"`
@@ -203,7 +203,7 @@ type AgentTaskEnvelope struct {
 	Deadline             time.Time        `json:"deadline"`
 }
 
-func (envelope AgentTaskEnvelope) Validate() error {
+func (envelope TaskEnvelope) Validate() error {
 	if blank(envelope.TaskID) || blank(envelope.RunID) || blank(envelope.StepID) || envelope.Attempt < 1 ||
 		!ValidTaskKind(envelope.TaskKind) || !ValidCapability(envelope.Capability) || !ValidSHA256(envelope.InputDigest) ||
 		len(envelope.InputRefs) == 0 || blank(envelope.ContextManifestID) || envelope.Deadline.IsZero() {
@@ -238,8 +238,8 @@ func (envelope AgentTaskEnvelope) Validate() error {
 	return nil
 }
 
-// AgentTaskResult 保存可回放结果、消耗和结构化质量结论。
-type AgentTaskResult struct {
+// TaskResult 保存可回放结果、消耗和结构化质量结论。
+type TaskResult struct {
 	TaskID                     string        `json:"task_id"`
 	RunID                      string        `json:"run_id"`
 	StepID                     string        `json:"step_id"`
@@ -259,7 +259,7 @@ type AgentTaskResult struct {
 	ErrorMessage               string        `json:"error_message,omitempty"`
 }
 
-func (result AgentTaskResult) Validate() error {
+func (result TaskResult) Validate() error {
 	if blank(result.TaskID) || blank(result.RunID) || blank(result.StepID) || result.Attempt < 1 ||
 		!validTerminalStepStatus(result.Status) || !ValidQualityStatus(result.QualityStatus) ||
 		result.InputTokens < 0 || result.OutputTokens < 0 ||
@@ -311,7 +311,7 @@ func ValidCapability(capability Capability) bool {
 	}
 }
 
-func DefaultRoleForCapability(capability Capability) AgentRole {
+func DefaultRoleForCapability(capability Capability) Role {
 	switch capability {
 	case CapabilityStoryArchitect, CapabilityChapterPlanner:
 		return RolePlanner

@@ -8,7 +8,7 @@ import (
 )
 
 func TestCapabilityUsesR21RoleSlots(t *testing.T) {
-	cases := map[Capability]AgentRole{
+	cases := map[Capability]Role{
 		CapabilityStoryArchitect: RolePlanner, CapabilityChapterPlanner: RolePlanner,
 		CapabilityProseWriter: RoleWriter, CapabilityBoundedRevision: RoleWriter,
 		CapabilityContinuityReview: RoleContinuityReviewer, CapabilityContentReview: RoleContinuityReviewer,
@@ -21,21 +21,21 @@ func TestCapabilityUsesR21RoleSlots(t *testing.T) {
 	}
 }
 
-func TestAgentTaskEnvelopeRejectsInvalidFields(t *testing.T) {
+func TestTaskEnvelopeRejectsInvalidFields(t *testing.T) {
 	envelope := validEnvelope()
 	if err := envelope.Validate(); err != nil {
 		t.Fatalf("valid envelope: %v", err)
 	}
 	cases := []struct {
 		name   string
-		mutate func(*AgentTaskEnvelope)
+		mutate func(*TaskEnvelope)
 	}{
-		{"attempt", func(value *AgentTaskEnvelope) { value.Attempt = 0 }},
-		{"hash", func(value *AgentTaskEnvelope) { value.InputDigest = strings.Repeat("A", 64) }},
-		{"role", func(value *AgentTaskEnvelope) { value.Execution.RoleSlot = RoleWriter }},
-		{"budget", func(value *AgentTaskEnvelope) { value.Budget.RepairReserve = value.Budget.MaxRunTokens }},
-		{"deadline", func(value *AgentTaskEnvelope) { value.Deadline = time.Time{} }},
-		{"project canonical", func(value *AgentTaskEnvelope) { value.ProjectID = "project-1" }},
+		{"attempt", func(value *TaskEnvelope) { value.Attempt = 0 }},
+		{"hash", func(value *TaskEnvelope) { value.InputDigest = strings.Repeat("A", 64) }},
+		{"role", func(value *TaskEnvelope) { value.Execution.RoleSlot = RoleWriter }},
+		{"budget", func(value *TaskEnvelope) { value.Budget.RepairReserve = value.Budget.MaxRunTokens }},
+		{"deadline", func(value *TaskEnvelope) { value.Deadline = time.Time{} }},
+		{"project canonical", func(value *TaskEnvelope) { value.ProjectID = "project-1" }},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestDecodeTaskOutputAcceptsEveryTaskContract(t *testing.T) {
 
 func TestAgentTaskResultAllowsFailureWithoutOutputArtifact(t *testing.T) {
 	now := time.Now().UTC()
-	result := AgentTaskResult{TaskID: "task", RunID: "run", StepID: "step", Attempt: 1, Status: StepFailed,
+	result := TaskResult{TaskID: "task", RunID: "run", StepID: "step", Attempt: 1, Status: StepFailed,
 		QualityStatus: QualityBlocked, StartedAt: now, CompletedAt: now.Add(time.Second), ErrorCode: "provider_timeout"}
 	if err := result.Validate(); err != nil {
 		t.Fatalf("valid failed result: %v", err)
@@ -127,10 +127,10 @@ func TestTypedOutputsRejectLimitsAndDuplicateIDs(t *testing.T) {
 	}
 }
 
-func validEnvelope() AgentTaskEnvelope {
+func validEnvelope() TaskEnvelope {
 	hash := SHA256Hex([]byte("fixture"))
 	binding := VersionBinding{ID: "resource", Version: 1, Hash: hash}
-	return AgentTaskEnvelope{
+	return TaskEnvelope{
 		TaskID: "task-1", RunID: "run-1", StepID: "step-1", Attempt: 1, TaskKind: TaskStoryBlueprint,
 		Capability: CapabilityStoryArchitect, Workflow: binding, InputDigest: hash, Prompt: binding, Schema: binding, Assembler: binding,
 		Execution: ExecutionBinding{RoleSlot: RolePlanner, ProviderConnectionID: "provider-1", ProviderName: "OpenAI", ProviderKind: ProviderOpenAI,

@@ -84,20 +84,20 @@ type AgentStore interface {
 	ListProviderConnections(ctx context.Context) ([]agentdomain.ProviderConnection, error)
 	ProviderConnection(ctx context.Context, id string) (agentdomain.ProviderConnection, error)
 	DeleteProviderConnection(ctx context.Context, id string) error
-	UpsertAgentProfile(ctx context.Context, profile agentdomain.AgentProfile) error
-	ListAgentProfiles(ctx context.Context) ([]agentdomain.AgentProfile, error)
-	AgentProfile(ctx context.Context, id string) (agentdomain.AgentProfile, error)
-	CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) error
-	CreateAgentRunBundle(ctx context.Context, bundle agentdomain.AgentRunBundle) error
-	UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun, drafts ...agentdomain.JobEventDraft) error
-	AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, error)
-	ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.AgentRun, error)
-	UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRunStep, drafts ...agentdomain.JobEventDraft) error
-	SaveAgentStepBundle(ctx context.Context, bundle agentdomain.AgentStepBundle, drafts ...agentdomain.JobEventDraft) error
-	CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error
-	ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.AgentArtifact, error)
+	UpsertAgentProfile(ctx context.Context, profile agentdomain.Profile) error
+	ListAgentProfiles(ctx context.Context) ([]agentdomain.Profile, error)
+	AgentProfile(ctx context.Context, id string) (agentdomain.Profile, error)
+	CreateAgentRun(ctx context.Context, run agentdomain.Run) error
+	CreateAgentRunBundle(ctx context.Context, bundle agentdomain.RunBundle) error
+	UpdateAgentRun(ctx context.Context, run agentdomain.Run, drafts ...agentdomain.JobEventDraft) error
+	AgentRun(ctx context.Context, id string) (agentdomain.Run, error)
+	ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Run, error)
+	UpdateAgentRunStep(ctx context.Context, step agentdomain.RunStep, drafts ...agentdomain.JobEventDraft) error
+	SaveAgentStepBundle(ctx context.Context, bundle agentdomain.StepBundle, drafts ...agentdomain.JobEventDraft) error
+	CreateAgentArtifact(ctx context.Context, artifact agentdomain.Artifact) error
+	ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.Artifact, error)
 	ContextManifest(ctx context.Context, id string) (agentdomain.ContextManifest, error)
 	ListContextManifests(ctx context.Context, runID string) ([]agentdomain.ContextManifest, error)
-	ListAgentReviewFindings(ctx context.Context, runID string) ([]agentdomain.AgentReviewFinding, error)
+	ListAgentReviewFindings(ctx context.Context, runID string) ([]agentdomain.ReviewFindingRecord, error)
 	RecoverInterruptedAgentRuns(ctx context.Context, recoveredAt time.Time) (int64, error)
 }

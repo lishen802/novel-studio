@@ -46,7 +46,7 @@ type ProfileInput struct {
 
 // RoleInput is a single role binding in a profile input.
 type RoleInput struct {
-	Role            agent.AgentRole
+	Role            agent.Role
 	ConnectionID    string
 	Model           string
 	MaxOutputTokens int
@@ -282,7 +282,7 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 	// 持久化层按 role ASC 排序会得到 continuity_reviewer → planner → writer，
 	// 但 AgentRun 严格按位置校验 planner → writer → continuity_reviewer。
 	// 此处按规范顺序重排，保证无论 DB 读取顺序如何，下游都能正确创建运行。
-	resolvedByRole := make(map[agent.AgentRole]agent.ResolvedRole, len(profile.Roles))
+	resolvedByRole := make(map[agent.Role]agent.ResolvedRole, len(profile.Roles))
 	for _, role := range profile.Roles {
 		conn, err := s.repo.Provider(ctx, role.ConnectionID)
 		if err != nil {
@@ -303,7 +303,7 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 			Temperature:     role.Temperature,
 		}
 	}
-	for _, required := range []agent.AgentRole{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
+	for _, required := range []agent.Role{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
 		r, ok := resolvedByRole[required]
 		if !ok {
 			return agent.ResolvedCreativeProfile{}, fmt.Errorf("%w: role %s", ErrInvalidProfileInput, required)

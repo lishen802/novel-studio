@@ -123,18 +123,18 @@ func NormalizeEndpoint(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-type AgentRole string
+type Role string
 
 const (
-	RolePlanner            AgentRole = "planner"
-	RoleWriter             AgentRole = "writer"
-	RoleContinuityReviewer AgentRole = "continuity_reviewer"
+	RolePlanner            Role = "planner"
+	RoleWriter             Role = "writer"
+	RoleContinuityReviewer Role = "continuity_reviewer"
 )
 
-type AgentProfile struct {
+type Profile struct {
 	ID              string
 	ProjectID       string
-	Role            AgentRole
+	Role            Role
 	ConnectionID    string
 	Model           string
 	MaxOutputTokens int
@@ -146,28 +146,28 @@ type AgentProfile struct {
 
 func NewAgentProfile(
 	id, projectID string,
-	role AgentRole,
+	role Role,
 	connectionID, model string,
 	maxOutputTokens int,
 	temperature float64,
 	enabled bool,
 	now time.Time,
-) (AgentProfile, error) {
+) (Profile, error) {
 	id = strings.TrimSpace(id)
 	projectID = strings.TrimSpace(projectID)
 	connectionID = strings.TrimSpace(connectionID)
 	model = strings.TrimSpace(model)
 	if id == "" || projectID == "" || connectionID == "" || model == "" {
-		return AgentProfile{}, ErrBlankValue
+		return Profile{}, ErrBlankValue
 	}
 	if !validRole(role) {
-		return AgentProfile{}, ErrInvalidRole
+		return Profile{}, ErrInvalidRole
 	}
 	if maxOutputTokens < 1 || temperature < 0 || temperature > 2 {
-		return AgentProfile{}, ErrInvalidProfile
+		return Profile{}, ErrInvalidProfile
 	}
 	now = now.UTC()
-	return AgentProfile{
+	return Profile{
 		ID:              id,
 		ProjectID:       projectID,
 		Role:            role,
@@ -181,18 +181,18 @@ func NewAgentProfile(
 	}, nil
 }
 
-func validRole(role AgentRole) bool {
+func validRole(role Role) bool {
 	return role == RolePlanner || role == RoleWriter || role == RoleContinuityReviewer
 }
 
-func ValidateAuthoringProfiles(profiles []AgentProfile) error {
-	byRole := make(map[AgentRole]AgentProfile, len(profiles))
+func ValidateAuthoringProfiles(profiles []Profile) error {
+	byRole := make(map[Role]Profile, len(profiles))
 	for _, profile := range profiles {
 		if profile.Enabled {
 			byRole[profile.Role] = profile
 		}
 	}
-	for _, role := range []AgentRole{RolePlanner, RoleWriter, RoleContinuityReviewer} {
+	for _, role := range []Role{RolePlanner, RoleWriter, RoleContinuityReviewer} {
 		if _, exists := byRole[role]; !exists {
 			return ErrInvalidProfile
 		}
@@ -228,7 +228,7 @@ const (
 
 type RunStepSpec struct {
 	ID        string
-	Role      AgentRole
+	Role      Role
 	ProfileID string // 旧项目级智能体档案 ID；R2.1 新运行留空。
 
 	// R2.1 运行冻结快照字段：新运行必填，旧运行留空。
@@ -247,7 +247,7 @@ type RunStepSpec struct {
 // ResolvedRole 是一次运行冻结快照中单个角色实际使用的连接、模型与参数。
 // 它只包含非敏感元数据与凭据引用，不包含 API Key。
 type ResolvedRole struct {
-	Role            AgentRole
+	Role            Role
 	ConnectionID    string
 	ProviderName    string
 	ProviderKind    ProviderKind
@@ -268,10 +268,10 @@ type ResolvedCreativeProfile struct {
 	Roles           []ResolvedRole
 }
 
-type AgentRunStep struct {
+type RunStep struct {
 	ID                string
 	RunID             string
-	Role              AgentRole
+	Role              Role
 	ProfileID         string
 	Position          int
 	Status            StepStatus
@@ -313,7 +313,7 @@ type AgentRunStep struct {
 	QualityStatus     QualityStatus
 }
 
-type AgentRun struct {
+type Run struct {
 	ID                  string
 	ProjectID           string
 	ChapterID           string
@@ -330,7 +330,7 @@ type AgentRun struct {
 	OutputTokens        int
 	ContextChars        int
 	ContextTruncated    bool
-	Steps               []AgentRunStep
+	Steps               []RunStep
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	StartedAt           *time.Time
@@ -348,7 +348,7 @@ type AgentRun struct {
 }
 
 // IsLegacy 判断运行是否缺少 R3 工作流冻结信息。
-func (run AgentRun) IsLegacy() bool {
+func (run Run) IsLegacy() bool {
 	return strings.TrimSpace(run.WorkflowBinding.ID) == ""
 }
 
@@ -358,23 +358,23 @@ func NewChapterDraftRun(
 	prompt string,
 	specs []RunStepSpec,
 	now time.Time,
-) (AgentRun, error) {
+) (Run, error) {
 	id = strings.TrimSpace(id)
 	projectID = strings.TrimSpace(projectID)
 	chapterID = strings.TrimSpace(chapterID)
 	prompt = strings.TrimSpace(prompt)
 	if id == "" || projectID == "" || chapterID == "" || prompt == "" || chapterBaseRevision < 1 {
-		return AgentRun{}, ErrInvalidRun
+		return Run{}, ErrInvalidRun
 	}
 	if len(specs) != 3 {
-		return AgentRun{}, ErrInvalidRun
+		return Run{}, ErrInvalidRun
 	}
-	expected := []AgentRole{RolePlanner, RoleWriter, RoleContinuityReviewer}
+	expected := []Role{RolePlanner, RoleWriter, RoleContinuityReviewer}
 	now = now.UTC()
-	steps := make([]AgentRunStep, len(specs))
+	steps := make([]RunStep, len(specs))
 	for index, spec := range specs {
 		if strings.TrimSpace(spec.ID) == "" || spec.Role != expected[index] {
-			return AgentRun{}, ErrInvalidRun
+			return Run{}, ErrInvalidRun
 		}
 		// 旧运行要求项目级智能体档案 ID；R2.1 新运行要求冻结快照字段完整。
 		if strings.TrimSpace(spec.ProfileID) == "" &&
@@ -382,9 +382,9 @@ func NewChapterDraftRun(
 				strings.TrimSpace(spec.ProviderConnectionID) == "" ||
 				strings.TrimSpace(spec.CredentialRef) == "" ||
 				strings.TrimSpace(spec.Model) == "") {
-			return AgentRun{}, ErrInvalidRun
+			return Run{}, ErrInvalidRun
 		}
-		steps[index] = AgentRunStep{
+		steps[index] = RunStep{
 			ID:        strings.TrimSpace(spec.ID),
 			RunID:     id,
 			Role:      spec.Role,
@@ -407,7 +407,7 @@ func NewChapterDraftRun(
 			UpdatedAt: now,
 		}
 	}
-	return AgentRun{
+	return Run{
 		ID:                  id,
 		ProjectID:           projectID,
 		ChapterID:           chapterID,
@@ -422,16 +422,16 @@ func NewChapterDraftRun(
 	}, nil
 }
 
-func (run AgentRun) WithBudgets(tokenBudget, contextCharBudget int) (AgentRun, error) {
+func (run Run) WithBudgets(tokenBudget, contextCharBudget int) (Run, error) {
 	if tokenBudget < 1 || contextCharBudget < 1 {
-		return AgentRun{}, ErrInvalidBudget
+		return Run{}, ErrInvalidBudget
 	}
 	run.TokenBudget = tokenBudget
 	run.ContextCharBudget = contextCharBudget
 	return run, nil
 }
 
-func (run AgentRun) RecordUsage(inputTokens, outputTokens int) AgentRun {
+func (run Run) RecordUsage(inputTokens, outputTokens int) Run {
 	if inputTokens > 0 {
 		run.InputTokens += inputTokens
 	}
@@ -441,7 +441,7 @@ func (run AgentRun) RecordUsage(inputTokens, outputTokens int) AgentRun {
 	return run
 }
 
-func (run AgentRun) RemainingTokens() int {
+func (run Run) RemainingTokens() int {
 	remaining := run.TokenBudget - run.InputTokens - run.OutputTokens
 	if remaining < 0 {
 		return 0
@@ -449,9 +449,9 @@ func (run AgentRun) RemainingTokens() int {
 	return remaining
 }
 
-func (run AgentRun) Transition(status RunStatus, message string, now time.Time) (AgentRun, error) {
+func (run Run) Transition(status RunStatus, message string, now time.Time) (Run, error) {
 	if !validRunTransition(run.Status, status) {
-		return AgentRun{}, ErrInvalidTransition
+		return Run{}, ErrInvalidTransition
 	}
 	now = now.UTC()
 	run.Status = status
@@ -494,7 +494,7 @@ const (
 	ArtifactFormatRepair     ArtifactKind = "format_repair"
 )
 
-type AgentArtifact struct {
+type Artifact struct {
 	ID        string
 	RunID     string
 	StepID    string

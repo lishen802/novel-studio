@@ -31,7 +31,7 @@ func ValidArtifactKind(kind ArtifactKind) bool {
 	}
 }
 
-func (artifact AgentArtifact) Validate() error {
+func (artifact Artifact) Validate() error {
 	if blank(artifact.ID) || blank(artifact.RunID) || !ValidArtifactKind(artifact.Kind) ||
 		!ValidSHA256(artifact.SHA256) || artifact.CreatedAt.IsZero() ||
 		SHA256Hex([]byte(artifact.Content)) != artifact.SHA256 {
@@ -124,7 +124,7 @@ func (manifest ContextManifest) Validate() error {
 	return nil
 }
 
-type AgentReviewFinding struct {
+type ReviewFindingRecord struct {
 	ReviewFinding
 	RunID     string
 	StepID    string
@@ -133,7 +133,7 @@ type AgentReviewFinding struct {
 	UpdatedAt time.Time
 }
 
-func (finding AgentReviewFinding) Validate() error {
+func (finding ReviewFindingRecord) Validate() error {
 	if blank(finding.RunID) || blank(finding.StepID) || finding.Attempt < 1 ||
 		finding.CreatedAt.IsZero() || finding.UpdatedAt.Before(finding.CreatedAt) ||
 		finding.ReviewFinding.Validate() != nil {
@@ -142,20 +142,20 @@ func (finding AgentReviewFinding) Validate() error {
 	return nil
 }
 
-// AgentRunBundle 是创建运行时需要原子提交的完整持久化单元。
-type AgentRunBundle struct {
-	Run       AgentRun
-	Artifacts []AgentArtifact
+// RunBundle 是创建运行时需要原子提交的完整持久化单元。
+type RunBundle struct {
+	Run       Run
+	Artifacts []Artifact
 	Manifests []ContextManifest
-	Findings  []AgentReviewFinding
+	Findings  []ReviewFindingRecord
 }
 
-// AgentStepBundle 是更新一次步骤尝试时需要原子提交的完整持久化单元。
-type AgentStepBundle struct {
-	Step      AgentRunStep
-	Artifacts []AgentArtifact
+// StepBundle 是更新一次步骤尝试时需要原子提交的完整持久化单元。
+type StepBundle struct {
+	Step      RunStep
+	Artifacts []Artifact
 	Manifests []ContextManifest
-	Findings  []AgentReviewFinding
+	Findings  []ReviewFindingRecord
 }
 
 func validManifestSourceKind(kind ManifestSourceKind) bool {

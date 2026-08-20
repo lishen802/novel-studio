@@ -302,7 +302,7 @@ func mustJobEventDraft(
 
 // createAgentRunForEvents builds a queued agent run with a single planner step
 // so UpdateAgentRun/UpdateAgentRunStep can emit events against it.
-func createAgentRunForEvents(t *testing.T) (*Store, agentdomain.AgentRun, time.Time) {
+func createAgentRunForEvents(t *testing.T) (*Store, agentdomain.Run, time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	store, project, chapter := createStoreWithChapter(t)

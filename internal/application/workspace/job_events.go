@@ -29,7 +29,7 @@ func eventJSON(fields map[string]any) string {
 // programming error (blank ID/project); callers surface that error alongside
 // the store update so the transition is not committed without its event.
 func newAgentJobDraft(
-	run agentdomain.AgentRun,
+	run agentdomain.Run,
 	eventType agentdomain.JobEventType,
 	stepID, payload string,
 	now time.Time,

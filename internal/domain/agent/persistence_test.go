@@ -14,8 +14,8 @@ func TestBoundedStepPreviewPreservesUnicodeBoundary(t *testing.T) {
 	}
 }
 
-func TestAgentArtifactValidateVerifiesContentHash(t *testing.T) {
-	artifact := AgentArtifact{
+func TestArtifactValidateVerifiesContentHash(t *testing.T) {
+	artifact := Artifact{
 		ID: "artifact-1", RunID: "run-1", Kind: ArtifactDraft,
 		Content: "正文", SHA256: SHA256Hex([]byte("其他正文")), CreatedAt: time.Now().UTC(),
 	}

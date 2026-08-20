@@ -317,7 +317,7 @@ func (s *Service) SaveAgentProfile(
 		return AgentProfileView{}, err
 	}
 	for _, existing := range profiles {
-		if existing.Role == agentdomain.AgentRole(input.Role) {
+		if existing.Role == agentdomain.Role(input.Role) {
 			id = existing.ID
 			createdAt = existing.CreatedAt
 			break
@@ -327,7 +327,7 @@ func (s *Service) SaveAgentProfile(
 		return AgentProfileView{}, err
 	}
 	profile, err := agentdomain.NewAgentProfile(
-		id, project.ID, agentdomain.AgentRole(input.Role), input.ConnectionID, input.Model,
+		id, project.ID, agentdomain.Role(input.Role), input.ConnectionID, input.Model,
 		input.MaxOutputTokens, input.Temperature, input.Enabled, s.clock.Now(),
 	)
 	if err != nil {
@@ -546,7 +546,7 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 // lease is released only after the goroutine has persisted its final state.
 func (s *Service) runAgentPipeline(
 	ctx context.Context,
-	run agentdomain.AgentRun,
+	run agentdomain.Run,
 	store ports.AgentStore,
 	projectStore ports.ProjectStore,
 	lease *jobLease,
@@ -835,7 +835,7 @@ func (s *Service) runAgentPipeline(
 func (s *Service) persistCancelledRun(
 	ctx context.Context,
 	store ports.AgentStore,
-	run agentdomain.AgentRun,
+	run agentdomain.Run,
 ) error {
 	now := s.clock.Now().UTC()
 	for index := range run.Steps {
@@ -1162,7 +1162,7 @@ func unrecoveredForeshadowingHooks(
 }
 
 func agentRequest(
-	role agentdomain.AgentRole,
+	role agentdomain.Role,
 	model string,
 	maxOutputTokens int,
 	temperature float64,
@@ -1190,7 +1190,7 @@ func agentRequest(
 	return request
 }
 
-func validateStructuredOutput(role agentdomain.AgentRole, output string) error {
+func validateStructuredOutput(role agentdomain.Role, output string) error {
 	switch role {
 	case agentdomain.RolePlanner:
 		var value struct {
@@ -1223,9 +1223,9 @@ func newArtifact(
 	kind agentdomain.ArtifactKind,
 	content string,
 	now time.Time,
-) agentdomain.AgentArtifact {
+) agentdomain.Artifact {
 	sum := sha256.Sum256([]byte(content))
-	return agentdomain.AgentArtifact{
+	return agentdomain.Artifact{
 		ID: id, RunID: runID, StepID: stepID, Kind: kind, Content: content,
 		SHA256: hex.EncodeToString(sum[:]), CreatedAt: now.UTC(),
 	}
@@ -1239,7 +1239,7 @@ func providerConnectionView(connection agentdomain.ProviderConnection, hasCreden
 	}
 }
 
-func agentProfileView(profile agentdomain.AgentProfile) AgentProfileView {
+func agentProfileView(profile agentdomain.Profile) AgentProfileView {
 	return AgentProfileView{
 		ID: profile.ID, Role: string(profile.Role), ConnectionID: profile.ConnectionID,
 		Model: profile.Model, MaxOutputTokens: profile.MaxOutputTokens,
@@ -1256,7 +1256,7 @@ func agentRuntimeSettingsView(settings agentdomain.RuntimeSettings) AgentRuntime
 	}
 }
 
-func agentRunView(run agentdomain.AgentRun) AgentRunView {
+func agentRunView(run agentdomain.Run) AgentRunView {
 	steps := make([]AgentRunStepView, 0, len(run.Steps))
 	for _, step := range run.Steps {
 		steps = append(steps, AgentRunStepView{

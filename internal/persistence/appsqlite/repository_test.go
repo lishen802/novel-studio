@@ -103,7 +103,7 @@ func TestPublishProfileVersionPersistsAllRolesInOneTransaction(t *testing.T) {
 	if len(got.Roles) != 3 {
 		t.Fatalf("roles = %d, want 3", len(got.Roles))
 	}
-	roleMap := make(map[agent.AgentRole]appsettings.RoleBinding, 3)
+	roleMap := make(map[agent.Role]appsettings.RoleBinding, 3)
 	for _, r := range got.Roles {
 		roleMap[r.Role] = r
 	}
@@ -139,8 +139,8 @@ func TestProfileVersionIsImmutableAfterNewVersionPublished(t *testing.T) {
 	}
 }
 
-func roleMap(roles []appsettings.RoleBinding) map[agent.AgentRole]appsettings.RoleBinding {
-	m := make(map[agent.AgentRole]appsettings.RoleBinding, len(roles))
+func roleMap(roles []appsettings.RoleBinding) map[agent.Role]appsettings.RoleBinding {
+	m := make(map[agent.Role]appsettings.RoleBinding, len(roles))
 	for _, r := range roles {
 		m[r.Role] = r
 	}

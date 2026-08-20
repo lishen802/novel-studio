@@ -74,7 +74,7 @@ func TestNewAgentProfileAcceptsOnlySupportedRoles(t *testing.T) {
 	_, err = NewAgentProfile(
 		"profile-2",
 		"project-1",
-		AgentRole("critic"),
+		Role("critic"),
 		"provider-1",
 		"gpt-5",
 		3200,
@@ -131,7 +131,7 @@ func TestNewChapterDraftRunBuildsOrderedStepsAndTransitions(t *testing.T) {
 }
 
 func TestValidateHeterogeneousReviewer(t *testing.T) {
-	profiles := []AgentProfile{
+	profiles := []Profile{
 		{Role: RolePlanner, ConnectionID: "provider-a", Model: "model-a", Enabled: true},
 		{Role: RoleWriter, ConnectionID: "provider-a", Model: "model-a", Enabled: true},
 		{Role: RoleContinuityReviewer, ConnectionID: "provider-a", Model: "model-a", Enabled: true},

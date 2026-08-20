@@ -46,7 +46,7 @@ type ProviderConnection struct {
 }
 
 type RoleBinding struct {
-	Role            agent.AgentRole
+	Role            agent.Role
 	ConnectionID    string
 	Model           string
 	MaxOutputTokens int
@@ -135,7 +135,7 @@ func NewCreativeProfileVersion(
 	if len(roles) != 3 {
 		return CreativeProfileVersion{}, ErrInvalidRoleCount
 	}
-	byRole := make(map[agent.AgentRole]RoleBinding, 3)
+	byRole := make(map[agent.Role]RoleBinding, 3)
 	for _, r := range roles {
 		if r.Role != agent.RolePlanner && r.Role != agent.RoleWriter && r.Role != agent.RoleContinuityReviewer {
 			return CreativeProfileVersion{}, agent.ErrInvalidRole
@@ -157,7 +157,7 @@ func NewCreativeProfileVersion(
 	// 缺失 reviewer，此时 byRole[reviewer] 是零值，必须拦截避免写入空角色绑定。
 	orderedRoles := make([]RoleBinding, 0, 3)
 	var sumMaxOutput int
-	for _, required := range []agent.AgentRole{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
+	for _, required := range []agent.Role{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
 		r, ok := byRole[required]
 		if !ok || r.ConnectionID == "" {
 			return CreativeProfileVersion{}, ErrInvalidRoleCount

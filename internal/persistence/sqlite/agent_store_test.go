@@ -49,7 +49,7 @@ func TestAgentStorePersistsConfigurationRunAndArtifacts(t *testing.T) {
 	if err := store.CreateAgentRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	artifact := agentdomain.AgentArtifact{
+	artifact := agentdomain.Artifact{
 		ID: "artifact-1", RunID: run.ID, StepID: run.Steps[0].ID,
 		Kind: agentdomain.ArtifactPlan, Content: `{"summary":"计划"}`,
 		SHA256: agentdomain.SHA256Hex([]byte(`{"summary":"计划"}`)), CreatedAt: now,
@@ -89,7 +89,7 @@ func TestAgentStoreRecoversInterruptedRuns(t *testing.T) {
 	if err := store.UpsertProviderConnection(ctx, connection); err != nil {
 		t.Fatal(err)
 	}
-	for index, role := range []agentdomain.AgentRole{
+	for index, role := range []agentdomain.Role{
 		agentdomain.RolePlanner,
 		agentdomain.RoleWriter,
 		agentdomain.RoleContinuityReviewer,
@@ -171,7 +171,7 @@ func TestAgentStorePersistsRuntimeSettingsAndTokenUsage(t *testing.T) {
 	if err := store.UpsertProviderConnection(ctx, connection); err != nil {
 		t.Fatal(err)
 	}
-	for index, role := range []agentdomain.AgentRole{
+	for index, role := range []agentdomain.Role{
 		agentdomain.RolePlanner,
 		agentdomain.RoleWriter,
 		agentdomain.RoleContinuityReviewer,

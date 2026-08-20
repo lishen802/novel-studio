@@ -1252,8 +1252,8 @@ func toProviderKind(kind string) agentdomain.ProviderKind {
 }
 
 // toAgentRole converts a string role to the domain type.
-func toAgentRole(role string) agentdomain.AgentRole {
-	return agentdomain.AgentRole(role)
+func toAgentRole(role string) agentdomain.Role {
+	return agentdomain.Role(role)
 }
 
 type wailsDirectoryPicker struct {

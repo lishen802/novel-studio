@@ -96,7 +96,7 @@ func (s *Service) ImportLegacyProject(
 			continue
 		}
 		roles = append(roles, appdomain.RoleBinding{
-			Role:            agent.AgentRole(p.Role),
+			Role:            agent.Role(p.Role),
 			ConnectionID:    providerID,
 			Model:           p.Model,
 			MaxOutputTokens: p.MaxOutputTokens,

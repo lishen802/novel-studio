@@ -9,7 +9,7 @@ import (
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 )
 
-func validateAgentRunBundle(bundle agentdomain.AgentRunBundle) error {
+func validateAgentRunBundle(bundle agentdomain.RunBundle) error {
 	run := bundle.Run
 	if strings.TrimSpace(run.ID) == "" {
 		return agentdomain.ErrInvalidAgentPersistence
@@ -34,7 +34,7 @@ func validateAgentRunBundle(bundle agentdomain.AgentRunBundle) error {
 	return validateBundleChildren(run.ID, steps, bundle.Artifacts, bundle.Manifests, bundle.Findings)
 }
 
-func validateAgentStepBundle(bundle agentdomain.AgentStepBundle) error {
+func validateAgentStepBundle(bundle agentdomain.StepBundle) error {
 	step := bundle.Step
 	if strings.TrimSpace(step.ID) == "" || strings.TrimSpace(step.RunID) == "" {
 		return agentdomain.ErrInvalidAgentPersistence
@@ -49,9 +49,9 @@ func validateAgentStepBundle(bundle agentdomain.AgentStepBundle) error {
 func validateBundleChildren(
 	runID string,
 	steps map[string]int,
-	artifacts []agentdomain.AgentArtifact,
+	artifacts []agentdomain.Artifact,
 	manifests []agentdomain.ContextManifest,
-	findings []agentdomain.AgentReviewFinding,
+	findings []agentdomain.ReviewFindingRecord,
 ) error {
 	for _, artifact := range artifacts {
 		if artifact.RunID != runID || artifact.Validate() != nil {
@@ -84,7 +84,7 @@ func validateBundleChildren(
 	return nil
 }
 
-func validateKernelStep(step agentdomain.AgentRunStep) error {
+func validateKernelStep(step agentdomain.RunStep) error {
 	if !agentdomain.ValidCapability(step.Capability) || step.Attempt < 1 ||
 		step.PromptBinding.Validate() != nil || step.SchemaBinding.Validate() != nil ||
 		strings.TrimSpace(step.NodeID) == "" || strings.TrimSpace(step.AssemblerID) == "" ||
@@ -100,21 +100,21 @@ func validateKernelStep(step agentdomain.AgentRunStep) error {
 	return nil
 }
 
-func normalizedNodeID(step agentdomain.AgentRunStep) string {
+func normalizedNodeID(step agentdomain.RunStep) string {
 	if strings.TrimSpace(step.NodeID) != "" {
 		return strings.TrimSpace(step.NodeID)
 	}
 	return string(step.Role)
 }
 
-func normalizedAttempt(step agentdomain.AgentRunStep) int {
+func normalizedAttempt(step agentdomain.RunStep) int {
 	if step.Attempt > 0 {
 		return step.Attempt
 	}
 	return 1
 }
 
-func insertAgentArtifact(ctx context.Context, exec txExecutor, artifact agentdomain.AgentArtifact) error {
+func insertAgentArtifact(ctx context.Context, exec txExecutor, artifact agentdomain.Artifact) error {
 	_, err := exec.ExecContext(ctx, `
 		INSERT INTO agent_artifacts(id, run_id, step_id, kind, content, sha256, created_at)
 		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?)
@@ -157,7 +157,7 @@ func insertContextManifest(ctx context.Context, exec txExecutor, manifest agentd
 	return nil
 }
 
-func insertAgentReviewFinding(ctx context.Context, exec txExecutor, finding agentdomain.AgentReviewFinding) error {
+func insertAgentReviewFinding(ctx context.Context, exec txExecutor, finding agentdomain.ReviewFindingRecord) error {
 	_, err := exec.ExecContext(ctx, `
 		INSERT INTO agent_review_findings(
 			id, run_id, step_id, attempt, category, severity, status, source, message,
@@ -265,7 +265,7 @@ func (s *Store) listContextManifestItems(ctx context.Context, manifestID string)
 	return result, rows.Err()
 }
 
-func (s *Store) ListAgentReviewFindings(ctx context.Context, runID string) ([]agentdomain.AgentReviewFinding, error) {
+func (s *Store) ListAgentReviewFindings(ctx context.Context, runID string) ([]agentdomain.ReviewFindingRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, run_id, step_id, attempt, category, severity, status, source, message,
 			suggested_action, quoted_evidence, scope_start, scope_end, constraint_ref,
@@ -276,9 +276,9 @@ func (s *Store) ListAgentReviewFindings(ctx context.Context, runID string) ([]ag
 		return nil, databaseOperationError("list agent review findings", err)
 	}
 	defer rows.Close()
-	result := make([]agentdomain.AgentReviewFinding, 0)
+	result := make([]agentdomain.ReviewFindingRecord, 0)
 	for rows.Next() {
-		var finding agentdomain.AgentReviewFinding
+		var finding agentdomain.ReviewFindingRecord
 		var start, end sql.NullInt64
 		var createdAt, updatedAt string
 		if err := rows.Scan(&finding.ID, &finding.RunID, &finding.StepID, &finding.Attempt,

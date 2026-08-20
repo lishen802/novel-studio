@@ -21,10 +21,10 @@ func TestAgentKernelBundlePersistsAndReconstructsAtomically(t *testing.T) {
 	manifest := testContextManifest(run.ID, run.Steps[0].ID, now)
 	finding := testAgentFinding(run.ID, run.Steps[0].ID, now)
 
-	if err := store.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{
-		Run: run, Artifacts: []agentdomain.AgentArtifact{artifact},
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{
+		Run: run, Artifacts: []agentdomain.Artifact{artifact},
 		Manifests: []agentdomain.ContextManifest{manifest},
-		Findings:  []agentdomain.AgentReviewFinding{finding},
+		Findings:  []agentdomain.ReviewFindingRecord{finding},
 	}); err != nil {
 		t.Fatalf("CreateAgentRunBundle: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestAgentKernelStepBundleKeepsFullArtifactAndBoundedPreview(t *testing.T) {
 	defer store.Close()
 	now := time.Unix(2_000, 0).UTC()
 	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
-	if err := store.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{Run: run}); err != nil {
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,8 +69,8 @@ func TestAgentKernelStepBundleKeepsFullArtifactAndBoundedPreview(t *testing.T) {
 	step.PrimaryArtifactID = artifact.ID
 	step.QualityStatus = agentdomain.QualityPassed
 	step.UpdatedAt = now.Add(time.Second)
-	if err := store.SaveAgentStepBundle(ctx, agentdomain.AgentStepBundle{
-		Step: step, Artifacts: []agentdomain.AgentArtifact{artifact},
+	if err := store.SaveAgentStepBundle(ctx, agentdomain.StepBundle{
+		Step: step, Artifacts: []agentdomain.Artifact{artifact},
 	}); err != nil {
 		t.Fatalf("SaveAgentStepBundle: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestAgentKernelBundleRollsBackOnDuplicateAttempt(t *testing.T) {
 	run.Steps[1].NodeID = run.Steps[0].NodeID
 	run.Steps[1].Attempt = run.Steps[0].Attempt
 
-	if err := store.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{Run: run}); err == nil {
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err == nil {
 		t.Fatal("CreateAgentRunBundle succeeded with duplicate node attempt")
 	}
 	if _, err := store.AgentRun(ctx, run.ID); !errors.Is(err, ErrAgentRecordMissing) {
@@ -148,7 +148,7 @@ func TestAgentKernelBundleRejectsHashAndReferenceErrorsWithoutPartialWrite(t *te
 	artifact := testAgentArtifact("artifact-invalid", run.ID, "unknown-step", agentdomain.ArtifactDraft, "正文", now)
 	artifact.SHA256 = strings.Repeat("0", 64)
 
-	err := store.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{Run: run, Artifacts: []agentdomain.AgentArtifact{artifact}})
+	err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run, Artifacts: []agentdomain.Artifact{artifact}})
 	if !errors.Is(err, agentdomain.ErrInvalidAgentPersistence) {
 		t.Fatalf("CreateAgentRunBundle error = %v", err)
 	}
@@ -163,7 +163,7 @@ func TestAgentKernelRecordsSurvivePortableDatabaseBackup(t *testing.T) {
 	now := time.Unix(5_000, 0).UTC()
 	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
 	manifest := testContextManifest(run.ID, run.Steps[0].ID, now)
-	if err := store.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{
 		Run: run, Manifests: []agentdomain.ContextManifest{manifest},
 	}); err != nil {
 		store.Close()
@@ -196,7 +196,7 @@ func TestAgentKernelSchemaRejectsInvalidHashesAndFindingReferences(t *testing.T)
 	defer store.Close()
 	now := time.Unix(6_000, 0).UTC()
 	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
-	if err := store.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{Run: run}); err != nil {
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.ExecContext(ctx, `UPDATE agent_runs SET workflow_hash = 'bad' WHERE id = ?`, run.ID); err == nil {
@@ -213,7 +213,7 @@ func TestAgentKernelSchemaRejectsInvalidHashesAndFindingReferences(t *testing.T)
 	}
 }
 
-func newR3PersistenceRun(t *testing.T, projectID, chapterID string, revision int64, now time.Time) agentdomain.AgentRun {
+func newR3PersistenceRun(t *testing.T, projectID, chapterID string, revision int64, now time.Time) agentdomain.Run {
 	t.Helper()
 	run, err := agentdomain.NewChapterDraftRun(
 		"run-r3", projectID, chapterID, revision, "续写",
@@ -252,8 +252,8 @@ func newR3PersistenceRun(t *testing.T, projectID, chapterID string, revision int
 	return run
 }
 
-func testAgentArtifact(id, runID, stepID string, kind agentdomain.ArtifactKind, content string, now time.Time) agentdomain.AgentArtifact {
-	return agentdomain.AgentArtifact{
+func testAgentArtifact(id, runID, stepID string, kind agentdomain.ArtifactKind, content string, now time.Time) agentdomain.Artifact {
+	return agentdomain.Artifact{
 		ID: id, RunID: runID, StepID: stepID, Kind: kind, Content: content,
 		SHA256: agentdomain.SHA256Hex([]byte(content)), CreatedAt: now,
 	}
@@ -274,8 +274,8 @@ func testContextManifest(runID, stepID string, now time.Time) agentdomain.Contex
 	}
 }
 
-func testAgentFinding(runID, stepID string, now time.Time) agentdomain.AgentReviewFinding {
-	return agentdomain.AgentReviewFinding{
+func testAgentFinding(runID, stepID string, now time.Time) agentdomain.ReviewFindingRecord {
+	return agentdomain.ReviewFindingRecord{
 		ReviewFinding: agentdomain.ReviewFinding{
 			ID: "finding-1", Category: agentdomain.FindingContinuity,
 			Severity: agentdomain.SeverityMajor, Status: agentdomain.FindingOpen,

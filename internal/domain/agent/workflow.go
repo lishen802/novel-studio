@@ -28,7 +28,7 @@ const (
 type WorkflowNode struct {
 	ID                  string         `json:"id"`
 	Capability          Capability     `json:"capability"`
-	RoleSlot            AgentRole      `json:"role_slot"`
+	RoleSlot            Role      `json:"role_slot"`
 	Prompt              VersionBinding `json:"prompt"`
 	Schema              VersionBinding `json:"schema"`
 	Assembler           VersionBinding `json:"assembler"`
