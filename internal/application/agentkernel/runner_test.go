@@ -30,7 +30,7 @@ func TestServiceRunsFrozenWorkflowAndPersistsTrace(t *testing.T) {
 	if len(provider.requests) != 1 || provider.requests[0].Model != "writer-model" {
 		t.Fatalf("provider requests = %#v", provider.requests)
 	}
-	if len(store.manifests) != 1 || len(store.artifacts) != 3 {
+	if len(store.manifests) != 1 || len(store.artifacts) != 5 {
 		t.Fatalf("trace manifests=%d artifacts=%d", len(store.manifests), len(store.artifacts))
 	}
 	loaded := store.runs[run.ID]

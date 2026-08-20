@@ -13,6 +13,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	"github.com/lishen802/novel-studio/internal/quality"
 )
 
 var (
@@ -23,6 +24,7 @@ var (
 	ErrTokenBudget        = errors.New("agent kernel token budget exceeded")
 	ErrContextBudget      = errors.New("agent kernel context budget exceeded")
 	ErrInvalidOutput      = errors.New("agent kernel structured output invalid")
+	ErrQualityPolicy      = errors.New("agent kernel quality policy unavailable")
 	ErrRuntimeUnavailable = errors.New("agent kernel runtime unavailable")
 )
 
@@ -67,16 +69,18 @@ type CreateRequest struct {
 	WorkflowVersion     int
 	Profile             agentdomain.ResolvedCreativeProfile
 	Sources             []Source
+	QualitySpec         quality.Spec
 	Deadline            time.Time
 	RetryOf             string
 }
 
 type persistedInput struct {
-	BranchID          string    `json:"branch_id"`
-	CanonicalHead     string    `json:"canonical_head"`
-	AuthorInstruction string    `json:"author_instruction"`
-	Sources           []Source  `json:"sources"`
-	Deadline          time.Time `json:"deadline"`
+	BranchID          string       `json:"branch_id"`
+	CanonicalHead     string       `json:"canonical_head"`
+	AuthorInstruction string       `json:"author_instruction"`
+	Sources           []Source     `json:"sources"`
+	QualitySpec       quality.Spec `json:"quality_spec"`
+	Deadline          time.Time    `json:"deadline"`
 }
 
 // Service 负责版本化工作流的冻结、执行和可恢复重放。
@@ -88,6 +92,7 @@ type Service struct {
 	clock        ports.Clock
 	ids          ports.IDGenerator
 	onJobUpdated func(context.Context, string)
+	quality      *quality.Engine
 }
 
 // NewService 创建执行器；回调仅用于唤醒观察界面，不参与正确性。
@@ -103,9 +108,14 @@ func NewService(
 	if onJobUpdated == nil {
 		onJobUpdated = func(context.Context, string) {}
 	}
+	qualityRegistry, qualityRegistryErr := quality.BuiltinRegistry()
+	var qualityEngine *quality.Engine
+	if qualityRegistryErr == nil {
+		qualityEngine = quality.NewEngine(qualityRegistry)
+	}
 	return &Service{
 		store: store, credentials: credentials, providers: providers, registries: registries,
-		clock: clock, ids: ids, onJobUpdated: onJobUpdated,
+		clock: clock, ids: ids, onJobUpdated: onJobUpdated, quality: qualityEngine,
 	}
 }
 
@@ -121,13 +131,21 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 	if err := validateCreateRequest(request, compiled); err != nil {
 		return agentdomain.Run{}, fmt.Errorf("%w: %w", ErrCreateRun, err)
 	}
+	if _, err := service.quality.Policy(compiled.QualityPolicyVersion); err != nil {
+		return agentdomain.Run{}, fmt.Errorf("%w: %w", ErrCreateRun, ErrQualityPolicy)
+	}
+	qualitySpec, err := frozenQualitySpec(request, compiled.TaskKind)
+	if err != nil {
+		return agentdomain.Run{}, fmt.Errorf("%w: %w", ErrCreateRun, err)
+	}
 	deadline := request.Deadline.UTC()
 	if deadline.IsZero() {
 		deadline = service.clock.Now().UTC().Add(defaultRunTimeout)
 	}
 	payload := persistedInput{
 		BranchID: strings.TrimSpace(request.BranchID), CanonicalHead: strings.TrimSpace(request.CanonicalHead),
-		AuthorInstruction: strings.TrimSpace(request.AuthorInstruction), Sources: cloneSources(request.Sources), Deadline: deadline,
+		AuthorInstruction: strings.TrimSpace(request.AuthorInstruction), Sources: cloneSources(request.Sources),
+		QualitySpec: qualitySpec, Deadline: deadline,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -320,7 +338,7 @@ func (service *Service) execute(
 			return service.failRun(context.WithoutCancel(ctx), run, ErrTokenBudget)
 		}
 	}
-	run.QualityStatus = aggregateQuality(latest)
+	run.QualityStatus = aggregateQuality(compiled, latest, artifacts)
 	completed, err := run.Transition(agentdomain.RunCompleted, "", service.clock.Now())
 	if err != nil {
 		return service.failRun(ctx, run, err)
@@ -436,9 +454,16 @@ func (service *Service) executeNode(
 	}
 	structured := newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactStructuredOutput, generated.Text, service.clock.Now())
 	primaryContent, quality, findings := outputDetails(decoded, run, step, service.clock.Now())
+	primaryContent, quality, findings, qualityArtifacts, qualityErr := service.applyQuality(
+		run, input, compiled, node, step, latest, artifacts, decoded, primaryContent, quality, findings,
+	)
+	if qualityErr != nil {
+		return service.failStep(ctx, run, step, errorCode(qualityErr), qualityErr, produced)
+	}
 	primaryKind := artifactKind(node.Capability)
 	primary := newArtifact(service.ids.NewID(), run.ID, step.ID, primaryKind, primaryContent, service.clock.Now())
 	produced = append(produced, structured, primary)
+	produced = append(produced, qualityArtifacts...)
 	completedAt := service.clock.Now().UTC()
 	step.Status = agentdomain.StepCompleted
 	step.Output = agentdomain.BoundedStepPreview(primaryContent)
@@ -742,6 +767,9 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 		strings.TrimSpace(request.AuthorInstruction) == "" || strings.TrimSpace(request.Profile.ProfileID) == "" ||
 		request.Profile.Version < 1 || request.Profile.MaxRunTokens < 1 || request.Profile.MaxContextChars < 1 {
 		return agentdomain.ErrInvalidRun
+	}
+	if request.QualitySpec.Validate() != nil {
+		return quality.ErrInvalidInput
 	}
 	for _, source := range request.Sources {
 		if strings.TrimSpace(source.ID) == "" || strings.TrimSpace(source.Version) == "" ||
@@ -1105,7 +1133,12 @@ func shouldRunNode(condition string, latest map[string]agentdomain.RunStep) bool
 	return condition == "on_blocker" && blocker
 }
 
-func aggregateQuality(latest map[string]agentdomain.RunStep) agentdomain.QualityStatus {
+func aggregateQuality(compiled CompiledWorkflow, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) agentdomain.QualityStatus {
+	if result, ok := latest[compiled.ResultNodeID]; ok {
+		if artifact, exists := artifactByID(artifacts, result.PrimaryArtifactID); exists && artifact.Kind == agentdomain.ArtifactRevision {
+			return result.QualityStatus
+		}
+	}
 	result := agentdomain.QualityPassed
 	for _, step := range latest {
 		if step.QualityStatus == agentdomain.QualityBlocked {
@@ -1225,6 +1258,10 @@ func errorCode(err error) string {
 		return "context_budget_exceeded"
 	case errors.Is(err, ErrInvalidOutput):
 		return "invalid_structured_output"
+	case errors.Is(err, agentdomain.ErrInvalidTaskOutput), errors.Is(err, quality.ErrInvalidReconciliation):
+		return "invalid_structured_output"
+	case errors.Is(err, ErrQualityPolicy), errors.Is(err, quality.ErrPolicyNotFound):
+		return "quality_policy_unavailable"
 	default:
 		return "provider_error"
 	}
@@ -1244,7 +1281,7 @@ func safeErrorMessage(code string) string {
 		return "模型输出未通过结构化契约校验。"
 	case "credential_unavailable":
 		return "模型凭据不可用，请检查连接设置。"
-	case "asset_missing", "prompt_render_failed", "invalid_envelope":
+	case "asset_missing", "prompt_render_failed", "invalid_envelope", "quality_policy_unavailable":
 		return "冻结的智能体资源无法执行。"
 	default:
 		return "模型调用失败，请检查连接、额度或服务状态。"
