@@ -21,6 +21,17 @@ func TestCapabilityUsesR21RoleSlots(t *testing.T) {
 	}
 }
 
+func TestBoundedRevisionAllowsWriterAndPlannerSlots(t *testing.T) {
+	for _, role := range []Role{RoleWriter, RolePlanner} {
+		if !ValidRoleForCapability(CapabilityBoundedRevision, role) {
+			t.Fatalf("bounded revision should allow %s", role)
+		}
+	}
+	if ValidRoleForCapability(CapabilityBoundedRevision, RoleContinuityReviewer) {
+		t.Fatal("bounded revision must reject reviewer slot")
+	}
+}
+
 func TestTaskEnvelopeRejectsInvalidFields(t *testing.T) {
 	envelope := validEnvelope()
 	if err := envelope.Validate(); err != nil {
@@ -87,17 +98,25 @@ func TestDecodeTaskOutputIsStrict(t *testing.T) {
 
 func TestDecodeTaskOutputAcceptsEveryTaskContract(t *testing.T) {
 	fixtures := map[TaskKind]string{
-		TaskStoryBlueprint: `{"title":"雾港","positioning":"悬疑成长","core_conflict":"真相与亲情冲突","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`,
-		TaskChapterPlan:    `{"chapter_goal":"找到船票","opening_hook":"空船靠岸","ending_hook":"船票写着明日死者姓名","scenes":[{"id":"s1","goal":"登船","conflict":"守卫阻拦","outcome":"偷渡成功"}]}`,
-		TaskChapterDraft:   `{"title":"空船","body":"潮声里没有脚步。","completion_note":"完成登船目标"}`,
-		TaskBaselineDraft:  `{"title":"空船","body":"潮声里没有脚步。","completion_note":"完成登船目标"}`,
-		TaskReviewBundle:   `{"quality_status":"passed","summary":"满足约束","findings":[]}`,
-		TaskReviseDraft:    `{"title":"空船","body":"潮声里仍没有脚步。","resolutions":[{"finding_id":"f1","status":"resolved","note":"删除重复句"}]}`,
+		TaskStoryBlueprint:  `{"title":"雾港","positioning":"悬疑成长","core_conflict":"真相与亲情冲突","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`,
+		TaskChapterPlan:     `{"chapter_goal":"找到船票","opening_hook":"空船靠岸","ending_hook":"船票写着明日死者姓名","scenes":[{"id":"s1","goal":"登船","conflict":"守卫阻拦","outcome":"偷渡成功"}]}`,
+		TaskChapterDraft:    `{"title":"空船","body":"潮声里没有脚步。","completion_note":"完成登船目标"}`,
+		TaskBaselineDraft:   `{"title":"空船","body":"潮声里没有脚步。","completion_note":"完成登船目标"}`,
+		TaskReviewBundle:    `{"quality_status":"passed","summary":"满足约束","findings":[]}`,
+		TaskReviseDraft:     `{"title":"空船","body":"潮声里仍没有脚步。","resolutions":[{"finding_id":"f1","status":"resolved","note":"删除重复句"}],"changes":[{"finding_id":"f1","original_text":"潮声里没有脚步。","revised_text":"潮声里仍没有脚步。"}]}`,
+		TaskReviseBlueprint: `{"blueprint":{"title":"雾港","positioning":"悬疑成长","core_conflict":"真相与亲情冲突","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]},"resolutions":[{"finding_id":"f1","status":"resolved","note":"补全规则"}],"changes":[{"finding_id":"f1","original_text":"潮汐影响航路","revised_text":"潮汐决定航路"}]}`,
 	}
 	for kind, fixture := range fixtures {
 		if _, err := DecodeTaskOutput(kind, []byte(fixture)); err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
+	}
+}
+
+func TestRevisionOutputRejectsUntraceableChanges(t *testing.T) {
+	fixture := []byte(`{"title":"空船","body":"修订正文","resolutions":[{"finding_id":"f1","status":"resolved","note":"已修订"}],"changes":[{"finding_id":"f2","original_text":"旧句","revised_text":"新句"}]}`)
+	if _, err := DecodeTaskOutput(TaskReviseDraft, fixture); !errors.Is(err, ErrInvalidTaskOutput) {
+		t.Fatalf("expected untraceable change error, got %v", err)
 	}
 }
 

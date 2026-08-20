@@ -431,6 +431,9 @@ func (service *Service) executeNode(
 			return service.failStep(ctx, run, step, "invalid_structured_output", fmt.Errorf("%w: %v", ErrInvalidOutput, decodeErr), produced)
 		}
 	}
+	if validateErr := validateCapabilityOutput(decoded, node, input, latest, artifacts); validateErr != nil {
+		return service.failStep(ctx, run, step, "invalid_structured_output", fmt.Errorf("%w: %v", ErrInvalidOutput, validateErr), produced)
+	}
 	structured := newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactStructuredOutput, generated.Text, service.clock.Now())
 	primaryContent, quality, findings := outputDetails(decoded, run, step, service.clock.Now())
 	primaryKind := artifactKind(node.Capability)
@@ -887,6 +890,9 @@ func outputDetails(
 		content = value.Body
 	case *agentdomain.ReviseDraftOutput:
 		content = value.Body
+	case *agentdomain.ReviseBlueprintOutput:
+		encoded, _ := json.Marshal(value.Blueprint)
+		content = string(encoded)
 	case *agentdomain.ReviewBundleOutput:
 		quality = value.QualityStatus
 		encoded, _ := json.Marshal(value)
@@ -919,10 +925,152 @@ func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.C
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
 		return agentdomain.TaskReviewBundle
 	case agentdomain.CapabilityBoundedRevision:
+		if workflowKind == agentdomain.TaskStoryBlueprint {
+			return agentdomain.TaskReviseBlueprint
+		}
 		return agentdomain.TaskReviseDraft
 	default:
 		return workflowKind
 	}
+}
+
+// validateCapabilityOutput 执行 JSON Schema 无法表达的评审来源、定位与有限修订约束。
+func validateCapabilityOutput(
+	output agentdomain.TaskOutput,
+	node FrozenNode,
+	input persistedInput,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+) error {
+	switch node.Capability {
+	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
+		return validateModelReview(output, node, latest, artifacts)
+	case agentdomain.CapabilityBoundedRevision:
+		return validateBoundedRevision(output, node, input, latest, artifacts)
+	default:
+		return nil
+	}
+}
+
+func validateModelReview(output agentdomain.TaskOutput, node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) error {
+	review, ok := output.(*agentdomain.ReviewBundleOutput)
+	if !ok {
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	candidate, _, err := revisionInputs(node, latest, artifacts)
+	if err != nil {
+		return err
+	}
+	runes := []rune(candidate)
+	for _, finding := range review.Findings {
+		if finding.Source != agentdomain.FindingModelReview {
+			return fmt.Errorf("review finding %s has invalid source", finding.ID)
+		}
+		if finding.ScopeStart == nil {
+			continue
+		}
+		if *finding.ScopeEnd > len(runes) || string(runes[*finding.ScopeStart:*finding.ScopeEnd]) != finding.Quote {
+			return fmt.Errorf("review finding %s has invalid text range", finding.ID)
+		}
+	}
+	return nil
+}
+
+func validateBoundedRevision(
+	output agentdomain.TaskOutput,
+	node FrozenNode,
+	input persistedInput,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+) error {
+	original, reviewJSON, err := revisionInputs(node, latest, artifacts)
+	if err != nil {
+		return err
+	}
+	decodedReview, err := agentdomain.DecodeTaskOutput(agentdomain.TaskReviewBundle, []byte(reviewJSON))
+	if err != nil {
+		return err
+	}
+	review := decodedReview.(*agentdomain.ReviewBundleOutput)
+	var revised string
+	var resolutions []agentdomain.FindingResolution
+	var changes []agentdomain.RevisionChange
+	switch value := output.(type) {
+	case *agentdomain.ReviseDraftOutput:
+		revised, resolutions, changes = value.Body, value.Resolutions, value.Changes
+	case *agentdomain.ReviseBlueprintOutput:
+		encoded, marshalErr := json.Marshal(value.Blueprint)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		revised, resolutions, changes = string(encoded), value.Resolutions, value.Changes
+	default:
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	if err := validateResolutionCoverage(review.Findings, resolutions); err != nil {
+		return err
+	}
+	expected := original
+	for _, change := range changes {
+		if !strings.Contains(expected, change.OriginalText) || !strings.Contains(revised, change.RevisedText) {
+			return fmt.Errorf("revision change %s has no matching evidence", change.FindingID)
+		}
+		expected = strings.Replace(expected, change.OriginalText, change.RevisedText, 1)
+	}
+	if expected != revised {
+		return errors.New("revision changed content outside declared evidence")
+	}
+	for _, source := range input.Sources {
+		if source.Kind == agentdomain.ManifestAnchor && source.Required && strings.Contains(original, source.Content) && !strings.Contains(revised, source.Content) {
+			return fmt.Errorf("revision lost required anchor %s", source.ID)
+		}
+	}
+	return nil
+}
+
+func validateResolutionCoverage(findings []agentdomain.ReviewFinding, resolutions []agentdomain.FindingResolution) error {
+	want := make(map[string]struct{}, len(findings))
+	for _, finding := range findings {
+		want[finding.ID] = struct{}{}
+	}
+	if len(want) != len(resolutions) {
+		return errors.New("revision resolutions do not cover review findings")
+	}
+	for _, resolution := range resolutions {
+		if _, ok := want[resolution.FindingID]; !ok {
+			return fmt.Errorf("revision references unknown finding %s", resolution.FindingID)
+		}
+	}
+	return nil
+}
+
+func revisionInputs(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (string, string, error) {
+	var candidate, review string
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		step, ok := latest[strings.TrimPrefix(selector, "node:")]
+		if !ok {
+			continue
+		}
+		artifact, ok := artifactByID(artifacts, step.PrimaryArtifactID)
+		if !ok {
+			return "", "", fmt.Errorf("missing upstream artifact %s", step.PrimaryArtifactID)
+		}
+		if step.Capability == agentdomain.CapabilityContinuityReview || step.Capability == agentdomain.CapabilityContentReview || step.Capability == agentdomain.CapabilityStyleReview {
+			review = artifact.Content
+		} else {
+			candidate = artifact.Content
+		}
+	}
+	if candidate == "" {
+		return "", "", errors.New("missing review candidate")
+	}
+	if node.Capability == agentdomain.CapabilityBoundedRevision && review == "" {
+		return "", "", errors.New("missing structured review")
+	}
+	return candidate, review, nil
 }
 
 func artifactKind(capability agentdomain.Capability) agentdomain.ArtifactKind {

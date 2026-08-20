@@ -31,19 +31,35 @@ func TestRegistryRequiresExactVersionAndReturnsCopies(t *testing.T) {
 	}
 }
 
-func TestBuiltinBaselineWorkflowCompilesWithoutModel(t *testing.T) {
+func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 	registry, err := Builtin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := agentkernel.Compile(context.Background(), agentkernel.Registries{
-		Workflows: registry, Prompts: registry, Schemas: registry, Assemblers: registry,
-	}, BaselineWorkflowID, BaselineWorkflowVersion)
-	if err != nil {
-		t.Fatalf("compile builtin: %v", err)
+	cases := []struct {
+		id      string
+		version int
+		nodes   []string
+	}{
+		{BaselineWorkflowID, BaselineWorkflowVersion, []string{"write"}},
+		{QualityChapterWorkflowID, QualityChapterWorkflowVersion, []string{"plan", "draft", "review", "revision"}},
+		{QualityBlueprintWorkflowID, QualityBlueprintWorkflowVersion, []string{"blueprint", "review", "revision"}},
 	}
-	if len(compiled.Nodes) != 1 || compiled.Nodes[0].ID != "write" {
-		t.Fatalf("unexpected nodes: %#v", compiled.Nodes)
+	for _, test := range cases {
+		compiled, compileErr := agentkernel.Compile(context.Background(), agentkernel.Registries{
+			Workflows: registry, Prompts: registry, Schemas: registry, Assemblers: registry,
+		}, test.id, test.version)
+		if compileErr != nil {
+			t.Fatalf("compile %s: %v", test.id, compileErr)
+		}
+		if len(compiled.Nodes) != len(test.nodes) {
+			t.Fatalf("%s nodes: %#v", test.id, compiled.Nodes)
+		}
+		for index, node := range compiled.Nodes {
+			if node.ID != test.nodes[index] {
+				t.Fatalf("%s node %d = %s, want %s", test.id, index, node.ID, test.nodes[index])
+			}
+		}
 	}
 }
 

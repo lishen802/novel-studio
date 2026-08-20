@@ -17,12 +17,13 @@ var (
 type TaskKind string
 
 const (
-	TaskStoryBlueprint TaskKind = "story_blueprint"
-	TaskChapterPlan    TaskKind = "chapter_plan"
-	TaskChapterDraft   TaskKind = "chapter_draft"
-	TaskReviewBundle   TaskKind = "review_bundle"
-	TaskReviseDraft    TaskKind = "revise_draft"
-	TaskBaselineDraft  TaskKind = "baseline_draft"
+	TaskStoryBlueprint  TaskKind = "story_blueprint"
+	TaskChapterPlan     TaskKind = "chapter_plan"
+	TaskChapterDraft    TaskKind = "chapter_draft"
+	TaskReviewBundle    TaskKind = "review_bundle"
+	TaskReviseDraft     TaskKind = "revise_draft"
+	TaskReviseBlueprint TaskKind = "revise_blueprint"
+	TaskBaselineDraft   TaskKind = "baseline_draft"
 )
 
 type Capability string
@@ -137,7 +138,7 @@ func (binding VersionBinding) Validate() error {
 }
 
 type ExecutionBinding struct {
-	RoleSlot             Role    `json:"role_slot"`
+	RoleSlot             Role         `json:"role_slot"`
 	ProviderConnectionID string       `json:"provider_connection_id"`
 	ProviderName         string       `json:"provider_name"`
 	ProviderKind         ProviderKind `json:"provider_kind"`
@@ -149,7 +150,7 @@ type ExecutionBinding struct {
 }
 
 func (binding ExecutionBinding) Validate(capability Capability) error {
-	if binding.RoleSlot != DefaultRoleForCapability(capability) || blank(binding.ProviderConnectionID) ||
+	if !ValidRoleForCapability(capability, binding.RoleSlot) || blank(binding.ProviderConnectionID) ||
 		blank(binding.ProviderName) || blank(binding.CredentialRef) || blank(binding.Model) ||
 		(binding.ProviderKind != ProviderOpenAI && binding.ProviderKind != ProviderAnthropic) ||
 		binding.MaxOutputTokens < 1 || binding.Temperature < 0 || binding.Temperature > 2 {
@@ -294,11 +295,19 @@ func ValidSHA256(value string) bool {
 
 func ValidTaskKind(kind TaskKind) bool {
 	switch kind {
-	case TaskStoryBlueprint, TaskChapterPlan, TaskChapterDraft, TaskReviewBundle, TaskReviseDraft, TaskBaselineDraft:
+	case TaskStoryBlueprint, TaskChapterPlan, TaskChapterDraft, TaskReviewBundle, TaskReviseDraft, TaskReviseBlueprint, TaskBaselineDraft:
 		return true
 	default:
 		return false
 	}
+}
+
+// ValidRoleForCapability 校验能力可绑定的角色槽；方案修订由策划槽执行，正文修订由写作槽执行。
+func ValidRoleForCapability(capability Capability, role Role) bool {
+	if capability == CapabilityBoundedRevision {
+		return role == RoleWriter || role == RolePlanner
+	}
+	return role != "" && role == DefaultRoleForCapability(capability)
 }
 
 func ValidCapability(capability Capability) bool {

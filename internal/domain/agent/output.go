@@ -12,10 +12,11 @@ import (
 var ErrInvalidTaskOutput = errors.New("invalid agent task output")
 
 const (
-	MaxBlueprintItems = 100
-	MaxChapterScenes  = 50
-	MaxReviewFindings = 200
-	MaxResolutions    = 200
+	MaxBlueprintItems  = 100
+	MaxChapterScenes   = 50
+	MaxReviewFindings  = 200
+	MaxResolutions     = 200
+	MaxRevisionChanges = 200
 )
 
 type TaskOutput interface{ Validate() error }
@@ -118,19 +119,61 @@ type ReviseDraftOutput struct {
 	Title       string              `json:"title"`
 	Body        string              `json:"body"`
 	Resolutions []FindingResolution `json:"resolutions"`
+	Changes     []RevisionChange    `json:"changes"`
 }
 
 func (output ReviseDraftOutput) Validate() error {
-	if blank(output.Title) || blank(output.Body) || len(output.Resolutions) == 0 || len(output.Resolutions) > MaxResolutions {
+	if blank(output.Title) || blank(output.Body) || validateRevisionTrace(output.Resolutions, output.Changes) != nil {
+		return ErrInvalidTaskOutput
+	}
+	return nil
+}
+
+type RevisionChange struct {
+	FindingID    string `json:"finding_id"`
+	OriginalText string `json:"original_text"`
+	RevisedText  string `json:"revised_text"`
+}
+
+type ReviseBlueprintOutput struct {
+	Blueprint   StoryBlueprintOutput `json:"blueprint"`
+	Resolutions []FindingResolution  `json:"resolutions"`
+	Changes     []RevisionChange     `json:"changes"`
+}
+
+func (output ReviseBlueprintOutput) Validate() error {
+	if output.Blueprint.Validate() != nil || validateRevisionTrace(output.Resolutions, output.Changes) != nil {
+		return ErrInvalidTaskOutput
+	}
+	return nil
+}
+
+func validateRevisionTrace(resolutions []FindingResolution, changes []RevisionChange) error {
+	if len(resolutions) == 0 || len(resolutions) > MaxResolutions || len(changes) > MaxRevisionChanges {
 		return ErrInvalidTaskOutput
 	}
 	seen := map[string]bool{}
-	for _, resolution := range output.Resolutions {
+	resolved := map[string]bool{}
+	for _, resolution := range resolutions {
 		if blank(resolution.FindingID) || blank(resolution.Note) || !validFindingStatus(resolution.Status) ||
 			resolution.Status == FindingOpen || seen[resolution.FindingID] {
 			return ErrInvalidTaskOutput
 		}
 		seen[resolution.FindingID] = true
+		resolved[resolution.FindingID] = resolution.Status == FindingResolved
+	}
+	changed := map[string]bool{}
+	for _, change := range changes {
+		if blank(change.FindingID) || blank(change.OriginalText) || blank(change.RevisedText) ||
+			change.OriginalText == change.RevisedText || !resolved[change.FindingID] || changed[change.FindingID] {
+			return ErrInvalidTaskOutput
+		}
+		changed[change.FindingID] = true
+	}
+	for findingID, isResolved := range resolved {
+		if isResolved && !changed[findingID] {
+			return ErrInvalidTaskOutput
+		}
 	}
 	return nil
 }
@@ -149,6 +192,8 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 		output = &ReviewBundleOutput{}
 	case TaskReviseDraft:
 		output = &ReviseDraftOutput{}
+	case TaskReviseBlueprint:
+		output = &ReviseBlueprintOutput{}
 	default:
 		return nil, ErrInvalidTaskOutput
 	}

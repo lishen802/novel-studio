@@ -28,7 +28,7 @@ const (
 type WorkflowNode struct {
 	ID                  string         `json:"id"`
 	Capability          Capability     `json:"capability"`
-	RoleSlot            Role      `json:"role_slot"`
+	RoleSlot            Role           `json:"role_slot"`
 	Prompt              VersionBinding `json:"prompt"`
 	Schema              VersionBinding `json:"schema"`
 	Assembler           VersionBinding `json:"assembler"`
@@ -75,7 +75,7 @@ func (definition WorkflowDefinition) Validate() error {
 	}
 	nodes := make(map[string]WorkflowNode, len(definition.Nodes))
 	for _, node := range definition.Nodes {
-		if blank(node.ID) || !ValidCapability(node.Capability) || node.RoleSlot != DefaultRoleForCapability(node.Capability) ||
+		if blank(node.ID) || !ValidCapability(node.Capability) || !ValidRoleForCapability(node.Capability, node.RoleSlot) ||
 			node.MaxOutputTokens < 1 || !validOutputKind(node.OutputKind) ||
 			(node.FailurePolicy != FailureFailRun && node.FailurePolicy != FailureSkipNode) {
 			return ErrInvalidWorkflow

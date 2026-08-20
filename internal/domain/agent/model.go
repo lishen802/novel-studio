@@ -525,7 +525,7 @@ func NewWorkflowRun(
 			MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
 		}
 		if strings.TrimSpace(spec.ID) == "" || nodeID == "" || !validRole(spec.Role) ||
-			!ValidCapability(spec.Capability) || spec.Role != DefaultRoleForCapability(spec.Capability) ||
+			!ValidCapability(spec.Capability) || !ValidRoleForCapability(spec.Capability, spec.Role) ||
 			strings.TrimSpace(spec.CreativeProfileID) == "" || spec.CreativeProfileVersion < 1 ||
 			strings.TrimSpace(spec.ProviderConnectionID) == "" || strings.TrimSpace(spec.ProviderName) == "" ||
 			strings.TrimSpace(spec.CredentialRef) == "" || strings.TrimSpace(spec.Model) == "" ||
