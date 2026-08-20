@@ -88,11 +88,16 @@ type AgentStore interface {
 	ListAgentProfiles(ctx context.Context) ([]agentdomain.AgentProfile, error)
 	AgentProfile(ctx context.Context, id string) (agentdomain.AgentProfile, error)
 	CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) error
+	CreateAgentRunBundle(ctx context.Context, bundle agentdomain.AgentRunBundle) error
 	UpdateAgentRun(ctx context.Context, run agentdomain.AgentRun, drafts ...agentdomain.JobEventDraft) error
 	AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, error)
 	ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.AgentRun, error)
 	UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRunStep, drafts ...agentdomain.JobEventDraft) error
+	SaveAgentStepBundle(ctx context.Context, bundle agentdomain.AgentStepBundle, drafts ...agentdomain.JobEventDraft) error
 	CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error
 	ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.AgentArtifact, error)
+	ContextManifest(ctx context.Context, id string) (agentdomain.ContextManifest, error)
+	ListContextManifests(ctx context.Context, runID string) ([]agentdomain.ContextManifest, error)
+	ListAgentReviewFindings(ctx context.Context, runID string) ([]agentdomain.AgentReviewFinding, error)
 	RecoverInterruptedAgentRuns(ctx context.Context, recoveredAt time.Time) (int64, error)
 }

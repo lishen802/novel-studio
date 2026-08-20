@@ -186,6 +186,14 @@ func (s *Store) AgentProfile(ctx context.Context, id string) (agentdomain.AgentP
 }
 
 func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) error {
+	return s.CreateAgentRunBundle(ctx, agentdomain.AgentRunBundle{Run: run})
+}
+
+func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.AgentRunBundle) error {
+	run := bundle.Run
+	if err := validateAgentRunBundle(bundle); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return databaseOperationError("begin create agent run", err)
@@ -196,10 +204,13 @@ func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 			id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, change_set_id, retry_of, created_at, updated_at,
 			started_at, completed_at, token_budget, context_char_budget,
-			input_tokens, output_tokens, context_chars, context_truncated
+			input_tokens, output_tokens, context_chars, context_truncated,
+			task_kind, workflow_id, workflow_version, workflow_hash, canonical_head,
+			input_digest, quality_status, budget_policy_version, quality_policy_version,
+			max_revision_attempts
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 	`,
 		run.ID, run.ProjectID, run.ChapterID, run.ChapterBaseRevision, run.Prompt, run.Status,
@@ -207,12 +218,30 @@ func (s *Store) CreateAgentRun(ctx context.Context, run agentdomain.AgentRun) er
 		formatTime(run.CreatedAt), formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
 		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
 		run.ContextChars, run.ContextTruncated,
+		run.TaskKind, run.WorkflowBinding.ID, run.WorkflowBinding.Version, run.WorkflowBinding.Hash,
+		run.CanonicalHead, run.InputDigest, run.QualityStatus, run.BudgetPolicyVersion,
+		run.QualityPolicyVersion, run.MaxRevisionAttempts,
 	)
 	if err != nil {
 		return databaseOperationError("create agent run", err)
 	}
 	for _, step := range run.Steps {
 		if err := insertAgentRunStep(ctx, tx, step); err != nil {
+			return err
+		}
+	}
+	for _, artifact := range bundle.Artifacts {
+		if err := insertAgentArtifact(ctx, tx, artifact); err != nil {
+			return err
+		}
+	}
+	for _, manifest := range bundle.Manifests {
+		if err := insertContextManifest(ctx, tx, manifest); err != nil {
+			return err
+		}
+	}
+	for _, finding := range bundle.Findings {
+		if err := insertAgentReviewFinding(ctx, tx, finding); err != nil {
 			return err
 		}
 	}
@@ -281,13 +310,19 @@ func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.Ag
 			updated_at = ?, started_at = ?, completed_at = ?,
 			token_budget = ?, context_char_budget = ?,
 			input_tokens = ?, output_tokens = ?,
-			context_chars = ?, context_truncated = ?
+			context_chars = ?, context_truncated = ?,
+			task_kind = ?, workflow_id = ?, workflow_version = ?, workflow_hash = ?,
+			canonical_head = ?, input_digest = ?, quality_status = ?,
+			budget_policy_version = ?, quality_policy_version = ?, max_revision_attempts = ?
 		WHERE id = ?
 	`,
 		run.Status, run.ErrorCode, run.ErrorMessage, run.ChangeSetID, run.RetryOf,
 		formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
 		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
-		run.ContextChars, run.ContextTruncated, run.ID,
+		run.ContextChars, run.ContextTruncated,
+		run.TaskKind, run.WorkflowBinding.ID, run.WorkflowBinding.Version, run.WorkflowBinding.Hash,
+		run.CanonicalHead, run.InputDigest, run.QualityStatus, run.BudgetPolicyVersion,
+		run.QualityPolicyVersion, run.MaxRevisionAttempts, run.ID,
 	)
 }
 
@@ -297,7 +332,9 @@ func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.AgentRun, 
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
 			created_at, updated_at, started_at, completed_at,
 			token_budget, context_char_budget, input_tokens, output_tokens,
-			context_chars, context_truncated
+			context_chars, context_truncated, task_kind, workflow_id, workflow_version,
+			workflow_hash, canonical_head, input_digest, quality_status,
+			budget_policy_version, quality_policy_version, max_revision_attempts
 		FROM agent_runs WHERE id = ?
 	`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -319,7 +356,9 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Age
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
 			created_at, updated_at, started_at, completed_at,
 			token_budget, context_char_budget, input_tokens, output_tokens,
-			context_chars, context_truncated
+			context_chars, context_truncated, task_kind, workflow_id, workflow_version,
+			workflow_hash, canonical_head, input_digest, quality_status,
+			budget_policy_version, quality_policy_version, max_revision_attempts
 		FROM agent_runs ORDER BY created_at DESC LIMIT ?
 	`, limit)
 	if err != nil {
@@ -354,11 +393,24 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 		}
 		return requireAffected(result, "agent run step", step.ID)
 	}
+	return s.SaveAgentStepBundle(ctx, agentdomain.AgentStepBundle{Step: step}, drafts...)
+}
+
+func (s *Store) SaveAgentStepBundle(ctx context.Context, bundle agentdomain.AgentStepBundle, drafts ...agentdomain.JobEventDraft) error {
+	step := bundle.Step
+	if err := validateAgentStepBundle(bundle); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return databaseOperationError("begin update agent run step", err)
 	}
 	defer tx.Rollback()
+	for _, artifact := range bundle.Artifacts {
+		if err := insertAgentArtifact(ctx, tx, artifact); err != nil {
+			return err
+		}
+	}
 	result, err := execUpdateAgentRunStep(ctx, tx, step)
 	if err != nil {
 		return databaseOperationError("update agent run step", err)
@@ -366,12 +418,27 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.AgentRu
 	if err := requireAffected(result, "agent run step", step.ID); err != nil {
 		return err
 	}
+	for _, manifest := range bundle.Manifests {
+		if err := insertContextManifest(ctx, tx, manifest); err != nil {
+			return err
+		}
+	}
+	for _, finding := range bundle.Findings {
+		if err := insertAgentReviewFinding(ctx, tx, finding); err != nil {
+			return err
+		}
+	}
 	if err := refreshAgentRunUsageFromSteps(ctx, tx, step.RunID, formatTime(step.UpdatedAt)); err != nil {
 		return err
 	}
-	maxSequence, err := appendJobEventDrafts(ctx, tx, drafts)
-	if err != nil {
-		return err
+	maxSequence := uint64(0)
+	if len(drafts) > 0 {
+		maxSequence, err = appendJobEventDrafts(ctx, tx, drafts)
+		if err != nil {
+			return err
+		}
+	} else if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence_number), 0) FROM job_events WHERE job_id = ?`, step.RunID).Scan(&maxSequence); err != nil {
+		return databaseOperationError("read agent event cursor", err)
 	}
 	// The snapshot projects from the run row, which the step update does not
 	// touch; the subsequent UpdateAgentRun (called by the workspace for terminal
@@ -407,28 +474,36 @@ func refreshAgentRunUsageFromSteps(ctx context.Context, exec txExecutor, runID, 
 // execUpdateAgentRunStep runs the step-row UPDATE against exec (a *sql.DB or
 // *sql.Tx) so UpdateAgentRunStep can reuse it for both code paths.
 func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdomain.AgentRunStep) (sql.Result, error) {
+	if step.Capability != "" {
+		step.Output = agentdomain.BoundedStepPreview(step.Output)
+	}
 	return exec.ExecContext(ctx, `
 		UPDATE agent_run_steps SET
 			status = ?, output = ?, error_code = ?, error_message = ?,
 			started_at = ?, completed_at = ?, updated_at = ?,
-			provider_request_id = ?, input_tokens = ?, output_tokens = ?
+			provider_request_id = ?, input_tokens = ?, output_tokens = ?,
+			node_id = ?, capability = ?, attempt = ?, prompt_id = ?, prompt_version = ?,
+			prompt_hash = ?, schema_id = ?, schema_version = ?, schema_hash = ?,
+			assembler_id = ?, assembler_version = ?, input_digest = ?, output_digest = ?,
+			primary_artifact_id = NULLIF(?, ''), quality_status = ?
 		WHERE id = ?
 	`,
 		step.Status, step.Output, step.ErrorCode, step.ErrorMessage,
 		nullableTime(step.StartedAt), nullableTime(step.CompletedAt), formatTime(step.UpdatedAt),
-		step.ProviderRequestID, step.InputTokens, step.OutputTokens, step.ID,
+		step.ProviderRequestID, step.InputTokens, step.OutputTokens,
+		normalizedNodeID(step), step.Capability, normalizedAttempt(step),
+		step.PromptBinding.ID, step.PromptBinding.Version, step.PromptBinding.Hash,
+		step.SchemaBinding.ID, step.SchemaBinding.Version, step.SchemaBinding.Hash,
+		step.AssemblerID, step.AssemblerVersion, step.InputDigest, step.OutputDigest,
+		step.PrimaryArtifactID, step.QualityStatus, step.ID,
 	)
 }
 
 func (s *Store) CreateAgentArtifact(ctx context.Context, artifact agentdomain.AgentArtifact) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO agent_artifacts(id, run_id, step_id, kind, content, sha256, created_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?)
-	`, artifact.ID, artifact.RunID, artifact.StepID, artifact.Kind, artifact.Content, artifact.SHA256, formatTime(artifact.CreatedAt))
-	if err != nil {
-		return databaseOperationError("create agent artifact", err)
+	if err := artifact.Validate(); err != nil {
+		return err
 	}
-	return nil
+	return insertAgentArtifact(ctx, s.db, artifact)
 }
 
 func (s *Store) ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.AgentArtifact, error) {
@@ -601,6 +676,9 @@ func scanAgentRun(scanner rowScanner) (agentdomain.AgentRun, error) {
 		&createdAt, &updatedAt, &startedAt, &completedAt,
 		&run.TokenBudget, &run.ContextCharBudget, &run.InputTokens, &run.OutputTokens,
 		&run.ContextChars, &run.ContextTruncated,
+		&run.TaskKind, &run.WorkflowBinding.ID, &run.WorkflowBinding.Version,
+		&run.WorkflowBinding.Hash, &run.CanonicalHead, &run.InputDigest, &run.QualityStatus,
+		&run.BudgetPolicyVersion, &run.QualityPolicyVersion, &run.MaxRevisionAttempts,
 	)
 	if err != nil {
 		return run, err
@@ -625,8 +703,11 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			provider_request_id, input_tokens, output_tokens,
 			creative_profile_id, creative_profile_version, provider_connection_id,
 			provider_name, provider_kind, base_url, credential_ref, model,
-			max_output_tokens, temperature
-		FROM agent_run_steps WHERE run_id = ? ORDER BY position
+			max_output_tokens, temperature,
+			node_id, capability, attempt, prompt_id, prompt_version, prompt_hash,
+			schema_id, schema_version, schema_hash, assembler_id, assembler_version,
+			input_digest, output_digest, COALESCE(primary_artifact_id, ''), quality_status
+		FROM agent_run_steps WHERE run_id = ? ORDER BY position, attempt
 	`, runID)
 	if err != nil {
 		return nil, err
@@ -645,6 +726,11 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			&step.CreativeProfileID, &step.CreativeProfileVersion, &step.ProviderConnectionID,
 			&step.ProviderName, &step.ProviderKind, &step.BaseURL, &step.CredentialRef, &step.Model,
 			&step.MaxOutputTokens, &step.Temperature,
+			&step.NodeID, &step.Capability, &step.Attempt,
+			&step.PromptBinding.ID, &step.PromptBinding.Version, &step.PromptBinding.Hash,
+			&step.SchemaBinding.ID, &step.SchemaBinding.Version, &step.SchemaBinding.Hash,
+			&step.AssemblerID, &step.AssemblerVersion, &step.InputDigest, &step.OutputDigest,
+			&step.PrimaryArtifactID, &step.QualityStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -667,6 +753,9 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 }
 
 func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.AgentRunStep) error {
+	if step.Capability != "" {
+		step.Output = agentdomain.BoundedStepPreview(step.Output)
+	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_run_steps(
 			id, run_id, role, profile_id, position, status, output,
@@ -674,9 +763,13 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.AgentR
 			provider_request_id, input_tokens, output_tokens,
 			creative_profile_id, creative_profile_version, provider_connection_id,
 			provider_name, provider_kind, base_url, credential_ref, model,
-			max_output_tokens, temperature
+			max_output_tokens, temperature, node_id, capability, attempt,
+			prompt_id, prompt_version, prompt_hash, schema_id, schema_version, schema_hash,
+			assembler_id, assembler_version, input_digest, output_digest,
+			primary_artifact_id, quality_status
 		) VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)
 	`,
 		step.ID, step.RunID, step.Role, step.ProfileID, step.Position, step.Status,
 		step.Output, step.ErrorCode, step.ErrorMessage,
@@ -686,6 +779,11 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.AgentR
 		step.CreativeProfileID, step.CreativeProfileVersion, step.ProviderConnectionID,
 		step.ProviderName, step.ProviderKind, step.BaseURL, step.CredentialRef, step.Model,
 		step.MaxOutputTokens, step.Temperature,
+		normalizedNodeID(step), step.Capability, normalizedAttempt(step),
+		step.PromptBinding.ID, step.PromptBinding.Version, step.PromptBinding.Hash,
+		step.SchemaBinding.ID, step.SchemaBinding.Version, step.SchemaBinding.Hash,
+		step.AssemblerID, step.AssemblerVersion, step.InputDigest, step.OutputDigest,
+		step.PrimaryArtifactID, step.QualityStatus,
 	)
 	if err != nil {
 		return databaseOperationError("create agent run step", err)

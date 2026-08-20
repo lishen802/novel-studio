@@ -11,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lishen802/novel-studio/internal/testsupport/legacyproject"
+	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
 
@@ -212,6 +214,113 @@ func TestOpenExistingDatabaseMigratesLegacyFixtureThroughValidatedStage(t *testi
 	if newHash == originalHash {
 		t.Fatalf("project.db bytes unchanged after migration; expected replacement")
 	}
+}
+
+func TestOpenExistingDatabaseMigratesV18AgentRecordsWithoutInventingBindings(t *testing.T) {
+	ctx := context.Background()
+	path := buildV18AgentFixture(t)
+	db, err := OpenExistingDatabase(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenExistingDatabase: %v", err)
+	}
+	defer db.Close()
+
+	var workflowID string
+	if err := db.QueryRowContext(ctx, `SELECT workflow_id FROM agent_runs WHERE id = 'legacy-run'`).Scan(&workflowID); err != nil {
+		t.Fatal(err)
+	}
+	if workflowID != "" {
+		t.Fatalf("legacy workflow_id = %q, want empty", workflowID)
+	}
+	var nodeID, promptHash, artifactContent string
+	var attempt int
+	if err := db.QueryRowContext(ctx, `
+		SELECT node_id, attempt, prompt_hash FROM agent_run_steps WHERE id = 'legacy-step'
+	`).Scan(&nodeID, &attempt, &promptHash); err != nil {
+		t.Fatal(err)
+	}
+	if nodeID != "planner" || attempt != 1 || promptHash != "" {
+		t.Fatalf("legacy step = (%q, %d, %q)", nodeID, attempt, promptHash)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT content FROM agent_artifacts WHERE id = 'legacy-artifact'`).Scan(&artifactContent); err != nil {
+		t.Fatal(err)
+	}
+	if artifactContent != "旧计划全文" {
+		t.Fatalf("legacy artifact content = %q", artifactContent)
+	}
+	for _, table := range []string{"context_manifests", "context_manifest_items", "agent_review_findings"} {
+		assertSchemaObjectExists(t, db, "table", table)
+	}
+	backup := filepath.Join(filepath.Dir(path), "recovery", migrationBackupName(18, currentSchemaVersion))
+	assertFileExists(t, backup)
+}
+
+func TestV18ToV19FailureLeavesOriginalDatabaseIntact(t *testing.T) {
+	ctx := context.Background()
+	path := buildV18AgentFixture(t)
+	originalHash := sha256File(t, path)
+	_, err := openExistingDatabase(ctx, path, migrationHooks{
+		afterStageValidated: func() error { return errors.New("injected v19 stage abort") },
+	})
+	if err == nil {
+		t.Fatal("openExistingDatabase succeeded, want injected failure")
+	}
+	if got := sha256File(t, path); got != originalHash {
+		t.Fatalf("v18 database changed after staged migration failure")
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if got := readSchemaVersion(t, db); got != 18 {
+		t.Fatalf("schema version = %d, want 18", got)
+	}
+}
+
+func buildV18AgentFixture(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "project.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 18); err != nil {
+		t.Fatalf("migrate fixture to v18: %v", err)
+	}
+	now := formatTime(time.Unix(100, 0).UTC())
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO projects(id, title, created_at, updated_at) VALUES ('project-1', '旧项目', ?, ?)`, []any{now, now}},
+		{`INSERT INTO chapters(id, project_id, title, position, revision, created_at, updated_at) VALUES ('chapter-1', 'project-1', '第一章', 1, 1, ?, ?)`, []any{now, now}},
+		{`INSERT INTO agent_runs(id, project_id, chapter_id, chapter_base_revision, prompt, status, created_at, updated_at) VALUES ('legacy-run', 'project-1', 'chapter-1', 1, '续写', 'completed', ?, ?)`, []any{now, now}},
+		{`INSERT INTO agent_run_steps(id, run_id, role, position, status, output, created_at, updated_at) VALUES ('legacy-step', 'legacy-run', 'planner', 1, 'completed', '旧预览', ?, ?)`, []any{now, now}},
+		{`INSERT INTO agent_artifacts(id, run_id, step_id, kind, content, sha256, created_at) VALUES ('legacy-artifact', 'legacy-run', 'legacy-step', 'plan', '旧计划全文', 'legacy-hash', ?)`, []any{now}},
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			db.Close()
+			t.Fatalf("seed v18 fixture: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeSQLiteSidecars(path); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // === Hook-injected failure tests ===

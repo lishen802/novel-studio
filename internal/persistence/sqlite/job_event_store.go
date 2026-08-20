@@ -306,8 +306,13 @@ func upsertAgentJobSnapshot(
 		SELECT ?, 'agent', r.project_id, r.status, ?, 1,
 			r.input_tokens, r.output_tokens, '', '', ?,
 			COALESCE((
-				SELECT json_group_array(json_object('stepId', st.id, 'status', st.status))
-				FROM agent_run_steps st WHERE st.run_id = r.id
+				SELECT json_group_array(json_object('stepId', ordered.id, 'status', ordered.status))
+				FROM (
+					SELECT st.id, st.status
+					FROM agent_run_steps st
+					WHERE st.run_id = r.id
+					ORDER BY st.position, st.attempt
+				) AS ordered
 			), '[]')
 		FROM agent_runs r
 		WHERE r.id = ?

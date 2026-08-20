@@ -44,12 +44,11 @@ type migrationPaths struct {
 	journal  string // <package>/recovery/migration.json
 	stage    string // <package>/recovery/migration-stage.sqlite
 	original string // <package>/recovery/migration-original.sqlite
-	backup   string // <package>/recovery/migration-v09-v14.sqlite
+	backup   string // <package>/recovery/migration-v<from>-v<to>.sqlite
 }
 
-// newMigrationPaths derives all migration coordinator paths from the database
-// location. The backup filename is fixed to the v9 -> v14 path; other source
-// versions reuse the same recovery directory but are not expected in R0.
+// newMigrationPaths 根据数据库位置生成迁移协调器所需的短路径。
+// 读取源版本后会替换具体备份名，避免不同迁移版本复用同一份备份。
 func newMigrationPaths(databasePath string) migrationPaths {
 	root := filepath.Dir(databasePath)
 	recovery := filepath.Join(root, "recovery")
@@ -59,7 +58,7 @@ func newMigrationPaths(databasePath string) migrationPaths {
 		journal:  filepath.Join(recovery, "migration.json"),
 		stage:    filepath.Join(recovery, "migration-stage.sqlite"),
 		original: filepath.Join(recovery, "migration-original.sqlite"),
-		backup:   filepath.Join(recovery, "migration-v09-v14.sqlite"),
+		backup:   filepath.Join(recovery, migrationBackupName(9, currentSchemaVersion)),
 	}
 }
 
@@ -81,9 +80,7 @@ func migrationRecoveryRequired(databasePath string) (bool, error) {
 	return false, nil
 }
 
-// migrationBackupName returns the fixed backup filename for a from -> to
-// migration. R0 only contemplates v9 -> v14; the parameterized form keeps
-// future versions from colliding with the v9 backup.
+// migrationBackupName 返回按起止版本隔离的备份文件名，避免跨版本误复用。
 func migrationBackupName(from, to int64) string {
 	return fmt.Sprintf("migration-v%02d-v%02d.sqlite", from, to)
 }
@@ -186,6 +183,7 @@ func openExistingDatabase(ctx context.Context, path string, hooks migrationHooks
 		_ = source.Close()
 		return nil, err
 	}
+	paths.backup = filepath.Join(paths.recovery, migrationBackupName(fromVersion, currentSchemaVersion))
 
 	// Already at current schema: configure runtime PRAGMAs and return.
 	if fromVersion == currentSchemaVersion {

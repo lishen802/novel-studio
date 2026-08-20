@@ -52,7 +52,7 @@ func TestAgentStorePersistsConfigurationRunAndArtifacts(t *testing.T) {
 	artifact := agentdomain.AgentArtifact{
 		ID: "artifact-1", RunID: run.ID, StepID: run.Steps[0].ID,
 		Kind: agentdomain.ArtifactPlan, Content: `{"summary":"计划"}`,
-		SHA256: "hash", CreatedAt: now,
+		SHA256: agentdomain.SHA256Hex([]byte(`{"summary":"计划"}`)), CreatedAt: now,
 	}
 	if err := store.CreateAgentArtifact(ctx, artifact); err != nil {
 		t.Fatal(err)

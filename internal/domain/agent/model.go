@@ -298,6 +298,19 @@ type AgentRunStep struct {
 	Model                  string
 	MaxOutputTokens        int
 	Temperature            float64
+
+	// R3 智能体内核冻结字段。旧运行仅有 NodeID 与 Attempt，其余字段保持空值。
+	NodeID            string
+	Capability        Capability
+	Attempt           int
+	PromptBinding     VersionBinding
+	SchemaBinding     VersionBinding
+	AssemblerID       string
+	AssemblerVersion  int
+	InputDigest       string
+	OutputDigest      string
+	PrimaryArtifactID string
+	QualityStatus     QualityStatus
 }
 
 type AgentRun struct {
@@ -322,6 +335,21 @@ type AgentRun struct {
 	UpdatedAt           time.Time
 	StartedAt           *time.Time
 	CompletedAt         *time.Time
+
+	// R3 智能体内核冻结字段。空 WorkflowBinding.ID 表示从 R2.1 或更早版本迁移的运行。
+	TaskKind             TaskKind
+	WorkflowBinding      VersionBinding
+	CanonicalHead        string
+	InputDigest          string
+	QualityStatus        QualityStatus
+	BudgetPolicyVersion  int
+	QualityPolicyVersion int
+	MaxRevisionAttempts  int
+}
+
+// IsLegacy 判断运行是否缺少 R3 工作流冻结信息。
+func (run AgentRun) IsLegacy() bool {
+	return strings.TrimSpace(run.WorkflowBinding.ID) == ""
 }
 
 func NewChapterDraftRun(
@@ -454,10 +482,16 @@ func validRunTransition(from, to RunStatus) bool {
 type ArtifactKind string
 
 const (
-	ArtifactContext ArtifactKind = "context"
-	ArtifactPlan    ArtifactKind = "plan"
-	ArtifactDraft   ArtifactKind = "draft"
-	ArtifactReview  ArtifactKind = "review"
+	ArtifactContext          ArtifactKind = "context"
+	ArtifactTaskInput        ArtifactKind = "task_input"
+	ArtifactPlan             ArtifactKind = "plan"
+	ArtifactDraft            ArtifactKind = "draft"
+	ArtifactReview           ArtifactKind = "review"
+	ArtifactRevision         ArtifactKind = "revision"
+	ArtifactStructuredOutput ArtifactKind = "structured_output"
+	ArtifactLintReport       ArtifactKind = "lint_report"
+	ArtifactQualityReport    ArtifactKind = "quality_report"
+	ArtifactFormatRepair     ArtifactKind = "format_repair"
 )
 
 type AgentArtifact struct {

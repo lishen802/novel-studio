@@ -70,7 +70,8 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 		"fact_scopes", "fact_conflicts", "character_knowledge",
 		"change_sets", "change_operations",
 		"provider_connections", "agent_profiles", "agent_runtime_settings", "agent_runs",
-		"agent_run_steps", "agent_artifacts",
+		"agent_run_steps", "agent_artifacts", "context_manifests", "context_manifest_items",
+		"agent_review_findings",
 		"import_jobs", "import_chapters",
 	} {
 		assertSchemaObjectExists(t, db, "table", name)
@@ -84,7 +85,7 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "index", "idx_relationships_source")
 	assertSchemaObjectExists(t, db, "index", "idx_chapter_characters_character")
 	assertSchemaObjectExists(t, db, "index", "idx_agent_runs_project_created")
-	assertSchemaObjectExists(t, db, "index", "idx_agent_run_steps_run_position")
+	assertSchemaObjectExists(t, db, "index", "idx_agent_run_steps_run_position_attempt")
 	assertSchemaObjectExists(t, db, "index", "idx_import_jobs_project_source_hash")
 	assertSchemaObjectExists(t, db, "index", "idx_import_chapters_job_position")
 	assertSchemaObjectExists(t, db, "table", "extraction_tasks")
