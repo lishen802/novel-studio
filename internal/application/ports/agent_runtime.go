@@ -93,6 +93,7 @@ type AgentStore interface {
 	AgentRun(ctx context.Context, id string) (agentdomain.Run, error)
 	ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Run, error)
 	UpdateAgentRunStep(ctx context.Context, step agentdomain.RunStep, drafts ...agentdomain.JobEventDraft) error
+	AppendAgentRunStep(ctx context.Context, step agentdomain.RunStep, drafts ...agentdomain.JobEventDraft) error
 	SaveAgentStepBundle(ctx context.Context, bundle agentdomain.StepBundle, drafts ...agentdomain.JobEventDraft) error
 	CreateAgentArtifact(ctx context.Context, artifact agentdomain.Artifact) error
 	ListAgentArtifacts(ctx context.Context, runID string) ([]agentdomain.Artifact, error)

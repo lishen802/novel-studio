@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lishen802/novel-studio/internal/application/agentkernel"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
@@ -637,8 +638,13 @@ func (s *Service) runAgentPipeline(
 		return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 	}
 
+	legacyNodes, err := agentkernel.AdaptLegacyRun(run)
+	if err != nil {
+		return failed(err)
+	}
 	var plan, draft, review string
-	for index := range run.Steps {
+	for _, legacyNode := range legacyNodes {
+		index := legacyNode.StepIndex
 		step := run.Steps[index]
 		// 执行阶段只读取冻结快照与凭据库，不重新解析可变的应用设置。
 		if strings.TrimSpace(step.Model) == "" || strings.TrimSpace(step.CredentialRef) == "" {
@@ -667,7 +673,7 @@ func (s *Service) runAgentPipeline(
 			return failStale()
 		}
 		stepStartedDraft, draftErr := newAgentJobDraft(run, agentdomain.EventStepStarted, step.ID,
-			eventJSON(map[string]any{"role": string(step.Role)}), now)
+			eventJSON(map[string]any{"role": string(step.Role), "capability": string(legacyNode.Capability)}), now)
 		if draftErr != nil {
 			return failed(draftErr)
 		}
@@ -1265,11 +1271,11 @@ func agentRunView(run agentdomain.Run) AgentRunView {
 			ErrorCode: step.ErrorCode, ErrorMessage: step.ErrorMessage,
 			ProviderRequestID: step.ProviderRequestID,
 			InputTokens:       step.InputTokens, OutputTokens: step.OutputTokens,
-			ProviderName:      step.ProviderName,
-			ProviderKind:      string(step.ProviderKind),
-			Model:             step.Model,
-			MaxOutputTokens:   step.MaxOutputTokens,
-			Temperature:       step.Temperature,
+			ProviderName:    step.ProviderName,
+			ProviderKind:    string(step.ProviderKind),
+			Model:           step.Model,
+			MaxOutputTokens: step.MaxOutputTokens,
+			Temperature:     step.Temperature,
 		})
 	}
 	return AgentRunView{

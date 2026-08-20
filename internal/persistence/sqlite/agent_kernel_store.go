@@ -17,7 +17,7 @@ func validateAgentRunBundle(bundle agentdomain.RunBundle) error {
 	if !run.IsLegacy() {
 		if !agentdomain.ValidTaskKind(run.TaskKind) || run.WorkflowBinding.Validate() != nil ||
 			!agentdomain.ValidSHA256(run.InputDigest) || run.BudgetPolicyVersion < 1 ||
-			run.QualityPolicyVersion < 1 || run.MaxRevisionAttempts < 1 {
+			run.QualityPolicyVersion < 1 || run.MaxRevisionAttempts < 0 {
 			return agentdomain.ErrInvalidAgentPersistence
 		}
 	}

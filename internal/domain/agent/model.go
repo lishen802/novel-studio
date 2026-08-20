@@ -242,6 +242,15 @@ type RunStepSpec struct {
 	Model                  string
 	MaxOutputTokens        int
 	Temperature            float64
+
+	// R3 工作流节点冻结字段；旧三步运行保持零值。
+	NodeID           string
+	Capability       Capability
+	PromptBinding    VersionBinding
+	SchemaBinding    VersionBinding
+	AssemblerID      string
+	AssemblerVersion int
+	InputDigest      string
 }
 
 // ResolvedRole 是一次运行冻结快照中单个角色实际使用的连接、模型与参数。
@@ -473,10 +482,82 @@ func validRunTransition(from, to RunStatus) bool {
 	case RunRunning:
 		return to == RunCompleted || to == RunFailed || to == RunCancelled || to == RunRecoverable
 	case RunRecoverable:
-		return to == RunCancelled
+		return to == RunRunning || to == RunCancelled
 	default:
 		return false
 	}
+}
+
+// NewWorkflowRun 根据已冻结工作流和模型绑定创建 R3 运行，输出始终停留在候选工件中。
+func NewWorkflowRun(
+	id, projectID, chapterID string,
+	chapterBaseRevision int64,
+	authorInstruction string,
+	workflow VersionBinding,
+	taskKind TaskKind,
+	canonicalHead, inputDigest string,
+	budgetPolicyVersion, qualityPolicyVersion, maxRevisionAttempts int,
+	tokenBudget, contextCharBudget int,
+	specs []RunStepSpec,
+	now time.Time,
+) (Run, error) {
+	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
+	chapterID = strings.TrimSpace(chapterID)
+	authorInstruction = strings.TrimSpace(authorInstruction)
+	canonicalHead = strings.TrimSpace(canonicalHead)
+	if id == "" || projectID == "" || chapterID == "" || chapterBaseRevision < 1 ||
+		authorInstruction == "" || workflow.Validate() != nil || !ValidTaskKind(taskKind) ||
+		canonicalHead == "" || !ValidSHA256(inputDigest) || budgetPolicyVersion < 1 ||
+		qualityPolicyVersion < 1 || maxRevisionAttempts < 0 || tokenBudget < 1 ||
+		contextCharBudget < 1 || len(specs) == 0 {
+		return Run{}, ErrInvalidRun
+	}
+	now = now.UTC()
+	steps := make([]RunStep, len(specs))
+	seenNodes := make(map[string]struct{}, len(specs))
+	for index, spec := range specs {
+		nodeID := strings.TrimSpace(spec.NodeID)
+		execution := ExecutionBinding{
+			RoleSlot: spec.Role, ProviderConnectionID: spec.ProviderConnectionID,
+			ProviderName: spec.ProviderName, ProviderKind: spec.ProviderKind, BaseURL: spec.BaseURL,
+			CredentialRef: spec.CredentialRef, Model: spec.Model,
+			MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
+		}
+		if strings.TrimSpace(spec.ID) == "" || nodeID == "" || !validRole(spec.Role) ||
+			!ValidCapability(spec.Capability) || spec.Role != DefaultRoleForCapability(spec.Capability) ||
+			strings.TrimSpace(spec.CreativeProfileID) == "" || spec.CreativeProfileVersion < 1 ||
+			strings.TrimSpace(spec.ProviderConnectionID) == "" || strings.TrimSpace(spec.ProviderName) == "" ||
+			strings.TrimSpace(spec.CredentialRef) == "" || strings.TrimSpace(spec.Model) == "" ||
+			spec.MaxOutputTokens < 1 || spec.PromptBinding.Validate() != nil || spec.SchemaBinding.Validate() != nil ||
+			strings.TrimSpace(spec.AssemblerID) == "" || spec.AssemblerVersion < 1 || !ValidSHA256(spec.InputDigest) ||
+			execution.Validate(spec.Capability) != nil {
+			return Run{}, ErrInvalidRun
+		}
+		if _, exists := seenNodes[nodeID]; exists {
+			return Run{}, ErrInvalidRun
+		}
+		seenNodes[nodeID] = struct{}{}
+		steps[index] = RunStep{
+			ID: spec.ID, RunID: id, Role: spec.Role, Position: index + 1, Status: StepQueued,
+			CreativeProfileID: spec.CreativeProfileID, CreativeProfileVersion: spec.CreativeProfileVersion,
+			ProviderConnectionID: spec.ProviderConnectionID, ProviderName: spec.ProviderName,
+			ProviderKind: spec.ProviderKind, BaseURL: spec.BaseURL, CredentialRef: spec.CredentialRef,
+			Model: spec.Model, MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
+			NodeID: nodeID, Capability: spec.Capability, Attempt: 1,
+			PromptBinding: spec.PromptBinding, SchemaBinding: spec.SchemaBinding,
+			AssemblerID: spec.AssemblerID, AssemblerVersion: spec.AssemblerVersion,
+			InputDigest: spec.InputDigest, CreatedAt: now, UpdatedAt: now,
+		}
+	}
+	return Run{
+		ID: id, ProjectID: projectID, ChapterID: chapterID, ChapterBaseRevision: chapterBaseRevision,
+		Prompt: authorInstruction, Status: RunQueued, TokenBudget: tokenBudget,
+		ContextCharBudget: contextCharBudget, Steps: steps, CreatedAt: now, UpdatedAt: now,
+		TaskKind: taskKind, WorkflowBinding: workflow, CanonicalHead: canonicalHead,
+		InputDigest: inputDigest, BudgetPolicyVersion: budgetPolicyVersion,
+		QualityPolicyVersion: qualityPolicyVersion, MaxRevisionAttempts: maxRevisionAttempts,
+	}, nil
 }
 
 type ArtifactKind string

@@ -396,6 +396,37 @@ func (s *Store) UpdateAgentRunStep(ctx context.Context, step agentdomain.RunStep
 	return s.SaveAgentStepBundle(ctx, agentdomain.StepBundle{Step: step}, drafts...)
 }
 
+// AppendAgentRunStep 为恢复执行追加新 attempt，旧 attempt 及其工件保持不可变。
+func (s *Store) AppendAgentRunStep(ctx context.Context, step agentdomain.RunStep, drafts ...agentdomain.JobEventDraft) error {
+	if validateKernelStep(step) != nil {
+		return agentdomain.ErrInvalidAgentPersistence
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return databaseOperationError("begin append agent run step", err)
+	}
+	defer tx.Rollback()
+	if err := insertAgentRunStep(ctx, tx, step); err != nil {
+		return err
+	}
+	maxSequence := uint64(0)
+	if len(drafts) > 0 {
+		maxSequence, err = appendJobEventDrafts(ctx, tx, drafts)
+		if err != nil {
+			return err
+		}
+	} else if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence_number), 0) FROM job_events WHERE job_id = ?`, step.RunID).Scan(&maxSequence); err != nil {
+		return databaseOperationError("read agent event cursor", err)
+	}
+	if err := upsertAgentJobSnapshot(ctx, tx, step.RunID, maxSequence, formatTime(step.UpdatedAt)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit append agent run step", err)
+	}
+	return nil
+}
+
 func (s *Store) SaveAgentStepBundle(ctx context.Context, bundle agentdomain.StepBundle, drafts ...agentdomain.JobEventDraft) error {
 	step := bundle.Step
 	if err := validateAgentStepBundle(bundle); err != nil {

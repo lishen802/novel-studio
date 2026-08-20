@@ -88,6 +88,48 @@ func TestAgentKernelStepBundleKeepsFullArtifactAndBoundedPreview(t *testing.T) {
 	}
 }
 
+func TestAppendAgentRunStepPreservesInterruptedAttempt(t *testing.T) {
+	ctx := context.Background()
+	store, project, chapter := createStoreWithChapter(t)
+	defer store.Close()
+	now := time.Unix(2_200, 0).UTC()
+	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err != nil {
+		t.Fatal(err)
+	}
+	interrupted := run.Steps[0]
+	interrupted.Status = agentdomain.StepFailed
+	interrupted.ErrorCode = "app_interrupted"
+	interrupted.ErrorMessage = "应用退出导致步骤中断。"
+	interrupted.QualityStatus = agentdomain.QualityBlocked
+	completedAt := now.Add(time.Second)
+	interrupted.CompletedAt = &completedAt
+	interrupted.UpdatedAt = now.Add(time.Second)
+	if err := store.UpdateAgentRunStep(ctx, interrupted); err != nil {
+		t.Fatal(err)
+	}
+	next := interrupted
+	next.ID = "step-attempt-2"
+	next.Attempt = 2
+	next.Status = agentdomain.StepQueued
+	next.ErrorCode = ""
+	next.ErrorMessage = ""
+	next.QualityStatus = ""
+	next.CompletedAt = nil
+	next.CreatedAt = now.Add(2 * time.Second)
+	next.UpdatedAt = next.CreatedAt
+	if err := store.AppendAgentRunStep(ctx, next); err != nil {
+		t.Fatalf("AppendAgentRunStep: %v", err)
+	}
+	loaded, err := store.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Steps) != len(run.Steps)+1 || loaded.Steps[0].Status != agentdomain.StepFailed || loaded.Steps[1].Attempt != 2 {
+		t.Fatalf("attempt history = %#v", loaded.Steps)
+	}
+}
+
 func TestLegacyAgentStepOutputRemainsLossless(t *testing.T) {
 	ctx := context.Background()
 	store, project, chapter := createStoreWithChapter(t)

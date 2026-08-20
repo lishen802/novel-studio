@@ -26,7 +26,7 @@ type Registries struct {
 type FrozenNode struct {
 	ID                  string                     `json:"id"`
 	Capability          agentdomain.Capability     `json:"capability"`
-	RoleSlot            agentdomain.Role      `json:"role_slot"`
+	RoleSlot            agentdomain.Role           `json:"role_slot"`
 	Prompt              agentdomain.VersionBinding `json:"prompt"`
 	Schema              agentdomain.VersionBinding `json:"schema"`
 	Assembler           agentdomain.VersionBinding `json:"assembler"`

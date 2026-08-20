@@ -2,9 +2,45 @@ package agent
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestNewWorkflowRunFreezesArbitraryNodeList(t *testing.T) {
+	now := time.Unix(1_000, 0).UTC()
+	hash := strings.Repeat("a", 64)
+	run, err := NewWorkflowRun(
+		"run", "project", "chapter", 1, "写作", VersionBinding{ID: "workflow", Version: 1, Hash: hash},
+		TaskBaselineDraft, "head", hash, 1, 1, 0, 6_000, 10_000,
+		[]RunStepSpec{{
+			ID: "step", Role: RoleWriter, CreativeProfileID: "profile", CreativeProfileVersion: 1,
+			ProviderConnectionID: "connection", ProviderName: "连接", ProviderKind: ProviderOpenAI,
+			BaseURL: "https://api.example.com/v1", CredentialRef: "credential", Model: "model",
+			MaxOutputTokens: 4_000, Temperature: 0.5, NodeID: "write", Capability: CapabilityProseWriter,
+			PromptBinding: VersionBinding{ID: "prompt", Version: 1, Hash: hash},
+			SchemaBinding: VersionBinding{ID: "schema", Version: 1, Hash: hash},
+			AssemblerID:   "assembler", AssemblerVersion: 1, InputDigest: hash,
+		}}, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.IsLegacy() || len(run.Steps) != 1 || run.Steps[0].Capability != CapabilityProseWriter {
+		t.Fatalf("run = %#v", run)
+	}
+	resumed, err := run.Transition(RunRunning, "", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err = resumed.Transition(RunRecoverable, "中断", now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resumed.Transition(RunRunning, "", now.Add(3*time.Second)); err != nil {
+		t.Fatalf("recoverable run cannot resume: %v", err)
+	}
+}
 
 func TestNewProviderConnectionValidatesKindAndEndpoint(t *testing.T) {
 	now := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
