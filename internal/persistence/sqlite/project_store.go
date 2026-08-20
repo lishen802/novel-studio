@@ -17,88 +17,6 @@ var (
 	ErrWorkbenchMissing = fmt.Errorf("%w: workbench state or profile not set", sql.ErrNoRows)
 )
 
-type Factory struct{}
-
-func (Factory) Create(ctx context.Context, databasePath string, project projectdomain.Project) (ports.ProjectStore, error) {
-	db, err := OpenDatabase(ctx, databasePath)
-	if err != nil {
-		return nil, err
-	}
-	store := &Store{db: db}
-
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO projects (id, title, genre, summary, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`,
-		project.ID,
-		project.Title,
-		project.Genre,
-		project.Summary,
-		formatTime(project.CreatedAt),
-		formatTime(project.UpdatedAt),
-	)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("create project record: %w", err)
-	}
-	return store, nil
-}
-
-func (Factory) Open(ctx context.Context, databasePath string) (ports.ProjectStore, error) {
-	db, err := OpenExistingDatabase(ctx, databasePath)
-	if err != nil {
-		return nil, err
-	}
-	store := &Store{db: db}
-
-	var count int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&count); err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("count projects: %w", err)
-	}
-	if count != 1 {
-		_ = store.Close()
-		return nil, fmt.Errorf("%w: found %d", ErrProjectCount, count)
-	}
-	return store, nil
-}
-
-// RecoveryRequired performs the migration-recovery portion of a read-only
-// workspace preflight. It only stats fixed recovery artifacts and never
-// invokes migration recovery or opens a writable SQLite connection.
-func (Factory) RecoveryRequired(databasePath string) (bool, error) {
-	return migrationRecoveryRequired(databasePath)
-}
-
-// OpenReadOnly opens an already-current project database without migration or
-// recovery. The returned Store has the same read API as an editable store;
-// SQLite mode=ro and query_only reject any accidental write attempt.
-func (Factory) OpenReadOnly(ctx context.Context, databasePath string) (ports.ProjectStore, error) {
-	db, err := OpenReadOnlyDatabase(ctx, databasePath)
-	if err != nil {
-		return nil, err
-	}
-	return &Store{db: db}, nil
-}
-
-// OpenReadOnlyImmutable opens an immutable branch-head snapshot. It is kept
-// separate from OpenReadOnly because an active project must still be able to
-// read a live WAL, while branch heads must not gain WAL/SHM coordination files
-// during a read-only comparison.
-func (Factory) OpenReadOnlyImmutable(ctx context.Context, databasePath string) (ports.ProjectStore, error) {
-	db, err := OpenReadOnlyImmutableDatabase(ctx, databasePath)
-	if err != nil {
-		return nil, err
-	}
-	return &Store{db: db}, nil
-}
-
-type Store struct {
-	db                              *sql.DB
-	importJobReadHook               func()
-	importApplyAfterMaxPositionHook func()
-}
-
 func (s *Store) Project(ctx context.Context) (projectdomain.Project, error) {
 	return scanProject(s.db.QueryRowContext(ctx, `
 		SELECT id, title, genre, summary, created_at, updated_at
@@ -420,19 +338,7 @@ func (s *Store) CommitChapter(ctx context.Context, chapter, previous projectdoma
 	return nil
 }
 
-func (s *Store) Close() error {
-	if s.db == nil {
-		return nil
-	}
-	return s.db.Close()
-}
-
-var _ ports.ProjectStoreFactory = Factory{}
 var _ ports.ProjectStore = (*Store)(nil)
-
-type scanner interface {
-	Scan(dest ...any) error
-}
 
 func scanProject(row scanner) (projectdomain.Project, error) {
 	var project projectdomain.Project
@@ -486,12 +392,4 @@ func scanChapter(row scanner) (projectdomain.Chapter, error) {
 		return projectdomain.Chapter{}, fmt.Errorf("parse chapter updated_at: %w", err)
 	}
 	return chapter, nil
-}
-
-func formatTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func parseTime(value string) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, value)
 }
