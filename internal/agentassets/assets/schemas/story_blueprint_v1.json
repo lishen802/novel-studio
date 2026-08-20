@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "positioning", "core_conflict", "protagonist_arc", "world_rules", "major_milestones"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1 },
+    "positioning": { "type": "string", "minLength": 1 },
+    "core_conflict": { "type": "string", "minLength": 1 },
+    "protagonist_arc": { "type": "string", "minLength": 1 },
+    "world_rules": { "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "major_milestones": { "type": "array", "minItems": 3, "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+  }
+}

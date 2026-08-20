@@ -1,0 +1,5 @@
+{
+  "strategy": "strict_json",
+  "version": 1,
+  "input_order": ["task", "context"]
+}

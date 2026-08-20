@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["quality_status", "summary", "findings"],
+  "properties": {
+    "quality_status": { "enum": ["passed", "needs_review", "blocked"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "findings": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "category", "severity", "status", "source", "message"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "enum": ["anchor", "continuity", "knowledge_boundary", "causality", "motivation", "pacing", "hook", "information_density", "world_rule", "foreshadowing", "repetition", "style", "format", "originality_risk"] },
+          "severity": { "enum": ["blocker", "major", "minor", "note"] },
+          "status": { "enum": ["open", "resolved", "retained", "cannot_resolve"] },
+          "source": { "enum": ["model_review", "deterministic_lint", "author"] },
+          "message": { "type": "string", "minLength": 1 },
+          "suggestion": { "type": "string" },
+          "quote": { "type": "string" },
+          "scope_start": { "type": "integer", "minimum": 0 },
+          "scope_end": { "type": "integer", "minimum": 1 },
+          "constraint_ref": { "type": "string" }
+        }
+      }
+    }
+  }
+}
