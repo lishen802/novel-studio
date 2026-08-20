@@ -71,6 +71,61 @@ func TestNewCreativeProfileVersionRejectsMissingRole(t *testing.T) {
 	}
 }
 
+// TestNewCreativeProfileVersionRejectsDuplicateRoles 覆盖审查指出的重复角色
+// 场景：输入 [planner, planner, writer] 共 3 项，Map 去重后缺失 reviewer，
+// 必须被拦截，不能写入空 ConnectionID/Model 的 reviewer 角色绑定。
+func TestNewCreativeProfileVersionRejectsDuplicateRoles(t *testing.T) {
+	roles := []RoleBinding{
+		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", MaxOutputTokens: 1000, Temperature: 0.7, Enabled: true},
+		{Role: agent.RolePlanner, ConnectionID: "c2", Model: "gpt-4", MaxOutputTokens: 1000, Temperature: 0.7, Enabled: true},
+		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
+	}
+	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, ErrInvalidRoleCount) {
+		t.Fatalf("err = %v, want ErrInvalidRoleCount", err)
+	}
+}
+
+// TestNewCreativeProfileVersionRejectsInvalidGenerationParams 验证 maxOutputTokens
+// 和 temperature 的边界校验，避免非法生成参数被写入不可变版本。
+func TestNewCreativeProfileVersionRejectsInvalidGenerationParams(t *testing.T) {
+	cases := []struct {
+		name        string
+		output      int
+		temperature float64
+	}{
+		{"zero output tokens", 0, 0.7},
+		{"negative output tokens", -1, 0.7},
+		{"temperature below zero", 1000, -0.1},
+		{"temperature above two", 1000, 2.1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			roles := []RoleBinding{
+				{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", MaxOutputTokens: tc.output, Temperature: tc.temperature, Enabled: true},
+				{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
+				{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer-model", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
+			}
+			if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, ErrInvalidGenerationParams) {
+				t.Fatalf("err = %v, want ErrInvalidGenerationParams", err)
+			}
+		})
+	}
+}
+
+// TestNewCreativeProfileVersionRejectsBudgetExceeded 验证三个角色最大输出之和
+// 不超过运行预算，避免运行中途因超限失败。
+func TestNewCreativeProfileVersionRejectsBudgetExceeded(t *testing.T) {
+	roles := []RoleBinding{
+		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", MaxOutputTokens: 15000, Temperature: 0.7, Enabled: true},
+		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", MaxOutputTokens: 10000, Temperature: 0.8, Enabled: true},
+		{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer-model", MaxOutputTokens: 6000, Temperature: 0.2, Enabled: true},
+	}
+	// 15000 + 10000 + 6000 = 31000 > 30000
+	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, agent.ErrInvalidBudget) {
+		t.Fatalf("err = %v, want ErrInvalidBudget", err)
+	}
+}
+
 func TestNewRecentProjectRejectsBlankFields(t *testing.T) {
 	if _, err := NewRecentProject("", "title", "/path", time.Now()); !errors.Is(err, ErrBlankValue) {
 		t.Fatalf("err = %v, want ErrBlankValue", err)

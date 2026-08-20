@@ -1049,9 +1049,31 @@ func (a *DesktopAPI) SaveApplicationPreferences(input ApplicationPreferencesInpu
 		prefs.Theme = appdomain.Theme(input.Theme)
 	}
 	// 空字符串表示清除默认方案，必须始终处理，不能因空值跳过更新。
-	prefs.DefaultCreativeProfileID = input.DefaultCreativeProfileID
+	newDefault := input.DefaultCreativeProfileID
+	// 生产入口必须复用 SetDefaultProfile 的已发布校验，否则前端虽然禁用了
+	// 未发布草稿的"设为默认"，后端约束仍可被直接调用绕过。
+	if newDefault != prefs.DefaultCreativeProfileID {
+		if err := a.settings.ValidateDefaultProfile(a.ctx, newDefault); err != nil {
+			return safeDesktopError(err)
+		}
+	}
+	prefs.DefaultCreativeProfileID = newDefault
 	prefs.UpdatedAt = time.Now().UTC()
 	return safeDesktopError(a.settings.SavePreferences(a.ctx, prefs))
+}
+
+// GetProfileVersion 返回指定方案某个已发布版本快照。运行前确认弹窗按项目
+// 锁定的 profileId + version 拉取准确的角色绑定与预算，避免 bootstrap 只返回
+// 最新版本导致弹窗显示 v2 的角色却标 v1、实际运行用 v1 的不一致。
+func (a *DesktopAPI) GetProfileVersion(profileID string, version int64) (CreativeProfileView, error) {
+	if a.settings == nil {
+		return CreativeProfileView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	v, err := a.settings.ProfileVersion(a.ctx, profileID, version)
+	if err != nil {
+		return CreativeProfileView{}, safeDesktopError(err)
+	}
+	return creativeProfileView(v), nil
 }
 
 // SaveApplicationProvider creates or updates a provider connection. The API

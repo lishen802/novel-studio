@@ -9,11 +9,12 @@ import (
 )
 
 var (
-	ErrBlankValue       = errors.New("required value must not be blank")
-	ErrInvalidTheme     = errors.New("invalid theme")
-	ErrInvalidVersion   = errors.New("invalid creative profile version")
-	ErrProfileInUse     = errors.New("provider is referenced by a creative profile")
-	ErrInvalidRoleCount = errors.New("creative profile must have exactly planner, writer, and continuity_reviewer roles")
+	ErrBlankValue             = errors.New("required value must not be blank")
+	ErrInvalidTheme           = errors.New("invalid theme")
+	ErrInvalidVersion         = errors.New("invalid creative profile version")
+	ErrProfileInUse           = errors.New("provider is referenced by a creative profile")
+	ErrInvalidRoleCount       = errors.New("creative profile must have exactly planner, writer, and continuity_reviewer roles")
+	ErrInvalidGenerationParams = errors.New("creative profile role has invalid generation parameters")
 )
 
 type Theme string
@@ -142,13 +143,31 @@ func NewCreativeProfileVersion(
 		if r.ConnectionID == "" || r.Model == "" {
 			return CreativeProfileVersion{}, ErrBlankValue
 		}
+		// 生成参数边界：maxOutputTokens ≥ 1，temperature ∈ [0, 2]。
+		// 非法值会让模型调用失败或行为异常，必须在不可变版本创建时拦截。
+		if r.MaxOutputTokens < 1 {
+			return CreativeProfileVersion{}, ErrInvalidGenerationParams
+		}
+		if r.Temperature < 0 || r.Temperature > 2 {
+			return CreativeProfileVersion{}, ErrInvalidGenerationParams
+		}
 		byRole[r.Role] = r
 	}
-	// 规范化角色顺序为 planner → writer → continuity_reviewer，避免上游传入字母序导致
-	// 后续 AgentRun 校验失败。AgentRun.NewChapterDraftRun 严格按位置匹配角色。
+	// 三个必需角色必须齐全：重复输入（如 planner, planner, writer）会让 Map 去重后
+	// 缺失 reviewer，此时 byRole[reviewer] 是零值，必须拦截避免写入空角色绑定。
 	orderedRoles := make([]RoleBinding, 0, 3)
+	var sumMaxOutput int
 	for _, required := range []agent.AgentRole{agent.RolePlanner, agent.RoleWriter, agent.RoleContinuityReviewer} {
-		orderedRoles = append(orderedRoles, byRole[required])
+		r, ok := byRole[required]
+		if !ok || r.ConnectionID == "" {
+			return CreativeProfileVersion{}, ErrInvalidRoleCount
+		}
+		sumMaxOutput += r.MaxOutputTokens
+		orderedRoles = append(orderedRoles, r)
+	}
+	// 三个角色最大输出之和不能超过运行预算，否则运行中途会因超限失败。
+	if sumMaxOutput > maxRunTokens {
+		return CreativeProfileVersion{}, agent.ErrInvalidBudget
 	}
 	writer := byRole[agent.RoleWriter]
 	reviewer := byRole[agent.RoleContinuityReviewer]

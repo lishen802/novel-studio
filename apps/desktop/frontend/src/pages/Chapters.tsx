@@ -38,7 +38,7 @@ import { Modal } from '../components/ui/Modal';
 import { useApp } from '../store/useApp';
 import type { ChapterStatus } from '../types';
 import { canvasPresets } from '../editor';
-import { studio, type AgentRunView, type ChapterView, type JobSnapshotView } from '../api/studio';
+import { studio, type AgentRunView, type ChapterView, type CreativeProfileView, type JobSnapshotView } from '../api/studio';
 
 interface Chapter {
   id: string;
@@ -159,32 +159,59 @@ export default function Chapters() {
   const selected = useMemo(() => chapters.find((c) => c.id === selectedId) || null, [chapters, selectedId]);
   const liveWordCount = countWords(content);
 
-  // 运行前确认弹窗需要预览项目锁定方案的角色绑定：把 connectionId 关联到
-  // Provider 显示名，让作者在真实调用前看到模型来源与预算。
-  const runPreview = useMemo(() => {
+  // 运行前确认弹窗按项目锁定的 profileId + version 异步拉取准确版本快照，
+  // 不再依赖 bootstrap 只返回的最新版本——否则项目锁定 v1、最新是 v2 时
+  // 弹窗会显示 v2 的角色却标 v1、实际运行用 v1。
+  const [runPreview, setRunPreview] = useState<{
+    profileName: string;
+    version: number;
+    roleRows: Array<{ role: string; providerName: string; model: string; maxOutputTokens: number; enabled: boolean }>;
+    maxRunTokens: number;
+    maxContextChars: number;
+  } | null>(null);
+  const [runPreviewLoading, setRunPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pendingRun) {
+      setRunPreview(null);
+      return;
+    }
     const selection = state.backendProject?.profileSelection;
-    if (!selection?.profileId || !state.bootstrap) return null;
-    const profile = state.bootstrap.profiles.find((p) => p.profileId === selection.profileId);
-    if (!profile) return null;
-    const providers = state.bootstrap.providers;
-    const roleRows = profile.roles.map((role) => {
-      const provider = providers.find((p) => p.id === role.connectionId);
-      return {
-        role: roleLabel(role.role),
-        providerName: provider?.name || '未知连接',
-        model: role.model,
-        maxOutputTokens: role.maxOutputTokens,
-        enabled: role.enabled,
-      };
+    if (!selection?.profileId || selection.version == null) {
+      setRunPreview(null);
+      return;
+    }
+    let active = true;
+    setRunPreviewLoading(true);
+    void studio.getProfileVersion(selection.profileId, selection.version).then((profile: CreativeProfileView) => {
+      if (!active) return;
+      const providers = state.bootstrap?.providers || [];
+      const roleRows = profile.roles.map((role) => {
+        const provider = providers.find((p) => p.id === role.connectionId);
+        return {
+          role: roleLabel(role.role),
+          providerName: provider?.name || '未知连接',
+          model: role.model,
+          maxOutputTokens: role.maxOutputTokens,
+          enabled: role.enabled,
+        };
+      });
+      setRunPreview({
+        profileName: profile.name,
+        version: profile.version,
+        roleRows,
+        maxRunTokens: profile.maxRunTokens,
+        maxContextChars: profile.maxContextChars,
+      });
+    }).catch(() => {
+      if (active) setRunPreview(null);
+    }).finally(() => {
+      if (active) setRunPreviewLoading(false);
     });
-    return {
-      profileName: profile.name,
-      version: selection.version,
-      roleRows,
-      maxRunTokens: profile.maxRunTokens,
-      maxContextChars: profile.maxContextChars,
-    };
-  }, [state.backendProject, state.bootstrap]);
+    return () => { active = false; };
+    // 依赖 pendingRun 和项目锁定方案：弹窗打开时拉取，关闭时清空。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRun, state.backendProject?.profileSelection]);
 
   useEffect(() => {
     let active = true;
@@ -330,11 +357,16 @@ export default function Chapters() {
       // 排空事件流：循环拉取直到没有更多事件，只推进游标，事件 payload 不直接消费。
       let cursor = jobCursorRef.current;
       let hasMore = true;
-      while (hasMore) {
+      let guard = 0;
+      while (hasMore && guard < 10) {
         const page = await studio.getJobEvents(runId, cursor, 100);
+        guard++;
         // 游标早于最早可重放序列时，后端要求重新对齐，防止漏拉历史。
+        // 必须在此 continue 重新请求，不能用 page.nextCursor——snapshotRequired
+        // 时它是 0，否则游标被重置后下次仍从旧位置请求，永久循环要求快照。
         if (page.snapshotRequired) {
-          cursor = snapshot.earliestReplayableSequence;
+          cursor = page.earliestReplayableSequence || snapshot.earliestReplayableSequence;
+          continue;
         }
         cursor = page.nextCursor;
         hasMore = page.hasMore;
@@ -1058,7 +1090,9 @@ export default function Chapters() {
             <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
             <span className="text-text-sub">将调用真实模型，会产生 API 调用费用。运行结果进入候选/变更集，不会直接覆盖正文。</span>
           </div>
-          {runPreview ? (
+          {runPreviewLoading ? (
+            <p className="text-sm text-text-sub">正在加载方案预览…</p>
+          ) : runPreview ? (
             <>
               <div className="text-sm text-text-sub">
                 方案：<span className="text-text">{runPreview.profileName}</span> · v{runPreview.version}

@@ -165,6 +165,8 @@ func safeDesktopError(err error) error {
 		code, message = errorCreativeProfileInvalid, "创作方案必须恰好包含规划、写作和审阅三个角色，且配置合法。"
 	case errors.Is(err, appdomain.ErrInvalidRoleCount), errors.Is(err, appdomain.ErrInvalidVersion):
 		code, message = errorCreativeProfileInvalid, "创作方案角色数量或版本不合法。"
+	case errors.Is(err, appdomain.ErrInvalidGenerationParams):
+		code, message = errorCreativeProfileInvalid, "创作方案角色的生成参数非法：maxOutputTokens ≥ 1，temperature ∈ [0, 2]，且角色最大输出之和不超过运行预算。"
 	case errors.Is(err, agentdomain.ErrInvalidRole), errors.Is(err, agentdomain.ErrReviewerNotIndependent), errors.Is(err, agentdomain.ErrInvalidProfile):
 		code, message = errorCreativeProfileInvalid, "创作方案角色配置不合法，审阅必须与写作使用不同连接或模型。"
 	case errors.Is(err, appshell.ErrProjectRelocateRequired):

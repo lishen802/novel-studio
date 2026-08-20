@@ -52,11 +52,15 @@ type JobStepStateView struct {
 // SnapshotRequired is true when afterSequence is below the snapshot's
 // earliest_replayable_sequence; in that case Events is empty and the caller
 // must rebuild from GetJobSnapshot before resuming cursor replay.
+// EarliestReplayableSequence is populated only when SnapshotRequired is true:
+// the caller should align the cursor to it and re-request instead of using
+// NextCursor (which is 0 in that case, resetting the cursor and looping forever).
 type JobEventsPageView struct {
-	Events           []JobEventView `json:"events"`
-	NextCursor       uint64         `json:"nextCursor"`
-	HasMore          bool           `json:"hasMore"`
-	SnapshotRequired bool           `json:"snapshotRequired"`
+	Events                    []JobEventView `json:"events"`
+	NextCursor                uint64         `json:"nextCursor"`
+	HasMore                   bool           `json:"hasMore"`
+	SnapshotRequired          bool           `json:"snapshotRequired"`
+	EarliestReplayableSequence uint64        `json:"earliestReplayableSequence,omitempty"`
 }
 
 // JobSummaryView is the lightweight recoverable-jobs listing row. Agent runs
@@ -123,7 +127,10 @@ func (s *Service) GetJobEvents(
 	// initial pull) is NOT stale because the next needed event (1) is at the
 	// lower bound.
 	if afterSequence+1 < snapshot.EarliestReplayableSequence {
-		return JobEventsPageView{SnapshotRequired: true}, nil
+		return JobEventsPageView{
+			SnapshotRequired:           true,
+			EarliestReplayableSequence: snapshot.EarliestReplayableSequence,
+		}, nil
 	}
 	if limit < 1 {
 		limit = 100

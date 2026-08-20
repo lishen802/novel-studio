@@ -223,6 +223,7 @@ export interface JobEventsPageView {
   nextCursor: number;
   hasMore: boolean;
   snapshotRequired: boolean;
+  earliestReplayableSequence: number;
 }
 
 type NativeMethod = (...args: unknown[]) => Promise<unknown>;
@@ -275,6 +276,8 @@ export const studio = {
   testApplicationProvider: (input: { providerId: string; model: string }) =>
     call<ProviderTestView>('TestApplicationProvider', input),
   publishCreativeProfile: (input: Record<string, unknown>) => call<CreativeProfileView>('PublishCreativeProfile', input),
+  getProfileVersion: (profileId: string, version: number) =>
+    call<CreativeProfileView>('GetProfileVersion', profileId, version),
 
   chooseProjectParent: () => call<string>('ChooseProjectParent'),
   chooseProjectToOpen: () => call<string>('ChooseProjectToOpen'),

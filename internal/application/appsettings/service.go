@@ -317,10 +317,8 @@ func (s *Service) SetDefaultProfile(ctx context.Context, profileID string) error
 	profileID = strings.TrimSpace(profileID)
 	// 非空默认方案必须对应一个已发布的最新版本，否则后续创建新项目时
 	// 解析默认方案会读不到版本并失败。空值表示清除默认，允许通过。
-	if profileID != "" {
-		if _, err := s.repo.LatestProfileVersion(ctx, profileID); err != nil {
-			return fmt.Errorf("%w: %s", ErrInvalidProfileInput, profileID)
-		}
+	if err := s.ValidateDefaultProfile(ctx, profileID); err != nil {
+		return err
 	}
 	prefs, err := s.repo.Preferences(ctx)
 	if err != nil {
@@ -329,6 +327,20 @@ func (s *Service) SetDefaultProfile(ctx context.Context, profileID string) error
 	prefs.DefaultCreativeProfileID = profileID
 	prefs.UpdatedAt = s.clock.Now()
 	return s.repo.SavePreferences(ctx, prefs)
+}
+
+// ValidateDefaultProfile 校验非空 profileID 对应一个已发布的最新版本。
+// 空值表示清除默认方案，始终合法。桌面层 SaveApplicationPreferences 和
+// Service.SetDefaultProfile 共用此校验，确保所有写入入口都不能绕过已发布约束。
+func (s *Service) ValidateDefaultProfile(ctx context.Context, profileID string) error {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return nil
+	}
+	if _, err := s.repo.LatestProfileVersion(ctx, profileID); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidProfileInput, profileID)
+	}
+	return nil
 }
 
 func (s *Service) RecentProjects(ctx context.Context, limit int) ([]appdomain.RecentProject, error) {
