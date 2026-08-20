@@ -17,6 +17,9 @@ func TestResolveCreatesNoDirectoryAndUsesStableSettingsPath(t *testing.T) {
 	if got, want := paths.Database, filepath.Join(root, "StoryStudio", "settings.db"); got != want {
 		t.Fatalf("Database = %q, want %q", got, want)
 	}
+	if got, want := paths.HarnessDatabase, filepath.Join(root, "StoryStudio", "harness.db"); got != want {
+		t.Fatalf("HarnessDatabase = %q, want %q", got, want)
+	}
 	if _, err := os.Stat(filepath.Dir(paths.Database)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Resolve mutated filesystem: %v", err)
 	}
@@ -40,5 +43,8 @@ func TestResolveDefaultReturnsNonEmptyPath(t *testing.T) {
 	}
 	if filepath.Base(paths.Database) != "settings.db" {
 		t.Fatalf("Database basename = %q, want settings.db", filepath.Base(paths.Database))
+	}
+	if filepath.Base(paths.HarnessDatabase) != "harness.db" {
+		t.Fatalf("HarnessDatabase basename = %q, want harness.db", filepath.Base(paths.HarnessDatabase))
 	}
 }

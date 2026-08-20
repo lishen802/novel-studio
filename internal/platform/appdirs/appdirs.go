@@ -9,7 +9,8 @@ import (
 // Paths holds the resolved application data directory locations. All paths
 // are computed without touching the filesystem.
 type Paths struct {
-	Database string
+	Database        string
+	HarnessDatabase string
 }
 
 // Resolve computes the application settings database path from a base
@@ -20,7 +21,8 @@ func Resolve(baseDirFn func() (string, error)) (Paths, error) {
 		return Paths{}, fmt.Errorf("resolve application data directory: %w", err)
 	}
 	return Paths{
-		Database: filepath.Join(base, "StoryStudio", "settings.db"),
+		Database:        filepath.Join(base, "StoryStudio", "settings.db"),
+		HarnessDatabase: filepath.Join(base, "StoryStudio", "harness.db"),
 	}, nil
 }
 

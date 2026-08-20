@@ -1,0 +1,91 @@
+{
+  "dataset_id": "creative-quality",
+  "version": "1.0.0",
+  "originality_note": "本数据集由项目团队为自动化质量验证原创编写，不取材于任何已发表小说、角色专名或连续情节。",
+  "cases": [
+    {
+      "case_id": "blueprint-eastern-fantasy-salt-road", "dataset_version": "1.0.0", "genre": "东方幻想", "task_kind": "blueprint",
+      "original_seed": "一座山城以记忆换取盐，年轻绘图师发现城墙每天偏移一步。", "story_spec": "设计可持续升级的长篇方案，核心冲突围绕个人记忆、公共生存与地图真相。",
+      "confirmed_constraints": ["魔法必须有不可逆代价", "主角不能是王族后裔"], "chapter_goal": "", "character_voices": ["绘图师说话谨慎具体", "守盐人偏爱反问"],
+      "required_anchors": ["移动城墙", "记忆盐票"], "soft_anchors": ["旧测绘塔"], "forbidden_items": ["天选血脉", "系统面板"], "target_length": 0,
+      "automatic_expectations": ["包含核心卖点和三层冲突", "给出可升级的长线压力"], "rating_dimensions": ["核心卖点", "冲突升级", "角色弧"], "provenance": "project_original_fixture", "ci_reduced": true
+    },
+    {
+      "case_id": "blueprint-urban-mystery-night-bus", "dataset_version": "1.0.0", "genre": "都市悬疑", "task_kind": "blueprint",
+      "original_seed": "末班公交每月多出一站，只有失物招领员记得下车的人。", "story_spec": "构建现实规则严密的都市悬疑方案，谜底与城市更新档案有关。",
+      "confirmed_constraints": ["无超自然真相", "线索必须可回溯"], "chapter_goal": "", "character_voices": ["失物招领员克制", "记者语速快且善追问"],
+      "required_anchors": ["多出的一站", "失物编号"], "soft_anchors": ["废弃调度表"], "forbidden_items": ["催眠万能解释", "孪生替身"], "target_length": 0,
+      "automatic_expectations": ["谜面与谜底因果闭合", "设计公平线索链"], "rating_dimensions": ["悬念", "因果", "可持续性"], "provenance": "project_original_fixture", "ci_reduced": true
+    },
+    {
+      "case_id": "blueprint-realistic-emotion-laundry", "dataset_version": "1.0.0", "genre": "现实情感", "task_kind": "blueprint",
+      "original_seed": "社区洗衣店替独居老人保管未寄出的衣袋留言。", "story_spec": "设计群像现实题材方案，用日常选择推进代际关系，不依赖绝症煽情。",
+      "confirmed_constraints": ["没有突发遗产", "冲突来自合理立场"], "chapter_goal": "", "character_voices": ["店主直接但不刻薄", "退休教师用词讲究"],
+      "required_anchors": ["衣袋留言", "错领的外套"], "soft_anchors": ["雨季停电"], "forbidden_items": ["绝症反转", "巨额遗产"], "target_length": 0,
+      "automatic_expectations": ["形成群像关系网", "给出细微而持续的变化"], "rating_dimensions": ["真实感", "人物动机", "情绪层次"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "blueprint-light-scifi-orbit-garden", "dataset_version": "1.0.0", "genre": "轻科幻", "task_kind": "blueprint",
+      "original_seed": "轨道温室的植物会记录乘员争执时的光谱变化。", "story_spec": "设计轻科幻长篇方案，科学设定服务于封闭环境中的信任危机。",
+      "confirmed_constraints": ["不出现超光速", "植物不具有人类意识"], "chapter_goal": "", "character_voices": ["植物学家偏重观察", "维修员常用简短比喻"],
+      "required_anchors": ["光谱日志", "轨道温室"], "soft_anchors": ["备用日照镜"], "forbidden_items": ["外星寄生", "时间旅行"], "target_length": 0,
+      "automatic_expectations": ["科学规则前后一致", "冲突可跨卷升级"], "rating_dimensions": ["设定可信度", "核心卖点", "冲突"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "chapter-opening-hook-tide-clock", "dataset_version": "1.0.0", "genre": "都市悬疑", "task_kind": "chapter",
+      "original_seed": "修钟师发现全街的钟在退潮时同时慢七秒。", "story_spec": "沿海旧街正在拆迁，修钟师受托修复一只没有厂牌的潮汐钟。",
+      "confirmed_constraints": ["第一人称限知", "谜因可用现实技术解释"], "chapter_goal": "用异常事件建立开篇钩子，并让主角主动调查。", "character_voices": ["修钟师精确克制"],
+      "required_anchors": ["慢七秒", "无厂牌潮汐钟"], "soft_anchors": ["拆迁测量线"], "forbidden_items": ["闹鬼", "梦醒"], "target_length": 1600,
+      "automatic_expectations": ["前300字出现异常", "结尾形成行动问题"], "rating_dimensions": ["开篇钩子", "阅读驱动力", "因果"], "provenance": "project_original_fixture", "ci_reduced": true
+    },
+    {
+      "case_id": "chapter-dialogue-conflict-shared-kitchen", "dataset_version": "1.0.0", "genre": "现实情感", "task_kind": "chapter",
+      "original_seed": "合租厨房里，一只被丢掉的发酵罐引爆两位旧友的隐瞒。", "story_spec": "两位合租者共同经营夜间餐摊，其中一人准备独自签下铺面。",
+      "confirmed_constraints": ["冲突不能靠误听", "双方都有合理利益"], "chapter_goal": "通过对话暴露合作裂缝，同时保留修复关系的可能。", "character_voices": ["阿芮句子短，先谈事实", "乔闻绕开问题，爱用玩笑"],
+      "required_anchors": ["发酵罐", "未签的铺面合同"], "soft_anchors": ["熄火的灶台"], "forbidden_items": ["扇耳光", "突然告白"], "target_length": 1800,
+      "automatic_expectations": ["对话声音可区分", "冲突逐级升级"], "rating_dimensions": ["人物声音", "人物动机", "冲突"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "chapter-action-cliff-courier", "dataset_version": "1.0.0", "genre": "东方幻想", "task_kind": "chapter",
+      "original_seed": "悬崖邮路断裂，信使必须在风向逆转前送达一枚会变重的印章。", "story_spec": "山谷城邦靠索桥传递契约，印章会随违约次数增加重量。",
+      "confirmed_constraints": ["动作受地形限制", "主角没有飞行能力"], "chapter_goal": "完成一次空间清晰且代价明确的追逐。", "character_voices": ["信使用路线术语思考"],
+      "required_anchors": ["变重的印章", "断裂索桥"], "soft_anchors": ["逆风旗"], "forbidden_items": ["临时觉醒飞行", "敌人无故停手"], "target_length": 1900,
+      "automatic_expectations": ["动作空间可追踪", "每次脱险有代价"], "rating_dimensions": ["场景化表达", "因果与冲突", "可读性"], "provenance": "project_original_fixture", "ci_reduced": true
+    },
+    {
+      "case_id": "chapter-emotional-turn-voice-mail", "dataset_version": "1.0.0", "genre": "现实情感", "task_kind": "chapter",
+      "original_seed": "女儿整理父亲修复过的旧收音机，听见一段从未发送的天气播报。", "story_spec": "父女因职业选择长期疏远，父亲习惯用天气代替情绪表达。",
+      "confirmed_constraints": ["父亲仍健在", "不靠重病推动和解"], "chapter_goal": "让女儿从愤怒转向理解，但不立即和解。", "character_voices": ["女儿观察尖锐", "父亲表达含蓄"],
+      "required_anchors": ["未发送的天气播报", "旋钮划痕"], "soft_anchors": ["窗外闷雷"], "forbidden_items": ["死亡留言", "当场大团圆"], "target_length": 1700,
+      "automatic_expectations": ["情绪转折有具体触发", "结尾保留张力"], "rating_dimensions": ["情绪递进", "人物动机", "自然度"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "chapter-clue-reveal-elevator-log", "dataset_version": "1.0.0", "genre": "都市悬疑", "task_kind": "chapter",
+      "original_seed": "停运电梯的纸质检修日志出现一条未来日期。", "story_spec": "调查员追查办公楼夜间失窃案，所有电子门禁记录都完整。",
+      "confirmed_constraints": ["线索可由读者验证", "真相不依赖黑客万能论"], "chapter_goal": "揭示关键线索并改变嫌疑范围，但不公布完整答案。", "character_voices": ["调查员先列反例", "保安习惯按时间顺序叙述"],
+      "required_anchors": ["未来日期", "纸质检修日志"], "soft_anchors": ["货梯配重"], "forbidden_items": ["超能力预知", "监控恰好全坏"], "target_length": 1800,
+      "automatic_expectations": ["线索改变推理方向", "旧信息获得新解释"], "rating_dimensions": ["信息密度", "因果", "阅读驱动力"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "chapter-world-rule-shadow-market", "dataset_version": "1.0.0", "genre": "东方幻想", "task_kind": "chapter",
+      "original_seed": "集市上，影子的长度决定一天内能说几句真话。", "story_spec": "边城以影契约维持交易秩序，规则由公共日晷执行。",
+      "confirmed_constraints": ["规则对所有人一致", "违规后果可观察"], "chapter_goal": "通过一场讨价还价自然展示规则，并让主角利用但不能绕过规则。", "character_voices": ["主角谨慎计算措辞", "商贩夸张但不说假话"],
+      "required_anchors": ["公共日晷", "真话额度"], "soft_anchors": ["缩短的影子"], "forbidden_items": ["旁白集中讲解规则", "主角免疫规则"], "target_length": 1600,
+      "automatic_expectations": ["规则通过行动展示", "代价即时可见"], "rating_dimensions": ["设定可信度", "场景化表达", "可读性"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "chapter-transition-orbit-maintenance", "dataset_version": "1.0.0", "genre": "轻科幻", "task_kind": "chapter",
+      "original_seed": "维修班在更换日照镜期间收到一份被延迟十四小时的内部通知。", "story_spec": "轨道居住站进入低功耗期，团队刚结束一次公开冲突。",
+      "confirmed_constraints": ["过渡章必须推进至少一条关系线", "技术操作符合既定低功耗规则"], "chapter_goal": "完成地点和任务切换，埋下通知延迟的疑点。", "character_voices": ["班长简短命令式", "实习生用问题确认"],
+      "required_anchors": ["延迟十四小时的通知", "日照镜更换"], "soft_anchors": ["低功耗灯带"], "forbidden_items": ["纯总结前情", "无事件闲聊"], "target_length": 1500,
+      "automatic_expectations": ["过渡同时推进关系", "结尾留下具体疑点"], "rating_dimensions": ["情节推进", "信息密度", "自然度"], "provenance": "project_original_fixture", "ci_reduced": false
+    },
+    {
+      "case_id": "chapter-continuity-water-ledger", "dataset_version": "1.0.0", "genre": "轻科幻", "task_kind": "chapter",
+      "original_seed": "封闭海底站的用水账显示已离站的工程师仍在领取配额。", "story_spec": "海底站按腕带分配淡水；工程师三天前乘补给艇离开，腕带已封存。",
+      "confirmed_constraints": ["工程师不能秘密留站", "腕带不能复制", "补给艇确已离港"], "chapter_goal": "让值班员验证矛盾、排除两个直觉答案，并发现制度漏洞。", "character_voices": ["值班员按清单思考", "站长避免绝对判断"],
+      "required_anchors": ["封存腕带", "用水账", "三天前离站"], "soft_anchors": ["回收水阀"], "forbidden_items": ["工程师秘密返回", "复制腕带"], "target_length": 1800,
+      "automatic_expectations": ["硬约束全部保留", "排除过程有证据"], "rating_dimensions": ["连续性", "因果", "信息密度"], "provenance": "project_original_fixture", "ci_reduced": true
+    }
+  ]
+}
