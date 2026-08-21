@@ -63,7 +63,42 @@
 - 正常正文编辑时 AI 面板默认收起，可通过快捷键或选中文本唤起。
 - 后端尚未实现的能力必须明确显示“尚未就绪”，不得使用 mock 数据伪造成功。
 
-### 2.5 设置界面
+### 2.5 作品构建工作台
+
+原创作品使用连续的“构建作品”工作台，而不是把作者送进一组互不关联的资产表单：
+
+```text
+灵感与创作意图
+→ 三套故事方向
+→ 作品方案
+→ 人物与世界
+→ 全书路线图
+→ 确认作品档案
+```
+
+- 顶部阶段轨道显示当前阶段、已确认阶段、阻断原因和恢复状态；对作者展示稳定的创作阶段，不展示内部 Agent 数量或具体节点拓扑。
+- 左侧承载当前阶段的分类、实体和完成状态；中央区域展示结构化候选、版本和差异；右侧为绑定当前阶段、实体、字段和选中候选的 AI 共创面板；底部保留上一步、重新生成、保存草稿和确认进入下一步。
+- 工作台支持“分步审阅”和“自动推进”。自动推进只省略无风险的中间停顿，不能越过正式资产确认、锁定内容变更、费用来源变化或阻断冲突。
+- 每个区块支持直接编辑、锁定、请求 AI 修改、查看前后差异和接受/拒绝；重新生成和 AI 修改都产生新候选版本，不能原地覆盖作者正在审阅的内容。
+- 作者可以随时退出并恢复到同一阶段、候选版本和审阅位置。上游内容变化后，应用层计算下游影响并返回 `stale`/影响待处理投影，React 不自行推断或自动级联重生成。
+- 世界观、人物和路线图的字段由作品方向与题材按需装配，不用固定字段数量作为完成度；低价值字段允许省略并记录原因。
+
+### 2.6 正文编辑工作台
+
+正文页面采用三栏但可收起的工作台：
+
+```text
+卷与章节树 | 中央正文编辑器 | Context/候选/AI 侧栏
+```
+
+- 左栏显示章节顺序、字数、候选、待审阅、已编辑未定稿、已定稿、连续性阻断、下游 stale 和记忆待恢复等应用层状态。
+- 中央编辑器保持安静，提供自动保存、当前 revision、字数、查找、撤销/重做、版本、专注和本地排版偏好；排版、面板开关和宽度是本机视图状态，不进入作品事实。
+- 选中文本后才浮出解释、审阅、润色和改写入口。AI 返回独立候选与差异，作者可以全部接受、按差异项接受、放弃或撤销已应用修改；接受产生新 revision，不修改历史正文。
+- 右栏优先解释当前章节实际使用的作品规则、人物状态、时间地点、知识边界、路线图、锚点、活跃伏笔、叙事债务和省略原因，并可切换到候选和作品级 AI 对话。
+- 正文生产任务用可收起的运行面板展示作者可理解的阶段、进度、用量、失败和恢复；完成后保留“查看候选”，不强制跳转或自动应用正文。
+- 正文定稿成功不依赖后验模型调用。事实、状态、摘要和伏笔后验异步运行；失败时标记 `memory_pending_rebuild`，不阻断手工编辑，但下一章 AI 生成前必须预检和恢复。
+
+### 2.7 设置界面
 
 设置采用类似 Codex 的左侧分类导航和右侧内容区，必须提供明确的“返回应用”。模型连接、创作方案、作者模板、外观和高级设置彼此分区。
 
@@ -190,6 +225,28 @@ Agent Kernel 阶段只建设三类必要薄界面：模型配置、Agent 运行�
 - 模型调用不在数据库事务中运行。
 - 定稿事务原子提交正文 revision、确认记忆、审阅摘要和版本信息。
 
+### 4.5 对话、修改提案与幂等动作
+
+`AssistantSession` 绑定单一作品和分支，保存作者与 AI 的公开消息、当前上下文引用和待处理 Action；不保存模型隐藏推理。切换作品后必须创建或恢复对应作品会话，不能把一个作品的对话或待处理动作复用到另一个作品。
+
+`AssistantAction` 表示 AI 对话提出但尚未获准执行的结构化操作，至少包含：
+
+```text
+action_id / session_id / project_id / branch_id
+operation / risk / target_refs
+base_versions / arguments / arguments_hash
+idempotency_key / estimated_cost
+state / created_at / expires_at
+result_refs / error_code
+```
+
+- 只读解释可以直接返回；任何写入作品、产生新付费调用、改变费用来源或修改锁定内容的操作都必须先形成 `AssistantAction`。
+- 状态至少包括 `pending_confirmation`、`executing`、`succeeded`、`rejected`、`expired`、`conflict`、`failed` 和 `outcome_unknown`。
+- 确认请求同时提交 `arguments_hash` 和幂等键；基准版本或参数变化时拒绝执行。`outcome_unknown` 必须先查询原操作结果，不能无条件再次执行。
+- Action 执行只能调用应用用例；Agent、React 和 Wails binding 均不能直接写 SQLite、文件或模型 Provider。
+
+字段改写和正文选区改写复用候选体系。请求必须绑定资源类型、资源 ID、稳定字段路径或 Unicode rune 范围、基准版本和原内容哈希；返回候选、差异、影响和预计费用。应用候选时再次比较 canonical head/资源版本，冲突后要求重新生成或显式合并。
+
 ## 5. Context Manifest 与长期记忆
 
 每次 AI 调用先构造 `ContextManifest`，记录所使用的 canonical 资产、章节 revision、人物状态、事实、时间窗口、路线图、锚点、伏笔、作者指令、装配原因、预算、模型和版本。
@@ -263,11 +320,68 @@ TXT/Markdown 快速导入不调用模型，完成后正文立即可读写。整�
 
 同一项目在可编辑模式下必须持有跨进程 OS 锁。锁冲突提供重试、只读打开或恢复副本。同步盘、网络目录、磁盘不足、路径过长和原子替换失败不得损坏 canonical 内容。迁移、恢复和备份必须操作完整 `.zjproject`，不能只复制数据库文件。
 
-## 8. 前端状态和事件
+## 8. 前端状态、命令和事件
 
-Go 应用层提供权威工作台投影；React 不根据路由、mock 数据或本地猜测决定产品阶段。
+### 8.1 权威投影
 
-长任务异步返回，通过轻量 Wails 通知提示客户端按 cursor 拉取 `JobEvent`。客户端必须处理漏推、重复、乱序、Bridge 重挂载、事件清理和 snapshot 重建。项目切换或关闭先阻止新作业并取消或等待现有 lease，禁止后台任务向已关闭 store 回写。
+Go 应用层提供权威工作台投影；React 不根据路由、mock 数据或本地猜测决定作品阶段、章节状态、候选是否可应用、Action 是否可执行或下游是否 stale。
+
+至少提供以下投影边界，具体 DTO 在对应阶段功能设计中版本化：
+
+```text
+CreationWorkbenchProjection
+ChapterEditorProjection
+RunProjection
+AssistantSessionProjection
+CandidateDiffProjection
+ContextExplanationProjection
+```
+
+投影只包含界面需要的结构化状态、稳定 ID、版本、摘要和动作能力，不发送无界正文、完整 Prompt、隐藏推理或内部凭据。大正文和差异按明确资源接口有界读取。
+
+### 8.2 作者可见运行阶段
+
+内部 Workflow Node 与作者可见阶段分离。应用层把一个或多个内部节点映射为稳定 `public_stage_id`，例如 `context_preparing`、`chapter_directing`、`prose_writing`、`independent_review`、`bounded_revision` 和 `candidate_ready`。
+
+`RunProjection` 至少包含：
+
+```text
+run_id / public_stage_id / status / progress
+current_attempt / recoverable / blocking_reason
+input_tokens / output_tokens / estimated_cost / actual_cost
+artifact_available / updated_at
+```
+
+React 只把公开阶段映射为作者语言。Workflow 拆分、合并或更换模型不得迫使页面依赖内部 `node_id`；诊断详情可在高级视图中单独展示节点和 attempt。
+
+### 8.3 命令边界
+
+直接编辑、候选应用和 AI 对话写操作使用明确命令，不使用前端字符串替换模拟持久化：
+
+```text
+PreviewAssetRewrite
+ConfirmAssistantAction
+RejectAssistantAction
+RequestSelectionRewrite
+ApplyRewriteCandidate
+FinalizeChapter
+```
+
+- 预览/生成命令返回候选，不修改 canonical。
+- 确认命令提交 expected version/head、参数哈希和幂等键，并在短事务中落库。
+- 选区命令使用 Unicode rune 范围和选中文本哈希；正文变化后返回冲突。
+- 字段路径来自版本化 Schema 或服务端允许列表，前端不能提交任意数据库路径。
+- AI 生成内容的撤销通过 revision/candidate 语义实现，不依赖浏览器内存栈；纯排版与尚未保存的手工输入可继续使用本地编辑器撤销栈。
+
+### 8.4 长任务事件与恢复
+
+长任务异步返回，通过轻量 Wails 通知提示客户端按 cursor 拉取 `JobEvent`。客户端必须处理漏推、重复、乱序、Bridge 重挂载、事件清理和 snapshot 重建。运行面板可以收起或重挂载，但不得因此取消后台任务或丢失完成入口。
+
+项目切换或关闭先阻止新作业并取消或等待现有 lease，禁止后台任务向已关闭 store 回写。Assistant Action、候选应用和节点人工重试同样使用 expected version/attempt 保护，拒绝旧页面或重复点击。
+
+### 8.5 本机视图状态
+
+面板开关、宽度、阅读布局、字号、行距、背景、专注模式和最近使用的侧栏标签属于本机视图偏好，可存应用设置或受控前端缓存；不得写入作品数据库的 canonical 资产，也不得参与 Context Manifest。跨设备恢复作品不依赖这些偏好。
 
 ## 9. 安全、隐私和成本
 
