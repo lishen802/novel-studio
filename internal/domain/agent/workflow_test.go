@@ -53,6 +53,23 @@ func TestOrderedNodesUsesTopologyInsteadOfLexicalOrder(t *testing.T) {
 	}
 }
 
+func TestWorkflowDefinitionRejectsUnknownPublicStage(t *testing.T) {
+	definition := validWorkflowDefinition()
+	definition.Nodes[0].PublicStageID = PublicStageID("internal-node-name")
+	definition.DefinitionHash = definition.ContentHash()
+	if err := definition.Validate(); !errors.Is(err, ErrInvalidWorkflow) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidWorkflow", err)
+	}
+}
+
+func TestPublicStageProjectionIsStableAcrossInternalNodeNames(t *testing.T) {
+	left := WorkflowNode{ID: "review-v1", PublicStageID: PublicStageIndependentReview}
+	right := WorkflowNode{ID: "three-specialists-v2", PublicStageID: PublicStageIndependentReview}
+	if left.PublicStageID != right.PublicStageID {
+		t.Fatal("public stage changed with internal node name")
+	}
+}
+
 func validWorkflowDefinition() WorkflowDefinition {
 	hash := SHA256Hex([]byte("resource"))
 	binding := VersionBinding{ID: "resource", Version: 1, Hash: hash}
@@ -61,9 +78,9 @@ func validWorkflowDefinition() WorkflowDefinition {
 		BudgetPolicyVersion: 1, QualityPolicyVersion: 1, MaxRevisionAttempts: 1,
 		MaxRunTokens: 10000, RepairReserve: 1000, RevisionReserve: 1000,
 		Nodes: []WorkflowNode{
-			{ID: "plan", Capability: CapabilityChapterPlanner, RoleSlot: RolePlanner, Prompt: binding, Schema: binding, Assembler: binding,
+			{ID: "plan", PublicStageID: PublicStageChapterDirecting, Capability: CapabilityChapterPlanner, RoleSlot: RolePlanner, Prompt: binding, Schema: binding, Assembler: binding,
 				InputSelectors: []string{"$task"}, OutputKind: OutputStructured, MaxOutputTokens: 2000, FailurePolicy: FailureFailRun},
-			{ID: "write", Capability: CapabilityProseWriter, RoleSlot: RoleWriter, Prompt: binding, Schema: binding, Assembler: binding,
+			{ID: "write", PublicStageID: PublicStageProseWriting, Capability: CapabilityProseWriter, RoleSlot: RoleWriter, Prompt: binding, Schema: binding, Assembler: binding,
 				InputSelectors: []string{"node:plan"}, OutputKind: OutputPrimaryContent, MaxOutputTokens: 4000, FailurePolicy: FailureFailRun},
 		},
 		Edges: []WorkflowEdge{{From: "plan", To: "write"}},

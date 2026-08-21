@@ -285,10 +285,10 @@ func twoNodeRegistry(t *testing.T, condition string) *agentassets.Registry {
 		EntryNodeID: "plan", ResultNodeID: "write", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
 		MaxRevisionAttempts: 1, MaxRunTokens: 6_500, RepairReserve: 500, RevisionReserve: 500,
 		Nodes: []agentdomain.WorkflowNode{
-			{ID: "plan", Capability: agentdomain.CapabilityChapterPlanner, RoleSlot: agentdomain.RolePlanner,
+			{ID: "plan", PublicStageID: agentdomain.PublicStageChapterDirecting, Capability: agentdomain.CapabilityChapterPlanner, RoleSlot: agentdomain.RolePlanner,
 				Prompt: planBinding, Schema: planSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task"},
 				OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 2_000, FailurePolicy: agentdomain.FailureFailRun},
-			{ID: "write", Capability: agentdomain.CapabilityProseWriter, RoleSlot: agentdomain.RoleWriter,
+			{ID: "write", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilityProseWriter, RoleSlot: agentdomain.RoleWriter,
 				Prompt: writeBinding, Schema: draftSchemaBinding, Assembler: assembler, InputSelectors: []string{"node:plan"},
 				OutputKind: agentdomain.OutputPrimaryContent, MaxOutputTokens: 3_000, Condition: condition, FailurePolicy: agentdomain.FailureFailRun},
 		},

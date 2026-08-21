@@ -40,17 +40,45 @@ func (output StoryBlueprintOutput) Validate() error {
 }
 
 type SceneBeat struct {
-	ID       string `json:"id"`
-	Goal     string `json:"goal"`
-	Conflict string `json:"conflict"`
-	Outcome  string `json:"outcome"`
+	ID                 string   `json:"id"`
+	Goal               string   `json:"goal"`
+	Conflict           string   `json:"conflict"`
+	Outcome            string   `json:"outcome"`
+	POV                string   `json:"pov,omitempty"`
+	Desire             string   `json:"desire,omitempty"`
+	Obstacle           string   `json:"obstacle,omitempty"`
+	InformationRelease []string `json:"information_release,omitempty"`
+	StateChange        string   `json:"state_change,omitempty"`
 }
 
 type ChapterPlanOutput struct {
-	ChapterGoal string      `json:"chapter_goal"`
-	OpeningHook string      `json:"opening_hook"`
-	EndingHook  string      `json:"ending_hook"`
-	Scenes      []SceneBeat `json:"scenes"`
+	ChapterGoal         string      `json:"chapter_goal"`
+	OpeningHook         string      `json:"opening_hook"`
+	EndingHook          string      `json:"ending_hook"`
+	Scenes              []SceneBeat `json:"scenes"`
+	RequiredAnchors     []string    `json:"required_anchors,omitempty"`
+	ForbiddenReveals    []string    `json:"forbidden_reveals,omitempty"`
+	ImprovisationBounds []string    `json:"improvisation_bounds,omitempty"`
+	CanonicalSourceRefs []string    `json:"canonical_source_refs,omitempty"`
+	CreativeSuggestions []string    `json:"creative_suggestions,omitempty"`
+}
+
+type ConstraintNotesOutput struct {
+	Notes []ConstraintNote `json:"notes"`
+}
+
+func (output ConstraintNotesOutput) Validate() error {
+	if len(output.Notes) == 0 || len(output.Notes) > MaxReviewFindings {
+		return ErrInvalidTaskOutput
+	}
+	seen := map[string]bool{}
+	for _, note := range output.Notes {
+		if note.Validate() != nil || seen[note.ID] {
+			return ErrInvalidTaskOutput
+		}
+		seen[note.ID] = true
+	}
+	return nil
 }
 
 func (output ChapterPlanOutput) Validate() error {
@@ -63,6 +91,19 @@ func (output ChapterPlanOutput) Validate() error {
 			return ErrInvalidTaskOutput
 		}
 		seen[scene.ID] = true
+	}
+	enhanced := len(output.RequiredAnchors)+len(output.ForbiddenReveals)+len(output.ImprovisationBounds)+len(output.CanonicalSourceRefs)+len(output.CreativeSuggestions) > 0
+	if enhanced {
+		if len(output.ImprovisationBounds) == 0 || len(output.CanonicalSourceRefs) == 0 ||
+			hasBlankOrDuplicate(output.RequiredAnchors) || hasBlankOrDuplicate(output.ForbiddenReveals) ||
+			hasBlankOrDuplicate(output.ImprovisationBounds) || hasBlankOrDuplicate(output.CanonicalSourceRefs) || hasBlankOrDuplicate(output.CreativeSuggestions) {
+			return ErrInvalidTaskOutput
+		}
+		for _, scene := range output.Scenes {
+			if blank(scene.POV) || blank(scene.Desire) || blank(scene.Obstacle) || blank(scene.StateChange) || hasBlankOrDuplicate(scene.InformationRelease) {
+				return ErrInvalidTaskOutput
+			}
+		}
 	}
 	return nil
 }
@@ -131,6 +172,7 @@ func (output ReviseDraftOutput) Validate() error {
 
 type RevisionChange struct {
 	FindingID    string `json:"finding_id"`
+	TargetRef    string `json:"target_ref,omitempty"`
 	OriginalText string `json:"original_text"`
 	RevisedText  string `json:"revised_text"`
 }
@@ -149,7 +191,21 @@ func (output ReviseBlueprintOutput) Validate() error {
 }
 
 func validateRevisionTrace(resolutions []FindingResolution, changes []RevisionChange) error {
-	if len(resolutions) == 0 || len(resolutions) > MaxResolutions || len(changes) > MaxRevisionChanges {
+	if len(resolutions) == 0 {
+		if len(changes) == 0 || len(changes) > MaxRevisionChanges {
+			return ErrInvalidTaskOutput
+		}
+		seenTargets := map[string]bool{}
+		for _, change := range changes {
+			if !blank(change.FindingID) || blank(change.TargetRef) || blank(change.OriginalText) || blank(change.RevisedText) ||
+				change.OriginalText == change.RevisedText || seenTargets[change.TargetRef] {
+				return ErrInvalidTaskOutput
+			}
+			seenTargets[change.TargetRef] = true
+		}
+		return nil
+	}
+	if len(resolutions) > MaxResolutions || len(changes) > MaxRevisionChanges {
 		return ErrInvalidTaskOutput
 	}
 	seen := map[string]bool{}
@@ -164,7 +220,7 @@ func validateRevisionTrace(resolutions []FindingResolution, changes []RevisionCh
 	}
 	changed := map[string]bool{}
 	for _, change := range changes {
-		if blank(change.FindingID) || blank(change.OriginalText) || blank(change.RevisedText) ||
+		if blank(change.FindingID) || !blank(change.TargetRef) || blank(change.OriginalText) || blank(change.RevisedText) ||
 			change.OriginalText == change.RevisedText || !resolved[change.FindingID] || changed[change.FindingID] {
 			return ErrInvalidTaskOutput
 		}

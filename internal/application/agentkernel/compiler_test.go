@@ -104,9 +104,9 @@ func fixtureRegistry(t *testing.T, omitWriterPrompt bool) *agentassets.Registry 
 		BudgetPolicyVersion: 1, QualityPolicyVersion: 1, MaxRevisionAttempts: 1,
 		MaxRunTokens: 10000, RepairReserve: 1000, RevisionReserve: 1000,
 		Nodes: []agentdomain.WorkflowNode{
-			{ID: "write", Capability: agentdomain.CapabilityProseWriter, RoleSlot: agentdomain.RoleWriter, Prompt: writeBinding, Schema: schemaBinding,
+			{ID: "write", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilityProseWriter, RoleSlot: agentdomain.RoleWriter, Prompt: writeBinding, Schema: schemaBinding,
 				Assembler: assemblerBinding, InputSelectors: []string{"node:plan"}, OutputKind: agentdomain.OutputPrimaryContent, MaxOutputTokens: 4000, FailurePolicy: agentdomain.FailureFailRun},
-			{ID: "plan", Capability: agentdomain.CapabilityChapterPlanner, RoleSlot: agentdomain.RolePlanner, Prompt: planBinding, Schema: schemaBinding,
+			{ID: "plan", PublicStageID: agentdomain.PublicStageChapterDirecting, Capability: agentdomain.CapabilityChapterPlanner, RoleSlot: agentdomain.RolePlanner, Prompt: planBinding, Schema: schemaBinding,
 				Assembler: assemblerBinding, InputSelectors: []string{"$task"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 2000, FailurePolicy: agentdomain.FailureFailRun},
 		}, Edges: []agentdomain.WorkflowEdge{{From: "plan", To: "write"}},
 	}
@@ -129,7 +129,7 @@ func singleNodeDefinition(prompt, schema, assembler agentdomain.VersionBinding) 
 	definition := agentdomain.WorkflowDefinition{ID: "single", Version: 1, TaskKind: agentdomain.TaskBaselineDraft, EntryNodeID: "write", ResultNodeID: "write",
 		BudgetPolicyVersion: 1, QualityPolicyVersion: 1, MaxRevisionAttempts: 0,
 		MaxRunTokens: 4000, RepairReserve: 500, RevisionReserve: 500,
-		Nodes: []agentdomain.WorkflowNode{{ID: "write", Capability: agentdomain.CapabilityProseWriter, RoleSlot: agentdomain.RoleWriter,
+		Nodes: []agentdomain.WorkflowNode{{ID: "write", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilityProseWriter, RoleSlot: agentdomain.RoleWriter,
 			Prompt: prompt, Schema: schema, Assembler: assembler, InputSelectors: []string{"$task"}, OutputKind: agentdomain.OutputPrimaryContent,
 			MaxOutputTokens: 2000, FailurePolicy: agentdomain.FailureFailRun}}}
 	definition.DefinitionHash = definition.ContentHash()

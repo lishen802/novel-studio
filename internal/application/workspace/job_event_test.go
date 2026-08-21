@@ -466,6 +466,9 @@ func TestGetJobSnapshotReturnsAuthoritativeProjection(t *testing.T) {
 	if view.InputTokens != 30 || view.OutputTokens != 15 {
 		t.Fatalf("snapshot tokens = in %d out %d, want 30/15", view.InputTokens, view.OutputTokens)
 	}
+	if view.PublicStageID != string(agentdomain.PublicStageCandidateReady) || view.CompletedSteps != 3 || view.TotalSteps != 3 {
+		t.Fatalf("public projection = stage %q progress %d/%d", view.PublicStageID, view.CompletedSteps, view.TotalSteps)
+	}
 }
 
 // TestGetJobEventsPaginatesByCursor asserts that GetJobEvents returns events in

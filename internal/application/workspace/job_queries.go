@@ -39,6 +39,12 @@ type JobSnapshotView struct {
 	PendingAction              string             `json:"pendingAction,omitempty"`
 	TerminalInfo               string             `json:"terminalInfo,omitempty"`
 	Steps                      []JobStepStateView `json:"steps"`
+	PublicStageID              string             `json:"publicStageId,omitempty"`
+	CompletedSteps             int                `json:"completedSteps"`
+	TotalSteps                 int                `json:"totalSteps"`
+	QualityStatus              string             `json:"qualityStatus,omitempty"`
+	Recoverable                bool               `json:"recoverable"`
+	CandidateAvailable         bool               `json:"candidateAvailable"`
 	UpdatedAt                  string             `json:"updatedAt"`
 }
 
@@ -219,6 +225,12 @@ func jobSnapshotView(snapshot agentdomain.JobSnapshot) JobSnapshotView {
 		PendingAction:              snapshot.PendingAction,
 		TerminalInfo:               snapshot.TerminalInfo,
 		Steps:                      make([]JobStepStateView, 0, len(snapshot.StepStates)),
+		PublicStageID:              string(snapshot.PublicProjection.StageID),
+		CompletedSteps:             snapshot.PublicProjection.CompletedSteps,
+		TotalSteps:                 snapshot.PublicProjection.TotalSteps,
+		QualityStatus:              string(snapshot.PublicProjection.QualityStatus),
+		Recoverable:                snapshot.PublicProjection.Recoverable,
+		CandidateAvailable:         snapshot.PublicProjection.CandidateAvailable,
 		UpdatedAt:                  snapshot.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	for _, step := range snapshot.StepStates {

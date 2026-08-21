@@ -235,6 +235,11 @@ func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.Run
 			return err
 		}
 	}
+	for _, relation := range bundle.Relations {
+		if err := insertAgentArtifactRelation(ctx, tx, relation); err != nil {
+			return err
+		}
+	}
 	for _, manifest := range bundle.Manifests {
 		if err := insertContextManifest(ctx, tx, manifest); err != nil {
 			return err
@@ -442,6 +447,11 @@ func (s *Store) SaveAgentStepBundle(ctx context.Context, bundle agentdomain.Step
 			return err
 		}
 	}
+	for _, relation := range bundle.Relations {
+		if err := insertAgentArtifactRelation(ctx, tx, relation); err != nil {
+			return err
+		}
+	}
 	result, err := execUpdateAgentRunStep(ctx, tx, step)
 	if err != nil {
 		return databaseOperationError("update agent run step", err)
@@ -513,7 +523,7 @@ func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdoma
 			status = ?, output = ?, error_code = ?, error_message = ?,
 			started_at = ?, completed_at = ?, updated_at = ?,
 			provider_request_id = ?, input_tokens = ?, output_tokens = ?,
-			node_id = ?, capability = ?, attempt = ?, prompt_id = ?, prompt_version = ?,
+			node_id = ?, public_stage_id = ?, capability = ?, attempt = ?, prompt_id = ?, prompt_version = ?,
 			prompt_hash = ?, schema_id = ?, schema_version = ?, schema_hash = ?,
 			assembler_id = ?, assembler_version = ?, input_digest = ?, output_digest = ?,
 			primary_artifact_id = NULLIF(?, ''), quality_status = ?
@@ -522,7 +532,7 @@ func execUpdateAgentRunStep(ctx context.Context, exec txExecutor, step agentdoma
 		step.Status, step.Output, step.ErrorCode, step.ErrorMessage,
 		nullableTime(step.StartedAt), nullableTime(step.CompletedAt), formatTime(step.UpdatedAt),
 		step.ProviderRequestID, step.InputTokens, step.OutputTokens,
-		normalizedNodeID(step), step.Capability, normalizedAttempt(step),
+		normalizedNodeID(step), step.PublicStageID, step.Capability, normalizedAttempt(step),
 		step.PromptBinding.ID, step.PromptBinding.Version, step.PromptBinding.Hash,
 		step.SchemaBinding.ID, step.SchemaBinding.Version, step.SchemaBinding.Hash,
 		step.AssemblerID, step.AssemblerVersion, step.InputDigest, step.OutputDigest,
@@ -561,6 +571,34 @@ func (s *Store) ListAgentArtifacts(ctx context.Context, runID string) ([]agentdo
 			return nil, err
 		}
 		result = append(result, artifact)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListAgentArtifactRelations(ctx context.Context, runID string) ([]agentdomain.ArtifactRelationRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rel.artifact_id, rel.relation, rel.related_artifact_id, rel.base_digest, rel.created_at
+		FROM agent_artifact_relations rel
+		JOIN agent_artifacts artifact ON artifact.id = rel.artifact_id
+		WHERE artifact.run_id = ?
+		ORDER BY rel.created_at, rel.artifact_id, rel.relation, rel.related_artifact_id
+	`, runID)
+	if err != nil {
+		return nil, databaseOperationError("list agent artifact relations", err)
+	}
+	defer rows.Close()
+	result := make([]agentdomain.ArtifactRelationRecord, 0)
+	for rows.Next() {
+		var relation agentdomain.ArtifactRelationRecord
+		var createdAt string
+		if err := rows.Scan(&relation.ArtifactID, &relation.Relation, &relation.RelatedArtifactID, &relation.BaseDigest, &createdAt); err != nil {
+			return nil, err
+		}
+		relation.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, relation)
 	}
 	return result, rows.Err()
 }
@@ -735,7 +773,7 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			creative_profile_id, creative_profile_version, provider_connection_id,
 			provider_name, provider_kind, base_url, credential_ref, model,
 			max_output_tokens, temperature,
-			node_id, capability, attempt, prompt_id, prompt_version, prompt_hash,
+			node_id, public_stage_id, capability, attempt, prompt_id, prompt_version, prompt_hash,
 			schema_id, schema_version, schema_hash, assembler_id, assembler_version,
 			input_digest, output_digest, COALESCE(primary_artifact_id, ''), quality_status
 		FROM agent_run_steps WHERE run_id = ? ORDER BY position, attempt
@@ -757,7 +795,7 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			&step.CreativeProfileID, &step.CreativeProfileVersion, &step.ProviderConnectionID,
 			&step.ProviderName, &step.ProviderKind, &step.BaseURL, &step.CredentialRef, &step.Model,
 			&step.MaxOutputTokens, &step.Temperature,
-			&step.NodeID, &step.Capability, &step.Attempt,
+			&step.NodeID, &step.PublicStageID, &step.Capability, &step.Attempt,
 			&step.PromptBinding.ID, &step.PromptBinding.Version, &step.PromptBinding.Hash,
 			&step.SchemaBinding.ID, &step.SchemaBinding.Version, &step.SchemaBinding.Hash,
 			&step.AssemblerID, &step.AssemblerVersion, &step.InputDigest, &step.OutputDigest,
@@ -794,13 +832,13 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.RunSte
 			provider_request_id, input_tokens, output_tokens,
 			creative_profile_id, creative_profile_version, provider_connection_id,
 			provider_name, provider_kind, base_url, credential_ref, model,
-			max_output_tokens, temperature, node_id, capability, attempt,
+			max_output_tokens, temperature, node_id, public_stage_id, capability, attempt,
 			prompt_id, prompt_version, prompt_hash, schema_id, schema_version, schema_hash,
 			assembler_id, assembler_version, input_digest, output_digest,
 			primary_artifact_id, quality_status
 		) VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)
 	`,
 		step.ID, step.RunID, step.Role, step.ProfileID, step.Position, step.Status,
 		step.Output, step.ErrorCode, step.ErrorMessage,
@@ -810,7 +848,7 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.RunSte
 		step.CreativeProfileID, step.CreativeProfileVersion, step.ProviderConnectionID,
 		step.ProviderName, step.ProviderKind, step.BaseURL, step.CredentialRef, step.Model,
 		step.MaxOutputTokens, step.Temperature,
-		normalizedNodeID(step), step.Capability, normalizedAttempt(step),
+		normalizedNodeID(step), step.PublicStageID, step.Capability, normalizedAttempt(step),
 		step.PromptBinding.ID, step.PromptBinding.Version, step.PromptBinding.Hash,
 		step.SchemaBinding.ID, step.SchemaBinding.Version, step.SchemaBinding.Hash,
 		step.AssemblerID, step.AssemblerVersion, step.InputDigest, step.OutputDigest,

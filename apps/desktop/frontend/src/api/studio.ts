@@ -215,6 +215,12 @@ export interface JobSnapshotView {
   pendingAction: string;
   terminalInfo: string;
   steps: Array<Record<string, unknown>>;
+  publicStageId: string;
+  completedSteps: number;
+  totalSteps: number;
+  qualityStatus: string;
+  recoverable: boolean;
+  candidateAvailable: boolean;
   updatedAt: string;
 }
 

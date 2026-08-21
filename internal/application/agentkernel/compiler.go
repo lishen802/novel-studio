@@ -25,6 +25,7 @@ type Registries struct {
 
 type FrozenNode struct {
 	ID                  string                     `json:"id"`
+	PublicStageID       agentdomain.PublicStageID  `json:"public_stage_id"`
 	Capability          agentdomain.Capability     `json:"capability"`
 	RoleSlot            agentdomain.Role           `json:"role_slot"`
 	Prompt              agentdomain.VersionBinding `json:"prompt"`
@@ -103,8 +104,12 @@ func Compile(ctx context.Context, registries Registries, id string, version int)
 		if err := validateAssemblerAsset(assembler.Binding, node.Assembler, assembler.JSON); err != nil {
 			return CompiledWorkflow{}, fmt.Errorf("%w: node %s assembler", ErrCompileWorkflow, node.ID)
 		}
+		publicStageID := node.PublicStageID
+		if publicStageID == "" {
+			publicStageID = agentdomain.DefaultPublicStageForCapability(node.Capability)
+		}
 		frozen = append(frozen, FrozenNode{
-			ID: node.ID, Capability: node.Capability, RoleSlot: node.RoleSlot,
+			ID: node.ID, PublicStageID: publicStageID, Capability: node.Capability, RoleSlot: node.RoleSlot,
 			Prompt: prompt.Binding, Schema: schema.Binding, Assembler: assembler.Binding,
 			InputSelectors: append([]string(nil), node.InputSelectors...), MaxOutputTokens: node.MaxOutputTokens,
 			OutputKind: node.OutputKind, TemperatureOverride: cloneFloat(node.TemperatureOverride),

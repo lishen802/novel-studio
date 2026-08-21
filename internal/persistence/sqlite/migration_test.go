@@ -255,12 +255,12 @@ func TestOpenExistingDatabaseMigratesV18AgentRecordsWithoutInventingBindings(t *
 	assertFileExists(t, backup)
 }
 
-func TestV18ToV19FailureLeavesOriginalDatabaseIntact(t *testing.T) {
+func TestV18ToCurrentFailureLeavesOriginalDatabaseIntact(t *testing.T) {
 	ctx := context.Background()
 	path := buildV18AgentFixture(t)
 	originalHash := sha256File(t, path)
 	_, err := openExistingDatabase(ctx, path, migrationHooks{
-		afterStageValidated: func() error { return errors.New("injected v19 stage abort") },
+		afterStageValidated: func() error { return errors.New("injected current-schema stage abort") },
 	})
 	if err == nil {
 		t.Fatal("openExistingDatabase succeeded, want injected failure")

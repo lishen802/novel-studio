@@ -31,7 +31,7 @@ func validateAgentRunBundle(bundle agentdomain.RunBundle) error {
 		}
 		steps[step.ID] = normalizedAttempt(step)
 	}
-	return validateBundleChildren(run.ID, steps, bundle.Artifacts, bundle.Manifests, bundle.Findings)
+	return validateBundleChildren(run.ID, steps, bundle.Artifacts, bundle.Relations, bundle.Manifests, bundle.Findings)
 }
 
 func validateAgentStepBundle(bundle agentdomain.StepBundle) error {
@@ -43,13 +43,14 @@ func validateAgentStepBundle(bundle agentdomain.StepBundle) error {
 		return agentdomain.ErrInvalidAgentPersistence
 	}
 	steps := map[string]int{step.ID: normalizedAttempt(step)}
-	return validateBundleChildren(step.RunID, steps, bundle.Artifacts, bundle.Manifests, bundle.Findings)
+	return validateBundleChildren(step.RunID, steps, bundle.Artifacts, bundle.Relations, bundle.Manifests, bundle.Findings)
 }
 
 func validateBundleChildren(
 	runID string,
 	steps map[string]int,
 	artifacts []agentdomain.Artifact,
+	relations []agentdomain.ArtifactRelationRecord,
 	manifests []agentdomain.ContextManifest,
 	findings []agentdomain.ReviewFindingRecord,
 ) error {
@@ -61,6 +62,18 @@ func validateBundleChildren(
 			if _, ok := steps[artifact.StepID]; !ok {
 				return agentdomain.ErrInvalidAgentPersistence
 			}
+		}
+	}
+	created := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		created[artifact.ID] = struct{}{}
+	}
+	for _, relation := range relations {
+		if relation.Validate() != nil {
+			return agentdomain.ErrInvalidAgentPersistence
+		}
+		if _, exists := created[relation.ArtifactID]; !exists {
+			return agentdomain.ErrInvalidAgentPersistence
 		}
 	}
 	for _, manifest := range manifests {
@@ -87,7 +100,7 @@ func validateBundleChildren(
 func validateKernelStep(step agentdomain.RunStep) error {
 	if !agentdomain.ValidCapability(step.Capability) || step.Attempt < 1 ||
 		step.PromptBinding.Validate() != nil || step.SchemaBinding.Validate() != nil ||
-		strings.TrimSpace(step.NodeID) == "" || strings.TrimSpace(step.AssemblerID) == "" ||
+		strings.TrimSpace(step.NodeID) == "" || !agentdomain.ValidPublicStageID(step.PublicStageID) || strings.TrimSpace(step.AssemblerID) == "" ||
 		step.AssemblerVersion < 1 || !agentdomain.ValidSHA256(step.InputDigest) ||
 		(step.OutputDigest != "" && !agentdomain.ValidSHA256(step.OutputDigest)) {
 		return agentdomain.ErrInvalidAgentPersistence
@@ -121,6 +134,17 @@ func insertAgentArtifact(ctx context.Context, exec txExecutor, artifact agentdom
 	`, artifact.ID, artifact.RunID, artifact.StepID, artifact.Kind, artifact.Content, artifact.SHA256, formatTime(artifact.CreatedAt))
 	if err != nil {
 		return databaseOperationError("create agent artifact", err)
+	}
+	return nil
+}
+
+func insertAgentArtifactRelation(ctx context.Context, exec txExecutor, relation agentdomain.ArtifactRelationRecord) error {
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO agent_artifact_relations(artifact_id, relation, related_artifact_id, base_digest, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, relation.ArtifactID, relation.Relation, relation.RelatedArtifactID, relation.BaseDigest, formatTime(relation.CreatedAt))
+	if err != nil {
+		return databaseOperationError("create agent artifact relation", err)
 	}
 	return nil
 }

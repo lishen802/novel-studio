@@ -17,7 +17,7 @@ func TestNewWorkflowRunFreezesArbitraryNodeList(t *testing.T) {
 			ID: "step", Role: RoleWriter, CreativeProfileID: "profile", CreativeProfileVersion: 1,
 			ProviderConnectionID: "connection", ProviderName: "连接", ProviderKind: ProviderOpenAI,
 			BaseURL: "https://api.example.com/v1", CredentialRef: "credential", Model: "model",
-			MaxOutputTokens: 4_000, Temperature: 0.5, NodeID: "write", Capability: CapabilityProseWriter,
+			MaxOutputTokens: 4_000, Temperature: 0.5, NodeID: "write", PublicStageID: PublicStageProseWriting, Capability: CapabilityProseWriter,
 			PromptBinding: VersionBinding{ID: "prompt", Version: 1, Hash: hash},
 			SchemaBinding: VersionBinding{ID: "schema", Version: 1, Hash: hash},
 			AssemblerID:   "assembler", AssemblerVersion: 1, InputDigest: hash,

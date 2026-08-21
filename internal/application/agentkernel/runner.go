@@ -70,17 +70,19 @@ type CreateRequest struct {
 	Profile             agentdomain.ResolvedCreativeProfile
 	Sources             []Source
 	QualitySpec         quality.Spec
+	RevisionDirective   *agentdomain.RevisionDirective
 	Deadline            time.Time
 	RetryOf             string
 }
 
 type persistedInput struct {
-	BranchID          string       `json:"branch_id"`
-	CanonicalHead     string       `json:"canonical_head"`
-	AuthorInstruction string       `json:"author_instruction"`
-	Sources           []Source     `json:"sources"`
-	QualitySpec       quality.Spec `json:"quality_spec"`
-	Deadline          time.Time    `json:"deadline"`
+	BranchID          string                         `json:"branch_id"`
+	CanonicalHead     string                         `json:"canonical_head"`
+	AuthorInstruction string                         `json:"author_instruction"`
+	Sources           []Source                       `json:"sources"`
+	QualitySpec       quality.Spec                   `json:"quality_spec"`
+	RevisionDirective *agentdomain.RevisionDirective `json:"revision_directive,omitempty"`
+	Deadline          time.Time                      `json:"deadline"`
 }
 
 // Service 负责版本化工作流的冻结、执行和可恢复重放。
@@ -145,7 +147,7 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 	payload := persistedInput{
 		BranchID: strings.TrimSpace(request.BranchID), CanonicalHead: strings.TrimSpace(request.CanonicalHead),
 		AuthorInstruction: strings.TrimSpace(request.AuthorInstruction), Sources: cloneSources(request.Sources),
-		QualitySpec: qualitySpec, Deadline: deadline,
+		QualitySpec: qualitySpec, RevisionDirective: request.RevisionDirective, Deadline: deadline,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -174,7 +176,7 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 			ProviderConnectionID: role.ConnectionID, ProviderName: role.ProviderName,
 			ProviderKind: role.ProviderKind, BaseURL: role.BaseURL, CredentialRef: role.CredentialRef,
 			Model: role.Model, MaxOutputTokens: maxOutputTokens, Temperature: temperature,
-			NodeID: node.ID, Capability: node.Capability, PromptBinding: node.Prompt,
+			NodeID: node.ID, PublicStageID: node.PublicStageID, Capability: node.Capability, PromptBinding: node.Prompt,
 			SchemaBinding: node.Schema, AssemblerID: node.Assembler.ID,
 			AssemblerVersion: node.Assembler.Version, InputDigest: nodeDigest,
 		})
@@ -386,7 +388,7 @@ func (service *Service) executeNode(
 	step.StartedAt = &now
 	step.UpdatedAt = now
 	started, _ := jobDraft(run, agentdomain.EventStepStarted, step.ID, map[string]any{
-		"node_id": node.ID, "attempt": step.Attempt, "capability": step.Capability,
+		"node_id": node.ID, "public_stage_id": node.PublicStageID, "attempt": step.Attempt, "capability": step.Capability,
 	}, now)
 	if err := service.store.SaveAgentStepBundle(ctx, agentdomain.StepBundle{Step: step, Manifests: []agentdomain.ContextManifest{manifest}}, started); err != nil {
 		return step, nil, err
@@ -462,6 +464,17 @@ func (service *Service) executeNode(
 	}
 	primaryKind := artifactKind(node.Capability)
 	primary := newArtifact(service.ids.NewID(), run.ID, step.ID, primaryKind, primaryContent, service.clock.Now())
+	relations := make([]agentdomain.ArtifactRelationRecord, 0, 1)
+	if node.Capability == agentdomain.CapabilityBoundedRevision {
+		base, baseErr := revisionBaseArtifact(node, latest, artifacts)
+		if baseErr != nil {
+			return service.failStep(ctx, run, step, "revision_base_missing", baseErr, produced)
+		}
+		relations = append(relations, agentdomain.ArtifactRelationRecord{
+			ArtifactID: primary.ID, Relation: agentdomain.ArtifactRevises,
+			RelatedArtifactID: base.ID, BaseDigest: base.SHA256, CreatedAt: service.clock.Now().UTC(),
+		})
+	}
 	produced = append(produced, structured, primary)
 	produced = append(produced, qualityArtifacts...)
 	completedAt := service.clock.Now().UTC()
@@ -473,16 +486,34 @@ func (service *Service) executeNode(
 	step.CompletedAt = &completedAt
 	step.UpdatedAt = completedAt
 	completed, _ := jobDraft(run, agentdomain.EventStepCompleted, step.ID, map[string]any{
-		"node_id": node.ID, "attempt": step.Attempt, "input_tokens": step.InputTokens,
+		"node_id": node.ID, "public_stage_id": node.PublicStageID, "attempt": step.Attempt, "input_tokens": step.InputTokens,
 		"output_tokens": step.OutputTokens, "quality_status": step.QualityStatus,
 	}, completedAt)
 	if err := service.store.SaveAgentStepBundle(context.WithoutCancel(ctx), agentdomain.StepBundle{
-		Step: step, Artifacts: produced, Findings: findings,
+		Step: step, Artifacts: produced, Relations: relations, Findings: findings,
 	}, completed); err != nil {
 		return step, produced, err
 	}
 	service.onJobUpdated(context.WithoutCancel(ctx), run.ID)
 	return step, produced, nil
+}
+
+func revisionBaseArtifact(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.Artifact, error) {
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		step, exists := latest[strings.TrimPrefix(selector, "node:")]
+		if !exists || step.PrimaryArtifactID == "" {
+			continue
+		}
+		for _, artifact := range artifacts {
+			if artifact.ID == step.PrimaryArtifactID && (artifact.Kind == agentdomain.ArtifactDraft || artifact.Kind == agentdomain.ArtifactPlan) {
+				return artifact, nil
+			}
+		}
+	}
+	return agentdomain.Artifact{}, errors.New("revision base artifact not found")
 }
 
 func (service *Service) repairOutput(
@@ -675,7 +706,7 @@ func (service *Service) persistSkipped(
 	step.QualityStatus = agentdomain.QualityPassed
 	step.CompletedAt = &now
 	step.UpdatedAt = now
-	draft, _ := jobDraft(run, agentdomain.EventStepCompleted, step.ID, map[string]any{"node_id": step.NodeID, "skipped": true}, now)
+	draft, _ := jobDraft(run, agentdomain.EventStepCompleted, step.ID, map[string]any{"node_id": step.NodeID, "public_stage_id": step.PublicStageID, "skipped": true}, now)
 	err := service.store.SaveAgentStepBundle(ctx, agentdomain.StepBundle{Step: step, Artifacts: []agentdomain.Artifact{artifact}}, draft)
 	if err == nil {
 		service.onJobUpdated(ctx, run.ID)
@@ -701,7 +732,7 @@ func (service *Service) failStep(
 	step.QualityStatus = agentdomain.QualityBlocked
 	step.CompletedAt = &now
 	step.UpdatedAt = now
-	draft, _ := jobDraft(run, agentdomain.EventStepFailed, step.ID, map[string]any{"error_code": code, "attempt": step.Attempt}, now)
+	draft, _ := jobDraft(run, agentdomain.EventStepFailed, step.ID, map[string]any{"error_code": code, "public_stage_id": step.PublicStageID, "attempt": step.Attempt}, now)
 	if err := service.store.SaveAgentStepBundle(context.WithoutCancel(ctx), agentdomain.StepBundle{Step: step, Artifacts: artifacts}, draft); err != nil {
 		return step, artifacts, errors.Join(cause, err)
 	}
@@ -770,6 +801,14 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 	}
 	if request.QualitySpec.Validate() != nil {
 		return quality.ErrInvalidInput
+	}
+	if request.RevisionDirective != nil {
+		if request.RevisionDirective.Validate() != nil || request.RevisionDirective.Mode != agentdomain.RevisionAuthorDirected ||
+			(compiled.TaskKind != agentdomain.TaskReviseDraft && compiled.TaskKind != agentdomain.TaskReviseBlueprint) {
+			return agentdomain.ErrInvalidRevisionDirective
+		}
+	} else if compiled.TaskKind == agentdomain.TaskReviseDraft || compiled.TaskKind == agentdomain.TaskReviseBlueprint {
+		return agentdomain.ErrInvalidRevisionDirective
 	}
 	for _, source := range request.Sources {
 		if strings.TrimSpace(source.ID) == "" || strings.TrimSpace(source.Version) == "" ||
@@ -863,6 +902,7 @@ func renderPrompt(
 ) (string, error) {
 	values := make(map[string]string, len(asset.Variables))
 	upstream := make([]string, 0)
+	reviewContents := make([]string, 0)
 	for _, selector := range node.InputSelectors {
 		if !strings.HasPrefix(selector, "node:") {
 			continue
@@ -876,6 +916,9 @@ func renderPrompt(
 		if ok {
 			upstream = append(upstream, artifact.Content)
 			values[exportedVariable(id)] = artifact.Content
+			if step.Capability == agentdomain.CapabilityContinuityReview || step.Capability == agentdomain.CapabilityContentReview || step.Capability == agentdomain.CapabilityStyleReview {
+				reviewContents = append(reviewContents, artifact.Content)
+			}
 		}
 	}
 	for _, variable := range asset.Variables {
@@ -885,6 +928,13 @@ func renderPrompt(
 		case "Context":
 			values[variable] = assembled
 		default:
+			if variable == "Review" && len(reviewContents) > 1 {
+				merged, mergeErr := mergeReviewContents(reviewContents)
+				if mergeErr != nil {
+					return "", mergeErr
+				}
+				values[variable] = merged
+			}
 			if values[variable] == "" && len(upstream) == 1 {
 				values[variable] = upstream[0]
 			}
@@ -971,6 +1021,8 @@ func validateCapabilityOutput(
 	artifacts []agentdomain.Artifact,
 ) error {
 	switch node.Capability {
+	case agentdomain.CapabilityChapterPlanner:
+		return validateChapterDirector(output, input)
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
 		return validateModelReview(output, node, latest, artifacts)
 	case agentdomain.CapabilityBoundedRevision:
@@ -978,6 +1030,34 @@ func validateCapabilityOutput(
 	default:
 		return nil
 	}
+}
+
+func validateChapterDirector(output agentdomain.TaskOutput, input persistedInput) error {
+	plan, ok := output.(*agentdomain.ChapterPlanOutput)
+	if !ok || len(plan.CanonicalSourceRefs) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(input.Sources)+1)
+	allowed["author-instruction"] = struct{}{}
+	for _, source := range input.Sources {
+		allowed[source.ID] = struct{}{}
+		allowed[source.ID+"@"+source.Version] = struct{}{}
+	}
+	for _, ref := range plan.CanonicalSourceRefs {
+		if _, exists := allowed[ref]; !exists {
+			return fmt.Errorf("chapter director references source outside frozen manifest: %s", ref)
+		}
+	}
+	for _, scene := range plan.Scenes {
+		for _, release := range scene.InformationRelease {
+			for _, forbidden := range plan.ForbiddenReveals {
+				if strings.Contains(release, forbidden) {
+					return fmt.Errorf("chapter director reveals forbidden information: %s", forbidden)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validateModelReview(output agentdomain.TaskOutput, node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) error {
@@ -1011,6 +1091,16 @@ func validateBoundedRevision(
 	latest map[string]agentdomain.RunStep,
 	artifacts []agentdomain.Artifact,
 ) error {
+	if input.RevisionDirective != nil && input.RevisionDirective.Mode == agentdomain.RevisionAuthorDirected {
+		base, err := revisionBaseArtifact(node, latest, artifacts)
+		if err != nil {
+			return err
+		}
+		if base.ID != input.RevisionDirective.BaseArtifactID || base.SHA256 != input.RevisionDirective.BaseDigest {
+			return agentdomain.ErrInvalidRevisionDirective
+		}
+		return validateAuthorDirectedRevision(output, base.Content, *input.RevisionDirective)
+	}
 	original, reviewJSON, err := revisionInputs(node, latest, artifacts)
 	if err != nil {
 		return err
@@ -1056,6 +1146,39 @@ func validateBoundedRevision(
 	return nil
 }
 
+func validateAuthorDirectedRevision(output agentdomain.TaskOutput, original string, directive agentdomain.RevisionDirective) error {
+	var revised string
+	var changes []agentdomain.RevisionChange
+	switch value := output.(type) {
+	case *agentdomain.ReviseDraftOutput:
+		revised, changes = value.Body, value.Changes
+	case *agentdomain.ReviseBlueprintOutput:
+		encoded, err := json.Marshal(value.Blueprint)
+		if err != nil {
+			return err
+		}
+		revised, changes = string(encoded), value.Changes
+	default:
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	targets := make(map[string]struct{}, len(directive.TargetRefs))
+	for _, target := range directive.TargetRefs {
+		targets[target] = struct{}{}
+	}
+	expected := original
+	for _, change := range changes {
+		if _, allowed := targets[change.TargetRef]; !allowed || change.FindingID != "" ||
+			!strings.Contains(expected, change.OriginalText) || !strings.Contains(revised, change.RevisedText) {
+			return agentdomain.ErrInvalidRevisionDirective
+		}
+		expected = strings.Replace(expected, change.OriginalText, change.RevisedText, 1)
+	}
+	if expected != revised {
+		return errors.New("author revision changed content outside target refs")
+	}
+	return nil
+}
+
 func validateResolutionCoverage(findings []agentdomain.ReviewFinding, resolutions []agentdomain.FindingResolution) error {
 	want := make(map[string]struct{}, len(findings))
 	for _, finding := range findings {
@@ -1073,7 +1196,8 @@ func validateResolutionCoverage(findings []agentdomain.ReviewFinding, resolution
 }
 
 func revisionInputs(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (string, string, error) {
-	var candidate, review string
+	var candidate string
+	reviews := make([]string, 0)
 	for _, selector := range node.InputSelectors {
 		if !strings.HasPrefix(selector, "node:") {
 			continue
@@ -1087,7 +1211,7 @@ func revisionInputs(node FrozenNode, latest map[string]agentdomain.RunStep, arti
 			return "", "", fmt.Errorf("missing upstream artifact %s", step.PrimaryArtifactID)
 		}
 		if step.Capability == agentdomain.CapabilityContinuityReview || step.Capability == agentdomain.CapabilityContentReview || step.Capability == agentdomain.CapabilityStyleReview {
-			review = artifact.Content
+			reviews = append(reviews, artifact.Content)
 		} else {
 			candidate = artifact.Content
 		}
@@ -1095,10 +1219,48 @@ func revisionInputs(node FrozenNode, latest map[string]agentdomain.RunStep, arti
 	if candidate == "" {
 		return "", "", errors.New("missing review candidate")
 	}
-	if node.Capability == agentdomain.CapabilityBoundedRevision && review == "" {
+	if node.Capability == agentdomain.CapabilityBoundedRevision && len(reviews) == 0 {
 		return "", "", errors.New("missing structured review")
 	}
+	review, err := mergeReviewContents(reviews)
+	if err != nil {
+		return "", "", err
+	}
 	return candidate, review, nil
+}
+
+func mergeReviewContents(contents []string) (string, error) {
+	if len(contents) == 1 {
+		return contents[0], nil
+	}
+	groups := make([][]agentdomain.ReviewFinding, 0, len(contents))
+	quality := agentdomain.QualityPassed
+	for _, content := range contents {
+		decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskReviewBundle, []byte(content))
+		if err != nil {
+			return "", err
+		}
+		review := decoded.(*agentdomain.ReviewBundleOutput)
+		groups = append(groups, review.Findings)
+		if review.QualityStatus == agentdomain.QualityBlocked || quality != agentdomain.QualityBlocked && review.QualityStatus == agentdomain.QualityNeedsReview {
+			quality = review.QualityStatus
+		}
+	}
+	merged, err := agentdomain.MergeFindings(groups...)
+	if err != nil {
+		return "", err
+	}
+	if len(merged.Findings) == 0 {
+		quality = agentdomain.QualityPassed
+	} else if quality == agentdomain.QualityPassed {
+		quality = agentdomain.QualityNeedsReview
+	}
+	result := agentdomain.ReviewBundleOutput{QualityStatus: quality, Summary: fmt.Sprintf("确定性合并 %d 组审阅，发现 %d 个问题、%d 组冲突。", len(contents), len(merged.Findings), len(merged.Conflicts)), Findings: merged.Findings}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
 }
 
 func artifactKind(capability agentdomain.Capability) agentdomain.ArtifactKind {

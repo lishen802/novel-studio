@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chapter_goal", "opening_hook", "ending_hook", "scenes", "required_anchors", "forbidden_reveals", "improvisation_bounds", "canonical_source_refs", "creative_suggestions"],
+  "properties": {
+    "chapter_goal": {"type": "string", "minLength": 1},
+    "opening_hook": {"type": "string", "minLength": 1},
+    "ending_hook": {"type": "string", "minLength": 1},
+    "required_anchors": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "forbidden_reveals": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "improvisation_bounds": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "canonical_source_refs": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "creative_suggestions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "scenes": {
+      "type": "array", "minItems": 1, "maxItems": 50,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "goal", "conflict", "outcome", "pov", "desire", "obstacle", "information_release", "state_change"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1}, "goal": {"type": "string", "minLength": 1},
+          "conflict": {"type": "string", "minLength": 1}, "outcome": {"type": "string", "minLength": 1},
+          "pov": {"type": "string", "minLength": 1}, "desire": {"type": "string", "minLength": 1},
+          "obstacle": {"type": "string", "minLength": 1}, "information_release": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "state_change": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

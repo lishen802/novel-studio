@@ -36,6 +36,11 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	legacyHashes := map[string]string{
+		BaselineWorkflowID:         "d3b99323219a347153d613743dad46e50f5dfe7f060c8b531464b61c845f2b5b",
+		QualityChapterWorkflowID:   "8cd791a01ce61989c61f4c4f057cb040cd0f6d1e28f06ef116e5022285582a68",
+		QualityBlueprintWorkflowID: "2ae580fe57ef8ad6960717925b098c545359a419c8b0406d8533d25410fadeba",
+	}
 	cases := []struct {
 		id      string
 		version int
@@ -44,6 +49,8 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{BaselineWorkflowID, BaselineWorkflowVersion, []string{"write"}},
 		{QualityChapterWorkflowID, QualityChapterWorkflowVersion, []string{"plan", "draft", "review", "revision"}},
 		{QualityBlueprintWorkflowID, QualityBlueprintWorkflowVersion, []string{"blueprint", "review", "revision"}},
+		{EnhancedChapterWorkflowID, EnhancedChapterWorkflowVersion, []string{"director", "draft", "review", "revision"}},
+		{SplitReviewWorkflowID, SplitReviewWorkflowVersion, []string{"director", "draft", "content", "continuity", "style", "revision"}},
 	}
 	for _, test := range cases {
 		compiled, compileErr := agentkernel.Compile(context.Background(), agentkernel.Registries{
@@ -52,12 +59,18 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		if compileErr != nil {
 			t.Fatalf("compile %s: %v", test.id, compileErr)
 		}
+		if want, ok := legacyHashes[test.id]; ok && compiled.Workflow.Hash != want {
+			t.Fatalf("%s hash = %s, want immutable v1 hash %s", test.id, compiled.Workflow.Hash, want)
+		}
 		if len(compiled.Nodes) != len(test.nodes) {
 			t.Fatalf("%s nodes: %#v", test.id, compiled.Nodes)
 		}
 		for index, node := range compiled.Nodes {
 			if node.ID != test.nodes[index] {
 				t.Fatalf("%s node %d = %s, want %s", test.id, index, node.ID, test.nodes[index])
+			}
+			if node.PublicStageID == "" {
+				t.Fatalf("%s node %s has no public stage", test.id, node.ID)
 			}
 		}
 	}
@@ -77,5 +90,28 @@ func TestRegistryRejectsContentHashMismatch(t *testing.T) {
 	_, err := New(nil, nil, []ports.SchemaAsset{{Binding: binding, JSON: []byte(`{"type":"object"}`)}}, nil)
 	if err == nil {
 		t.Fatal("expected content hash mismatch")
+	}
+}
+
+func TestBuiltinRegistersAuthorRevisionContracts(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contract := range []struct {
+		prompt string
+		schema string
+	}{
+		{prompt: "author_revise_draft.prompt", schema: "author_revise_draft.schema"},
+		{prompt: "author_revise_blueprint.prompt", schema: "author_revise_blueprint.schema"},
+	} {
+		prompt, promptErr := registry.Prompt(context.Background(), contract.prompt, 1)
+		if promptErr != nil || len(prompt.Variables) != 4 {
+			t.Fatalf("prompt %s: %+v, %v", contract.prompt, prompt, promptErr)
+		}
+		schema, schemaErr := registry.Schema(context.Background(), contract.schema, 1)
+		if schemaErr != nil || len(schema.JSON) == 0 {
+			t.Fatalf("schema %s: %v", contract.schema, schemaErr)
+		}
 	}
 }

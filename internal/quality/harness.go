@@ -126,16 +126,20 @@ const (
 )
 
 type HarnessCandidateMetrics struct {
-	GatePassed     bool  `json:"gate_passed"`
-	Blockers       int   `json:"blockers"`
-	Majors         int   `json:"majors"`
-	Minors         int   `json:"minors"`
-	Resolved       int   `json:"resolved"`
-	InputTokens    int   `json:"input_tokens"`
-	OutputTokens   int   `json:"output_tokens"`
-	Calls          int   `json:"calls"`
-	DurationMillis int64 `json:"duration_millis"`
-	Retries        int   `json:"retries"`
+	GatePassed                  bool  `json:"gate_passed"`
+	Blockers                    int   `json:"blockers"`
+	Majors                      int   `json:"majors"`
+	Minors                      int   `json:"minors"`
+	Resolved                    int   `json:"resolved"`
+	InputTokens                 int   `json:"input_tokens"`
+	OutputTokens                int   `json:"output_tokens"`
+	Calls                       int   `json:"calls"`
+	DurationMillis              int64 `json:"duration_millis"`
+	Retries                     int   `json:"retries"`
+	DirectorProtocolPassed      bool  `json:"director_protocol_passed"`
+	ProfessionalConstraintsUsed int   `json:"professional_constraints_used"`
+	ReviewIndependencePassed    bool  `json:"review_independence_passed"`
+	MergeConflicts              int   `json:"merge_conflicts"`
 }
 
 type HarnessCandidate struct {
@@ -288,19 +292,23 @@ type HarnessReport struct {
 }
 
 type HarnessCandidateReport struct {
-	Kind           HarnessCandidateKind `json:"kind"`
-	ContentSHA256  string               `json:"content_sha256"`
-	RuneCount      int                  `json:"rune_count"`
-	GatePassed     bool                 `json:"gate_passed"`
-	Blockers       int                  `json:"blockers"`
-	Majors         int                  `json:"majors"`
-	Minors         int                  `json:"minors"`
-	Resolved       int                  `json:"resolved"`
-	InputTokens    int                  `json:"input_tokens"`
-	OutputTokens   int                  `json:"output_tokens"`
-	Calls          int                  `json:"calls"`
-	DurationMillis int64                `json:"duration_millis"`
-	Retries        int                  `json:"retries"`
+	Kind                        HarnessCandidateKind `json:"kind"`
+	ContentSHA256               string               `json:"content_sha256"`
+	RuneCount                   int                  `json:"rune_count"`
+	GatePassed                  bool                 `json:"gate_passed"`
+	Blockers                    int                  `json:"blockers"`
+	Majors                      int                  `json:"majors"`
+	Minors                      int                  `json:"minors"`
+	Resolved                    int                  `json:"resolved"`
+	InputTokens                 int                  `json:"input_tokens"`
+	OutputTokens                int                  `json:"output_tokens"`
+	Calls                       int                  `json:"calls"`
+	DurationMillis              int64                `json:"duration_millis"`
+	Retries                     int                  `json:"retries"`
+	DirectorProtocolPassed      bool                 `json:"director_protocol_passed"`
+	ProfessionalConstraintsUsed int                  `json:"professional_constraints_used"`
+	ReviewIndependencePassed    bool                 `json:"review_independence_passed"`
+	MergeConflicts              int                  `json:"merge_conflicts"`
 }
 
 type HarnessCaseReport struct {
@@ -484,7 +492,11 @@ func buildHarnessReport(run HarnessRun, results []HarnessCaseResult, generatedAt
 				GatePassed: candidate.Metrics.GatePassed, Blockers: candidate.Metrics.Blockers, Majors: candidate.Metrics.Majors,
 				Minors: candidate.Metrics.Minors, Resolved: candidate.Metrics.Resolved, InputTokens: candidate.Metrics.InputTokens,
 				OutputTokens: candidate.Metrics.OutputTokens, Calls: candidate.Metrics.Calls, DurationMillis: candidate.Metrics.DurationMillis,
-				Retries: candidate.Metrics.Retries,
+				Retries:                     candidate.Metrics.Retries,
+				DirectorProtocolPassed:      candidate.Metrics.DirectorProtocolPassed,
+				ProfessionalConstraintsUsed: candidate.Metrics.ProfessionalConstraintsUsed,
+				ReviewIndependencePassed:    candidate.Metrics.ReviewIndependencePassed,
+				MergeConflicts:              candidate.Metrics.MergeConflicts,
 			})
 		}
 		if baseline, exists := byKind[CandidateBaseline]; exists {

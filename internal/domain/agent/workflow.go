@@ -25,8 +25,51 @@ const (
 	OutputFindings       OutputKind = "findings"
 )
 
+type PublicStageID string
+
+const (
+	PublicStageContextPreparing   PublicStageID = "context_preparing"
+	PublicStageStoryPlanning      PublicStageID = "story_planning"
+	PublicStageChapterDirecting   PublicStageID = "chapter_directing"
+	PublicStageProfessionalReview PublicStageID = "professional_analysis"
+	PublicStageProseWriting       PublicStageID = "prose_writing"
+	PublicStageIndependentReview  PublicStageID = "independent_review"
+	PublicStageBoundedRevision    PublicStageID = "bounded_revision"
+	PublicStageCandidateReady     PublicStageID = "candidate_ready"
+)
+
+func ValidPublicStageID(stage PublicStageID) bool {
+	switch stage {
+	case PublicStageContextPreparing, PublicStageStoryPlanning, PublicStageChapterDirecting,
+		PublicStageProfessionalReview, PublicStageProseWriting, PublicStageIndependentReview,
+		PublicStageBoundedRevision, PublicStageCandidateReady:
+		return true
+	default:
+		return false
+	}
+}
+
+// DefaultPublicStageForCapability 为未携带公开阶段的历史工作流提供确定性兼容映射。
+func DefaultPublicStageForCapability(capability Capability) PublicStageID {
+	switch capability {
+	case CapabilityStoryArchitect:
+		return PublicStageStoryPlanning
+	case CapabilityChapterPlanner:
+		return PublicStageChapterDirecting
+	case CapabilityProseWriter:
+		return PublicStageProseWriting
+	case CapabilityContinuityReview, CapabilityContentReview, CapabilityStyleReview:
+		return PublicStageIndependentReview
+	case CapabilityBoundedRevision:
+		return PublicStageBoundedRevision
+	default:
+		return ""
+	}
+}
+
 type WorkflowNode struct {
 	ID                  string         `json:"id"`
+	PublicStageID       PublicStageID  `json:"public_stage_id,omitempty"`
 	Capability          Capability     `json:"capability"`
 	RoleSlot            Role           `json:"role_slot"`
 	Prompt              VersionBinding `json:"prompt"`
@@ -75,7 +118,7 @@ func (definition WorkflowDefinition) Validate() error {
 	}
 	nodes := make(map[string]WorkflowNode, len(definition.Nodes))
 	for _, node := range definition.Nodes {
-		if blank(node.ID) || !ValidCapability(node.Capability) || !ValidRoleForCapability(node.Capability, node.RoleSlot) ||
+		if blank(node.ID) || (node.PublicStageID != "" && !ValidPublicStageID(node.PublicStageID)) || !ValidCapability(node.Capability) || !ValidRoleForCapability(node.Capability, node.RoleSlot) ||
 			node.MaxOutputTokens < 1 || !validOutputKind(node.OutputKind) ||
 			(node.FailurePolicy != FailureFailRun && node.FailurePolicy != FailureSkipNode) {
 			return ErrInvalidWorkflow

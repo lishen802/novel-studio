@@ -116,7 +116,17 @@ type JobSnapshot struct {
 	PendingAction              string
 	TerminalInfo               string
 	StepStates                 []JobStepState
+	PublicProjection           JobPublicProjection
 	UpdatedAt                  time.Time
+}
+
+type JobPublicProjection struct {
+	StageID            PublicStageID `json:"stageId,omitempty"`
+	CompletedSteps     int           `json:"completedSteps"`
+	TotalSteps         int           `json:"totalSteps"`
+	QualityStatus      QualityStatus `json:"qualityStatus,omitempty"`
+	Recoverable        bool          `json:"recoverable"`
+	CandidateAvailable bool          `json:"candidateAvailable"`
 }
 
 // JobStepState is the compact provider-neutral step projection persisted in a

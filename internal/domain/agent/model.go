@@ -245,6 +245,7 @@ type RunStepSpec struct {
 
 	// R3 工作流节点冻结字段；旧三步运行保持零值。
 	NodeID           string
+	PublicStageID    PublicStageID
 	Capability       Capability
 	PromptBinding    VersionBinding
 	SchemaBinding    VersionBinding
@@ -310,6 +311,7 @@ type RunStep struct {
 
 	// R3 智能体内核冻结字段。旧运行仅有 NodeID 与 Attempt，其余字段保持空值。
 	NodeID            string
+	PublicStageID     PublicStageID
 	Capability        Capability
 	Attempt           int
 	PromptBinding     VersionBinding
@@ -524,7 +526,7 @@ func NewWorkflowRun(
 			CredentialRef: spec.CredentialRef, Model: spec.Model,
 			MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
 		}
-		if strings.TrimSpace(spec.ID) == "" || nodeID == "" || !validRole(spec.Role) ||
+		if strings.TrimSpace(spec.ID) == "" || nodeID == "" || !ValidPublicStageID(spec.PublicStageID) || !validRole(spec.Role) ||
 			!ValidCapability(spec.Capability) || !ValidRoleForCapability(spec.Capability, spec.Role) ||
 			strings.TrimSpace(spec.CreativeProfileID) == "" || spec.CreativeProfileVersion < 1 ||
 			strings.TrimSpace(spec.ProviderConnectionID) == "" || strings.TrimSpace(spec.ProviderName) == "" ||
@@ -544,7 +546,7 @@ func NewWorkflowRun(
 			ProviderConnectionID: spec.ProviderConnectionID, ProviderName: spec.ProviderName,
 			ProviderKind: spec.ProviderKind, BaseURL: spec.BaseURL, CredentialRef: spec.CredentialRef,
 			Model: spec.Model, MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
-			NodeID: nodeID, Capability: spec.Capability, Attempt: 1,
+			NodeID: nodeID, PublicStageID: spec.PublicStageID, Capability: spec.Capability, Attempt: 1,
 			PromptBinding: spec.PromptBinding, SchemaBinding: spec.SchemaBinding,
 			AssemblerID: spec.AssemblerID, AssemblerVersion: spec.AssemblerVersion,
 			InputDigest: spec.InputDigest, CreatedAt: now, UpdatedAt: now,

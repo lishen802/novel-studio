@@ -146,6 +146,7 @@ func (finding ReviewFindingRecord) Validate() error {
 type RunBundle struct {
 	Run       Run
 	Artifacts []Artifact
+	Relations []ArtifactRelationRecord
 	Manifests []ContextManifest
 	Findings  []ReviewFindingRecord
 }
@@ -154,8 +155,38 @@ type RunBundle struct {
 type StepBundle struct {
 	Step      RunStep
 	Artifacts []Artifact
+	Relations []ArtifactRelationRecord
 	Manifests []ContextManifest
 	Findings  []ReviewFindingRecord
+}
+
+type ArtifactRelation string
+
+const (
+	ArtifactDerivedFrom ArtifactRelation = "derived_from"
+	ArtifactRevises     ArtifactRelation = "revises"
+	ArtifactSupersedes  ArtifactRelation = "supersedes"
+)
+
+type ArtifactRelationRecord struct {
+	ArtifactID        string
+	Relation          ArtifactRelation
+	RelatedArtifactID string
+	BaseDigest        string
+	CreatedAt         time.Time
+}
+
+func (relation ArtifactRelationRecord) Validate() error {
+	if blank(relation.ArtifactID) || blank(relation.RelatedArtifactID) || relation.ArtifactID == relation.RelatedArtifactID ||
+		!ValidSHA256(relation.BaseDigest) || relation.CreatedAt.IsZero() {
+		return ErrInvalidAgentPersistence
+	}
+	switch relation.Relation {
+	case ArtifactDerivedFrom, ArtifactRevises, ArtifactSupersedes:
+		return nil
+	default:
+		return ErrInvalidAgentPersistence
+	}
 }
 
 func validManifestSourceKind(kind ManifestSourceKind) bool {

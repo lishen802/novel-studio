@@ -1,0 +1,8 @@
+你只执行作者已确认的定向正文修订，输出独立候选，不写入正式正文。
+
+作者任务：{{.Task}}
+冻结上下文：{{.Context}}
+版本化修订指令：{{.Directive}}
+基线候选：{{.Draft}}
+
+只能修改 target_refs 指向的内容；preserve_refs 和其他内容必须保持不变。每项 change 必须携带 target_ref 与精确前后文本。

@@ -28,6 +28,13 @@ func TestAgentKernelBundlePersistsAndReconstructsAtomically(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateAgentRunBundle: %v", err)
 	}
+	snapshot, err := store.JobSnapshot(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.PublicProjection.StageID != agentdomain.PublicStageChapterDirecting || snapshot.PublicProjection.TotalSteps != len(run.Steps) {
+		t.Fatalf("public projection = %+v", snapshot.PublicProjection)
+	}
 
 	loaded, err := store.AgentRun(ctx, run.ID)
 	if err != nil {
@@ -47,6 +54,27 @@ func TestAgentKernelBundlePersistsAndReconstructsAtomically(t *testing.T) {
 	findings, err := store.ListAgentReviewFindings(ctx, run.ID)
 	if err != nil || len(findings) != 1 || findings[0].Message != finding.Message {
 		t.Fatalf("findings = %#v, error %v", findings, err)
+	}
+}
+
+func TestArtifactRelationsPreserveCandidateLineage(t *testing.T) {
+	ctx := context.Background()
+	store, project, chapter := createStoreWithChapter(t)
+	defer store.Close()
+	now := time.Unix(1_500, 0).UTC()
+	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
+	base := testAgentArtifact("artifact-base", run.ID, run.Steps[0].ID, agentdomain.ArtifactDraft, "原稿", now)
+	revision := testAgentArtifact("artifact-revision", run.ID, run.Steps[0].ID, agentdomain.ArtifactRevision, "修订稿", now.Add(time.Second))
+	relation := agentdomain.ArtifactRelationRecord{
+		ArtifactID: revision.ID, Relation: agentdomain.ArtifactRevises,
+		RelatedArtifactID: base.ID, BaseDigest: base.SHA256, CreatedAt: now.Add(time.Second),
+	}
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run, Artifacts: []agentdomain.Artifact{base, revision}, Relations: []agentdomain.ArtifactRelationRecord{relation}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.ListAgentArtifactRelations(ctx, run.ID)
+	if err != nil || len(loaded) != 1 || loaded[0].RelatedArtifactID != base.ID || loaded[0].BaseDigest != base.SHA256 {
+		t.Fatalf("relations = %+v, err = %v", loaded, err)
 	}
 }
 
@@ -281,8 +309,14 @@ func newR3PersistenceRun(t *testing.T, projectID, chapterID string, revision int
 		agentdomain.CapabilityProseWriter,
 		agentdomain.CapabilityContinuityReview,
 	}
+	stages := []agentdomain.PublicStageID{
+		agentdomain.PublicStageChapterDirecting,
+		agentdomain.PublicStageProseWriting,
+		agentdomain.PublicStageIndependentReview,
+	}
 	for index := range run.Steps {
 		run.Steps[index].NodeID = "node-" + run.Steps[index].ID
+		run.Steps[index].PublicStageID = stages[index]
 		run.Steps[index].Capability = capabilities[index]
 		run.Steps[index].Attempt = 1
 		run.Steps[index].PromptBinding = agentdomain.VersionBinding{ID: "prompt-" + run.Steps[index].ID, Version: 1, Hash: hash}
