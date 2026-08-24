@@ -43,9 +43,9 @@ export function projectRouteForStatus(status: ProjectStatus): string {
   }
 }
 
-/** 首页、应用设置和导入入口不加载项目侧栏和项目级 AI 面板。 */
+/** 应用级工作区不加载项目侧栏和项目级 AI 面板。 */
 export function isApplicationWorkspace(pathname: string): boolean {
-  return pathname === '/' || pathname === '/settings' || pathname === '/import';
+  return pathname === '/' || pathname === '/settings' || pathname === '/import' || pathname === '/lab';
 }
 
 /** 整书档案必须整包审阅完毕且不存在阻断冲突才能确认入库。 */

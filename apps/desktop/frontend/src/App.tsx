@@ -8,6 +8,7 @@ import Import from './pages/Import';
 import Versions from './pages/Versions';
 import Settings from './pages/Settings';
 import ProjectSettings from './pages/ProjectSettings';
+import Lab from './pages/Lab';
 import ArchiveLayout from './pages/archive/ArchiveLayout';
 import Outline from './pages/archive/Outline';
 import Structure from './pages/archive/Structure';
@@ -28,6 +29,7 @@ function App() {
         <Route path="versions" element={<Versions />} />
         <Route path="settings" element={<Settings />} />
         <Route path="project-settings" element={<ProjectSettings />} />
+        <Route path="lab" element={<Lab />} />
         <Route path="archive" element={<ArchiveLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
           <Route path="outline" element={<Outline />} />

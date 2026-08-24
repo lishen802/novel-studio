@@ -18,6 +18,7 @@ var (
 	ErrInvalidHarnessDataset = errors.New("invalid harness dataset")
 	ErrDatasetHashMismatch   = errors.New("harness dataset hash mismatch")
 	ErrInvalidHarnessRun     = errors.New("invalid harness run")
+	ErrHarnessRatingExists   = errors.New("harness rating already exists")
 	ErrSensitiveReportData   = errors.New("harness report contains sensitive data")
 )
 
@@ -151,8 +152,10 @@ type HarnessCandidate struct {
 }
 
 type AnonymousHarnessCandidate struct {
-	Slot    string `json:"slot"`
-	Content string `json:"content"`
+	Slot              string                  `json:"slot"`
+	Content           string                  `json:"content"`
+	Metrics           HarnessCandidateMetrics `json:"metrics"`
+	QualityReportJSON string                  `json:"quality_report_json,omitempty"`
 }
 
 // AnonymizeCandidates 由运行种子和 case ID 生成稳定匿名顺序，返回值不携带真实候选身份。
@@ -163,7 +166,10 @@ func AnonymizeCandidates(caseID string, seed int64, candidates []HarnessCandidat
 	}
 	projection := make([]AnonymousHarnessCandidate, 0, len(ordered))
 	for index, candidate := range ordered {
-		projection = append(projection, AnonymousHarnessCandidate{Slot: fmt.Sprintf("候选-%d", index+1), Content: candidate.Content})
+		projection = append(projection, AnonymousHarnessCandidate{
+			Slot: fmt.Sprintf("候选-%d", index+1), Content: candidate.Content,
+			QualityReportJSON: candidate.QualityReportJSON,
+		})
 	}
 	return projection, nil
 }
@@ -194,21 +200,37 @@ func anonymousCandidateOrder(caseID string, seed int64, candidates []HarnessCand
 }
 
 type HarnessRunBinding struct {
-	ProfileID        string `json:"profile_id"`
-	ProfileVersion   int64  `json:"profile_version"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	PromptVersion    string `json:"prompt_version"`
-	PromptSHA256     string `json:"prompt_sha256"`
-	SchemaVersion    string `json:"schema_version"`
-	SchemaSHA256     string `json:"schema_sha256"`
-	WorkflowVersion  string `json:"workflow_version"`
-	WorkflowSHA256   string `json:"workflow_sha256"`
-	AssemblerVersion string `json:"assembler_version"`
-	AssemblerSHA256  string `json:"assembler_sha256"`
+	VariantID        string               `json:"variant_id,omitempty"`
+	WorkflowID       string               `json:"workflow_id,omitempty"`
+	WorkflowRevision int                  `json:"workflow_revision,omitempty"`
+	ProfileID        string               `json:"profile_id"`
+	ProfileVersion   int64                `json:"profile_version"`
+	Provider         string               `json:"provider"`
+	Model            string               `json:"model"`
+	PromptVersion    string               `json:"prompt_version"`
+	PromptSHA256     string               `json:"prompt_sha256"`
+	SchemaVersion    string               `json:"schema_version"`
+	SchemaSHA256     string               `json:"schema_sha256"`
+	WorkflowVersion  string               `json:"workflow_version"`
+	WorkflowSHA256   string               `json:"workflow_sha256"`
+	AssemblerVersion string               `json:"assembler_version"`
+	AssemblerSHA256  string               `json:"assembler_sha256"`
+	Roles            []HarnessRoleBinding `json:"roles,omitempty"`
 }
 
+type HarnessRoleBinding struct {
+	Role     string `json:"role"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// Validate 校验运行冻结绑定；公开方法供应用层在费用确认前复用相同规则。
+func (binding HarnessRunBinding) Validate() error { return binding.validate() }
+
 func (binding HarnessRunBinding) validate() error {
+	if (blankHarness(binding.WorkflowID) && binding.WorkflowRevision != 0) || (!blankHarness(binding.WorkflowID) && binding.WorkflowRevision < 1) {
+		return ErrInvalidHarnessRun
+	}
 	if blankHarness(binding.ProfileID) || binding.ProfileVersion < 1 || blankHarness(binding.Provider) || blankHarness(binding.Model) ||
 		blankHarness(binding.PromptVersion) || blankHarness(binding.SchemaVersion) || blankHarness(binding.WorkflowVersion) || blankHarness(binding.AssemblerVersion) {
 		return ErrInvalidHarnessRun
@@ -221,15 +243,28 @@ func (binding HarnessRunBinding) validate() error {
 			return ErrInvalidHarnessRun
 		}
 	}
+	seenRoles := make(map[string]struct{}, len(binding.Roles))
+	for _, role := range binding.Roles {
+		if blankHarness(role.Role) || blankHarness(role.Provider) || blankHarness(role.Model) {
+			return ErrInvalidHarnessRun
+		}
+		if _, exists := seenRoles[role.Role]; exists {
+			return ErrInvalidHarnessRun
+		}
+		seenRoles[role.Role] = struct{}{}
+	}
 	return nil
 }
 
 type HarnessRunStatus string
 
 const (
-	HarnessRunRunning   HarnessRunStatus = "running"
-	HarnessRunCompleted HarnessRunStatus = "completed"
-	HarnessRunFailed    HarnessRunStatus = "failed"
+	HarnessRunQueued      HarnessRunStatus = "queued"
+	HarnessRunRunning     HarnessRunStatus = "running"
+	HarnessRunRecoverable HarnessRunStatus = "recoverable"
+	HarnessRunCompleted   HarnessRunStatus = "completed"
+	HarnessRunFailed      HarnessRunStatus = "failed"
+	HarnessRunCancelled   HarnessRunStatus = "cancelled"
 )
 
 type HarnessRun struct {
@@ -242,9 +277,78 @@ type HarnessRun struct {
 	Binding        HarnessRunBinding `json:"binding"`
 	CaseIDs        []string          `json:"case_ids"`
 	Status         HarnessRunStatus  `json:"status"`
+	RetryOf        string            `json:"retry_of,omitempty"`
 	StartedAt      time.Time         `json:"started_at"`
 	CompletedAt    *time.Time        `json:"completed_at,omitempty"`
 	Failure        string            `json:"failure,omitempty"`
+	CurrentCaseID  string            `json:"current_case_id,omitempty"`
+	PublicStageID  string            `json:"public_stage_id,omitempty"`
+	InputTokens    int               `json:"input_tokens"`
+	OutputTokens   int               `json:"output_tokens"`
+	Calls          int               `json:"calls"`
+}
+
+type HarnessAcceptance string
+
+const (
+	HarnessAcceptDirect  HarnessAcceptance = "direct"
+	HarnessAcceptMinor   HarnessAcceptance = "minor_changes"
+	HarnessAcceptMajor   HarnessAcceptance = "major_changes"
+	HarnessAcceptRewrite HarnessAcceptance = "rewrite"
+)
+
+type HarnessCandidateRating struct {
+	Slot       string            `json:"slot"`
+	Scores     map[string]int    `json:"scores"`
+	Acceptance HarnessAcceptance `json:"acceptance"`
+	Note       string            `json:"note,omitempty"`
+}
+
+type HarnessRatingSubmission struct {
+	ID           string                   `json:"id"`
+	RunID        string                   `json:"run_id"`
+	CaseID       string                   `json:"case_id"`
+	LocalRaterID string                   `json:"local_rater_id"`
+	Ratings      []HarnessCandidateRating `json:"ratings"`
+	CreatedAt    time.Time                `json:"created_at"`
+}
+
+// Validate 校验一次盲评提交覆盖全部匿名候选，并且每个评分维度都完整有效。
+func (submission HarnessRatingSubmission) Validate(expectedSlots, dimensions []string) error {
+	if blankHarness(submission.ID) || blankHarness(submission.RunID) || blankHarness(submission.CaseID) ||
+		blankHarness(submission.LocalRaterID) || submission.CreatedAt.IsZero() || len(submission.Ratings) != len(expectedSlots) || len(dimensions) == 0 {
+		return ErrInvalidHarnessRun
+	}
+	expected := make(map[string]struct{}, len(expectedSlots))
+	for _, slot := range expectedSlots {
+		expected[slot] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(submission.Ratings))
+	for _, rating := range submission.Ratings {
+		if _, ok := expected[rating.Slot]; !ok {
+			return ErrInvalidHarnessRun
+		}
+		if _, duplicate := seen[rating.Slot]; duplicate || !validHarnessAcceptance(rating.Acceptance) || len(rating.Scores) != len(dimensions) {
+			return ErrInvalidHarnessRun
+		}
+		seen[rating.Slot] = struct{}{}
+		for _, dimension := range dimensions {
+			score, ok := rating.Scores[dimension]
+			if !ok || score < 1 || score > 5 {
+				return ErrInvalidHarnessRun
+			}
+		}
+	}
+	return nil
+}
+
+func validHarnessAcceptance(value HarnessAcceptance) bool {
+	switch value {
+	case HarnessAcceptDirect, HarnessAcceptMinor, HarnessAcceptMajor, HarnessAcceptRewrite:
+		return true
+	default:
+		return false
+	}
 }
 
 type HarnessCaseResult struct {
@@ -377,70 +481,160 @@ type HarnessRunRequest struct {
 	Mode    HarnessMode
 	Seed    int64
 	Binding HarnessRunBinding
+	CaseIDs []string
+	RetryOf string
 }
 
 type HarnessExecutor interface {
 	Execute(context.Context, HarnessCase, HarnessRunBinding) ([]HarnessCandidate, error)
 }
 
+type HarnessExecutionProgress struct {
+	CaseID        string
+	PublicStageID string
+	InputTokens   int
+	OutputTokens  int
+	Calls         int
+}
+
+type HarnessProgressExecutor interface {
+	ExecuteWithProgress(context.Context, HarnessCase, HarnessRunBinding, func(HarnessExecutionProgress)) ([]HarnessCandidate, error)
+}
+
 type HarnessStore interface {
 	CreateRun(context.Context, HarnessRun) error
+	UpdateRun(context.Context, HarnessRun) error
 	SaveCaseResult(context.Context, HarnessCaseResult) error
 	CompleteRun(context.Context, HarnessRun, HarnessReport) error
+	GetRun(context.Context, string) (HarnessRun, error)
+	ListCaseResults(context.Context, string) ([]HarnessCaseResult, error)
 }
 
 type HarnessRunnerConfig struct {
-	Store    HarnessStore
-	Executor HarnessExecutor
-	Now      func() time.Time
-	NewID    func() string
+	Store     HarnessStore
+	Executor  HarnessExecutor
+	Now       func() time.Time
+	NewID     func() string
+	OnUpdated func(context.Context, HarnessRun)
 }
 
 type HarnessRunner struct {
-	store    HarnessStore
-	executor HarnessExecutor
-	now      func() time.Time
-	newID    func() string
+	store     HarnessStore
+	executor  HarnessExecutor
+	now       func() time.Time
+	newID     func() string
+	onUpdated func(context.Context, HarnessRun)
 }
 
 func NewHarnessRunner(config HarnessRunnerConfig) (*HarnessRunner, error) {
 	if config.Store == nil || config.Executor == nil || config.Now == nil || config.NewID == nil {
 		return nil, ErrInvalidHarnessRun
 	}
-	return &HarnessRunner{store: config.Store, executor: config.Executor, now: config.Now, newID: config.NewID}, nil
+	onUpdated := config.OnUpdated
+	if onUpdated == nil {
+		onUpdated = func(context.Context, HarnessRun) {}
+	}
+	return &HarnessRunner{store: config.Store, executor: config.Executor, now: config.Now, newID: config.NewID, onUpdated: onUpdated}, nil
 }
 
 // Run 冻结数据集与模型编排版本，逐 case 执行对照组并生成保留分组证据的报告。
 func (runner *HarnessRunner) Run(ctx context.Context, request HarnessRunRequest) (HarnessReport, error) {
-	if err := request.Dataset.Validate(); err != nil || request.Binding.validate() != nil || request.Mode != HarnessModeReduced && request.Mode != HarnessModeFull {
-		return HarnessReport{}, ErrInvalidHarnessRun
+	run, err := runner.Create(ctx, request)
+	if err != nil {
+		return HarnessReport{}, err
 	}
-	cases := selectHarnessCases(request.Dataset.Cases, request.Mode)
+	return runner.Execute(ctx, run.ID, request.Dataset)
+}
+
+// Create 冻结数据集、case、模型与工作流绑定，但不触发任何付费调用。
+func (runner *HarnessRunner) Create(ctx context.Context, request HarnessRunRequest) (HarnessRun, error) {
+	if err := request.Dataset.Validate(); err != nil || request.Binding.validate() != nil || request.Mode != HarnessModeReduced && request.Mode != HarnessModeFull {
+		return HarnessRun{}, ErrInvalidHarnessRun
+	}
+	cases := selectHarnessCases(request.Dataset.Cases, request.Mode, request.CaseIDs)
 	if len(cases) == 0 {
-		return HarnessReport{}, ErrInvalidHarnessRun
+		return HarnessRun{}, ErrInvalidHarnessRun
 	}
 	now := runner.now().UTC()
-	run := HarnessRun{ID: runner.newID(), DatasetID: request.Dataset.ID, DatasetVersion: request.Dataset.Version, DatasetSHA256: request.Dataset.SHA256, Mode: request.Mode, Seed: request.Seed, Binding: request.Binding, Status: HarnessRunRunning, StartedAt: now}
+	run := HarnessRun{ID: runner.newID(), DatasetID: request.Dataset.ID, DatasetVersion: request.Dataset.Version, DatasetSHA256: request.Dataset.SHA256, Mode: request.Mode, Seed: request.Seed, Binding: request.Binding, Status: HarnessRunQueued, RetryOf: strings.TrimSpace(request.RetryOf), StartedAt: now}
 	for _, item := range cases {
 		run.CaseIDs = append(run.CaseIDs, item.ID)
 	}
 	if blankHarness(run.ID) {
-		return HarnessReport{}, ErrInvalidHarnessRun
+		return HarnessRun{}, ErrInvalidHarnessRun
 	}
 	if err := runner.store.CreateRun(ctx, run); err != nil {
-		return HarnessReport{}, fmt.Errorf("create harness run: %w", err)
+		return HarnessRun{}, fmt.Errorf("create harness run: %w", err)
 	}
+	runner.onUpdated(ctx, run)
+	return run, nil
+}
 
-	results := make([]HarnessCaseResult, 0, len(cases))
-	for _, item := range cases {
-		candidates, err := runner.executor.Execute(ctx, item, request.Binding)
+// Execute 从持久化进度继续运行；已完成 case 不会再次调用 Provider。
+func (runner *HarnessRunner) Execute(ctx context.Context, runID string, dataset HarnessDataset) (HarnessReport, error) {
+	run, err := runner.store.GetRun(ctx, strings.TrimSpace(runID))
+	if err != nil || dataset.Validate() != nil || run.DatasetID != dataset.ID || run.DatasetVersion != dataset.Version || run.DatasetSHA256 != dataset.SHA256 || run.Status == HarnessRunCompleted {
+		return HarnessReport{}, ErrInvalidHarnessRun
+	}
+	caseByID := make(map[string]HarnessCase, len(dataset.Cases))
+	for _, item := range dataset.Cases {
+		caseByID[item.ID] = item
+	}
+	results, err := runner.store.ListCaseResults(ctx, run.ID)
+	if err != nil {
+		return HarnessReport{}, fmt.Errorf("load harness progress: %w", err)
+	}
+	completedCases := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		completedCases[result.CaseID] = struct{}{}
+	}
+	run.Status = HarnessRunRunning
+	run.CompletedAt = nil
+	run.Failure = ""
+	if err := runner.store.UpdateRun(ctx, run); err != nil {
+		return HarnessReport{}, fmt.Errorf("start harness run: %w", err)
+	}
+	runner.onUpdated(ctx, run)
+	for _, caseID := range run.CaseIDs {
+		if _, exists := completedCases[caseID]; exists {
+			continue
+		}
+		item, exists := caseByID[caseID]
+		if !exists {
+			return HarnessReport{}, ErrInvalidHarnessRun
+		}
+		if err := ctx.Err(); err != nil {
+			runner.stopRun(context.WithoutCancel(ctx), &run, HarnessRunCancelled, "运行已取消")
+			return HarnessReport{}, err
+		}
+		run.CurrentCaseID, run.PublicStageID = item.ID, "preparing"
+		_ = runner.store.UpdateRun(ctx, run)
+		runner.onUpdated(ctx, run)
+		var candidates []HarnessCandidate
+		completedInput, completedOutput, completedCalls := harnessUsage(results)
+		if executor, ok := runner.executor.(HarnessProgressExecutor); ok {
+			candidates, err = executor.ExecuteWithProgress(ctx, item, run.Binding, func(progress HarnessExecutionProgress) {
+				run.CurrentCaseID, run.PublicStageID = progress.CaseID, progress.PublicStageID
+				run.InputTokens, run.OutputTokens, run.Calls = completedInput+progress.InputTokens, completedOutput+progress.OutputTokens, completedCalls+progress.Calls
+				_ = runner.store.UpdateRun(context.WithoutCancel(ctx), run)
+				runner.onUpdated(ctx, run)
+			})
+		} else {
+			candidates, err = runner.executor.Execute(ctx, item, run.Binding)
+		}
 		if err != nil {
+			status := HarnessRunFailed
+			if errors.Is(err, context.Canceled) {
+				status = HarnessRunCancelled
+			}
+			runner.stopRun(context.WithoutCancel(ctx), &run, status, "case 执行失败")
 			return HarnessReport{}, fmt.Errorf("execute harness case %s: %w", item.ID, err)
 		}
 		if err := validateCandidates(item.TaskKind, candidates); err != nil {
+			runner.stopRun(context.WithoutCancel(ctx), &run, HarnessRunFailed, "候选验证失败")
 			return HarnessReport{}, fmt.Errorf("validate harness case %s: %w", item.ID, err)
 		}
-		ordered, err := anonymousCandidateOrder(item.ID, request.Seed, candidates)
+		ordered, err := anonymousCandidateOrder(item.ID, run.Seed, candidates)
 		if err != nil {
 			return HarnessReport{}, err
 		}
@@ -449,19 +643,48 @@ func (runner *HarnessRunner) Run(ctx context.Context, request HarnessRunRequest)
 			result.AnonymousOrder = append(result.AnonymousOrder, string(candidate.Kind))
 		}
 		if err := runner.store.SaveCaseResult(ctx, result); err != nil {
+			runner.stopRun(context.WithoutCancel(ctx), &run, HarnessRunFailed, "case 保存失败")
 			return HarnessReport{}, fmt.Errorf("save harness case %s: %w", item.ID, err)
 		}
 		results = append(results, result)
+		run.InputTokens, run.OutputTokens, run.Calls = harnessUsage(results)
+		run.PublicStageID = "case_completed"
+		_ = runner.store.UpdateRun(context.WithoutCancel(ctx), run)
+		runner.onUpdated(ctx, run)
 	}
 
 	completed := runner.now().UTC()
 	run.Status = HarnessRunCompleted
+	run.CurrentCaseID = ""
+	run.PublicStageID = "candidate_ready"
 	run.CompletedAt = &completed
 	report := buildHarnessReport(run, results, completed)
 	if err := runner.store.CompleteRun(ctx, run, report); err != nil {
 		return HarnessReport{}, fmt.Errorf("complete harness run: %w", err)
 	}
+	runner.onUpdated(ctx, run)
 	return report, nil
+}
+
+func harnessUsage(results []HarnessCaseResult) (int, int, int) {
+	var inputTokens, outputTokens, calls int
+	for _, result := range results {
+		for _, candidate := range result.Candidates {
+			inputTokens += candidate.Metrics.InputTokens
+			outputTokens += candidate.Metrics.OutputTokens
+			calls += candidate.Metrics.Calls
+		}
+	}
+	return inputTokens, outputTokens, calls
+}
+
+func (runner *HarnessRunner) stopRun(ctx context.Context, run *HarnessRun, status HarnessRunStatus, failure string) {
+	completed := runner.now().UTC()
+	run.Status = status
+	run.CompletedAt = &completed
+	run.Failure = failure
+	_ = runner.store.UpdateRun(ctx, *run)
+	runner.onUpdated(ctx, *run)
 }
 
 func buildHarnessReport(run HarnessRun, results []HarnessCaseResult, generatedAt time.Time) HarnessReport {
@@ -586,12 +809,27 @@ func CompareHarnessReports(base, candidate HarnessReport) (HarnessReportComparis
 	return comparison, nil
 }
 
-func selectHarnessCases(cases []HarnessCase, mode HarnessMode) []HarnessCase {
+func selectHarnessCases(cases []HarnessCase, mode HarnessMode, requested []string) []HarnessCase {
+	wanted := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil
+		}
+		wanted[id] = struct{}{}
+	}
 	selected := make([]HarnessCase, 0, len(cases))
 	for _, item := range cases {
-		if mode == HarnessModeFull || item.CIReduced {
+		_, explicitlyRequested := wanted[item.ID]
+		if len(wanted) > 0 && !explicitlyRequested {
+			continue
+		}
+		if mode == HarnessModeFull || item.CIReduced || explicitlyRequested {
 			selected = append(selected, item)
 		}
+	}
+	if len(wanted) > 0 && len(selected) != len(wanted) {
+		return nil
 	}
 	return selected
 }

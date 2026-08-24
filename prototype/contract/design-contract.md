@@ -143,6 +143,9 @@
 | 6  | Versions        | Versions & delivery: snapshots, export, manuscript                     | VersionTimeline, ExportActions          | —                                     |
 | 7  | Settings        | Application settings: model, plan, templates, appearance, advanced     | SettingsSidebar, Search, FormGroups     | /chapters or /                        |
 | 8  | ProjectSettings | Project-level settings only                                            | FormGroups                              | —                                     |
+| 9  | 智能体实验室    | 原创测试集、费用确认、运行观察、匿名盲评和回归报告                     | RunConfig, Observer, BlindRating, Report | /                                    |
+
+智能体实验室属于应用工作区，不渲染作品侧栏。候选在整组评分提交前只显示稳定匿名槽位，提交成功后才揭示来源和冻结绑定；所有状态都持续显示“不会写入作品正文或正式资产”。
 
 ### Stateful Views (embedded inside pages as needed)
 - NoModelConfig: settings prompt when no model is configured

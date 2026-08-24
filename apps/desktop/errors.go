@@ -9,6 +9,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/appsettings"
 	"github.com/lishen802/novel-studio/internal/application/appshell"
+	"github.com/lishen802/novel-studio/internal/application/creativeharness"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -24,6 +25,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
 	"github.com/lishen802/novel-studio/internal/platform/projectfs"
 	"github.com/lishen802/novel-studio/internal/providers"
+	"github.com/lishen802/novel-studio/internal/quality"
 )
 
 type desktopErrorCode string
@@ -103,6 +105,8 @@ const (
 	errorCredentialRollback      desktopErrorCode = "CREDENTIAL_ROLLBACK_FAILED"
 	errorCreativeProfileInvalid  desktopErrorCode = "CREATIVE_PROFILE_INVALID"
 	errorCreativeProfileMissing  desktopErrorCode = "CREATIVE_PROFILE_NOT_FOUND"
+	errorHarnessConfirmation     desktopErrorCode = "HARNESS_CONFIRMATION_REQUIRED"
+	errorHarnessRatingExists     desktopErrorCode = "HARNESS_RATING_EXISTS"
 )
 
 var (
@@ -131,6 +135,10 @@ func safeDesktopError(err error) error {
 	message := "操作失败，请重试。"
 	lowerMessage := strings.ToLower(err.Error())
 	switch {
+	case errors.Is(err, creativeharness.ErrConfirmationRequired):
+		code, message = errorHarnessConfirmation, "运行配置或费用确认已变化，请重新预览并确认。"
+	case errors.Is(err, quality.ErrHarnessRatingExists):
+		code, message = errorHarnessRatingExists, "该 case 已提交评分，不能重复覆盖。"
 	case errors.Is(err, context.Canceled):
 		code, message = errorOperationCancelled, "操作已取消。"
 	case errors.Is(err, context.DeadlineExceeded):

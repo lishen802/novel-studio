@@ -8,6 +8,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/appsettings"
 	"github.com/lishen802/novel-studio/internal/application/appshell"
+	"github.com/lishen802/novel-studio/internal/application/creativeharness"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -359,6 +360,7 @@ type DesktopAPI struct {
 	completeClose func()
 	settings      *appsettings.Service
 	shell         *appshell.Service
+	harness       *creativeharness.Service
 }
 
 func newDesktopAPI(workspaceService WorkspaceUseCases, picker DirectoryPicker) *DesktopAPI {
@@ -371,6 +373,90 @@ func newDesktopAPI(workspaceService WorkspaceUseCases, picker DirectoryPicker) *
 
 func (a *DesktopAPI) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+func (a *DesktopAPI) ListCreativeHarnessDatasets() (creativeharness.DatasetView, error) {
+	if a.harness == nil {
+		return creativeharness.DatasetView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return a.harness.Datasets(), nil
+}
+
+func (a *DesktopAPI) PreviewCreativeHarnessRun(input creativeharness.PreviewInput) (creativeharness.RunPreview, error) {
+	if a.harness == nil {
+		return creativeharness.RunPreview{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Preview(a.ctx, input))
+}
+
+func (a *DesktopAPI) CreateCreativeHarnessRun(input creativeharness.RunInput) (creativeharness.RunView, error) {
+	if a.harness == nil {
+		return creativeharness.RunView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Create(a.ctx, input))
+}
+
+func (a *DesktopAPI) ExecuteCreativeHarnessRun(runID string) (creativeharness.RunView, error) {
+	if a.harness == nil {
+		return creativeharness.RunView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Execute(a.ctx, runID))
+}
+
+func (a *DesktopAPI) CancelCreativeHarnessRun(runID string) error {
+	if a.harness == nil {
+		return safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeDesktopError(a.harness.Cancel(a.ctx, runID))
+}
+
+func (a *DesktopAPI) ListCreativeHarnessRuns() ([]creativeharness.RunView, error) {
+	if a.harness == nil {
+		return nil, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Runs(a.ctx))
+}
+
+func (a *DesktopAPI) GetCreativeHarnessRun(runID string) (creativeharness.RunView, error) {
+	if a.harness == nil {
+		return creativeharness.RunView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Run(a.ctx, runID))
+}
+
+func (a *DesktopAPI) RetryCreativeHarnessCase(runID, caseID string) (creativeharness.RunView, error) {
+	if a.harness == nil {
+		return creativeharness.RunView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.RetryCase(a.ctx, runID, caseID))
+}
+
+func (a *DesktopAPI) GetCreativeHarnessCaseResult(runID, caseID, localRaterID string) (creativeharness.CaseView, error) {
+	if a.harness == nil {
+		return creativeharness.CaseView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Case(a.ctx, runID, caseID, localRaterID))
+}
+
+func (a *DesktopAPI) SaveCreativeHarnessRating(input creativeharness.RatingInput) (creativeharness.CaseView, error) {
+	if a.harness == nil {
+		return creativeharness.CaseView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.SaveRating(a.ctx, input))
+}
+
+func (a *DesktopAPI) CompareCreativeHarnessRuns(baseRunID, candidateRunID string) (creativeharness.ComparisonView, error) {
+	if a.harness == nil {
+		return creativeharness.ComparisonView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Compare(a.ctx, baseRunID, candidateRunID))
+}
+
+func (a *DesktopAPI) ExportCreativeHarnessReport(runID string) (string, error) {
+	if a.harness == nil {
+		return "", safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(a.harness.Export(a.ctx, runID))
 }
 
 func (a *DesktopAPI) ProviderConnections() ([]workspace.ProviderConnectionView, error) {

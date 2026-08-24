@@ -9,6 +9,7 @@ import {
   Clock,
   ChevronRight,
   RotateCcw,
+  FlaskConical,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -134,6 +135,17 @@ export default function Home() {
               <p className="text-xs text-text-muted mt-0.5">浏览本地作品文件夹</p>
             </div>
             <FolderOpen className="w-5 h-5 text-text-muted group-hover:text-text transition-colors" />
+          </button>
+
+          <button
+            onClick={() => navigate('/lab')}
+            className="w-full group flex items-center justify-between p-3.5 rounded-xl bg-surface-elevated border border-border hover:border-border-strong hover:bg-surface-hover transition-colors text-left"
+          >
+            <div>
+              <p className="text-sm font-medium text-text">智能体实验室</p>
+              <p className="text-xs text-text-muted mt-0.5">运行原创测试集与匿名盲评</p>
+            </div>
+            <FlaskConical className="w-5 h-5 text-text-muted group-hover:text-text transition-colors" />
           </button>
         </div>
 

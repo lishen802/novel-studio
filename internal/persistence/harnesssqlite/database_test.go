@@ -2,6 +2,7 @@ package harnesssqlite
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,7 @@ func TestOpenCreatesIsolatedHarnessSchema(t *testing.T) {
 		t.Fatalf("open harness database: %v", err)
 	}
 	defer db.Close()
-	for _, table := range []string{"harness_runs", "harness_case_results", "harness_ratings", "harness_reports"} {
+	for _, table := range []string{"harness_runs", "harness_case_results", "harness_ratings", "harness_rating_submissions", "harness_reports"} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -45,6 +46,7 @@ func TestStoreRoundTripBlindProjectionAndDeleteIsolation(t *testing.T) {
 	run := quality.HarnessRun{
 		ID: "run-1", DatasetID: "set", DatasetVersion: "1.0.0", DatasetSHA256: hash('a'), Mode: quality.HarnessModeReduced,
 		Seed: 23, Binding: binding(), CaseIDs: []string{"case-1"}, Status: quality.HarnessRunRunning, StartedAt: started,
+		CurrentCaseID: "case-1", PublicStageID: "prose_writing", InputTokens: 12, OutputTokens: 8, Calls: 1,
 	}
 	if err := store.CreateRun(context.Background(), run); err != nil {
 		t.Fatal(err)
@@ -80,8 +82,34 @@ func TestStoreRoundTripBlindProjectionAndDeleteIsolation(t *testing.T) {
 		t.Fatalf("report = %+v, err = %v", loaded, err)
 	}
 	loadedRun, err := store.GetRun(context.Background(), "run-1")
-	if err != nil || loadedRun.Binding.WorkflowSHA256 != run.Binding.WorkflowSHA256 || loadedRun.DatasetSHA256 != run.DatasetSHA256 {
+	if err != nil || loadedRun.Binding.WorkflowSHA256 != run.Binding.WorkflowSHA256 || loadedRun.DatasetSHA256 != run.DatasetSHA256 || loadedRun.PublicStageID != "prose_writing" || loadedRun.InputTokens != 12 {
 		t.Fatalf("frozen run = %+v, err = %v", loadedRun, err)
+	}
+	runs, err := store.ListRuns(context.Background())
+	if err != nil || len(runs) != 1 || runs[0].Status != quality.HarnessRunCompleted {
+		t.Fatalf("runs = %+v, err = %v", runs, err)
+	}
+	results, err := store.ListCaseResults(context.Background(), run.ID)
+	if err != nil || len(results) != 1 || results[0].CaseID != "case-1" {
+		t.Fatalf("results = %+v, err = %v", results, err)
+	}
+	submission := quality.HarnessRatingSubmission{
+		ID: "rating-1", RunID: run.ID, CaseID: "case-1", LocalRaterID: "local", CreatedAt: completed,
+		Ratings: []quality.HarnessCandidateRating{{Slot: "候选-1", Scores: map[string]int{"叙事": 4}, Acceptance: quality.HarnessAcceptDirect}},
+	}
+	if err := store.SaveRatingSubmission(context.Background(), submission); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRatingSubmission(context.Background(), submission); !errors.Is(err, quality.ErrHarnessRatingExists) {
+		t.Fatalf("duplicate rating error = %v", err)
+	}
+	loadedRating, err := store.GetRatingSubmission(context.Background(), run.ID, "case-1", "local")
+	if err != nil || len(loadedRating.Ratings) != 1 {
+		t.Fatalf("rating = %+v, err = %v", loadedRating, err)
+	}
+	ratings, err := store.ListRatingSubmissions(context.Background(), run.ID)
+	if err != nil || len(ratings) != 1 || ratings[0].ID != submission.ID {
+		t.Fatalf("ratings = %+v, err = %v", ratings, err)
 	}
 
 	if err := store.DeleteAll(context.Background()); err != nil {

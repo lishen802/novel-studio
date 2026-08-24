@@ -135,6 +135,72 @@ func TestHarnessRunnerRunsReducedSetAndBuildsBreakdowns(t *testing.T) {
 	}
 }
 
+func TestHarnessRunnerPersistsCancellationAndResumesWithoutRepeatingCompletedCase(t *testing.T) {
+	dataset, err := BuiltinHarnessDatasetV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryHarnessStore{}
+	executor := &interruptOnceExecutor{}
+	runner, err := NewHarnessRunner(HarnessRunnerConfig{Store: store, Executor: executor, Now: time.Now, NewID: func() string { return "run-resume" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runner.Create(context.Background(), HarnessRunRequest{Dataset: dataset, Mode: HarnessModeReduced, Seed: 7, Binding: testHarnessBinding()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Execute(context.Background(), run.ID, dataset); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first execute error = %v", err)
+	}
+	if store.run.Status != HarnessRunCancelled || len(store.results) != 1 {
+		t.Fatalf("cancelled progress = %+v, results=%d", store.run, len(store.results))
+	}
+	firstCaseCalls := executor.calls[store.results[0].CaseID]
+	if _, err := runner.Execute(context.Background(), run.ID, dataset); err != nil {
+		t.Fatal(err)
+	}
+	if store.run.Status != HarnessRunCompleted || executor.calls[store.results[0].CaseID] != firstCaseCalls {
+		t.Fatalf("resume repeated completed case: status=%s calls=%v", store.run.Status, executor.calls)
+	}
+}
+
+func TestHarnessRunnerPersistsPublicStageAndUsageProgress(t *testing.T) {
+	dataset, err := BuiltinHarnessDatasetV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryHarnessStore{}
+	var updates []HarnessRun
+	runner, err := NewHarnessRunner(HarnessRunnerConfig{Store: store, Executor: progressExecutor{}, Now: time.Now, NewID: func() string { return "run-progress" }, OnUpdated: func(_ context.Context, run HarnessRun) { updates = append(updates, run) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(context.Background(), HarnessRunRequest{Dataset: dataset, Mode: HarnessModeReduced, Binding: testHarnessBinding()}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, update := range updates {
+		if update.PublicStageID == "prose_writing" && update.CurrentCaseID != "" && update.InputTokens == 7 && update.OutputTokens == 5 && update.Calls == 1 {
+			found = true
+		}
+	}
+	if !found || store.run.PublicStageID != "candidate_ready" {
+		t.Fatalf("progress updates = %+v, final = %+v", updates, store.run)
+	}
+}
+
+func TestHarnessRatingSubmissionRequiresWholeBlindSet(t *testing.T) {
+	submission := HarnessRatingSubmission{ID: "rating", RunID: "run", CaseID: "case", LocalRaterID: "local", CreatedAt: time.Now(), Ratings: []HarnessCandidateRating{{Slot: "候选-1", Scores: map[string]int{"人物动机": 4}, Acceptance: HarnessAcceptDirect}}}
+	if err := submission.Validate([]string{"候选-1", "候选-2"}, []string{"人物动机"}); !errors.Is(err, ErrInvalidHarnessRun) {
+		t.Fatalf("partial rating error = %v", err)
+	}
+	submission.Ratings = append(submission.Ratings, HarnessCandidateRating{Slot: "候选-2", Scores: map[string]int{"人物动机": 3}, Acceptance: HarnessAcceptMinor})
+	if err := submission.Validate([]string{"候选-1", "候选-2"}, []string{"人物动机"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExportHarnessReportRejectsSecretShapedMetadata(t *testing.T) {
 	report := HarnessReport{RunID: "run-1", DatasetID: "set", DatasetVersion: "1", GeneratedAt: time.Now().UTC(), Provider: "sk-live-secret"}
 	if _, err := ExportHarnessReport(report); !errors.Is(err, ErrSensitiveReportData) {
@@ -172,6 +238,30 @@ func (deterministicExecutor) Execute(_ context.Context, item HarnessCase, _ Harn
 	return result, nil
 }
 
+type interruptOnceExecutor struct {
+	interrupted bool
+	calls       map[string]int
+}
+
+type progressExecutor struct{ deterministicExecutor }
+
+func (progressExecutor) ExecuteWithProgress(ctx context.Context, item HarnessCase, binding HarnessRunBinding, onProgress func(HarnessExecutionProgress)) ([]HarnessCandidate, error) {
+	onProgress(HarnessExecutionProgress{CaseID: item.ID, PublicStageID: "prose_writing", InputTokens: 7, OutputTokens: 5, Calls: 1})
+	return deterministicExecutor{}.Execute(ctx, item, binding)
+}
+
+func (executor *interruptOnceExecutor) Execute(ctx context.Context, item HarnessCase, binding HarnessRunBinding) ([]HarnessCandidate, error) {
+	if executor.calls == nil {
+		executor.calls = map[string]int{}
+	}
+	executor.calls[item.ID]++
+	if !executor.interrupted && len(executor.calls) > 1 {
+		executor.interrupted = true
+		return nil, context.Canceled
+	}
+	return deterministicExecutor{}.Execute(ctx, item, binding)
+}
+
 type memoryHarnessStore struct {
 	run     HarnessRun
 	results []HarnessCaseResult
@@ -181,6 +271,22 @@ type memoryHarnessStore struct {
 func (store *memoryHarnessStore) CreateRun(_ context.Context, run HarnessRun) error {
 	store.run = run
 	return nil
+}
+func (store *memoryHarnessStore) UpdateRun(_ context.Context, run HarnessRun) error {
+	store.run = run
+	return nil
+}
+func (store *memoryHarnessStore) GetRun(_ context.Context, runID string) (HarnessRun, error) {
+	if store.run.ID != runID {
+		return HarnessRun{}, errors.New("run 不存在")
+	}
+	return store.run, nil
+}
+func (store *memoryHarnessStore) ListCaseResults(_ context.Context, runID string) ([]HarnessCaseResult, error) {
+	if store.run.ID != runID {
+		return nil, errors.New("run 不存在")
+	}
+	return append([]HarnessCaseResult(nil), store.results...), nil
 }
 func (store *memoryHarnessStore) SaveCaseResult(_ context.Context, result HarnessCaseResult) error {
 	store.results = append(store.results, result)

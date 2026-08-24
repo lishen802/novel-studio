@@ -232,6 +232,30 @@ export interface JobEventsPageView {
   earliestReplayableSequence: number;
 }
 
+export interface HarnessDatasetView {
+  dataset: { dataset_id: string; version: string; sha256: string; originality_note: string; cases: Array<Record<string, unknown>> };
+  variants: Array<{ id: string; workflow_id: string; workflow_version: number; default_enabled: boolean }>;
+}
+
+export interface HarnessPreviewView {
+  datasetId: string; datasetVersion: string; datasetSha256: string; caseCount: number;
+  estimatedCalls: number; maximumOutputTokens: number; currencyEstimate: string;
+  provider: string; model: string; workflowId: string; workflowVersion: number;
+  confirmationDigest: string; binding: Record<string, unknown>;
+}
+
+export interface HarnessRunView {
+  run: { id: string; status: string; case_ids: string[]; failure?: string; binding: Record<string, unknown>; started_at: string; current_case_id?: string; public_stage_id?: string; input_tokens?: number; output_tokens?: number; calls?: number };
+  completedCases: number; completedCaseIds?: string[]; totalCases: number; report?: Record<string, unknown>;
+  ratings?: { submissions: number; candidateRatings: number; acceptable: number; rewrite: number; dimensionAverage: Record<string, number> };
+}
+
+export interface HarnessCaseView {
+  case: { case_id: string; genre: string; task_kind: string; rating_dimensions: string[]; chapter_goal: string };
+  candidates: Array<{ slot: string; content: string; metrics: Record<string, unknown>; quality_report_json?: string }>;
+  rating?: Record<string, unknown>; revealed?: Record<string, string>; binding?: Record<string, unknown>;
+}
+
 type NativeMethod = (...args: unknown[]) => Promise<unknown>;
 type NativeDesktopAPI = Record<string, NativeMethod>;
 
@@ -356,4 +380,16 @@ export const studio = {
   getJobEvents: (jobId: string, afterSequence: number, limit: number) =>
     call<JobEventsPageView>('GetJobEvents', jobId, afterSequence, limit),
   listRecoverableJobs: () => call<Array<Record<string, unknown>>>('ListRecoverableJobs'),
+  listCreativeHarnessDatasets: () => call<HarnessDatasetView>('ListCreativeHarnessDatasets'),
+  previewCreativeHarnessRun: (input: Record<string, unknown>) => call<HarnessPreviewView>('PreviewCreativeHarnessRun', input),
+  createCreativeHarnessRun: (input: Record<string, unknown>) => call<HarnessRunView>('CreateCreativeHarnessRun', input),
+  executeCreativeHarnessRun: (id: string) => call<HarnessRunView>('ExecuteCreativeHarnessRun', id),
+  cancelCreativeHarnessRun: (id: string) => call<void>('CancelCreativeHarnessRun', id),
+  listCreativeHarnessRuns: () => call<HarnessRunView[]>('ListCreativeHarnessRuns'),
+  getCreativeHarnessRun: (id: string) => call<HarnessRunView>('GetCreativeHarnessRun', id),
+  retryCreativeHarnessCase: (runId: string, caseId: string) => call<HarnessRunView>('RetryCreativeHarnessCase', runId, caseId),
+  getCreativeHarnessCaseResult: (runId: string, caseId: string, raterId: string) => call<HarnessCaseView>('GetCreativeHarnessCaseResult', runId, caseId, raterId),
+  saveCreativeHarnessRating: (input: Record<string, unknown>) => call<HarnessCaseView>('SaveCreativeHarnessRating', input),
+  compareCreativeHarnessRuns: (baseId: string, candidateId: string) => call<Record<string, unknown>>('CompareCreativeHarnessRuns', baseId, candidateId),
+  exportCreativeHarnessReport: (id: string) => call<string>('ExportCreativeHarnessReport', id),
 };

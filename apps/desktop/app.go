@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -10,10 +11,12 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/appsettings"
 	"github.com/lishen802/novel-studio/internal/application/appshell"
+	"github.com/lishen802/novel-studio/internal/application/creativeharness"
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	"github.com/lishen802/novel-studio/internal/persistence/appsqlite"
+	"github.com/lishen802/novel-studio/internal/persistence/harnesssqlite"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/appdirs"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
@@ -39,6 +42,7 @@ type App struct {
 	quit            func(context.Context)
 	closeAllowed    atomic.Bool
 	notifier        *wailsJobEventNotifier
+	harnessDB       *sql.DB
 }
 
 func newApp() *App {
@@ -88,6 +92,27 @@ func newApp() *App {
 	app.api.completeClose = app.completeClose
 	app.api.settings = appSettingsService
 	app.api.shell = shell
+	if appSettingsService != nil {
+		paths, err := appdirs.ResolveDefault()
+		if err != nil {
+			log.Printf("creativeharness: resolve data directory: %v", err)
+		} else if db, openErr := harnesssqlite.Open(context.Background(), paths.HarnessDatabase); openErr != nil {
+			log.Printf("creativeharness: open database: %v", openErr)
+		} else {
+			harness, serviceErr := creativeharness.New(creativeharness.ServiceConfig{
+				Store: harnesssqlite.NewStore(db), Profiles: appSettingsService, Credentials: credentials.NewStore(),
+				Providers: providers.NewFactory(http.DefaultClient), Clock: clock, IDs: idGenerator,
+				OnUpdated: func(ctx context.Context, runID string) { runtime.EventsEmit(ctx, "harness:updated", runID) },
+			})
+			if serviceErr != nil {
+				_ = db.Close()
+				log.Printf("creativeharness: create service: %v", serviceErr)
+			} else {
+				app.api.harness = harness
+				app.harnessDB = db
+			}
+		}
+	}
 	return app
 }
 
@@ -130,6 +155,11 @@ func processLeaseMetadata() ports.ProjectLeaseMetadata {
 
 func (a *App) startup(ctx context.Context) {
 	a.api.startup(ctx)
+	if a.api.harness != nil {
+		if err := a.api.harness.RecoverInterrupted(ctx); err != nil {
+			log.Printf("creativeharness: recover interrupted runs: %v", err)
+		}
+	}
 	if a.notifier != nil {
 		a.notifier.startup(ctx)
 	}
@@ -137,6 +167,12 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(context.Context) {
 	_ = a.api.workspace.Close()
+	if a.api.harness != nil {
+		a.api.harness.Close()
+	}
+	if a.harnessDB != nil {
+		_ = a.harnessDB.Close()
+	}
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
