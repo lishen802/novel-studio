@@ -53,7 +53,7 @@ func TestOpenAIResponsesStreamsTextAndUsage(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesDisablesStrictModeForOptionalSchemaFields(t *testing.T) {
+func TestDeepSeekResponsesOmitsStrictModeForOptionalSchemaFields(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
@@ -78,8 +78,8 @@ func TestOpenAIResponsesDisablesStrictModeForOptionalSchemaFields(t *testing.T) 
 	}
 	textConfig := received["text"].(map[string]any)
 	format := textConfig["format"].(map[string]any)
-	if format["strict"] != false {
-		t.Fatalf("strict format = %#v", format)
+	if _, exists := format["strict"]; exists {
+		t.Fatalf("DeepSeek format must omit strict: %#v", format)
 	}
 	schema := format["schema"].(map[string]any)
 	required := schema["required"].([]any)
@@ -89,6 +89,31 @@ func TestOpenAIResponsesDisablesStrictModeForOptionalSchemaFields(t *testing.T) 
 	properties := schema["properties"].(map[string]any)
 	if properties["suggestion"].(map[string]any)["type"] != "string" {
 		t.Fatalf("optional property was rewritten: %#v", properties["suggestion"])
+	}
+}
+
+func TestOpenAIResponsesDisablesStrictModeForOptionalSchemaFields(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		return sseResponse("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"usage\":{}}}\n\n"), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.example.test/v1")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{
+		Model: "gpt-test", Input: "input", SchemaName: "review_bundle",
+		JSONSchema: json.RawMessage(`{
+			"type":"object","required":["message"],
+			"properties":{"message":{"type":"string"},"suggestion":{"type":"string"}}
+		}`),
+	}, nil)
+	if err != nil && !errors.Is(err, ErrEmptyResponse) {
+		t.Fatal(err)
+	}
+	format := received["text"].(map[string]any)["format"].(map[string]any)
+	if format["strict"] != false {
+		t.Fatalf("strict format = %#v", format)
 	}
 }
 

@@ -111,9 +111,15 @@ func (client *OpenAIClient) Generate(
 		if err := json.Unmarshal(request.JSONSchema, &schema); err != nil {
 			return GenerateResult{}, fmt.Errorf("decode output schema: %w", err)
 		}
-		payload["text"] = map[string]any{"format": map[string]any{
-			"type": "json_schema", "name": request.SchemaName, "schema": schema, "strict": strictJSONSchemaCompatible(schema),
-		}}
+		format := map[string]any{
+			"type": "json_schema", "name": request.SchemaName, "schema": schema,
+		}
+		// 官方 DeepSeek Responses 接口不接受 text.format.strict；仅对其他
+		// OpenAI 兼容端点发送该扩展字段，避免审阅等可选字段 Schema 被拒绝。
+		if !isDeepSeekEndpoint(client.baseURL) {
+			format["strict"] = strictJSONSchemaCompatible(schema)
+		}
+		payload["text"] = map[string]any{"format": format}
 	}
 	response, err := client.post(ctx, "/responses", apiKey, payload)
 	if err != nil {
