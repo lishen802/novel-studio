@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -31,6 +32,8 @@ var (
 	ErrNetwork = errors.New("provider network failed")
 	// ErrIncompatible 表示接口协议与所选 Provider 类型不兼容（例如端点 404）。
 	ErrIncompatible = errors.New("provider incompatible")
+	// ErrSchemaRejected 表示 Provider 拒绝了结构化输出 Schema。
+	ErrSchemaRejected = errors.New("provider schema rejected")
 	// ErrProvider 表示未细分的 Provider 请求失败。
 	ErrProvider = errors.New("provider request failed")
 	// ErrInvalidStream 表示流式响应格式损坏。
@@ -109,6 +112,7 @@ func (client *OpenAIClient) Generate(
 		if err := json.Unmarshal(request.JSONSchema, &schema); err != nil {
 			return GenerateResult{}, fmt.Errorf("decode output schema: %w", err)
 		}
+		schema = normalizeStrictJSONSchema(schema)
 		payload["text"] = map[string]any{"format": map[string]any{
 			"type": "json_schema", "name": request.SchemaName, "schema": schema, "strict": true,
 		}}
@@ -188,6 +192,8 @@ func (client *OpenAIClient) Generate(
 func classifyResponseFailure(code string) error {
 	normalized := strings.ToLower(strings.TrimSpace(code))
 	switch {
+	case strings.Contains(normalized, "schema"), strings.Contains(normalized, "structured_output"):
+		return ErrSchemaRejected
 	case strings.Contains(normalized, "auth"), strings.Contains(normalized, "api_key"), strings.Contains(normalized, "permission"):
 		return ErrAuthentication
 	case strings.Contains(normalized, "model") && strings.Contains(normalized, "not"):
@@ -206,8 +212,79 @@ func classifyResponseFailure(code string) error {
 func isStableProviderError(err error) bool {
 	return errors.Is(err, ErrAuthentication) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrQuotaExceeded) ||
 		errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrIncompatible) ||
+		errors.Is(err, ErrSchemaRejected) ||
 		errors.Is(err, ErrProvider) || errors.Is(err, ErrResponseIncomplete) || errors.Is(err, ErrResponseFailed) ||
 		errors.Is(err, ErrEmptyResponse)
+}
+
+// normalizeStrictJSONSchema 将可选属性转换为“必填且允许 null”。
+// OpenAI 兼容严格模式要求每个对象的 properties 全部出现在 required 中；
+// nullable 保留了领域协议中可选字段的原有语义。
+func normalizeStrictJSONSchema(value any) any {
+	switch schema := value.(type) {
+	case []any:
+		for index := range schema {
+			schema[index] = normalizeStrictJSONSchema(schema[index])
+		}
+		return schema
+	case map[string]any:
+		for key, child := range schema {
+			schema[key] = normalizeStrictJSONSchema(child)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			return schema
+		}
+		required := make(map[string]struct{})
+		if existing, ok := schema["required"].([]any); ok {
+			for _, item := range existing {
+				if name, ok := item.(string); ok {
+					required[name] = struct{}{}
+				}
+			}
+		}
+		names := make([]string, 0, len(properties))
+		for name, property := range properties {
+			names = append(names, name)
+			if _, exists := required[name]; !exists && !jsonSchemaAllowsNull(property) {
+				properties[name] = map[string]any{"anyOf": []any{property, map[string]any{"type": "null"}}}
+			}
+		}
+		sort.Strings(names)
+		schema["required"] = names
+		return schema
+	default:
+		return value
+	}
+}
+
+func jsonSchemaAllowsNull(value any) bool {
+	schema, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	switch fieldType := schema["type"].(type) {
+	case string:
+		if fieldType == "null" {
+			return true
+		}
+	case []any:
+		for _, item := range fieldType {
+			if item == "null" {
+				return true
+			}
+		}
+	}
+	for _, keyword := range []string{"anyOf", "oneOf"} {
+		if options, ok := schema[keyword].([]any); ok {
+			for _, option := range options {
+				if jsonSchemaAllowsNull(option) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (client *OpenAIClient) post(
@@ -432,6 +509,9 @@ func classifyStatus(status int, body []byte) error {
 		}
 		return ErrRateLimited
 	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
+		if has("json_schema", "json schema", "invalid schema", "schema validation", "strict schema", "strict mode") {
+			return ErrSchemaRejected
+		}
 		if has("content", "policy", "safety", "moderation", "refusal", "unsafe") {
 			return ErrContentRejected
 		}

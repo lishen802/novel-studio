@@ -153,6 +153,7 @@ func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 		{providers.ErrResponseFailed, "provider_response_failed", "模型服务未能完成生成，请稍后重试。"},
 		{providers.ErrEmptyResponse, "provider_empty_response", "模型返回了空内容，请检查模型能力或生成参数。"},
 		{providers.ErrInvalidStream, "provider_invalid_stream", "模型流式响应提前中断或格式不兼容。"},
+		{providers.ErrSchemaRejected, "provider_schema_rejected", "模型服务拒绝了结构化输出格式，请更新应用或切换兼容模型。"},
 	}
 	for _, test := range tests {
 		if got := errorCode(test.err); got != test.code {

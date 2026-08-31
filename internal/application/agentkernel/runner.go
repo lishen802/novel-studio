@@ -1498,6 +1498,8 @@ func errorCode(err error) string {
 		return "provider_content_rejected"
 	case errors.Is(err, providers.ErrIncompatible):
 		return "provider_incompatible"
+	case errors.Is(err, providers.ErrSchemaRejected):
+		return "provider_schema_rejected"
 	case errors.Is(err, providers.ErrResponseIncomplete):
 		return "provider_response_incomplete"
 	case errors.Is(err, providers.ErrResponseFailed):
@@ -1541,6 +1543,8 @@ func safeErrorMessage(code string) string {
 		return "请求被模型内容政策拒绝。"
 	case "provider_incompatible":
 		return "接口地址与所选模型服务不兼容。"
+	case "provider_schema_rejected":
+		return "模型服务拒绝了结构化输出格式，请更新应用或切换兼容模型。"
 	case "provider_response_incomplete":
 		return "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"
 	case "provider_response_failed":

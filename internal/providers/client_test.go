@@ -53,6 +53,54 @@ func TestOpenAIResponsesStreamsTextAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesNormalizesOptionalSchemaFieldsForStrictMode(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		return sseResponse("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"usage\":{}}}\n\n"), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{
+		Model: "deepseek-v4-pro", Input: "input", SchemaName: "review_bundle",
+		JSONSchema: json.RawMessage(`{
+			"type":"object","additionalProperties":false,"required":["message"],
+			"properties":{
+				"message":{"type":"string"},
+				"suggestion":{"type":"string"},
+				"detail":{"type":"object","additionalProperties":false,"properties":{"quote":{"type":"string"}}}
+			}
+		}`),
+	}, nil)
+	if err != nil && !errors.Is(err, ErrEmptyResponse) {
+		t.Fatal(err)
+	}
+	textConfig := received["text"].(map[string]any)
+	format := textConfig["format"].(map[string]any)
+	if format["strict"] != true {
+		t.Fatalf("strict format = %#v", format)
+	}
+	schema := format["schema"].(map[string]any)
+	required := schema["required"].([]any)
+	if strings.Join([]string{required[0].(string), required[1].(string), required[2].(string)}, ",") != "detail,message,suggestion" {
+		t.Fatalf("required = %#v", required)
+	}
+	properties := schema["properties"].(map[string]any)
+	assertNullableSchema(t, properties["suggestion"])
+	detail := properties["detail"].(map[string]any)["anyOf"].([]any)[0].(map[string]any)
+	quote := detail["properties"].(map[string]any)["quote"]
+	assertNullableSchema(t, quote)
+}
+
+func assertNullableSchema(t *testing.T, value any) {
+	t.Helper()
+	options, ok := value.(map[string]any)["anyOf"].([]any)
+	if !ok || len(options) != 2 || options[1].(map[string]any)["type"] != "null" {
+		t.Fatalf("schema is not nullable: %#v", value)
+	}
+}
+
 func TestOpenAIOmitsMaxOutputAndSendsReasoningEffort(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -381,6 +429,7 @@ func TestClassifyStatusMapsStableProviderErrors(t *testing.T) {
 		{"rate limited", http.StatusTooManyRequests, `{"error":{"type":"rate_limit_error"}}`, ErrRateLimited},
 		{"quota via 429", http.StatusTooManyRequests, `{"error":{"type":"insufficient_quota"}}`, ErrQuotaExceeded},
 		{"content rejected", http.StatusBadRequest, `{"error":{"type":"invalid_request_error","message":"content policy violation"}}`, ErrContentRejected},
+		{"strict schema rejected", http.StatusBadRequest, `{"error":{"message":"Invalid JSON schema: every property must be listed in required"}}`, ErrSchemaRejected},
 		{"server overloaded", http.StatusInternalServerError, `{"error":{"type":"overloaded_error"}}`, ErrRateLimited},
 		{"generic server error", http.StatusInternalServerError, "", ErrProvider},
 	}
