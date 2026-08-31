@@ -30,8 +30,9 @@ var (
 )
 
 const (
-	defaultRunTimeout = 30 * time.Minute
-	tokenCharRatio    = 4
+	defaultRunTimeout          = 30 * time.Minute
+	tokenCharRatio             = 4
+	requestTokenSafetyOverhead = 1024 // 为协议包装与结构化输出描述预留空间。
 )
 
 // Store 是执行器实际消费的最小持久化端口。
@@ -430,7 +431,16 @@ func (service *Service) executeNode(
 	if err != nil {
 		return service.failStep(ctx, run, step, "prompt_render_failed", err, nil)
 	}
-	generated, err := provider.Generate(ctx, apiKey, generateRequest(step, remaining, capabilityInstruction(step.Capability), rendered, schema, node.Schema.ID), nil)
+	// 有限预算必须在发起计费调用前动态扣除输入与预留；字节数是 tokenizer
+	// 未知时的保守输入上界，避免事后才发现超出总预算。
+	availableOutput := remaining
+	if !run.TokenBudgetUnlimited {
+		availableOutput -= len(rendered) + len(capabilityInstruction(step.Capability)) + len(schema.JSON) + reserve + requestTokenSafetyOverhead
+		if availableOutput < 1 {
+			return service.failStep(ctx, run, step, "token_budget_exceeded", ErrTokenBudget, nil)
+		}
+	}
+	generated, err := provider.Generate(ctx, apiKey, generateRequest(step, availableOutput, run.TokenBudgetUnlimited, capabilityInstruction(step.Capability), rendered, schema, node.Schema.ID), nil)
 	step.InputTokens = generated.InputTokens
 	step.OutputTokens = generated.OutputTokens
 	step.ProviderRequestID = generated.ProviderRequestID
@@ -542,9 +552,15 @@ func (service *Service) repairOutput(
 	if decoded != nil || remaining < 1 {
 		return decoded, original, produced, 0, 0, "", ErrInvalidOutput
 	}
-	maxOutput := protocolMaxOutput(step, remaining)
+	availableOutput := remaining
+	if !run.TokenBudgetUnlimited {
+		// 修复调用已经受独立 RepairReserve 约束，仅扣除待修复正文，避免结构
+		// 描述的保守估算吞掉整个小额修复预留。
+		availableOutput -= len(original)
+	}
+	maxOutput := protocolMaxOutput(step, availableOutput, run.TokenBudgetUnlimited)
 	omitMax := step.OutputLimitMode.OmitsConfiguredMaxOutput() && step.ProviderKind == agentdomain.ProviderOpenAI
-	if remaining < 1 || (!omitMax && maxOutput < 1) {
+	if availableOutput < 1 || (!omitMax && maxOutput < 1) {
 		return nil, original, produced, 0, 0, "", ErrTokenBudget
 	}
 	apiKey, err := service.credentials.Get(ctx, step.CredentialRef)
@@ -561,7 +577,7 @@ func (service *Service) repairOutput(
 	repairStep := step
 	repairStep.Temperature = 0
 	repaired, err := provider.Generate(ctx, apiKey, generateRequest(
-		repairStep, remaining,
+		repairStep, availableOutput, run.TokenBudgetUnlimited,
 		"你只负责修复 JSON 结构，使其符合给定 Schema；不得增加事实、删改正文或改变语义。",
 		original, schema, node.Schema.ID,
 	), nil)
@@ -1354,9 +1370,9 @@ func replaceStep(run agentdomain.Run, replacement agentdomain.RunStep) agentdoma
 
 // protocolMaxOutput 计算本次请求实际发送的上限：方案预算模式在 OpenAI 上省略，
 // 在强制要求上限的协议上使用剩余预算或技术封顶。
-func protocolMaxOutput(step agentdomain.RunStep, remaining int) int {
+func protocolMaxOutput(step agentdomain.RunStep, remaining int, budgetUnlimited bool) int {
 	if step.OutputLimitMode.OmitsConfiguredMaxOutput() {
-		if step.ProviderKind == agentdomain.ProviderOpenAI {
+		if budgetUnlimited && step.ProviderKind == agentdomain.ProviderOpenAI {
 			return 0
 		}
 		cap := remaining
@@ -1374,6 +1390,7 @@ func protocolMaxOutput(step agentdomain.RunStep, remaining int) int {
 func generateRequest(
 	step agentdomain.RunStep,
 	remaining int,
+	budgetUnlimited bool,
 	system, input string,
 	schema ports.SchemaAsset,
 	schemaName string,
@@ -1382,7 +1399,7 @@ func generateRequest(
 		Model:           step.Model,
 		System:          system,
 		Input:           input,
-		MaxOutputTokens: protocolMaxOutput(step, remaining),
+		MaxOutputTokens: protocolMaxOutput(step, remaining, budgetUnlimited),
 		ReasoningEffort: step.ReasoningEffort.Normalized(),
 		Temperature:     step.Temperature,
 		JSONSchema:      append([]byte(nil), schema.JSON...),

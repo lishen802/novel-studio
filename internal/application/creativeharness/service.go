@@ -222,9 +222,6 @@ func (service *Service) Preview(ctx context.Context, input PreviewInput) (RunPre
 	if err != nil {
 		return RunPreview{}, err
 	}
-	if !profile.RunBudgetUnlimited && profile.MaxRunTokens < compiled.RequiredTokenBudget() {
-		return RunPreview{}, fmt.Errorf("%w: 创作方案运行预算至少需要 %d Token", agentkernel.ErrTokenBudget, compiled.RequiredTokenBudget())
-	}
 	role := profile.Roles[0]
 	for _, candidate := range profile.Roles {
 		if candidate.Role == agentdomain.RoleWriter {
@@ -258,13 +255,53 @@ func (service *Service) Preview(ctx context.Context, input PreviewInput) (RunPre
 		ContextBudgetUnlimited: profile.ContextBudgetUnlimited,
 		MaxRunTokens:           maxRunTokens, MaxContextChars: maxContextChars,
 	}
-	for range cases {
-		preview.EstimatedCalls += len(compiled.Nodes)
+	// 费用预览必须按执行器实际选择的工作流逐 case 计算：蓝图 case 会切换
+	// 蓝图工作流，章节 case 还会额外运行一次 baseline。
+	runCount := 0
+	compiledByWorkflow := map[string]agentkernel.CompiledWorkflow{
+		fmt.Sprintf("%s@%d", variant.WorkflowID, variant.WorkflowVersion): compiled,
+	}
+	loadWorkflow := func(id string, version int) (agentkernel.CompiledWorkflow, error) {
+		key := fmt.Sprintf("%s@%d", id, version)
+		if cached, ok := compiledByWorkflow[key]; ok {
+			return cached, nil
+		}
+		loaded, loadErr := agentkernel.Compile(ctx, agentkernel.Registries{Workflows: service.registry, Prompts: service.registry, Schemas: service.registry, Assemblers: service.registry}, id, version)
+		if loadErr == nil {
+			compiledByWorkflow[key] = loaded
+		}
+		return loaded, loadErr
+	}
+	accountWorkflow := func(id string, version int) error {
+		actual, loadErr := loadWorkflow(id, version)
+		if loadErr != nil {
+			return loadErr
+		}
+		if !profile.RunBudgetUnlimited && profile.MaxRunTokens < actual.RequiredTokenBudget() {
+			return fmt.Errorf("%w: 创作方案运行预算至少需要 %d Token", agentkernel.ErrTokenBudget, actual.RequiredTokenBudget())
+		}
+		preview.EstimatedCalls += len(actual.Nodes)
+		runCount++
+		return nil
+	}
+	for _, item := range cases {
+		workflowID, workflowVersion := variant.WorkflowID, variant.WorkflowVersion
+		if item.TaskKind == quality.HarnessTaskBlueprint {
+			workflowID, workflowVersion = agentassets.QualityBlueprintWorkflowID, agentassets.QualityBlueprintWorkflowVersion
+		}
+		if item.TaskKind == quality.HarnessTaskChapter {
+			if err := accountWorkflow(agentassets.BaselineWorkflowID, agentassets.BaselineWorkflowVersion); err != nil {
+				return RunPreview{}, err
+			}
+		}
+		if err := accountWorkflow(workflowID, workflowVersion); err != nil {
+			return RunPreview{}, err
+		}
 	}
 	if profile.RunBudgetUnlimited {
 		preview.MaximumOutputTokens = 0
 	} else {
-		preview.MaximumOutputTokens = profile.MaxRunTokens * len(cases)
+		preview.MaximumOutputTokens = profile.MaxRunTokens * runCount
 	}
 	payload, _ := json.Marshal(struct {
 		Input   PreviewInput

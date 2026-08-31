@@ -136,12 +136,12 @@ func NewCreativeProfileVersion(
 	}
 	if runBudgetUnlimited {
 		maxRunTokens = agent.UnlimitedBudgetSentinel
-	} else if maxRunTokens < 1 {
+	} else if maxRunTokens < agent.BudgetWanUnit {
 		return CreativeProfileVersion{}, agent.ErrInvalidBudget
 	}
 	if contextBudgetUnlimited {
 		maxContextChars = agent.UnlimitedBudgetSentinel
-	} else if maxContextChars < 1 {
+	} else if maxContextChars < agent.BudgetWanUnit {
 		return CreativeProfileVersion{}, agent.ErrInvalidBudget
 	}
 	if len(roles) != 3 {

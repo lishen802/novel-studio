@@ -42,6 +42,9 @@ func TestPreviewFreezesCostDigestAndCreateRequiresExactConfirmation(t *testing.T
 	if preview.Roles[1].ReasoningEffort != string(agentdomain.ReasoningHigh) {
 		t.Fatalf("writer reasoning = %#v", preview.Roles)
 	}
+	if preview.EstimatedCalls != 21 || preview.MaximumOutputTokens != 400_000 {
+		t.Fatalf("preview actual run budget = %+v", preview)
+	}
 	if _, err := service.Create(context.Background(), RunInput{PreviewInput: input, CostConfirmed: true, ConfirmationDigest: "stale"}); !errors.Is(err, ErrConfirmationRequired) {
 		t.Fatalf("stale confirmation error = %v", err)
 	}

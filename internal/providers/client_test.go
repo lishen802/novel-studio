@@ -78,6 +78,25 @@ func TestOpenAIOmitsMaxOutputAndSendsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestDeepSeekPreservesMaximumReasoningEffort(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		return sseResponse("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"usage\":{}}}\n\n"), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input", ReasoningEffort: agentdomain.ReasoningMax}, nil)
+	if err != nil && !errors.Is(err, ErrEmptyResponse) {
+		t.Fatal(err)
+	}
+	reasoning, _ := received["reasoning"].(map[string]any)
+	if reasoning["effort"] != "max" {
+		t.Fatalf("reasoning = %#v", received["reasoning"])
+	}
+}
+
 func TestAnthropicSendsOutputConfigEffort(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -92,13 +111,38 @@ func TestAnthropicSendsOutputConfigEffort(t *testing.T) {
 	})}
 	client := NewAnthropicClient(httpClient, "https://api.example.test")
 	if _, err := client.Generate(context.Background(), "secret", GenerateRequest{
-		Model: "claude-test", Input: "input", MaxOutputTokens: 32, ReasoningEffort: agentdomain.ReasoningMax,
+		Model: "claude-sonnet-4-6", Input: "input", MaxOutputTokens: 32, ReasoningEffort: agentdomain.ReasoningMax,
 	}, nil); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 	cfg, _ := received["output_config"].(map[string]any)
 	if cfg["effort"] != "max" {
 		t.Fatalf("output_config = %#v", received["output_config"])
+	}
+}
+
+func TestAnthropicDisablesThinkingAndOmitsTemperature(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"usage\":{}}}\n\n" +
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n" +
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{}}\n\n" +
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+		return sseResponse(stream), nil
+	})}
+	client := NewAnthropicClient(httpClient, "https://api.anthropic.com")
+	if _, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "claude-sonnet-4-6", Input: "input", MaxOutputTokens: 32, ReasoningEffort: agentdomain.ReasoningNone, Temperature: 0.7}, nil); err != nil {
+		t.Fatal(err)
+	}
+	thinking, _ := received["thinking"].(map[string]any)
+	if thinking["type"] != "disabled" {
+		t.Fatalf("thinking = %#v", received["thinking"])
+	}
+	if _, exists := received["temperature"]; exists {
+		t.Fatalf("temperature should be omitted: %#v", received)
 	}
 }
 

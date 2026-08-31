@@ -141,6 +141,17 @@ func TestNewCreativeProfileVersionAcceptsProfileBudgetWithoutMaxOutput(t *testin
 	}
 }
 
+func TestNewCreativeProfileVersionRejectsFiniteBudgetBelowOneWan(t *testing.T) {
+	roles := []RoleBinding{
+		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "planner", OutputLimitMode: agent.OutputLimitProfileBudget},
+		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer", OutputLimitMode: agent.OutputLimitProfileBudget},
+		{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer", OutputLimitMode: agent.OutputLimitProfileBudget},
+	}
+	if _, err := NewCreativeProfileVersion("profile", 1, "方案", roles, agent.BudgetWanUnit-1, agent.BudgetWanUnit, false, false, time.Now()); !errors.Is(err, agent.ErrInvalidBudget) {
+		t.Fatalf("err = %v, want ErrInvalidBudget", err)
+	}
+}
+
 func TestNewCreativeProfileVersionAcceptsUnlimitedBudget(t *testing.T) {
 	roles := []RoleBinding{
 		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", Temperature: 0.7, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget},

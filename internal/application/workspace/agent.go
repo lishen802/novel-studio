@@ -697,10 +697,16 @@ func (s *Service) runAgentPipeline(
 		}
 		s.notifyJobUpdated(ctx, store, run.ID, agentdomain.JobKindAgent)
 		request := agentRequest(step.Role, step.Model, step.MaxOutputTokens, step.ReasoningEffort, step.Temperature, run.Prompt, contextJSON, plan, draft)
-		if step.OutputLimitMode.OmitsConfiguredMaxOutput() && step.ProviderKind == agentdomain.ProviderOpenAI {
+		if step.OutputLimitMode.OmitsConfiguredMaxOutput() && step.ProviderKind == agentdomain.ProviderOpenAI && run.TokenBudgetUnlimited {
 			request.MaxOutputTokens = 0
 		} else if step.OutputLimitMode.OmitsConfiguredMaxOutput() {
 			cap := run.RemainingTokens()
+			if !run.TokenBudgetUnlimited {
+				cap -= len(request.System) + len(request.Input)
+				if cap < 1 {
+					return failed(agentkernel.ErrTokenBudget)
+				}
+			}
 			if cap > agentdomain.ProviderTechnicalMaxOutput {
 				cap = agentdomain.ProviderTechnicalMaxOutput
 			}

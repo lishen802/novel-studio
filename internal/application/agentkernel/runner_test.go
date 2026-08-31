@@ -540,3 +540,13 @@ func assertEventTypes(t *testing.T, events []agentdomain.JobEventDraft, expected
 		}
 	}
 }
+
+func TestProtocolMaxOutputUsesRemainingFiniteBudget(t *testing.T) {
+	step := agentdomain.RunStep{ProviderKind: agentdomain.ProviderOpenAI, OutputLimitMode: agentdomain.OutputLimitProfileBudget}
+	if got := protocolMaxOutput(step, 12_345, false); got != 12_345 {
+		t.Fatalf("finite max output = %d", got)
+	}
+	if got := protocolMaxOutput(step, 12_345, true); got != 0 {
+		t.Fatalf("unlimited max output = %d", got)
+	}
+}

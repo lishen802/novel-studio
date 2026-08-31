@@ -758,6 +758,7 @@ export default function Settings() {
                 <h3 className="text-sm font-medium text-text mb-3">运行预算</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <BudgetSelect
+                    key={`${selectedProfile.id}:run-budget`}
                     label="运行 Token 预算"
                     ariaLabel="运行 Token 预算"
                     unlimited={Boolean(selectedProfile.runBudgetUnlimited)}
@@ -768,6 +769,7 @@ export default function Settings() {
                     })}
                   />
                   <BudgetSelect
+                    key={`${selectedProfile.id}:context-budget`}
                     label="上下文字符预算"
                     ariaLabel="上下文字符预算"
                     unlimited={Boolean(selectedProfile.contextBudgetUnlimited)}

@@ -97,7 +97,7 @@ func (client *OpenAIClient) Generate(
 	if request.Temperature > 0 {
 		payload["temperature"] = request.Temperature
 	}
-	effort, sendEffort, err := openaiReasoningEffort(request.ReasoningEffort)
+	effort, sendEffort, err := openaiReasoningEffort(client.baseURL, request.ReasoningEffort)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -261,12 +261,16 @@ func (client *AnthropicClient) Generate(
 	if request.MaxOutputTokens < 1 {
 		return GenerateResult{}, fmt.Errorf("%w: anthropic requires max_tokens", ErrIncompatible)
 	}
-	if request.Temperature > 0 {
+	// 新版 Claude 的自适应思考仅接受默认温度；显式推理配置时不发送温度。
+	if request.Temperature > 0 && request.ReasoningEffort.Normalized() == agentdomain.ReasoningAuto && !supportsAdaptiveThinking(request.Model) {
 		payload["temperature"] = request.Temperature
 	}
 	effort, sendEffort, err := anthropicOutputEffort(request.ReasoningEffort)
 	if err != nil {
 		return GenerateResult{}, err
+	}
+	if sendEffort && !supportsAnthropicEffort(request.Model) {
+		return GenerateResult{}, fmt.Errorf("%w: model does not support reasoning effort", ErrIncompatible)
 	}
 	if len(request.JSONSchema) > 0 {
 		var schema any
@@ -284,6 +288,14 @@ func (client *AnthropicClient) Generate(
 		}
 		cfg["effort"] = effort
 		payload["output_config"] = cfg
+	}
+	switch request.ReasoningEffort.Normalized() {
+	case agentdomain.ReasoningNone:
+		payload["thinking"] = map[string]any{"type": "disabled"}
+	case agentdomain.ReasoningLow, agentdomain.ReasoningMedium, agentdomain.ReasoningHigh, agentdomain.ReasoningMax:
+		if supportsAdaptiveThinking(request.Model) {
+			payload["thinking"] = map[string]any{"type": "adaptive"}
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

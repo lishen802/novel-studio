@@ -228,7 +228,8 @@ export default function Lab() {
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <p>最大调用次数<br/><strong>{preview.estimatedCalls}</strong></p>
-            <p>运行 Token 预算<br/><strong>{formatBudget(preview.maxRunTokens || 0, Boolean(preview.runBudgetUnlimited))}</strong></p>
+            <p>单次运行 Token 预算<br/><strong>{formatBudget(preview.maxRunTokens || 0, Boolean(preview.runBudgetUnlimited))}</strong></p>
+            <p>本次实验最大 Token<br/><strong>{formatBudget(preview.maximumOutputTokens || 0, Boolean(preview.runBudgetUnlimited))}</strong></p>
             <p>上下文字符预算<br/><strong>{formatBudget(preview.maxContextChars || 0, Boolean(preview.contextBudgetUnlimited))}</strong></p>
             <p>工作流<br/><strong>{preview.workflowId}@{preview.workflowVersion}</strong></p>
           </div>
