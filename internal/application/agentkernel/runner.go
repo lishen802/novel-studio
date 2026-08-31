@@ -13,6 +13,7 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	"github.com/lishen802/novel-studio/internal/providers"
 	"github.com/lishen802/novel-studio/internal/quality"
 )
 
@@ -1420,6 +1421,28 @@ func errorCode(err error) string {
 		return "context_budget_exceeded"
 	case errors.Is(err, ErrInvalidOutput):
 		return "invalid_structured_output"
+	case errors.Is(err, providers.ErrAuthentication):
+		return "provider_authentication_failed"
+	case errors.Is(err, providers.ErrModelNotFound):
+		return "provider_model_not_found"
+	case errors.Is(err, providers.ErrQuotaExceeded):
+		return "provider_quota_exceeded"
+	case errors.Is(err, providers.ErrRateLimited):
+		return "provider_rate_limited"
+	case errors.Is(err, providers.ErrNetwork):
+		return "provider_network_failed"
+	case errors.Is(err, providers.ErrContentRejected):
+		return "provider_content_rejected"
+	case errors.Is(err, providers.ErrIncompatible):
+		return "provider_incompatible"
+	case errors.Is(err, providers.ErrResponseIncomplete):
+		return "provider_response_incomplete"
+	case errors.Is(err, providers.ErrResponseFailed):
+		return "provider_response_failed"
+	case errors.Is(err, providers.ErrEmptyResponse):
+		return "provider_empty_response"
+	case errors.Is(err, providers.ErrInvalidStream):
+		return "provider_invalid_stream"
 	case errors.Is(err, agentdomain.ErrInvalidTaskOutput), errors.Is(err, quality.ErrInvalidReconciliation):
 		return "invalid_structured_output"
 	case errors.Is(err, ErrQualityPolicy), errors.Is(err, quality.ErrPolicyNotFound):
@@ -1441,6 +1464,28 @@ func safeErrorMessage(code string) string {
 		return "必要约束无法装入上下文预算。"
 	case "invalid_structured_output":
 		return "模型输出未通过结构化契约校验。"
+	case "provider_authentication_failed":
+		return "API Key 无效或无权访问当前模型。"
+	case "provider_model_not_found":
+		return "模型名称不存在或当前账户不可用。"
+	case "provider_quota_exceeded":
+		return "模型额度不足或账单受限。"
+	case "provider_rate_limited":
+		return "模型服务正在限流，请稍后重试。"
+	case "provider_network_failed":
+		return "模型网络连接失败，请检查网络或代理设置。"
+	case "provider_content_rejected":
+		return "请求被模型内容政策拒绝。"
+	case "provider_incompatible":
+		return "接口地址与所选模型服务不兼容。"
+	case "provider_response_incomplete":
+		return "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"
+	case "provider_response_failed":
+		return "模型服务未能完成生成，请稍后重试。"
+	case "provider_empty_response":
+		return "模型返回了空内容，请检查模型能力或生成参数。"
+	case "provider_invalid_stream":
+		return "模型流式响应提前中断或格式不兼容。"
 	case "credential_unavailable":
 		return "模型凭据不可用，请检查连接设置。"
 	case "asset_missing", "prompt_render_failed", "invalid_envelope", "quality_policy_unavailable":

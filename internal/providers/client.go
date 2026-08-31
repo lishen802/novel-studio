@@ -35,6 +35,12 @@ var (
 	ErrProvider = errors.New("provider request failed")
 	// ErrInvalidStream 表示流式响应格式损坏。
 	ErrInvalidStream = errors.New("invalid provider stream")
+	// ErrResponseIncomplete 表示 Provider 在达到输出上限等情况下提前结束生成。
+	ErrResponseIncomplete = errors.New("provider response incomplete")
+	// ErrResponseFailed 表示 Provider 以失败终态结束生成。
+	ErrResponseFailed = errors.New("provider response failed")
+	// ErrEmptyResponse 表示 Provider 声称完成但没有返回可用正文。
+	ErrEmptyResponse = errors.New("provider response empty")
 )
 
 type GenerateRequest = ports.ModelGenerateRequest
@@ -105,12 +111,19 @@ func (client *OpenAIClient) Generate(
 	defer response.Body.Close()
 
 	var result GenerateResult
+	completed := false
 	err = readSSE(response.Body, func(event string, data []byte) error {
 		var envelope struct {
 			Type     string `json:"type"`
 			Delta    string `json:"delta"`
 			Response struct {
 				ID    string `json:"id"`
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+				IncompleteDetails struct {
+					Reason string `json:"reason"`
+				} `json:"incomplete_details"`
 				Usage struct {
 					InputTokens  int `json:"input_tokens"`
 					OutputTokens int `json:"output_tokens"`
@@ -120,25 +133,72 @@ func (client *OpenAIClient) Generate(
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			return err
 		}
-		switch envelope.Type {
+		eventType := envelope.Type
+		if eventType == "" {
+			eventType = event
+		}
+		switch eventType {
 		case "response.output_text.delta":
 			result.Text += envelope.Delta
 			if onDelta != nil {
 				onDelta(envelope.Delta)
 			}
 		case "response.completed":
+			completed = true
 			result.ProviderRequestID = envelope.Response.ID
 			result.InputTokens = envelope.Response.Usage.InputTokens
 			result.OutputTokens = envelope.Response.Usage.OutputTokens
+		case "response.incomplete":
+			if strings.EqualFold(envelope.Response.IncompleteDetails.Reason, "content_filter") {
+				return ErrContentRejected
+			}
+			return ErrResponseIncomplete
+		case "response.failed":
+			return classifyResponseFailure(envelope.Response.Error.Code)
 		case "error":
 			return ErrProvider
 		}
 		return nil
 	})
 	if err != nil {
+		if isStableProviderError(err) {
+			return GenerateResult{}, err
+		}
 		return GenerateResult{}, fmt.Errorf("%w: %w", ErrInvalidStream, err)
 	}
+	if !completed {
+		return GenerateResult{}, ErrInvalidStream
+	}
+	if strings.TrimSpace(result.Text) == "" {
+		return GenerateResult{}, ErrEmptyResponse
+	}
 	return result, nil
+}
+
+// classifyResponseFailure 只读取 Provider 的稳定错误码，避免把响应正文写入日志或界面。
+func classifyResponseFailure(code string) error {
+	normalized := strings.ToLower(strings.TrimSpace(code))
+	switch {
+	case strings.Contains(normalized, "auth"), strings.Contains(normalized, "api_key"), strings.Contains(normalized, "permission"):
+		return ErrAuthentication
+	case strings.Contains(normalized, "model") && strings.Contains(normalized, "not"):
+		return ErrModelNotFound
+	case strings.Contains(normalized, "quota"), strings.Contains(normalized, "billing"):
+		return ErrQuotaExceeded
+	case strings.Contains(normalized, "rate"), strings.Contains(normalized, "overload"):
+		return ErrRateLimited
+	case strings.Contains(normalized, "content"), strings.Contains(normalized, "safety"), strings.Contains(normalized, "policy"):
+		return ErrContentRejected
+	default:
+		return ErrResponseFailed
+	}
+}
+
+func isStableProviderError(err error) bool {
+	return errors.Is(err, ErrAuthentication) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrQuotaExceeded) ||
+		errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrIncompatible) ||
+		errors.Is(err, ErrProvider) || errors.Is(err, ErrResponseIncomplete) || errors.Is(err, ErrResponseFailed) ||
+		errors.Is(err, ErrEmptyResponse)
 }
 
 func (client *OpenAIClient) post(

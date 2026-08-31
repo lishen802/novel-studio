@@ -29,6 +29,7 @@ import (
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 	"github.com/lishen802/novel-studio/internal/platform/branchfs"
+	"github.com/lishen802/novel-studio/internal/providers"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -967,6 +968,27 @@ func TestSafeDesktopErrorExplainsAgentRuntimeFailures(t *testing.T) {
 		{workspace.ErrContextBudgetExceeded, errorAgentContextExceeded, "必要的故事上下文超过预算，请提高上下文字符预算。"},
 		{workspace.ErrAgentRunActive, errorAgentRunActive, "智能创作任务正在运行，请先等待完成或取消任务。"},
 		{agentdomain.ErrInvalidBudget, errorValidationFailed, "运行预算必须是大于零的整数。"},
+	}
+	for _, test := range tests {
+		var safe *desktopError
+		if err := safeDesktopError(test.err); !errors.As(err, &safe) {
+			t.Fatalf("safeDesktopError(%v) = %#v", test.err, err)
+		}
+		if safe.Code != test.code || safe.Message != test.message {
+			t.Fatalf("safe error = %#v", safe)
+		}
+	}
+}
+
+func TestSafeDesktopErrorExplainsProviderTerminalFailures(t *testing.T) {
+	tests := []struct {
+		err     error
+		code    desktopErrorCode
+		message string
+	}{
+		{providers.ErrResponseIncomplete, errorProviderIncomplete, "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"},
+		{providers.ErrResponseFailed, errorProviderResponseFailed, "模型服务未能完成生成，请稍后重试。"},
+		{providers.ErrEmptyResponse, errorProviderEmptyResponse, "模型返回了空内容，请检查模型能力或生成参数。"},
 	}
 	for _, test := range tests {
 		var safe *desktopError

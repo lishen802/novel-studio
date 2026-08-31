@@ -120,7 +120,8 @@ func (executor *kernelExecutor) runKernel(ctx context.Context, item quality.Harn
 	started := time.Now()
 	run, err = service.ExecuteRun(ctx, run.ID, request.CanonicalHead)
 	if err != nil {
-		return store, run, time.Since(started), fmt.Errorf("执行实验 Agent 运行: %w", err)
+		cause := fmt.Errorf("执行实验 Agent 运行: %w", err)
+		return store, run, time.Since(started), quality.NewHarnessExecutionError(run.ErrorMessage, cause)
 	}
 	return store, run, time.Since(started), nil
 }

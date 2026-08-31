@@ -519,11 +519,13 @@ var _ ports.ProviderProber = (*Service)(nil)
 var _ ports.CreativeProfileResolver = (*Service)(nil)
 
 type fakeProvider struct {
-	result ports.ModelGenerateResult
-	err    error
+	result  ports.ModelGenerateResult
+	err     error
+	request ports.ModelGenerateRequest
 }
 
-func (f *fakeProvider) Generate(_ context.Context, _ string, _ ports.ModelGenerateRequest, _ func(string)) (ports.ModelGenerateResult, error) {
+func (f *fakeProvider) Generate(_ context.Context, _ string, request ports.ModelGenerateRequest, _ func(string)) (ports.ModelGenerateResult, error) {
+	f.request = request
 	return f.result, f.err
 }
 
@@ -539,9 +541,10 @@ func (f *fakeProviderFactory) New(_ agent.ProviderConnection) (ports.ModelProvid
 func TestProbeProviderReturnsUsageAndLatency(t *testing.T) {
 	svc, _, _ := newServiceHarness(t)
 	provider := mustSaveProvider(t, svc)
-	svc.ConfigureProviders(&fakeProviderFactory{provider: &fakeProvider{
-		result: ports.ModelGenerateResult{ProviderRequestID: "req-1", InputTokens: 5, OutputTokens: 2},
-	}})
+	modelProvider := &fakeProvider{
+		result: ports.ModelGenerateResult{Text: "ok", ProviderRequestID: "req-1", InputTokens: 5, OutputTokens: 2},
+	}
+	svc.ConfigureProviders(&fakeProviderFactory{provider: modelProvider})
 	result, err := svc.ProbeProvider(context.Background(), provider.ID, "gpt-test")
 	if err != nil {
 		t.Fatal(err)
@@ -551,6 +554,20 @@ func TestProbeProviderReturnsUsageAndLatency(t *testing.T) {
 	}
 	if result.Model != "gpt-test" || result.ProviderID != provider.ID {
 		t.Fatalf("unexpected probe identity: %#v", result)
+	}
+	if modelProvider.request.MaxOutputTokens != probeMaxOutputTokens {
+		t.Fatalf("probe max output = %d, want %d", modelProvider.request.MaxOutputTokens, probeMaxOutputTokens)
+	}
+}
+
+func TestProbeProviderRejectsEmptyResponse(t *testing.T) {
+	svc, _, _ := newServiceHarness(t)
+	provider := mustSaveProvider(t, svc)
+	svc.ConfigureProviders(&fakeProviderFactory{provider: &fakeProvider{
+		result: ports.ModelGenerateResult{ProviderRequestID: "req-empty"},
+	}})
+	if _, err := svc.ProbeProvider(context.Background(), provider.ID, "gpt-test"); err == nil {
+		t.Fatal("ProbeProvider accepted an empty response")
 	}
 }
 

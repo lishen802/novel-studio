@@ -102,6 +102,9 @@ const (
 	errorProviderNetworkFailed   desktopErrorCode = "PROVIDER_NETWORK_FAILED"
 	errorProviderContentRejected desktopErrorCode = "PROVIDER_CONTENT_REJECTED"
 	errorProviderIncompatible    desktopErrorCode = "PROVIDER_INCOMPATIBLE"
+	errorProviderIncomplete      desktopErrorCode = "PROVIDER_RESPONSE_INCOMPLETE"
+	errorProviderResponseFailed  desktopErrorCode = "PROVIDER_RESPONSE_FAILED"
+	errorProviderEmptyResponse   desktopErrorCode = "PROVIDER_EMPTY_RESPONSE"
 	errorCredentialRollback      desktopErrorCode = "CREDENTIAL_ROLLBACK_FAILED"
 	errorCreativeProfileInvalid  desktopErrorCode = "CREATIVE_PROFILE_INVALID"
 	errorCreativeProfileMissing  desktopErrorCode = "CREATIVE_PROFILE_NOT_FOUND"
@@ -157,6 +160,12 @@ func safeDesktopError(err error) error {
 		code, message = errorProviderContentRejected, "请求被模型内容政策拒绝。"
 	case errors.Is(err, providers.ErrIncompatible):
 		code, message = errorProviderIncompatible, "接口地址与所选模型服务不兼容。"
+	case errors.Is(err, providers.ErrResponseIncomplete):
+		code, message = errorProviderIncomplete, "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"
+	case errors.Is(err, providers.ErrResponseFailed):
+		code, message = errorProviderResponseFailed, "模型服务未能完成生成，请稍后重试。"
+	case errors.Is(err, providers.ErrEmptyResponse):
+		code, message = errorProviderEmptyResponse, "模型返回了空内容，请检查模型能力或生成参数。"
 	case errors.Is(err, appsettings.ErrProviderNotFound):
 		code, message = errorProviderNotFound, "模型连接已被删除或页面数据已过期。"
 	case errors.Is(err, appsettings.ErrCredentialMissing):

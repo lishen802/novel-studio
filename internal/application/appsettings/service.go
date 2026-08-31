@@ -10,6 +10,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/domain/agent"
 	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
+	"github.com/lishen802/novel-studio/internal/providers"
 )
 
 var (
@@ -383,8 +384,12 @@ func (s *Service) HasCredential(ctx context.Context, provider appdomain.Provider
 	return err == nil
 }
 
-// probeTimeout 是真实连接测试的默认超时。
-const probeTimeout = 20 * time.Second
+const (
+	// probeTimeout 是真实连接测试的默认超时。
+	probeTimeout = 20 * time.Second
+	// probeMaxOutputTokens 为默认开启推理的模型预留足够空间；实际只要求简短确认。
+	probeMaxOutputTokens = 1024
+)
 
 // ProbeProvider 对已保存连接发起一次真实、最小费用的模型请求，验证鉴权、
 // 模型名称与调用协议可用。它不保存响应正文，也不自动重试到其他连接或模型。
@@ -419,11 +424,14 @@ func (s *Service) ProbeProvider(ctx context.Context, providerID, model string) (
 		Model:           model,
 		System:          "Return a concise acknowledgement.",
 		Input:           "Connection test.",
-		MaxOutputTokens: 16,
+		MaxOutputTokens: probeMaxOutputTokens,
 		Temperature:     0,
 	}, nil)
 	if err != nil {
 		return ports.ProviderProbeResult{}, err
+	}
+	if strings.TrimSpace(result.Text) == "" {
+		return ports.ProviderProbeResult{}, providers.ErrEmptyResponse
 	}
 
 	return ports.ProviderProbeResult{

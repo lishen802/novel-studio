@@ -22,6 +22,35 @@ var (
 	ErrSensitiveReportData   = errors.New("harness report contains sensitive data")
 )
 
+// HarnessExecutionError 携带可持久化的脱敏错误说明，同时保留内部错误链用于分类。
+type HarnessExecutionError struct {
+	PublicMessage string
+	Cause         error
+}
+
+func (failure *HarnessExecutionError) Error() string {
+	if failure == nil {
+		return "harness execution failed"
+	}
+	return failure.PublicMessage
+}
+
+func (failure *HarnessExecutionError) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.Cause
+}
+
+// NewHarnessExecutionError 创建只向运行记录暴露预先脱敏说明的执行错误。
+func NewHarnessExecutionError(publicMessage string, cause error) error {
+	message := strings.TrimSpace(publicMessage)
+	if message == "" {
+		message = "case 执行失败"
+	}
+	return &HarnessExecutionError{PublicMessage: message, Cause: cause}
+}
+
 const ProvenanceOriginalFixture = "project_original_fixture"
 
 type HarnessTaskKind string
@@ -627,7 +656,12 @@ func (runner *HarnessRunner) Execute(ctx context.Context, runID string, dataset 
 			if errors.Is(err, context.Canceled) {
 				status = HarnessRunCancelled
 			}
-			runner.stopRun(context.WithoutCancel(ctx), &run, status, "case 执行失败")
+			failureMessage := "case 执行失败"
+			var executionFailure *HarnessExecutionError
+			if errors.As(err, &executionFailure) && strings.TrimSpace(executionFailure.PublicMessage) != "" {
+				failureMessage = executionFailure.PublicMessage
+			}
+			runner.stopRun(context.WithoutCancel(ctx), &run, status, failureMessage)
 			return HarnessReport{}, fmt.Errorf("execute harness case %s: %w", item.ID, err)
 		}
 		if err := validateCandidates(item.TaskKind, candidates); err != nil {

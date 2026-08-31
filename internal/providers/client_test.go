@@ -53,6 +53,59 @@ func TestOpenAIResponsesStreamsTextAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesRejectsIncompleteTerminalEvent(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"未完成\"}\n\n" +
+			"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n"
+		return sseResponse(stream), nil
+	})}
+
+	client := NewOpenAIClient(httpClient, "https://api.example.test")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, nil)
+	if !errors.Is(err, ErrResponseIncomplete) {
+		t.Fatalf("Generate() error = %v, want ErrResponseIncomplete", err)
+	}
+}
+
+func TestOpenAIResponsesRejectsFailedTerminalEvent(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		stream := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"error\":{\"code\":\"server_error\",\"message\":\"sensitive upstream detail\"}}}\n\n"
+		return sseResponse(stream), nil
+	})}
+
+	client := NewOpenAIClient(httpClient, "https://api.example.test")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, nil)
+	if !errors.Is(err, ErrResponseFailed) {
+		t.Fatalf("Generate() error = %v, want ErrResponseFailed", err)
+	}
+	if strings.Contains(err.Error(), "sensitive upstream detail") {
+		t.Fatalf("Generate() leaked provider detail: %v", err)
+	}
+}
+
+func TestOpenAIResponsesRequiresCompletedTerminalAndText(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream string
+		want   error
+	}{
+		{name: "stream ended early", stream: "event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n", want: ErrInvalidStream},
+		{name: "completed without text", stream: "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"usage\":{}}}\n\n", want: ErrEmptyResponse},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return sseResponse(test.stream), nil
+			})}
+			client := NewOpenAIClient(httpClient, "https://api.example.test")
+			_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, nil)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("Generate() error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
 func TestAnthropicMessagesStreamsTextAndUsage(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

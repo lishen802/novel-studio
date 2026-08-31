@@ -12,6 +12,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/agentassets"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	"github.com/lishen802/novel-studio/internal/providers"
 )
 
 func TestServiceRunsFrozenWorkflowAndPersistsTrace(t *testing.T) {
@@ -101,6 +102,27 @@ func TestServiceKeepsProviderDetailsOutOfPersistedError(t *testing.T) {
 	loaded := store.runs[run.ID]
 	if loaded.ErrorMessage == "secret upstream response" || loaded.Steps[0].ErrorMessage == "secret upstream response" {
 		t.Fatalf("provider response leaked: %#v", loaded)
+	}
+}
+
+func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
+	tests := []struct {
+		err     error
+		code    string
+		message string
+	}{
+		{providers.ErrResponseIncomplete, "provider_response_incomplete", "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"},
+		{providers.ErrResponseFailed, "provider_response_failed", "模型服务未能完成生成，请稍后重试。"},
+		{providers.ErrEmptyResponse, "provider_empty_response", "模型返回了空内容，请检查模型能力或生成参数。"},
+		{providers.ErrInvalidStream, "provider_invalid_stream", "模型流式响应提前中断或格式不兼容。"},
+	}
+	for _, test := range tests {
+		if got := errorCode(test.err); got != test.code {
+			t.Fatalf("errorCode(%v) = %q, want %q", test.err, got, test.code)
+		}
+		if got := safeErrorMessage(test.code); got != test.message {
+			t.Fatalf("safeErrorMessage(%q) = %q, want %q", test.code, got, test.message)
+		}
 	}
 }
 

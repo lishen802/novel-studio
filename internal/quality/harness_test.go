@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -190,6 +191,39 @@ func TestHarnessRunnerPersistsPublicStageAndUsageProgress(t *testing.T) {
 	}
 }
 
+func TestHarnessRunnerPersistsSafeExecutionFailure(t *testing.T) {
+	dataset, err := BuiltinHarnessDatasetV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryHarnessStore{}
+	runner, err := NewHarnessRunner(HarnessRunnerConfig{
+		Store: store,
+		Executor: failingHarnessExecutor{err: NewHarnessExecutionError(
+			"模型输出达到上限而未完成，请提高最大输出 Token 后重试。",
+			errors.New("private provider detail"),
+		)},
+		Now:   time.Now,
+		NewID: func() string { return "run-failed" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runner.Create(context.Background(), HarnessRunRequest{Dataset: dataset, Mode: HarnessModeReduced, Binding: testHarnessBinding()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Execute(context.Background(), run.ID, dataset); err == nil {
+		t.Fatal("Execute() succeeded")
+	}
+	if store.run.Failure != "模型输出达到上限而未完成，请提高最大输出 Token 后重试。" {
+		t.Fatalf("failure = %q", store.run.Failure)
+	}
+	if strings.Contains(store.run.Failure, "private provider detail") {
+		t.Fatalf("failure leaked private detail: %q", store.run.Failure)
+	}
+}
+
 func TestHarnessRatingSubmissionRequiresWholeBlindSet(t *testing.T) {
 	submission := HarnessRatingSubmission{ID: "rating", RunID: "run", CaseID: "case", LocalRaterID: "local", CreatedAt: time.Now(), Ratings: []HarnessCandidateRating{{Slot: "候选-1", Scores: map[string]int{"人物动机": 4}, Acceptance: HarnessAcceptDirect}}}
 	if err := submission.Validate([]string{"候选-1", "候选-2"}, []string{"人物动机"}); !errors.Is(err, ErrInvalidHarnessRun) {
@@ -221,6 +255,12 @@ func TestCompareHarnessReportsDoesNotHideGenreRegression(t *testing.T) {
 }
 
 type deterministicExecutor struct{}
+
+type failingHarnessExecutor struct{ err error }
+
+func (executor failingHarnessExecutor) Execute(context.Context, HarnessCase, HarnessRunBinding) ([]HarnessCandidate, error) {
+	return nil, executor.err
+}
 
 func (deterministicExecutor) Execute(_ context.Context, item HarnessCase, _ HarnessRunBinding) ([]HarnessCandidate, error) {
 	kinds := []HarnessCandidateKind{CandidateInitial, CandidateRevised}
