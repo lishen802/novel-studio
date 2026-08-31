@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -112,9 +111,8 @@ func (client *OpenAIClient) Generate(
 		if err := json.Unmarshal(request.JSONSchema, &schema); err != nil {
 			return GenerateResult{}, fmt.Errorf("decode output schema: %w", err)
 		}
-		schema = normalizeStrictJSONSchema(schema)
 		payload["text"] = map[string]any{"format": map[string]any{
-			"type": "json_schema", "name": request.SchemaName, "schema": schema, "strict": true,
+			"type": "json_schema", "name": request.SchemaName, "schema": schema, "strict": strictJSONSchemaCompatible(schema),
 		}}
 	}
 	response, err := client.post(ctx, "/responses", apiKey, payload)
@@ -217,74 +215,43 @@ func isStableProviderError(err error) bool {
 		errors.Is(err, ErrEmptyResponse)
 }
 
-// normalizeStrictJSONSchema 将可选属性转换为“必填且允许 null”。
-// OpenAI 兼容严格模式要求每个对象的 properties 全部出现在 required 中；
-// nullable 保留了领域协议中可选字段的原有语义。
-func normalizeStrictJSONSchema(value any) any {
+// strictJSONSchemaCompatible 判断 Schema 是否满足 OpenAI 兼容严格模式。
+// 含可选字段的领域契约保留原始 Schema 并关闭 Provider 严格模式，最终仍由
+// Go 强类型解码和领域 Validate 执行完整校验。
+func strictJSONSchemaCompatible(value any) bool {
 	switch schema := value.(type) {
 	case []any:
-		for index := range schema {
-			schema[index] = normalizeStrictJSONSchema(schema[index])
+		for _, child := range schema {
+			if !strictJSONSchemaCompatible(child) {
+				return false
+			}
 		}
-		return schema
+		return true
 	case map[string]any:
-		for key, child := range schema {
-			schema[key] = normalizeStrictJSONSchema(child)
-		}
-		properties, ok := schema["properties"].(map[string]any)
-		if !ok {
-			return schema
-		}
-		required := make(map[string]struct{})
-		if existing, ok := schema["required"].([]any); ok {
-			for _, item := range existing {
-				if name, ok := item.(string); ok {
-					required[name] = struct{}{}
+		if properties, ok := schema["properties"].(map[string]any); ok {
+			required := make(map[string]struct{})
+			if existing, ok := schema["required"].([]any); ok {
+				for _, item := range existing {
+					if name, ok := item.(string); ok {
+						required[name] = struct{}{}
+					}
+				}
+			}
+			for name := range properties {
+				if _, exists := required[name]; !exists {
+					return false
 				}
 			}
 		}
-		names := make([]string, 0, len(properties))
-		for name, property := range properties {
-			names = append(names, name)
-			if _, exists := required[name]; !exists && !jsonSchemaAllowsNull(property) {
-				properties[name] = map[string]any{"anyOf": []any{property, map[string]any{"type": "null"}}}
+		for _, child := range schema {
+			if !strictJSONSchemaCompatible(child) {
+				return false
 			}
 		}
-		sort.Strings(names)
-		schema["required"] = names
-		return schema
+		return true
 	default:
-		return value
+		return true
 	}
-}
-
-func jsonSchemaAllowsNull(value any) bool {
-	schema, ok := value.(map[string]any)
-	if !ok {
-		return false
-	}
-	switch fieldType := schema["type"].(type) {
-	case string:
-		if fieldType == "null" {
-			return true
-		}
-	case []any:
-		for _, item := range fieldType {
-			if item == "null" {
-				return true
-			}
-		}
-	}
-	for _, keyword := range []string{"anyOf", "oneOf"} {
-		if options, ok := schema[keyword].([]any); ok {
-			for _, option := range options {
-				if jsonSchemaAllowsNull(option) {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func (client *OpenAIClient) post(

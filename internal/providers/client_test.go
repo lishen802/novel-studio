@@ -53,7 +53,7 @@ func TestOpenAIResponsesStreamsTextAndUsage(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesNormalizesOptionalSchemaFieldsForStrictMode(t *testing.T) {
+func TestOpenAIResponsesDisablesStrictModeForOptionalSchemaFields(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
@@ -78,26 +78,17 @@ func TestOpenAIResponsesNormalizesOptionalSchemaFieldsForStrictMode(t *testing.T
 	}
 	textConfig := received["text"].(map[string]any)
 	format := textConfig["format"].(map[string]any)
-	if format["strict"] != true {
+	if format["strict"] != false {
 		t.Fatalf("strict format = %#v", format)
 	}
 	schema := format["schema"].(map[string]any)
 	required := schema["required"].([]any)
-	if strings.Join([]string{required[0].(string), required[1].(string), required[2].(string)}, ",") != "detail,message,suggestion" {
+	if len(required) != 1 || required[0] != "message" {
 		t.Fatalf("required = %#v", required)
 	}
 	properties := schema["properties"].(map[string]any)
-	assertNullableSchema(t, properties["suggestion"])
-	detail := properties["detail"].(map[string]any)["anyOf"].([]any)[0].(map[string]any)
-	quote := detail["properties"].(map[string]any)["quote"]
-	assertNullableSchema(t, quote)
-}
-
-func assertNullableSchema(t *testing.T, value any) {
-	t.Helper()
-	options, ok := value.(map[string]any)["anyOf"].([]any)
-	if !ok || len(options) != 2 || options[1].(map[string]any)["type"] != "null" {
-		t.Fatalf("schema is not nullable: %#v", value)
+	if properties["suggestion"].(map[string]any)["type"] != "string" {
+		t.Fatalf("optional property was rewritten: %#v", properties["suggestion"])
 	}
 }
 
