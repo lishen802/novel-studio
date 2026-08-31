@@ -207,14 +207,16 @@ func (s *Store) PublishProfileVersion(ctx context.Context, v appsettings.Creativ
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO creative_profile_versions(profile_id, version, name, max_run_tokens, max_context_chars, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO creative_profile_versions(profile_id, version, name, max_run_tokens, max_context_chars, run_budget_unlimited, context_budget_unlimited, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id, version) DO UPDATE SET
 			name = excluded.name,
 			max_run_tokens = excluded.max_run_tokens,
 			max_context_chars = excluded.max_context_chars,
+			run_budget_unlimited = excluded.run_budget_unlimited,
+			context_budget_unlimited = excluded.context_budget_unlimited,
 			created_at = excluded.created_at
-	`, v.ProfileID, v.Version, v.Name, v.MaxRunTokens, v.MaxContextChars, formatTime(v.CreatedAt))
+	`, v.ProfileID, v.Version, v.Name, v.MaxRunTokens, v.MaxContextChars, boolToInt(v.RunBudgetUnlimited), boolToInt(v.ContextBudgetUnlimited), formatTime(v.CreatedAt))
 	if err != nil {
 		return closeWithError(fmt.Errorf("upsert profile version: %w", err))
 	}
@@ -233,10 +235,10 @@ func (s *Store) PublishProfileVersion(ctx context.Context, v appsettings.Creativ
 			enabled = 1
 		}
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO creative_profile_roles(profile_id, version, role, connection_id, model, max_output_tokens, temperature, enabled)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO creative_profile_roles(profile_id, version, role, connection_id, model, max_output_tokens, reasoning_effort, output_limit_mode, temperature, enabled)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, v.ProfileID, v.Version, string(role.Role), role.ConnectionID, role.Model,
-			role.MaxOutputTokens, role.Temperature, enabled)
+			role.MaxOutputTokens, string(role.ReasoningEffort.Normalized()), string(role.OutputLimitMode.Normalized()), role.Temperature, enabled)
 		if err != nil {
 			return closeWithError(fmt.Errorf("insert profile role: %w", err))
 		}
@@ -250,14 +252,16 @@ func (s *Store) PublishProfileVersion(ctx context.Context, v appsettings.Creativ
 
 func (s *Store) ProfileVersion(ctx context.Context, profileID string, version int64) (appsettings.CreativeProfileVersion, error) {
 	var (
-		v         appsettings.CreativeProfileVersion
-		createdAt string
+		v                appsettings.CreativeProfileVersion
+		createdAt        string
+		runUnlimited     int
+		contextUnlimited int
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT profile_id, version, name, max_run_tokens, max_context_chars, created_at
+		SELECT profile_id, version, name, max_run_tokens, max_context_chars, run_budget_unlimited, context_budget_unlimited, created_at
 		FROM creative_profile_versions WHERE profile_id = ? AND version = ?
 	`, profileID, version).Scan(
-		&v.ProfileID, &v.Version, &v.Name, &v.MaxRunTokens, &v.MaxContextChars, &createdAt,
+		&v.ProfileID, &v.Version, &v.Name, &v.MaxRunTokens, &v.MaxContextChars, &runUnlimited, &contextUnlimited, &createdAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return appsettings.CreativeProfileVersion{}, ErrSettingsMissing
@@ -265,13 +269,15 @@ func (s *Store) ProfileVersion(ctx context.Context, profileID string, version in
 	if err != nil {
 		return appsettings.CreativeProfileVersion{}, fmt.Errorf("read profile version: %w", err)
 	}
+	v.RunBudgetUnlimited = runUnlimited == 1
+	v.ContextBudgetUnlimited = contextUnlimited == 1
 	v.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
 		return appsettings.CreativeProfileVersion{}, fmt.Errorf("parse profile created_at: %w", err)
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT role, connection_id, model, max_output_tokens, temperature, enabled
+		SELECT role, connection_id, model, max_output_tokens, reasoning_effort, output_limit_mode, temperature, enabled
 		FROM creative_profile_roles
 		WHERE profile_id = ? AND version = ?
 		ORDER BY role ASC
@@ -282,14 +288,18 @@ func (s *Store) ProfileVersion(ctx context.Context, profileID string, version in
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			roleStr string
-			enabled int
-			r       appsettings.RoleBinding
+			roleStr         string
+			enabled         int
+			reasoning       string
+			outputLimitMode string
+			r               appsettings.RoleBinding
 		)
-		if err := rows.Scan(&roleStr, &r.ConnectionID, &r.Model, &r.MaxOutputTokens, &r.Temperature, &enabled); err != nil {
+		if err := rows.Scan(&roleStr, &r.ConnectionID, &r.Model, &r.MaxOutputTokens, &reasoning, &outputLimitMode, &r.Temperature, &enabled); err != nil {
 			return appsettings.CreativeProfileVersion{}, fmt.Errorf("scan profile role: %w", err)
 		}
 		r.Role = agent.Role(roleStr)
+		r.ReasoningEffort = agent.ReasoningEffort(reasoning).Normalized()
+		r.OutputLimitMode = agent.OutputLimitMode(outputLimitMode).Normalized()
 		r.Enabled = enabled == 1
 		v.Roles = append(v.Roles, r)
 	}
@@ -317,8 +327,8 @@ func (s *Store) LatestProfileVersion(ctx context.Context, profileID string) (app
 // 避免上层循环逐方案调用 LatestProfileVersion 造成 N+1 查询。
 func (s *Store) ListLatestProfiles(ctx context.Context) ([]appsettings.CreativeProfileVersion, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.profile_id, v.version, v.name, v.max_run_tokens, v.max_context_chars, v.created_at,
-		       r.role, r.connection_id, r.model, r.max_output_tokens, r.temperature, r.enabled
+		SELECT v.profile_id, v.version, v.name, v.max_run_tokens, v.max_context_chars, v.run_budget_unlimited, v.context_budget_unlimited, v.created_at,
+		       r.role, r.connection_id, r.model, r.max_output_tokens, r.reasoning_effort, r.output_limit_mode, r.temperature, r.enabled
 		FROM creative_profile_versions v
 		JOIN (SELECT profile_id, MAX(version) AS max_version FROM creative_profile_versions GROUP BY profile_id) latest
 		  ON v.profile_id = latest.profile_id AND v.version = latest.max_version
@@ -335,18 +345,20 @@ func (s *Store) ListLatestProfiles(ctx context.Context) ([]appsettings.CreativeP
 	order := make([]string, 0)
 	for rows.Next() {
 		var (
-			profileID                          string
-			version                            int64
-			name                               string
-			maxRunTokens, maxContextChars      int
-			createdAt                          string
-			roleStr, connectionID, model       sql.NullString
-			maxOutputTokens, enabled           sql.NullInt64
-			temperature                        sql.NullFloat64
+			profileID                      string
+			version                        int64
+			name                           string
+			maxRunTokens, maxContextChars  int
+			runUnlimited, contextUnlimited int
+			createdAt                      string
+			roleStr, connectionID, model   sql.NullString
+			reasoning, outputLimitMode     sql.NullString
+			maxOutputTokens, enabled       sql.NullInt64
+			temperature                    sql.NullFloat64
 		)
 		if err := rows.Scan(
-			&profileID, &version, &name, &maxRunTokens, &maxContextChars, &createdAt,
-			&roleStr, &connectionID, &model, &maxOutputTokens, &temperature, &enabled,
+			&profileID, &version, &name, &maxRunTokens, &maxContextChars, &runUnlimited, &contextUnlimited, &createdAt,
+			&roleStr, &connectionID, &model, &maxOutputTokens, &reasoning, &outputLimitMode, &temperature, &enabled,
 		); err != nil {
 			return nil, fmt.Errorf("scan latest profile: %w", err)
 		}
@@ -357,12 +369,14 @@ func (s *Store) ListLatestProfiles(ctx context.Context) ([]appsettings.CreativeP
 				return nil, fmt.Errorf("parse latest profile created_at: %w", err)
 			}
 			byID[profileID] = &appsettings.CreativeProfileVersion{
-				ProfileID:       profileID,
-				Version:         version,
-				Name:            name,
-				MaxRunTokens:    maxRunTokens,
-				MaxContextChars: maxContextChars,
-				CreatedAt:       created,
+				ProfileID:              profileID,
+				Version:                version,
+				Name:                   name,
+				MaxRunTokens:           maxRunTokens,
+				MaxContextChars:        maxContextChars,
+				RunBudgetUnlimited:     runUnlimited == 1,
+				ContextBudgetUnlimited: contextUnlimited == 1,
+				CreatedAt:              created,
 			}
 			order = append(order, profileID)
 			profile = byID[profileID]
@@ -373,6 +387,8 @@ func (s *Store) ListLatestProfiles(ctx context.Context) ([]appsettings.CreativeP
 				ConnectionID:    connectionID.String,
 				Model:           model.String,
 				MaxOutputTokens: int(maxOutputTokens.Int64),
+				ReasoningEffort: agent.ReasoningEffort(reasoning.String).Normalized(),
+				OutputLimitMode: agent.OutputLimitMode(outputLimitMode.String).Normalized(),
 				Temperature:     temperature.Float64,
 				Enabled:         enabled.Int64 == 1,
 			})
@@ -486,4 +502,11 @@ func (s *Store) LegacyImport(ctx context.Context, projectID, sourceDigest string
 		return "", 0, fmt.Errorf("read legacy import: %w", err)
 	}
 	return profileID, profileVersion, nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

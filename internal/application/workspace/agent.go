@@ -83,27 +83,31 @@ type AgentRunStepView struct {
 	ProviderKind    string  `json:"providerKind"`
 	Model           string  `json:"model"`
 	MaxOutputTokens int     `json:"maxOutputTokens"`
+	ReasoningEffort string  `json:"reasoningEffort"`
+	OutputLimitMode string  `json:"outputLimitMode"`
 	Temperature     float64 `json:"temperature"`
 }
 
 type AgentRunView struct {
-	ID                string             `json:"id"`
-	ChapterID         string             `json:"chapterId"`
-	Prompt            string             `json:"prompt"`
-	Status            string             `json:"status"`
-	ErrorCode         string             `json:"errorCode"`
-	ErrorMessage      string             `json:"errorMessage"`
-	ChangeSetID       string             `json:"changeSetId"`
-	RetryOf           string             `json:"retryOf"`
-	TokenBudget       int                `json:"tokenBudget"`
-	ContextCharBudget int                `json:"contextCharBudget"`
-	InputTokens       int                `json:"inputTokens"`
-	OutputTokens      int                `json:"outputTokens"`
-	ContextChars      int                `json:"contextChars"`
-	ContextTruncated  bool               `json:"contextTruncated"`
-	Steps             []AgentRunStepView `json:"steps"`
-	CreatedAt         string             `json:"createdAt"`
-	UpdatedAt         string             `json:"updatedAt"`
+	ID                     string             `json:"id"`
+	ChapterID              string             `json:"chapterId"`
+	Prompt                 string             `json:"prompt"`
+	Status                 string             `json:"status"`
+	ErrorCode              string             `json:"errorCode"`
+	ErrorMessage           string             `json:"errorMessage"`
+	ChangeSetID            string             `json:"changeSetId"`
+	RetryOf                string             `json:"retryOf"`
+	TokenBudget            int                `json:"tokenBudget"`
+	ContextCharBudget      int                `json:"contextCharBudget"`
+	TokenBudgetUnlimited   bool               `json:"tokenBudgetUnlimited"`
+	ContextBudgetUnlimited bool               `json:"contextBudgetUnlimited"`
+	InputTokens            int                `json:"inputTokens"`
+	OutputTokens           int                `json:"outputTokens"`
+	ContextChars           int                `json:"contextChars"`
+	ContextTruncated       bool               `json:"contextTruncated"`
+	Steps                  []AgentRunStepView `json:"steps"`
+	CreatedAt              string             `json:"createdAt"`
+	UpdatedAt              string             `json:"updatedAt"`
 }
 
 func (s *Service) AgentRuntimeSettings(ctx context.Context) (AgentRuntimeSettingsView, error) {
@@ -400,10 +404,14 @@ func (s *Service) createChapterAgentRunLocked(
 	}
 
 	maxOutputTokens := 0
+	hasFixedOutput := false
 	for _, role := range resolved.Roles {
-		maxOutputTokens += role.MaxOutputTokens
+		if !role.OutputLimitMode.OmitsConfiguredMaxOutput() {
+			hasFixedOutput = true
+			maxOutputTokens += role.MaxOutputTokens
+		}
 	}
-	if maxOutputTokens > resolved.MaxRunTokens {
+	if hasFixedOutput && !resolved.RunBudgetUnlimited && maxOutputTokens > resolved.MaxRunTokens {
 		return AgentRunView{}, fmt.Errorf(
 			"%w: role output limits total %d, budget %d",
 			ErrTokenBudgetExceeded,
@@ -426,6 +434,8 @@ func (s *Service) createChapterAgentRunLocked(
 			CredentialRef:          role.CredentialRef,
 			Model:                  role.Model,
 			MaxOutputTokens:        role.MaxOutputTokens,
+			ReasoningEffort:        role.ReasoningEffort.Normalized(),
+			OutputLimitMode:        role.OutputLimitMode.Normalized(),
 			Temperature:            role.Temperature,
 		}
 	}
@@ -436,10 +446,15 @@ func (s *Service) createChapterAgentRunLocked(
 	if err != nil {
 		return AgentRunView{}, err
 	}
-	run, err = run.WithBudgets(resolved.MaxRunTokens, resolved.MaxContextChars)
+	run, err = run.WithBudgets(
+		agentdomain.EffectiveBudget(resolved.MaxRunTokens, resolved.RunBudgetUnlimited),
+		agentdomain.EffectiveBudget(resolved.MaxContextChars, resolved.ContextBudgetUnlimited),
+	)
 	if err != nil {
 		return AgentRunView{}, err
 	}
+	run.TokenBudgetUnlimited = resolved.RunBudgetUnlimited
+	run.ContextBudgetUnlimited = resolved.ContextBudgetUnlimited
 	run.RetryOf = strings.TrimSpace(retryOf)
 	if err := store.CreateAgentRun(ctx, run); err != nil {
 		return AgentRunView{}, s.handleFilesystemWriteFailureLocked(err)
@@ -681,7 +696,16 @@ func (s *Service) runAgentPipeline(
 			return failed(s.handleFilesystemWriteFailureForGeneration(generation, err))
 		}
 		s.notifyJobUpdated(ctx, store, run.ID, agentdomain.JobKindAgent)
-		request := agentRequest(step.Role, step.Model, step.MaxOutputTokens, step.Temperature, run.Prompt, contextJSON, plan, draft)
+		request := agentRequest(step.Role, step.Model, step.MaxOutputTokens, step.ReasoningEffort, step.Temperature, run.Prompt, contextJSON, plan, draft)
+		if step.OutputLimitMode.OmitsConfiguredMaxOutput() && step.ProviderKind == agentdomain.ProviderOpenAI {
+			request.MaxOutputTokens = 0
+		} else if step.OutputLimitMode.OmitsConfiguredMaxOutput() {
+			cap := run.RemainingTokens()
+			if cap > agentdomain.ProviderTechnicalMaxOutput {
+				cap = agentdomain.ProviderTechnicalMaxOutput
+			}
+			request.MaxOutputTokens = cap
+		}
 		generated, err := provider.Generate(ctx, apiKey, request, func(delta string) {
 			step.Output += delta
 		})
@@ -1171,12 +1195,13 @@ func agentRequest(
 	role agentdomain.Role,
 	model string,
 	maxOutputTokens int,
+	reasoningEffort agentdomain.ReasoningEffort,
 	temperature float64,
 	goal, contextJSON, plan, draft string,
 ) ports.ModelGenerateRequest {
 	request := ports.ModelGenerateRequest{
 		Model: model, MaxOutputTokens: maxOutputTokens,
-		Temperature: temperature,
+		ReasoningEffort: reasoningEffort, Temperature: temperature,
 	}
 	switch role {
 	case agentdomain.RolePlanner:
@@ -1275,14 +1300,24 @@ func agentRunView(run agentdomain.Run) AgentRunView {
 			ProviderKind:    string(step.ProviderKind),
 			Model:           step.Model,
 			MaxOutputTokens: step.MaxOutputTokens,
+			ReasoningEffort: string(step.ReasoningEffort.Normalized()),
+			OutputLimitMode: string(step.OutputLimitMode.Normalized()),
 			Temperature:     step.Temperature,
 		})
+	}
+	tokenBudget, contextBudget := run.TokenBudget, run.ContextCharBudget
+	if run.TokenBudgetUnlimited {
+		tokenBudget = 0
+	}
+	if run.ContextBudgetUnlimited {
+		contextBudget = 0
 	}
 	return AgentRunView{
 		ID: run.ID, ChapterID: run.ChapterID, Prompt: run.Prompt,
 		Status: string(run.Status), ErrorCode: run.ErrorCode, ErrorMessage: run.ErrorMessage,
 		ChangeSetID: run.ChangeSetID, RetryOf: run.RetryOf, Steps: steps,
-		TokenBudget: run.TokenBudget, ContextCharBudget: run.ContextCharBudget,
+		TokenBudget: tokenBudget, ContextCharBudget: contextBudget,
+		TokenBudgetUnlimited: run.TokenBudgetUnlimited, ContextBudgetUnlimited: run.ContextBudgetUnlimited,
 		InputTokens: run.InputTokens, OutputTokens: run.OutputTokens,
 		ContextChars: run.ContextChars, ContextTruncated: run.ContextTruncated,
 		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339Nano),

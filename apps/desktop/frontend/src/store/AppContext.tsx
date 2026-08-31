@@ -59,10 +59,14 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
       connectionId: role.connectionId,
       model: role.model,
       maxOutputTokens: role.maxOutputTokens,
+      reasoningEffort: role.reasoningEffort || 'auto',
+      outputLimitMode: role.outputLimitMode || 'fixed',
       temperature: role.temperature,
     }])),
     maxRunTokens: profile.maxRunTokens,
     maxContextChars: profile.maxContextChars,
+    runBudgetUnlimited: Boolean(profile.runBudgetUnlimited),
+    contextBudgetUnlimited: Boolean(profile.contextBudgetUnlimited),
   })) as AppSettings['creativeProfiles'];
   // Bootstrap 只包含不可变的已发布版本；本地未发布草稿必须合并保留，避免保存连接
   // 或发布另一方案后被刷新静默清空。

@@ -113,7 +113,7 @@ func (s *Service) ImportLegacyProject(
 	name := legacyProfileName(snapshot.ProjectTitle, nextVersion)
 	version, err := appdomain.NewCreativeProfileVersion(
 		profileID, nextVersion, name,
-		roles, snapshot.MaxRunTokens, snapshot.MaxContextChars, s.clock.Now(),
+		roles, snapshot.MaxRunTokens, snapshot.MaxContextChars, false, false, s.clock.Now(),
 	)
 	if err != nil {
 		return ports.LegacyImportResult{}, fmt.Errorf("create legacy profile version: %w", err)

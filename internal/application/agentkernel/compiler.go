@@ -130,6 +130,15 @@ func Compile(ctx context.Context, registries Registries, id string, version int)
 	return result, nil
 }
 
+// RequiredTokenBudget 用节点预览上限与应急预留估算一次运行的最低预算。
+func (compiled CompiledWorkflow) RequiredTokenBudget() int {
+	total := compiled.RepairReserve + compiled.RevisionReserve
+	for _, node := range compiled.Nodes {
+		total += node.MaxOutputTokens
+	}
+	return total
+}
+
 func compiledHash(workflow CompiledWorkflow) string {
 	workflow.Hash = ""
 	return hashJSON(workflow)

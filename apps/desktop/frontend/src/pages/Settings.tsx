@@ -18,6 +18,11 @@ import { Modal } from '../components/ui/Modal';
 import { studio } from '../api/studio';
 import type { ProviderTestView } from '../api/studio';
 import { getModelVendor, inferModelVendor, modelVendors } from '../modelCatalog';
+import {
+  BUDGET_PRESETS_WAN, DEFAULT_CUSTOM_BUDGET_WAN, MIN_CUSTOM_BUDGET_WAN,
+  baseToWan, deriveBudgetChoice, reasoningEffortOptions, wanToBase,
+  type BudgetChoice,
+} from '../budget';
 
 type TabKey = 'model' | 'writing' | 'templates' | 'appearance' | 'advanced';
 
@@ -267,10 +272,10 @@ export default function Settings() {
     )));
   };
 
-  /** 更新方案中单一角色的生成参数（最大输出 Token、温度）。 */
+  /** 更新方案中单一角色的生成参数（推理强度、温度）。 */
   const updateProfileRoleParam = (
     role: CreativeRole,
-    patch: Partial<Pick<CreativeProfileRole, 'maxOutputTokens' | 'temperature'>>,
+    patch: Partial<Pick<CreativeProfileRole, 'reasoningEffort' | 'temperature'>>,
   ) => {
     if (!selectedProfile) return;
     setCreativeProfiles((profiles) => profiles.map((profile) => (
@@ -281,7 +286,7 @@ export default function Settings() {
   };
 
   /** 更新方案级运行预算。 */
-  const updateProfileBudget = (patch: Partial<Pick<CreativeProfile, 'maxRunTokens' | 'maxContextChars'>>) => {
+  const updateProfileBudget = (patch: Partial<Pick<CreativeProfile, 'maxRunTokens' | 'maxContextChars' | 'runBudgetUnlimited' | 'contextBudgetUnlimited'>>) => {
     if (!selectedProfile) return;
     setCreativeProfiles((profiles) => profiles.map((profile) => (
       profile.id === selectedProfile.id ? { ...profile, ...patch } : profile
@@ -297,7 +302,8 @@ export default function Settings() {
         role,
         connectionId: binding?.connectionId || '',
         model: binding?.model || '',
-        maxOutputTokens: binding?.maxOutputTokens || 4096,
+        reasoningEffort: binding?.reasoningEffort || 'auto',
+        outputLimitMode: 'profile_budget',
         temperature: binding?.temperature ?? (role === 'continuity_reviewer' ? 0.2 : 0.7),
         enabled: true,
       };
@@ -308,12 +314,22 @@ export default function Settings() {
         profileId: selectedProfile.id,
         name: selectedProfile.name,
         roles,
-        maxRunTokens: selectedProfile.maxRunTokens || 30000,
-        maxContextChars: selectedProfile.maxContextChars || 120000,
+        maxRunTokens: selectedProfile.runBudgetUnlimited ? 0 : selectedProfile.maxRunTokens || wanToBase(DEFAULT_CUSTOM_BUDGET_WAN),
+        maxContextChars: selectedProfile.contextBudgetUnlimited ? 0 : selectedProfile.maxContextChars || wanToBase(DEFAULT_CUSTOM_BUDGET_WAN),
+        runBudgetUnlimited: Boolean(selectedProfile.runBudgetUnlimited),
+        contextBudgetUnlimited: Boolean(selectedProfile.contextBudgetUnlimited),
       });
       const updatedProfiles = creativeProfiles.map((profile) => (
         profile.id === selectedProfile.id
-          ? { ...profile, version: published.version, published: true, maxRunTokens: selectedProfile.maxRunTokens || 30000, maxContextChars: selectedProfile.maxContextChars || 120000 }
+          ? {
+            ...profile,
+            version: published.version,
+            published: true,
+            maxRunTokens: published.maxRunTokens,
+            maxContextChars: published.maxContextChars,
+            runBudgetUnlimited: published.runBudgetUnlimited,
+            contextBudgetUnlimited: published.contextBudgetUnlimited,
+          }
           : profile
       ));
       setCreativeProfiles(updatedProfiles);
@@ -362,12 +378,14 @@ export default function Settings() {
       version: 0,
       published: false,
       roles: {
-        planner: { connectionId, model: initialModel, maxOutputTokens: 4096, temperature: 0.7 },
-        writer: { connectionId, model: initialModel, maxOutputTokens: 4096, temperature: 0.7 },
-        continuity_reviewer: { connectionId, model: initialModel, maxOutputTokens: 4096, temperature: 0.2 },
+        planner: { connectionId, model: initialModel, reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.7 },
+        writer: { connectionId, model: initialModel, reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.7 },
+        continuity_reviewer: { connectionId, model: initialModel, reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.2 },
       },
-      maxRunTokens: 30000,
-      maxContextChars: 120000,
+      maxRunTokens: wanToBase(DEFAULT_CUSTOM_BUDGET_WAN),
+      maxContextChars: wanToBase(DEFAULT_CUSTOM_BUDGET_WAN),
+      runBudgetUnlimited: false,
+      contextBudgetUnlimited: false,
     };
     setCreativeProfiles((prev) => [...prev, profile]);
     setSelectedProfileId(id);
@@ -704,16 +722,17 @@ export default function Settings() {
                         <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-center">
                           <span className="text-xs text-text-sub">生成参数</span>
                           <label className="flex items-center gap-2 text-xs text-text-sub">
-                            <span className="shrink-0">最大输出</span>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={binding.maxOutputTokens}
-                              onChange={(event) => updateProfileRoleParam(role, { maxOutputTokens: Math.max(1, Number(event.target.value) || 0) })}
-                              aria-label={`${creativeRoleLabels[role]}最大输出 Token`}
-                              className="h-8"
-                            />
-                            <span className="shrink-0">tokens</span>
+                            <span className="shrink-0">推理强度</span>
+                            <select
+                              aria-label={`${creativeRoleLabels[role]}推理强度`}
+                              value={binding.reasoningEffort || 'auto'}
+                              onChange={(event) => updateProfileRoleParam(role, { reasoningEffort: event.target.value })}
+                              className="h-8 px-2 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
+                            >
+                              {reasoningEffortOptions.map(([value, label]) => (
+                                <option key={value} value={value}>{label}</option>
+                              ))}
+                            </select>
                           </label>
                           <label className="flex items-center gap-2 text-xs text-text-sub">
                             <span className="shrink-0">温度</span>
@@ -738,28 +757,28 @@ export default function Settings() {
               <section>
                 <h3 className="text-sm font-medium text-text mb-3">运行预算</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 text-sm text-text-sub">
-                    <span className="shrink-0 w-28">运行 Token 预算</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={selectedProfile.maxRunTokens || 30000}
-                      onChange={(event) => updateProfileBudget({ maxRunTokens: Math.max(1, Number(event.target.value) || 0) })}
-                      aria-label="运行 Token 预算"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-text-sub">
-                    <span className="shrink-0 w-28">上下文字符预算</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={selectedProfile.maxContextChars || 120000}
-                      onChange={(event) => updateProfileBudget({ maxContextChars: Math.max(1, Number(event.target.value) || 0) })}
-                      aria-label="上下文字符预算"
-                    />
-                  </label>
+                  <BudgetSelect
+                    label="运行 Token 预算"
+                    ariaLabel="运行 Token 预算"
+                    unlimited={Boolean(selectedProfile.runBudgetUnlimited)}
+                    wan={baseToWan(selectedProfile.maxRunTokens || wanToBase(DEFAULT_CUSTOM_BUDGET_WAN))}
+                    onChange={(next) => updateProfileBudget({
+                      runBudgetUnlimited: next.unlimited,
+                      maxRunTokens: next.unlimited ? 0 : wanToBase(next.wan),
+                    })}
+                  />
+                  <BudgetSelect
+                    label="上下文字符预算"
+                    ariaLabel="上下文字符预算"
+                    unlimited={Boolean(selectedProfile.contextBudgetUnlimited)}
+                    wan={baseToWan(selectedProfile.maxContextChars || wanToBase(DEFAULT_CUSTOM_BUDGET_WAN))}
+                    onChange={(next) => updateProfileBudget({
+                      contextBudgetUnlimited: next.unlimited,
+                      maxContextChars: next.unlimited ? 0 : wanToBase(next.wan),
+                    })}
+                  />
                 </div>
-                <p className="text-xs text-text-muted mt-2">三个角色的最大输出 Token 之和不能超过运行 Token 预算，否则创建运行时会被拒绝。</p>
+                <p className="text-xs text-text-muted mt-2">单位为万。有限预算是整次运行的硬上限；选择不限制时，确认真实调用前会明确提示费用无法由应用封顶。测试运行使用同一套方案预算，不再单独设置限额。</p>
               </section>
             </Card>
           </div>
@@ -1002,5 +1021,65 @@ export default function Settings() {
         )}
       </Modal>
     </div>
+  );
+}
+
+function BudgetSelect({
+  label, ariaLabel, unlimited, wan, onChange,
+}: {
+  label: string;
+  ariaLabel: string;
+  unlimited: boolean;
+  wan: number;
+  onChange: (next: { unlimited: boolean; wan: number }) => void;
+}) {
+  const derived = deriveBudgetChoice(unlimited, wan);
+  const [customOpen, setCustomOpen] = useState(derived === 'custom');
+  const choice: BudgetChoice = unlimited ? 'unlimited' : (customOpen || derived === 'custom' ? 'custom' : derived);
+  return (
+    <label className="flex flex-col gap-2 text-sm text-text-sub">
+      <span>{label}</span>
+      <select
+        aria-label={ariaLabel}
+        value={choice}
+        onChange={(event) => {
+          const value = event.target.value as BudgetChoice;
+          if (value === 'unlimited') {
+            setCustomOpen(false);
+            onChange({ unlimited: true, wan });
+            return;
+          }
+          if (value === 'custom') {
+            setCustomOpen(true);
+            onChange({ unlimited: false, wan: DEFAULT_CUSTOM_BUDGET_WAN });
+            return;
+          }
+          setCustomOpen(false);
+          onChange({ unlimited: false, wan: Number(value) });
+        }}
+        className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
+      >
+        {BUDGET_PRESETS_WAN.map((preset) => (
+          <option key={preset} value={String(preset)}>{preset} 万</option>
+        ))}
+        <option value="unlimited">不限制</option>
+        <option value="custom">自定义…</option>
+      </select>
+      {choice === 'custom' && (
+        <span className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={MIN_CUSTOM_BUDGET_WAN}
+            aria-label={`${ariaLabel}自定义`}
+            value={wan}
+            onChange={(event) => onChange({
+              unlimited: false,
+              wan: Math.max(MIN_CUSTOM_BUDGET_WAN, Math.floor(Number(event.target.value) || 0)),
+            })}
+          />
+          <span className="shrink-0">万</span>
+        </span>
+      )}
+    </label>
   );
 }

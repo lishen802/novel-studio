@@ -39,6 +39,7 @@ import { useApp } from '../store/useApp';
 import type { ChapterStatus } from '../types';
 import { canvasPresets } from '../editor';
 import { studio, type AgentRunView, type ChapterView, type CreativeProfileView, type JobSnapshotView } from '../api/studio';
+import { formatBudget, reasoningLabel } from '../budget';
 
 interface Chapter {
   id: string;
@@ -165,9 +166,11 @@ export default function Chapters() {
   const [runPreview, setRunPreview] = useState<{
     profileName: string;
     version: number;
-    roleRows: Array<{ role: string; providerName: string; model: string; maxOutputTokens: number; enabled: boolean }>;
+    roleRows: Array<{ role: string; providerName: string; model: string; reasoningEffort: string; enabled: boolean }>;
     maxRunTokens: number;
     maxContextChars: number;
+    runBudgetUnlimited: boolean;
+    contextBudgetUnlimited: boolean;
   } | null>(null);
   const [runPreviewLoading, setRunPreviewLoading] = useState(false);
   const [runPreviewError, setRunPreviewError] = useState(false);
@@ -200,7 +203,7 @@ export default function Chapters() {
           role: roleLabel(role.role),
           providerName: provider?.name || '未知连接',
           model: role.model,
-          maxOutputTokens: role.maxOutputTokens,
+          reasoningEffort: role.reasoningEffort || 'auto',
           enabled: role.enabled,
         };
       });
@@ -210,6 +213,8 @@ export default function Chapters() {
         roleRows,
         maxRunTokens: profile.maxRunTokens,
         maxContextChars: profile.maxContextChars,
+        runBudgetUnlimited: Boolean(profile.runBudgetUnlimited),
+        contextBudgetUnlimited: Boolean(profile.contextBudgetUnlimited),
       });
     }).catch(() => {
       if (active) {
@@ -1116,7 +1121,7 @@ export default function Chapters() {
                       <th className="text-left px-3 py-2 font-medium">角色</th>
                       <th className="text-left px-3 py-2 font-medium">Provider</th>
                       <th className="text-left px-3 py-2 font-medium">模型</th>
-                      <th className="text-right px-3 py-2 font-medium">最大输出</th>
+                      <th className="text-left px-3 py-2 font-medium">推理强度</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1125,15 +1130,16 @@ export default function Chapters() {
                         <td className="px-3 py-2 text-text">{row.role}</td>
                         <td className="px-3 py-2 text-text-sub">{row.providerName}</td>
                         <td className="px-3 py-2 text-text-sub">{row.model || '—'}</td>
-                        <td className="px-3 py-2 text-text-sub text-right">{row.maxOutputTokens}</td>
+                        <td className="px-3 py-2 text-text-sub">{reasoningLabel(row.reasoningEffort)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <div className="text-xs text-text-muted space-y-1">
-                <div>运行 Token 预算：{runPreview.maxRunTokens}</div>
-                <div>上下文字符预算：{runPreview.maxContextChars}</div>
+                <div>运行 Token 预算：{formatBudget(runPreview.maxRunTokens, runPreview.runBudgetUnlimited)}</div>
+                <div>上下文字符预算：{formatBudget(runPreview.maxContextChars, runPreview.contextBudgetUnlimited)}</div>
+                {runPreview.runBudgetUnlimited && <div>不限制预算时，应用无法封顶本次真实调用费用。</div>}
               </div>
             </>
           ) : runPreviewError ? (

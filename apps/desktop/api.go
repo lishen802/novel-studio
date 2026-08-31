@@ -309,29 +309,35 @@ type RoleBindingView struct {
 	ConnectionID    string  `json:"connectionId"`
 	Model           string  `json:"model"`
 	MaxOutputTokens int     `json:"maxOutputTokens"`
+	ReasoningEffort string  `json:"reasoningEffort"`
+	OutputLimitMode string  `json:"outputLimitMode"`
 	Temperature     float64 `json:"temperature"`
 	Enabled         bool    `json:"enabled"`
 }
 
 // CreativeProfileView is the safe projection of a creative profile version.
 type CreativeProfileView struct {
-	ProfileID       string            `json:"profileId"`
-	Version         int64             `json:"version"`
-	Name            string            `json:"name"`
-	Roles           []RoleBindingView `json:"roles"`
-	MaxRunTokens    int               `json:"maxRunTokens"`
-	MaxContextChars int               `json:"maxContextChars"`
-	CreatedAt       string            `json:"createdAt"`
+	ProfileID              string            `json:"profileId"`
+	Version                int64             `json:"version"`
+	Name                   string            `json:"name"`
+	Roles                  []RoleBindingView `json:"roles"`
+	MaxRunTokens           int               `json:"maxRunTokens"`
+	MaxContextChars        int               `json:"maxContextChars"`
+	RunBudgetUnlimited     bool              `json:"runBudgetUnlimited"`
+	ContextBudgetUnlimited bool              `json:"contextBudgetUnlimited"`
+	CreatedAt              string            `json:"createdAt"`
 }
 
 // PublishProfileInput carries the data needed to publish a new creative
 // profile version.
 type PublishProfileInput struct {
-	ProfileID       string             `json:"profileId"`
-	Name            string             `json:"name"`
-	Roles           []PublishRoleInput `json:"roles"`
-	MaxRunTokens    int                `json:"maxRunTokens"`
-	MaxContextChars int                `json:"maxContextChars"`
+	ProfileID              string             `json:"profileId"`
+	Name                   string             `json:"name"`
+	Roles                  []PublishRoleInput `json:"roles"`
+	MaxRunTokens           int                `json:"maxRunTokens"`
+	MaxContextChars        int                `json:"maxContextChars"`
+	RunBudgetUnlimited     bool               `json:"runBudgetUnlimited"`
+	ContextBudgetUnlimited bool               `json:"contextBudgetUnlimited"`
 }
 
 // PublishRoleInput is a single role binding in a publish profile input.
@@ -340,6 +346,8 @@ type PublishRoleInput struct {
 	ConnectionID    string  `json:"connectionId"`
 	Model           string  `json:"model"`
 	MaxOutputTokens int     `json:"maxOutputTokens"`
+	ReasoningEffort string  `json:"reasoningEffort"`
+	OutputLimitMode string  `json:"outputLimitMode"`
 	Temperature     float64 `json:"temperature"`
 	Enabled         bool    `json:"enabled"`
 }
@@ -1241,16 +1249,20 @@ func (a *DesktopAPI) PublishCreativeProfile(input PublishProfileInput) (Creative
 			ConnectionID:    r.ConnectionID,
 			Model:           r.Model,
 			MaxOutputTokens: r.MaxOutputTokens,
+			ReasoningEffort: agentdomain.ReasoningEffort(r.ReasoningEffort),
+			OutputLimitMode: agentdomain.OutputLimitMode(r.OutputLimitMode),
 			Temperature:     r.Temperature,
 			Enabled:         r.Enabled,
 		}
 	}
 	version, err := a.settings.PublishCreativeProfile(a.ctx, appsettings.ProfileInput{
-		ProfileID:       input.ProfileID,
-		Name:            input.Name,
-		Roles:           roles,
-		MaxRunTokens:    input.MaxRunTokens,
-		MaxContextChars: input.MaxContextChars,
+		ProfileID:              input.ProfileID,
+		Name:                   input.Name,
+		Roles:                  roles,
+		MaxRunTokens:           input.MaxRunTokens,
+		MaxContextChars:        input.MaxContextChars,
+		RunBudgetUnlimited:     input.RunBudgetUnlimited,
+		ContextBudgetUnlimited: input.ContextBudgetUnlimited,
 	})
 	if err != nil {
 		return CreativeProfileView{}, safeDesktopError(err)
@@ -1317,18 +1329,29 @@ func creativeProfileView(v appdomain.CreativeProfileVersion) CreativeProfileView
 			ConnectionID:    r.ConnectionID,
 			Model:           r.Model,
 			MaxOutputTokens: r.MaxOutputTokens,
+			ReasoningEffort: string(r.ReasoningEffort.Normalized()),
+			OutputLimitMode: string(r.OutputLimitMode.Normalized()),
 			Temperature:     r.Temperature,
 			Enabled:         r.Enabled,
 		}
 	}
+	maxRunTokens, maxContextChars := v.MaxRunTokens, v.MaxContextChars
+	if v.RunBudgetUnlimited {
+		maxRunTokens = 0
+	}
+	if v.ContextBudgetUnlimited {
+		maxContextChars = 0
+	}
 	return CreativeProfileView{
-		ProfileID:       v.ProfileID,
-		Version:         v.Version,
-		Name:            v.Name,
-		Roles:           roles,
-		MaxRunTokens:    v.MaxRunTokens,
-		MaxContextChars: v.MaxContextChars,
-		CreatedAt:       formatDesktopTime(v.CreatedAt),
+		ProfileID:              v.ProfileID,
+		Version:                v.Version,
+		Name:                   v.Name,
+		Roles:                  roles,
+		MaxRunTokens:           maxRunTokens,
+		MaxContextChars:        maxContextChars,
+		RunBudgetUnlimited:     v.RunBudgetUnlimited,
+		ContextBudgetUnlimited: v.ContextBudgetUnlimited,
+		CreatedAt:              formatDesktopTime(v.CreatedAt),
 	}
 }
 

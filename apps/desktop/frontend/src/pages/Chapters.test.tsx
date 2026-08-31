@@ -154,18 +154,21 @@ describe('正文编辑器真实模型运行确认', () => {
       version: 1,
       name: '正式创作方案',
       roles: [
-        { role: 'planner', connectionId: 'provider-1', model: 'model-a', maxOutputTokens: 1000, temperature: 0.7, enabled: true },
-        { role: 'writer', connectionId: 'provider-1', model: 'model-b', maxOutputTokens: 2000, temperature: 0.8, enabled: true },
-        { role: 'continuity_reviewer', connectionId: 'provider-1', model: 'model-c', maxOutputTokens: 1000, temperature: 0.3, enabled: true },
+        { role: 'planner', connectionId: 'provider-1', model: 'model-a', reasoningEffort: 'high', outputLimitMode: 'profile_budget', temperature: 0.7, enabled: true },
+        { role: 'writer', connectionId: 'provider-1', model: 'model-b', reasoningEffort: 'medium', outputLimitMode: 'profile_budget', temperature: 0.8, enabled: true },
+        { role: 'continuity_reviewer', connectionId: 'provider-1', model: 'model-c', reasoningEffort: 'low', outputLimitMode: 'profile_budget', temperature: 0.3, enabled: true },
       ],
-      maxRunTokens: 5000,
-      maxContextChars: 20000,
+      maxRunTokens: 10000000,
+      maxContextChars: 20000000,
       createdAt: '',
     })));
 
     await openRunConfirmation(user);
 
     expect(await screen.findByText('正式创作方案')).toBeTruthy();
+    expect(screen.getByText('高')).toBeTruthy();
+    expect(screen.getByText('中')).toBeTruthy();
+    expect(screen.getByText('低')).toBeTruthy();
     expect((screen.getByRole('button', { name: '确认运行' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

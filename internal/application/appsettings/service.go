@@ -38,11 +38,13 @@ type ProviderInput struct {
 // ProfileInput carries the data needed to publish a new creative profile
 // version.
 type ProfileInput struct {
-	ProfileID       string
-	Name            string
-	Roles           []RoleInput
-	MaxRunTokens    int
-	MaxContextChars int
+	ProfileID              string
+	Name                   string
+	Roles                  []RoleInput
+	MaxRunTokens           int
+	MaxContextChars        int
+	RunBudgetUnlimited     bool
+	ContextBudgetUnlimited bool
 }
 
 // RoleInput is a single role binding in a profile input.
@@ -51,6 +53,8 @@ type RoleInput struct {
 	ConnectionID    string
 	Model           string
 	MaxOutputTokens int
+	ReasoningEffort agent.ReasoningEffort
+	OutputLimitMode agent.OutputLimitMode
 	Temperature     float64
 	Enabled         bool
 }
@@ -220,19 +224,42 @@ func (s *Service) PublishCreativeProfile(ctx context.Context, input ProfileInput
 
 	roles := make([]appdomain.RoleBinding, len(input.Roles))
 	for i, r := range input.Roles {
+		mode := r.OutputLimitMode
+		if mode == "" {
+			if r.MaxOutputTokens < 1 {
+				mode = agent.OutputLimitProfileBudget
+			} else {
+				mode = agent.OutputLimitFixed
+			}
+		}
+		effort := r.ReasoningEffort
+		if effort == "" {
+			effort = agent.ReasoningAuto
+		}
 		roles[i] = appdomain.RoleBinding{
 			Role:            r.Role,
 			ConnectionID:    r.ConnectionID,
 			Model:           r.Model,
 			MaxOutputTokens: r.MaxOutputTokens,
+			ReasoningEffort: effort,
+			OutputLimitMode: mode,
 			Temperature:     r.Temperature,
 			Enabled:         r.Enabled,
 		}
 	}
 
+	maxRunTokens := input.MaxRunTokens
+	maxContextChars := input.MaxContextChars
+	if input.RunBudgetUnlimited {
+		maxRunTokens = agent.UnlimitedBudgetSentinel
+	}
+	if input.ContextBudgetUnlimited {
+		maxContextChars = agent.UnlimitedBudgetSentinel
+	}
+
 	v, err := appdomain.NewCreativeProfileVersion(
 		input.ProfileID, nextVersion, input.Name,
-		roles, input.MaxRunTokens, input.MaxContextChars, s.clock.Now(),
+		roles, maxRunTokens, maxContextChars, input.RunBudgetUnlimited, input.ContextBudgetUnlimited, s.clock.Now(),
 	)
 	if err != nil {
 		// 方案领域校验错误（角色缺失、预算非法、审阅不独立等）统一包装为
@@ -274,11 +301,13 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 	}
 
 	resolved := agent.ResolvedCreativeProfile{
-		ProfileID:       profile.ProfileID,
-		Version:         profile.Version,
-		MaxRunTokens:    profile.MaxRunTokens,
-		MaxContextChars: profile.MaxContextChars,
-		Roles:           make([]agent.ResolvedRole, 0, len(profile.Roles)),
+		ProfileID:              profile.ProfileID,
+		Version:                profile.Version,
+		MaxRunTokens:           agent.EffectiveBudget(profile.MaxRunTokens, profile.RunBudgetUnlimited),
+		MaxContextChars:        agent.EffectiveBudget(profile.MaxContextChars, profile.ContextBudgetUnlimited),
+		RunBudgetUnlimited:     profile.RunBudgetUnlimited,
+		ContextBudgetUnlimited: profile.ContextBudgetUnlimited,
+		Roles:                  make([]agent.ResolvedRole, 0, len(profile.Roles)),
 	}
 	// 持久化层按 role ASC 排序会得到 continuity_reviewer → planner → writer，
 	// 但 AgentRun 严格按位置校验 planner → writer → continuity_reviewer。
@@ -301,6 +330,8 @@ func (s *Service) ResolveCreativeProfile(ctx context.Context, profileID string, 
 			CredentialRef:   conn.CredentialRef,
 			Model:           role.Model,
 			MaxOutputTokens: role.MaxOutputTokens,
+			ReasoningEffort: role.ReasoningEffort.Normalized(),
+			OutputLimitMode: role.OutputLimitMode.Normalized(),
 			Temperature:     role.Temperature,
 		}
 	}

@@ -52,19 +52,24 @@ type RunInput struct {
 }
 
 type RunPreview struct {
-	DatasetID           string                    `json:"datasetId"`
-	DatasetVersion      string                    `json:"datasetVersion"`
-	DatasetSHA256       string                    `json:"datasetSha256"`
-	CaseCount           int                       `json:"caseCount"`
-	EstimatedCalls      int                       `json:"estimatedCalls"`
-	MaximumOutputTokens int                       `json:"maximumOutputTokens"`
-	CurrencyEstimate    string                    `json:"currencyEstimate"`
-	Provider            string                    `json:"provider"`
-	Model               string                    `json:"model"`
-	WorkflowID          string                    `json:"workflowId"`
-	WorkflowVersion     int                       `json:"workflowVersion"`
-	ConfirmationDigest  string                    `json:"confirmationDigest"`
-	Binding             quality.HarnessRunBinding `json:"binding"`
+	DatasetID              string                       `json:"datasetId"`
+	DatasetVersion         string                       `json:"datasetVersion"`
+	DatasetSHA256          string                       `json:"datasetSha256"`
+	CaseCount              int                          `json:"caseCount"`
+	EstimatedCalls         int                          `json:"estimatedCalls"`
+	MaximumOutputTokens    int                          `json:"maximumOutputTokens"`
+	RunBudgetUnlimited     bool                         `json:"runBudgetUnlimited"`
+	ContextBudgetUnlimited bool                         `json:"contextBudgetUnlimited"`
+	MaxRunTokens           int                          `json:"maxRunTokens"`
+	MaxContextChars        int                          `json:"maxContextChars"`
+	CurrencyEstimate       string                       `json:"currencyEstimate"`
+	Provider               string                       `json:"provider"`
+	Model                  string                       `json:"model"`
+	Roles                  []quality.HarnessRoleBinding `json:"roles"`
+	WorkflowID             string                       `json:"workflowId"`
+	WorkflowVersion        int                          `json:"workflowVersion"`
+	ConfirmationDigest     string                       `json:"confirmationDigest"`
+	Binding                quality.HarnessRunBinding    `json:"binding"`
 }
 
 type DatasetView struct {
@@ -217,8 +222,8 @@ func (service *Service) Preview(ctx context.Context, input PreviewInput) (RunPre
 	if err != nil {
 		return RunPreview{}, err
 	}
-	if profile.MaxRunTokens < compiled.MaxRunTokens {
-		return RunPreview{}, fmt.Errorf("%w: 创作方案单次预算至少需要 %d Token", agentkernel.ErrTokenBudget, compiled.MaxRunTokens)
+	if !profile.RunBudgetUnlimited && profile.MaxRunTokens < compiled.RequiredTokenBudget() {
+		return RunPreview{}, fmt.Errorf("%w: 创作方案运行预算至少需要 %d Token", agentkernel.ErrTokenBudget, compiled.RequiredTokenBudget())
 	}
 	role := profile.Roles[0]
 	for _, candidate := range profile.Roles {
@@ -229,16 +234,37 @@ func (service *Service) Preview(ctx context.Context, input PreviewInput) (RunPre
 	first := compiled.Nodes[0]
 	binding := quality.HarnessRunBinding{VariantID: variant.ID, WorkflowID: variant.WorkflowID, WorkflowRevision: variant.WorkflowVersion, ProfileID: profile.ProfileID, ProfileVersion: profile.Version, Provider: role.ProviderName, Model: role.Model, PromptVersion: fmt.Sprintf("%s@%d", first.Prompt.ID, first.Prompt.Version), PromptSHA256: first.Prompt.Hash, SchemaVersion: fmt.Sprintf("%s@%d", first.Schema.ID, first.Schema.Version), SchemaSHA256: first.Schema.Hash, WorkflowVersion: fmt.Sprintf("%s@%d", compiled.Workflow.ID, compiled.Workflow.Version), WorkflowSHA256: compiled.Workflow.Hash, AssemblerVersion: fmt.Sprintf("%s@%d", first.Assembler.ID, first.Assembler.Version), AssemblerSHA256: first.Assembler.Hash}
 	for _, resolvedRole := range profile.Roles {
-		binding.Roles = append(binding.Roles, quality.HarnessRoleBinding{Role: string(resolvedRole.Role), Provider: resolvedRole.ProviderName, Model: resolvedRole.Model})
+		binding.Roles = append(binding.Roles, quality.HarnessRoleBinding{
+			Role: string(resolvedRole.Role), Provider: resolvedRole.ProviderName, Model: resolvedRole.Model,
+			ReasoningEffort: string(resolvedRole.ReasoningEffort.Normalized()),
+		})
 	}
-	preview := RunPreview{DatasetID: service.dataset.ID, DatasetVersion: service.dataset.Version, DatasetSHA256: service.dataset.SHA256, CaseCount: len(cases), Provider: role.ProviderName, Model: role.Model, WorkflowID: variant.WorkflowID, WorkflowVersion: variant.WorkflowVersion, Binding: binding, CurrencyEstimate: "Provider 未提供稳定单价；执行前仅确认最大 Token 与调用次数"}
-	for _, item := range cases {
+	estimate := "Provider 未提供稳定单价；执行前仅确认方案冻结的运行预算与调用次数"
+	if profile.RunBudgetUnlimited {
+		estimate = "当前方案运行 Token 预算为不限制，应用无法封顶本次真实调用费用。"
+	}
+	maxRunTokens, maxContextChars := profile.MaxRunTokens, profile.MaxContextChars
+	if profile.RunBudgetUnlimited {
+		maxRunTokens = 0
+	}
+	if profile.ContextBudgetUnlimited {
+		maxContextChars = 0
+	}
+	preview := RunPreview{
+		DatasetID: service.dataset.ID, DatasetVersion: service.dataset.Version, DatasetSHA256: service.dataset.SHA256,
+		CaseCount: len(cases), Provider: role.ProviderName, Model: role.Model, Roles: binding.Roles,
+		WorkflowID: variant.WorkflowID, WorkflowVersion: variant.WorkflowVersion, Binding: binding,
+		CurrencyEstimate: estimate, RunBudgetUnlimited: profile.RunBudgetUnlimited,
+		ContextBudgetUnlimited: profile.ContextBudgetUnlimited,
+		MaxRunTokens:           maxRunTokens, MaxContextChars: maxContextChars,
+	}
+	for range cases {
 		preview.EstimatedCalls += len(compiled.Nodes)
-		preview.MaximumOutputTokens += compiled.MaxRunTokens
-		if item.TaskKind == quality.HarnessTaskChapter {
-			preview.EstimatedCalls++
-			preview.MaximumOutputTokens += 6500
-		}
+	}
+	if profile.RunBudgetUnlimited {
+		preview.MaximumOutputTokens = 0
+	} else {
+		preview.MaximumOutputTokens = profile.MaxRunTokens * len(cases)
 	}
 	payload, _ := json.Marshal(struct {
 		Input   PreviewInput

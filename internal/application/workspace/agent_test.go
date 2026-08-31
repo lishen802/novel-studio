@@ -97,6 +97,25 @@ func TestCreateChapterAgentRunRejectsConfiguredOutputAboveBudget(t *testing.T) {
 	}
 }
 
+func TestCreateChapterAgentRunAcceptsProfileBudgetWithoutPerCallCap(t *testing.T) {
+	resolved := defaultResolvedProfile()
+	resolved.MaxRunTokens = 1000
+	for index := range resolved.Roles {
+		resolved.Roles[index].OutputLimitMode = agentdomain.OutputLimitProfileBudget
+		resolved.Roles[index].MaxOutputTokens = 0
+		resolved.Roles[index].ReasoningEffort = agentdomain.ReasoningMedium
+	}
+	service, chapter := configuredAgentServiceWithProfile(t, failingModelProviderFactory{}, resolved)
+	defer service.Close()
+	run, err := service.CreateChapterAgentRun(context.Background(), chapter.ID, "继续写作")
+	if err != nil {
+		t.Fatalf("CreateChapterAgentRun() error = %v", err)
+	}
+	if run.TokenBudget != 1000 || run.Steps[0].ReasoningEffort != string(agentdomain.ReasoningMedium) {
+		t.Fatalf("run = %#v", run)
+	}
+}
+
 func TestAgentRunStopsBeforeNextStepWhenActualUsageExhaustsBudget(t *testing.T) {
 	providerFactory := &usageModelProviderFactory{}
 	resolved := defaultResolvedProfile()

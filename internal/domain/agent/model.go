@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"math"
 	"net"
 	"net/url"
 	"strings"
@@ -24,7 +25,25 @@ var (
 const (
 	DefaultMaxRunTokens    = 30000
 	DefaultMaxContextChars = 120000
+	// BudgetWanUnit 是界面“万”与持久化基础单位的换算。
+	BudgetWanUnit = 10_000
+	// DefaultBudgetWan 是自定义预算首次出现时的默认值（10000 万）。
+	DefaultBudgetWan = 10_000
+	// MinCustomBudgetWan 是自定义预算允许的最小值（1 万）。
+	MinCustomBudgetWan = 1
+	// UnlimitedBudgetSentinel 仅供执行器算术使用，不得作为对外“不限制”语义。
+	UnlimitedBudgetSentinel = math.MaxInt / 4
+	// ProviderTechnicalMaxOutput 是协议强制要求上限时的技术封顶。
+	ProviderTechnicalMaxOutput = 128_000
 )
+
+// EffectiveBudget 把作者可见预算换成执行器可用的正整数；不限制使用哨兵。
+func EffectiveBudget(value int, unlimited bool) int {
+	if unlimited {
+		return UnlimitedBudgetSentinel
+	}
+	return value
+}
 
 type RuntimeSettings struct {
 	ProjectID       string
@@ -130,6 +149,56 @@ const (
 	RoleWriter             Role = "writer"
 	RoleContinuityReviewer Role = "continuity_reviewer"
 )
+
+// ReasoningEffort 是创作方案冻结的推理强度；auto 表示交由模型厂商决定。
+type ReasoningEffort string
+
+const (
+	ReasoningAuto   ReasoningEffort = "auto"
+	ReasoningNone   ReasoningEffort = "none"
+	ReasoningLow    ReasoningEffort = "low"
+	ReasoningMedium ReasoningEffort = "medium"
+	ReasoningHigh   ReasoningEffort = "high"
+	ReasoningMax    ReasoningEffort = "max"
+)
+
+func (effort ReasoningEffort) Valid() bool {
+	return effort == "" || effort == ReasoningAuto || effort == ReasoningNone || effort == ReasoningLow ||
+		effort == ReasoningMedium || effort == ReasoningHigh || effort == ReasoningMax
+}
+
+// Normalized 把空值视为 auto，供冻结与 Provider 映射使用。
+func (effort ReasoningEffort) Normalized() ReasoningEffort {
+	if effort == "" {
+		return ReasoningAuto
+	}
+	return effort
+}
+
+// OutputLimitMode 区分历史固定单次上限与新版方案级预算模式。
+type OutputLimitMode string
+
+const (
+	OutputLimitFixed         OutputLimitMode = "fixed"
+	OutputLimitProfileBudget OutputLimitMode = "profile_budget"
+)
+
+func (mode OutputLimitMode) Valid() bool {
+	return mode == "" || mode == OutputLimitFixed || mode == OutputLimitProfileBudget
+}
+
+// Normalized 把空值视为历史固定上限，保证旧运行恢复语义不变。
+func (mode OutputLimitMode) Normalized() OutputLimitMode {
+	if mode == "" {
+		return OutputLimitFixed
+	}
+	return mode
+}
+
+// OmitsConfiguredMaxOutput 表示不再用作者配置的单次上限截断请求。
+func (mode OutputLimitMode) OmitsConfiguredMaxOutput() bool {
+	return mode.Normalized() == OutputLimitProfileBudget
+}
 
 type Profile struct {
 	ID              string
@@ -241,6 +310,8 @@ type RunStepSpec struct {
 	CredentialRef          string
 	Model                  string
 	MaxOutputTokens        int
+	ReasoningEffort        ReasoningEffort
+	OutputLimitMode        OutputLimitMode
 	Temperature            float64
 
 	// R3 工作流节点冻结字段；旧三步运行保持零值。
@@ -265,17 +336,21 @@ type ResolvedRole struct {
 	CredentialRef   string
 	Model           string
 	MaxOutputTokens int
+	ReasoningEffort ReasoningEffort
+	OutputLimitMode OutputLimitMode
 	Temperature     float64
 }
 
 // ResolvedCreativeProfile 是项目锁定创作方案的解析结果，包含预算与三个角色
 // 的实际绑定。它由应用设置服务按确切版本解析，供创建运行冻结快照使用。
 type ResolvedCreativeProfile struct {
-	ProfileID       string
-	Version         int64
-	MaxRunTokens    int
-	MaxContextChars int
-	Roles           []ResolvedRole
+	ProfileID              string
+	Version                int64
+	MaxRunTokens           int
+	MaxContextChars        int
+	RunBudgetUnlimited     bool
+	ContextBudgetUnlimited bool
+	Roles                  []ResolvedRole
 }
 
 type RunStep struct {
@@ -307,6 +382,8 @@ type RunStep struct {
 	CredentialRef          string
 	Model                  string
 	MaxOutputTokens        int
+	ReasoningEffort        ReasoningEffort
+	OutputLimitMode        OutputLimitMode
 	Temperature            float64
 
 	// R3 智能体内核冻结字段。旧运行仅有 NodeID 与 Attempt，其余字段保持空值。
@@ -325,27 +402,29 @@ type RunStep struct {
 }
 
 type Run struct {
-	ID                  string
-	ProjectID           string
-	ChapterID           string
-	ChapterBaseRevision int64
-	Prompt              string
-	Status              RunStatus
-	ErrorCode           string
-	ErrorMessage        string
-	ChangeSetID         string
-	RetryOf             string
-	TokenBudget         int
-	ContextCharBudget   int
-	InputTokens         int
-	OutputTokens        int
-	ContextChars        int
-	ContextTruncated    bool
-	Steps               []RunStep
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	StartedAt           *time.Time
-	CompletedAt         *time.Time
+	ID                     string
+	ProjectID              string
+	ChapterID              string
+	ChapterBaseRevision    int64
+	Prompt                 string
+	Status                 RunStatus
+	ErrorCode              string
+	ErrorMessage           string
+	ChangeSetID            string
+	RetryOf                string
+	TokenBudget            int
+	ContextCharBudget      int
+	TokenBudgetUnlimited   bool
+	ContextBudgetUnlimited bool
+	InputTokens            int
+	OutputTokens           int
+	ContextChars           int
+	ContextTruncated       bool
+	Steps                  []RunStep
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	StartedAt              *time.Time
+	CompletedAt            *time.Time
 
 	// R3 智能体内核冻结字段。空 WorkflowBinding.ID 表示从 R2.1 或更早版本迁移的运行。
 	TaskKind             TaskKind
@@ -412,6 +491,8 @@ func NewChapterDraftRun(
 			CredentialRef:          strings.TrimSpace(spec.CredentialRef),
 			Model:                  strings.TrimSpace(spec.Model),
 			MaxOutputTokens:        spec.MaxOutputTokens,
+			ReasoningEffort:        spec.ReasoningEffort.Normalized(),
+			OutputLimitMode:        spec.OutputLimitMode.Normalized(),
 			Temperature:            spec.Temperature,
 
 			CreatedAt: now,
@@ -453,7 +534,22 @@ func (run Run) RecordUsage(inputTokens, outputTokens int) Run {
 }
 
 func (run Run) RemainingTokens() int {
+	if run.TokenBudgetUnlimited {
+		return UnlimitedBudgetSentinel
+	}
 	remaining := run.TokenBudget - run.InputTokens - run.OutputTokens
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// RemainingContextChars 返回本次运行剩余上下文字符；不限制使用哨兵。
+func (run Run) RemainingContextChars() int {
+	if run.ContextBudgetUnlimited {
+		return UnlimitedBudgetSentinel
+	}
+	remaining := run.ContextCharBudget - run.ContextChars
 	if remaining < 0 {
 		return 0
 	}
@@ -524,14 +620,16 @@ func NewWorkflowRun(
 			RoleSlot: spec.Role, ProviderConnectionID: spec.ProviderConnectionID,
 			ProviderName: spec.ProviderName, ProviderKind: spec.ProviderKind, BaseURL: spec.BaseURL,
 			CredentialRef: spec.CredentialRef, Model: spec.Model,
-			MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
+			MaxOutputTokens: spec.MaxOutputTokens, ReasoningEffort: spec.ReasoningEffort,
+			OutputLimitMode: spec.OutputLimitMode, Temperature: spec.Temperature,
 		}
 		if strings.TrimSpace(spec.ID) == "" || nodeID == "" || !ValidPublicStageID(spec.PublicStageID) || !validRole(spec.Role) ||
 			!ValidCapability(spec.Capability) || !ValidRoleForCapability(spec.Capability, spec.Role) ||
 			strings.TrimSpace(spec.CreativeProfileID) == "" || spec.CreativeProfileVersion < 1 ||
 			strings.TrimSpace(spec.ProviderConnectionID) == "" || strings.TrimSpace(spec.ProviderName) == "" ||
 			strings.TrimSpace(spec.CredentialRef) == "" || strings.TrimSpace(spec.Model) == "" ||
-			spec.MaxOutputTokens < 1 || spec.PromptBinding.Validate() != nil || spec.SchemaBinding.Validate() != nil ||
+			!spec.ReasoningEffort.Valid() || !spec.OutputLimitMode.Valid() ||
+			spec.PromptBinding.Validate() != nil || spec.SchemaBinding.Validate() != nil ||
 			strings.TrimSpace(spec.AssemblerID) == "" || spec.AssemblerVersion < 1 || !ValidSHA256(spec.InputDigest) ||
 			execution.Validate(spec.Capability) != nil {
 			return Run{}, ErrInvalidRun
@@ -545,7 +643,8 @@ func NewWorkflowRun(
 			CreativeProfileID: spec.CreativeProfileID, CreativeProfileVersion: spec.CreativeProfileVersion,
 			ProviderConnectionID: spec.ProviderConnectionID, ProviderName: spec.ProviderName,
 			ProviderKind: spec.ProviderKind, BaseURL: spec.BaseURL, CredentialRef: spec.CredentialRef,
-			Model: spec.Model, MaxOutputTokens: spec.MaxOutputTokens, Temperature: spec.Temperature,
+			Model: spec.Model, MaxOutputTokens: spec.MaxOutputTokens, ReasoningEffort: spec.ReasoningEffort.Normalized(),
+			OutputLimitMode: spec.OutputLimitMode.Normalized(), Temperature: spec.Temperature,
 			NodeID: nodeID, PublicStageID: spec.PublicStageID, Capability: spec.Capability, Attempt: 1,
 			PromptBinding: spec.PromptBinding, SchemaBinding: spec.SchemaBinding,
 			AssemblerID: spec.AssemblerID, AssemblerVersion: spec.AssemblerVersion,

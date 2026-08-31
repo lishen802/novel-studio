@@ -84,16 +84,25 @@ func (client *OpenAIClient) Generate(
 	onDelta func(string),
 ) (GenerateResult, error) {
 	payload := map[string]any{
-		"model":             request.Model,
-		"instructions":      request.System,
-		"input":             request.Input,
-		"max_output_tokens": request.MaxOutputTokens,
-		"stream":            true,
+		"model":        request.Model,
+		"instructions": request.System,
+		"input":        request.Input,
+		"stream":       true,
+	}
+	if request.MaxOutputTokens > 0 {
+		payload["max_output_tokens"] = request.MaxOutputTokens
 	}
 	// 发送方案冻结的温度，使 writer/reviewer 等角色的生成参数真正生效。
 	// temperature=0 通常用于探测或刻意使用 Provider 默认值，此时不发送。
 	if request.Temperature > 0 {
 		payload["temperature"] = request.Temperature
+	}
+	effort, sendEffort, err := openaiReasoningEffort(request.ReasoningEffort)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	if sendEffort {
+		payload["reasoning"] = map[string]any{"effort": effort}
 	}
 	if len(request.JSONSchema) > 0 {
 		var schema any
@@ -249,8 +258,15 @@ func (client *AnthropicClient) Generate(
 		"messages":   []map[string]string{{"role": "user", "content": request.Input}},
 		"stream":     true,
 	}
+	if request.MaxOutputTokens < 1 {
+		return GenerateResult{}, fmt.Errorf("%w: anthropic requires max_tokens", ErrIncompatible)
+	}
 	if request.Temperature > 0 {
 		payload["temperature"] = request.Temperature
+	}
+	effort, sendEffort, err := anthropicOutputEffort(request.ReasoningEffort)
+	if err != nil {
+		return GenerateResult{}, err
 	}
 	if len(request.JSONSchema) > 0 {
 		var schema any
@@ -260,6 +276,14 @@ func (client *AnthropicClient) Generate(
 		payload["output_config"] = map[string]any{
 			"format": map[string]any{"type": "json_schema", "schema": schema},
 		}
+	}
+	if sendEffort {
+		cfg, _ := payload["output_config"].(map[string]any)
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		cfg["effort"] = effort
+		payload["output_config"] = cfg
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -53,6 +53,55 @@ func TestOpenAIResponsesStreamsTextAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIOmitsMaxOutputAndSendsReasoningEffort(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		stream := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+		return sseResponse(stream), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.example.test/v1")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{
+		Model: "gpt-test", Input: "input", ReasoningEffort: agentdomain.ReasoningHigh,
+	}, nil)
+	if err != nil && !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if _, exists := received["max_output_tokens"]; exists {
+		t.Fatalf("max_output_tokens should be omitted: %#v", received)
+	}
+	reasoning, _ := received["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
+		t.Fatalf("reasoning = %#v", received["reasoning"])
+	}
+}
+
+func TestAnthropicSendsOutputConfigEffort(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":1}}}\n\n" +
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n" +
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+		return sseResponse(stream), nil
+	})}
+	client := NewAnthropicClient(httpClient, "https://api.example.test")
+	if _, err := client.Generate(context.Background(), "secret", GenerateRequest{
+		Model: "claude-test", Input: "input", MaxOutputTokens: 32, ReasoningEffort: agentdomain.ReasoningMax,
+	}, nil); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	cfg, _ := received["output_config"].(map[string]any)
+	if cfg["effort"] != "max" {
+		t.Fatalf("output_config = %#v", received["output_config"])
+	}
+}
+
 func TestOpenAIResponsesRejectsIncompleteTerminalEvent(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"未完成\"}\n\n" +

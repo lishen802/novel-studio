@@ -137,7 +137,9 @@ export type CreativeRole = 'planner' | 'writer' | 'continuity_reviewer';
 export interface CreativeProfileRole {
   connectionId: string;
   model: string;
-  maxOutputTokens: number;
+  maxOutputTokens?: number;
+  reasoningEffort: string;
+  outputLimitMode?: string;
   temperature: number;
 }
 
@@ -147,10 +149,12 @@ export interface CreativeProfile {
   version: number;
   published: boolean;
   roles: Record<CreativeRole, CreativeProfileRole>;
-  /** 运行 Token 预算；发布时冻结到方案版本。 */
+  /** 运行 Token 预算；发布时冻结到方案版本。不限制时忽略该值。 */
   maxRunTokens?: number;
-  /** 上下文字符预算；发布时冻结到方案版本。 */
+  /** 上下文字符预算；发布时冻结到方案版本。不限制时忽略该值。 */
   maxContextChars?: number;
+  runBudgetUnlimited?: boolean;
+  contextBudgetUnlimited?: boolean;
 }
 
 export interface ProjectProfileSelection {

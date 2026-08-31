@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +15,7 @@ describe('应用级创作方案', () => {
     applicationBootstrap.mockResolvedValue({
       preferences: { theme: 'light', defaultCreativeProfileId: 'profile-1' }, recentProjects: [],
       providers: [{ id: 'provider-1', name: '主模型', kind: 'openai', baseUrl: '', hasCredential: true, createdAt: '', updatedAt: '' }],
-      profiles: [{ profileId: 'profile-1', version: 1, name: '长篇方案', maxRunTokens: 1000, maxContextChars: 1000, createdAt: '', roles: ['planner', 'writer', 'continuity_reviewer'].map((role) => ({ role, connectionId: 'provider-1', model: 'model', maxOutputTokens: 1000, temperature: 0.5, enabled: true })) }],
+      profiles: [{ profileId: 'profile-1', version: 1, name: '长篇方案', maxRunTokens: 100000000, maxContextChars: 100000000, createdAt: '', roles: ['planner', 'writer', 'continuity_reviewer'].map((role) => ({ role, connectionId: 'provider-1', model: 'model', reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.5, enabled: true })) }],
     });
     saveProvider.mockResolvedValue({ id: 'provider-1', name: '主模型', kind: 'openai', baseUrl: '', hasCredential: true, createdAt: '', updatedAt: '' });
     savePreferences.mockResolvedValue({ theme: 'light', defaultCreativeProfileId: 'profile-1' });
@@ -52,7 +52,36 @@ describe('应用级创作方案', () => {
     expect(screen.getByLabelText('规划')).toBeTruthy();
     expect(screen.getByLabelText('写作')).toBeTruthy();
     expect(screen.getByLabelText('审阅')).toBeTruthy();
+    expect(screen.getByLabelText('规划推理强度')).toBeTruthy();
+    expect(screen.getByLabelText('写作推理强度')).toBeTruthy();
+    expect(screen.getByLabelText('审阅推理强度')).toBeTruthy();
+    expect(screen.getByLabelText('运行 Token 预算')).toBeTruthy();
     expect(screen.getByText('只影响以后新建的作品')).toBeTruthy();
+  });
+
+  it('支持选择推理强度、预置预算、不限制和自定义预算', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <AppProvider>
+          <Settings />
+        </AppProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: '创作方案' }));
+    await user.selectOptions(screen.getByLabelText('写作推理强度'), 'high');
+    expect((screen.getByLabelText('写作推理强度') as HTMLSelectElement).value).toBe('high');
+
+    await user.selectOptions(screen.getByLabelText('运行 Token 预算'), 'unlimited');
+    expect((screen.getByLabelText('运行 Token 预算') as HTMLSelectElement).value).toBe('unlimited');
+    expect(screen.queryByLabelText('运行 Token 预算自定义')).toBeNull();
+
+    await user.selectOptions(screen.getByLabelText('运行 Token 预算'), 'custom');
+    const custom = await screen.findByLabelText('运行 Token 预算自定义') as HTMLInputElement;
+    expect(custom.value).toBe('10000');
+    fireEvent.change(custom, { target: { value: '2' } });
+    expect((screen.getByLabelText('运行 Token 预算自定义') as HTMLInputElement).value).toBe('2');
   });
 
   it('选择内置 DeepSeek 厂商后自动填充接口与模型目录', async () => {

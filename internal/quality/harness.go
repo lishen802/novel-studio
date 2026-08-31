@@ -248,9 +248,10 @@ type HarnessRunBinding struct {
 }
 
 type HarnessRoleBinding struct {
-	Role     string `json:"role"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Role            string `json:"role"`
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // Validate 校验运行冻结绑定；公开方法供应用层在费用确认前复用相同规则。

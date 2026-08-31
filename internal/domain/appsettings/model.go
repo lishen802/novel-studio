@@ -50,18 +50,22 @@ type RoleBinding struct {
 	ConnectionID    string
 	Model           string
 	MaxOutputTokens int
+	ReasoningEffort agent.ReasoningEffort
+	OutputLimitMode agent.OutputLimitMode
 	Temperature     float64
 	Enabled         bool
 }
 
 type CreativeProfileVersion struct {
-	ProfileID       string
-	Version         int64
-	Name            string
-	Roles           []RoleBinding
-	MaxRunTokens    int
-	MaxContextChars int
-	CreatedAt       time.Time
+	ProfileID              string
+	Version                int64
+	Name                   string
+	Roles                  []RoleBinding
+	MaxRunTokens           int
+	MaxContextChars        int
+	RunBudgetUnlimited     bool
+	ContextBudgetUnlimited bool
+	CreatedAt              time.Time
 }
 
 type RecentProject struct {
@@ -119,6 +123,7 @@ func NewCreativeProfileVersion(
 	name string,
 	roles []RoleBinding,
 	maxRunTokens, maxContextChars int,
+	runBudgetUnlimited, contextBudgetUnlimited bool,
 	now time.Time,
 ) (CreativeProfileVersion, error) {
 	profileID = strings.TrimSpace(profileID)
@@ -129,7 +134,14 @@ func NewCreativeProfileVersion(
 	if version < 1 {
 		return CreativeProfileVersion{}, ErrInvalidVersion
 	}
-	if maxRunTokens < 1 || maxContextChars < 1 {
+	if runBudgetUnlimited {
+		maxRunTokens = agent.UnlimitedBudgetSentinel
+	} else if maxRunTokens < 1 {
+		return CreativeProfileVersion{}, agent.ErrInvalidBudget
+	}
+	if contextBudgetUnlimited {
+		maxContextChars = agent.UnlimitedBudgetSentinel
+	} else if maxContextChars < 1 {
 		return CreativeProfileVersion{}, agent.ErrInvalidBudget
 	}
 	if len(roles) != 3 {
@@ -143,9 +155,19 @@ func NewCreativeProfileVersion(
 		if r.ConnectionID == "" || r.Model == "" {
 			return CreativeProfileVersion{}, ErrBlankValue
 		}
-		// 生成参数边界：maxOutputTokens ≥ 1，temperature ∈ [0, 2]。
-		// 非法值会让模型调用失败或行为异常，必须在不可变版本创建时拦截。
-		if r.MaxOutputTokens < 1 {
+		if r.ReasoningEffort == "" {
+			r.ReasoningEffort = agent.ReasoningAuto
+		}
+		if r.OutputLimitMode == "" {
+			r.OutputLimitMode = agent.OutputLimitFixed
+		}
+		if !r.ReasoningEffort.Valid() || !r.OutputLimitMode.Valid() {
+			return CreativeProfileVersion{}, ErrInvalidGenerationParams
+		}
+		// 历史固定上限必须为正；新版方案预算模式不再配置单次输出上限。
+		if r.OutputLimitMode.OmitsConfiguredMaxOutput() {
+			r.MaxOutputTokens = 0
+		} else if r.MaxOutputTokens < 1 {
 			return CreativeProfileVersion{}, ErrInvalidGenerationParams
 		}
 		if r.Temperature < 0 || r.Temperature > 2 {
@@ -162,11 +184,13 @@ func NewCreativeProfileVersion(
 		if !ok || r.ConnectionID == "" {
 			return CreativeProfileVersion{}, ErrInvalidRoleCount
 		}
-		sumMaxOutput += r.MaxOutputTokens
+		if !r.OutputLimitMode.OmitsConfiguredMaxOutput() {
+			sumMaxOutput += r.MaxOutputTokens
+		}
 		orderedRoles = append(orderedRoles, r)
 	}
-	// 三个角色最大输出之和不能超过运行预算，否则运行中途会因超限失败。
-	if sumMaxOutput > maxRunTokens {
+	// 历史固定上限之和不能超过有限运行预算；方案预算模式不再用单次上限卡总额。
+	if !runBudgetUnlimited && sumMaxOutput > maxRunTokens {
 		return CreativeProfileVersion{}, agent.ErrInvalidBudget
 	}
 	writer := byRole[agent.RoleWriter]
@@ -176,13 +200,15 @@ func NewCreativeProfileVersion(
 	}
 	now = now.UTC()
 	return CreativeProfileVersion{
-		ProfileID:       profileID,
-		Version:         version,
-		Name:            name,
-		Roles:           orderedRoles,
-		MaxRunTokens:    maxRunTokens,
-		MaxContextChars: maxContextChars,
-		CreatedAt:       now,
+		ProfileID:              profileID,
+		Version:                version,
+		Name:                   name,
+		Roles:                  orderedRoles,
+		MaxRunTokens:           maxRunTokens,
+		MaxContextChars:        maxContextChars,
+		RunBudgetUnlimited:     runBudgetUnlimited,
+		ContextBudgetUnlimited: contextBudgetUnlimited,
+		CreatedAt:              now,
 	}, nil
 }
 

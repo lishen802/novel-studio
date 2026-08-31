@@ -204,19 +204,21 @@ func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.Run
 			id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, change_set_id, retry_of, created_at, updated_at,
 			started_at, completed_at, token_budget, context_char_budget,
+			token_budget_unlimited, context_budget_unlimited,
 			input_tokens, output_tokens, context_chars, context_truncated,
 			task_kind, workflow_id, workflow_version, workflow_hash, canonical_head,
 			input_digest, quality_status, budget_policy_version, quality_policy_version,
 			max_revision_attempts
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 	`,
 		run.ID, run.ProjectID, run.ChapterID, run.ChapterBaseRevision, run.Prompt, run.Status,
 		run.ErrorCode, run.ErrorMessage, run.ChangeSetID, run.RetryOf,
 		formatTime(run.CreatedAt), formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
-		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
+		run.TokenBudget, run.ContextCharBudget, boolToInt(run.TokenBudgetUnlimited), boolToInt(run.ContextBudgetUnlimited),
+		run.InputTokens, run.OutputTokens,
 		run.ContextChars, run.ContextTruncated,
 		run.TaskKind, run.WorkflowBinding.ID, run.WorkflowBinding.Version, run.WorkflowBinding.Hash,
 		run.CanonicalHead, run.InputDigest, run.QualityStatus, run.BudgetPolicyVersion,
@@ -314,6 +316,7 @@ func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.Ru
 			change_set_id = NULLIF(?, ''), retry_of = NULLIF(?, ''),
 			updated_at = ?, started_at = ?, completed_at = ?,
 			token_budget = ?, context_char_budget = ?,
+			token_budget_unlimited = ?, context_budget_unlimited = ?,
 			input_tokens = ?, output_tokens = ?,
 			context_chars = ?, context_truncated = ?,
 			task_kind = ?, workflow_id = ?, workflow_version = ?, workflow_hash = ?,
@@ -323,7 +326,8 @@ func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.Ru
 	`,
 		run.Status, run.ErrorCode, run.ErrorMessage, run.ChangeSetID, run.RetryOf,
 		formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
-		run.TokenBudget, run.ContextCharBudget, run.InputTokens, run.OutputTokens,
+		run.TokenBudget, run.ContextCharBudget, boolToInt(run.TokenBudgetUnlimited), boolToInt(run.ContextBudgetUnlimited),
+		run.InputTokens, run.OutputTokens,
 		run.ContextChars, run.ContextTruncated,
 		run.TaskKind, run.WorkflowBinding.ID, run.WorkflowBinding.Version, run.WorkflowBinding.Hash,
 		run.CanonicalHead, run.InputDigest, run.QualityStatus, run.BudgetPolicyVersion,
@@ -336,7 +340,8 @@ func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.Run, error
 		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
 			created_at, updated_at, started_at, completed_at,
-			token_budget, context_char_budget, input_tokens, output_tokens,
+			token_budget, context_char_budget, token_budget_unlimited, context_budget_unlimited,
+			input_tokens, output_tokens,
 			context_chars, context_truncated, task_kind, workflow_id, workflow_version,
 			workflow_hash, canonical_head, input_digest, quality_status,
 			budget_policy_version, quality_policy_version, max_revision_attempts
@@ -360,7 +365,8 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Run
 		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
 			created_at, updated_at, started_at, completed_at,
-			token_budget, context_char_budget, input_tokens, output_tokens,
+			token_budget, context_char_budget, token_budget_unlimited, context_budget_unlimited,
+			input_tokens, output_tokens,
 			context_chars, context_truncated, task_kind, workflow_id, workflow_version,
 			workflow_hash, canonical_head, input_digest, quality_status,
 			budget_policy_version, quality_policy_version, max_revision_attempts
@@ -739,11 +745,12 @@ func scanAgentRun(scanner rowScanner) (agentdomain.Run, error) {
 	var run agentdomain.Run
 	var createdAt, updatedAt string
 	var startedAt, completedAt sql.NullString
+	var tokenUnlimited, contextUnlimited int
 	err := scanner.Scan(
 		&run.ID, &run.ProjectID, &run.ChapterID, &run.ChapterBaseRevision, &run.Prompt,
 		&run.Status, &run.ErrorCode, &run.ErrorMessage, &run.ChangeSetID, &run.RetryOf,
 		&createdAt, &updatedAt, &startedAt, &completedAt,
-		&run.TokenBudget, &run.ContextCharBudget, &run.InputTokens, &run.OutputTokens,
+		&run.TokenBudget, &run.ContextCharBudget, &tokenUnlimited, &contextUnlimited, &run.InputTokens, &run.OutputTokens,
 		&run.ContextChars, &run.ContextTruncated,
 		&run.TaskKind, &run.WorkflowBinding.ID, &run.WorkflowBinding.Version,
 		&run.WorkflowBinding.Hash, &run.CanonicalHead, &run.InputDigest, &run.QualityStatus,
@@ -752,6 +759,8 @@ func scanAgentRun(scanner rowScanner) (agentdomain.Run, error) {
 	if err != nil {
 		return run, err
 	}
+	run.TokenBudgetUnlimited = tokenUnlimited == 1
+	run.ContextBudgetUnlimited = contextUnlimited == 1
 	run.CreatedAt, err = parseTime(createdAt)
 	if err == nil {
 		run.UpdatedAt, err = parseTime(updatedAt)
@@ -772,7 +781,7 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			provider_request_id, input_tokens, output_tokens,
 			creative_profile_id, creative_profile_version, provider_connection_id,
 			provider_name, provider_kind, base_url, credential_ref, model,
-			max_output_tokens, temperature,
+			max_output_tokens, reasoning_effort, output_limit_mode, temperature,
 			node_id, public_stage_id, capability, attempt, prompt_id, prompt_version, prompt_hash,
 			schema_id, schema_version, schema_hash, assembler_id, assembler_version,
 			input_digest, output_digest, COALESCE(primary_artifact_id, ''), quality_status
@@ -794,7 +803,7 @@ func (s *Store) listAgentRunSteps(ctx context.Context, runID string) ([]agentdom
 			&step.ProviderRequestID, &step.InputTokens, &step.OutputTokens,
 			&step.CreativeProfileID, &step.CreativeProfileVersion, &step.ProviderConnectionID,
 			&step.ProviderName, &step.ProviderKind, &step.BaseURL, &step.CredentialRef, &step.Model,
-			&step.MaxOutputTokens, &step.Temperature,
+			&step.MaxOutputTokens, &step.ReasoningEffort, &step.OutputLimitMode, &step.Temperature,
 			&step.NodeID, &step.PublicStageID, &step.Capability, &step.Attempt,
 			&step.PromptBinding.ID, &step.PromptBinding.Version, &step.PromptBinding.Hash,
 			&step.SchemaBinding.ID, &step.SchemaBinding.Version, &step.SchemaBinding.Hash,
@@ -832,12 +841,12 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.RunSte
 			provider_request_id, input_tokens, output_tokens,
 			creative_profile_id, creative_profile_version, provider_connection_id,
 			provider_name, provider_kind, base_url, credential_ref, model,
-			max_output_tokens, temperature, node_id, public_stage_id, capability, attempt,
+			max_output_tokens, reasoning_effort, output_limit_mode, temperature, node_id, public_stage_id, capability, attempt,
 			prompt_id, prompt_version, prompt_hash, schema_id, schema_version, schema_hash,
 			assembler_id, assembler_version, input_digest, output_digest,
 			primary_artifact_id, quality_status
 		) VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)
 	`,
 		step.ID, step.RunID, step.Role, step.ProfileID, step.Position, step.Status,
@@ -847,7 +856,7 @@ func insertAgentRunStep(ctx context.Context, tx *sql.Tx, step agentdomain.RunSte
 		step.ProviderRequestID, step.InputTokens, step.OutputTokens,
 		step.CreativeProfileID, step.CreativeProfileVersion, step.ProviderConnectionID,
 		step.ProviderName, step.ProviderKind, step.BaseURL, step.CredentialRef, step.Model,
-		step.MaxOutputTokens, step.Temperature,
+		step.MaxOutputTokens, string(step.ReasoningEffort), string(step.OutputLimitMode), step.Temperature,
 		normalizedNodeID(step), step.PublicStageID, step.Capability, normalizedAttempt(step),
 		step.PromptBinding.ID, step.PromptBinding.Version, step.PromptBinding.Hash,
 		step.SchemaBinding.ID, step.SchemaBinding.Version, step.SchemaBinding.Hash,

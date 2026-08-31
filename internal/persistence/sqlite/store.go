@@ -36,3 +36,10 @@ func formatTime(value time.Time) string {
 func parseTime(value string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, value)
 }
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}

@@ -227,3 +227,10 @@ func TestRunRecordsUsageAndBudgetSnapshot(t *testing.T) {
 		t.Fatalf("RemainingTokens() = %d", run.RemainingTokens())
 	}
 }
+
+func TestUnlimitedRunKeepsSentinelOutOfRemainingTokensIdentity(t *testing.T) {
+	run := Run{TokenBudget: 8, TokenBudgetUnlimited: true, ContextCharBudget: 8, ContextBudgetUnlimited: true}
+	if run.RemainingTokens() != UnlimitedBudgetSentinel || run.RemainingContextChars() != UnlimitedBudgetSentinel {
+		t.Fatalf("remaining = %d/%d", run.RemainingTokens(), run.RemainingContextChars())
+	}
+}

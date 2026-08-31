@@ -5,6 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { studio, type HarnessCaseView, type HarnessDatasetView, type HarnessPreviewView, type HarnessRunView } from '../api/studio';
 import { useApp } from '../store/useApp';
+import { formatBudget, reasoningLabel } from '../budget';
 
 const localRaterID = 'local-author';
 const acceptanceOptions = [
@@ -160,12 +161,21 @@ export default function Lab() {
 
       <section aria-labelledby="lab-config" className="bg-surface border border-border rounded-xl p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4"><h2 id="lab-config" className="font-medium text-text">1. 测试集与运行配置</h2><span className="text-xs text-text-muted">{catalog ? `${catalog.dataset.dataset_id}@${catalog.dataset.version} · ${catalog.dataset.cases.length} cases` : '加载中…'}</span></div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label className="text-sm text-text-sub">参考创作方案<select value={profile} onChange={(event) => setProfile(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-text"><option value="">请选择</option>{state.bootstrap?.profiles.map((item) => <option key={`${item.profileId}:${item.version}`} value={`${item.profileId}:${item.version}`}>{item.name} · v{item.version}</option>)}</select></label>
           <label className="text-sm text-text-sub">工作流变体<select value={variant} onChange={(event) => setVariant(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-text">{catalog?.variants.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.workflow_id}@{item.workflow_version}</option>)}</select></label>
           <label className="text-sm text-text-sub">测试范围<select value={mode} onChange={(event) => setMode(event.target.value)} className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-text"><option value="reduced">快速集</option><option value="full">完整 12 cases</option></select></label>
-          <div className="flex items-end"><Button variant="primary" onClick={() => void previewRun()} disabled={busy || !profile || !catalog || selectedCaseIDs.length === 0} className="w-full">预览费用与运行</Button></div>
         </div>
+        {(() => {
+          const selected = state.bootstrap?.profiles.find((item) => `${item.profileId}:${item.version}` === profile);
+          if (!selected) return null;
+          return (
+            <p className="mt-3 text-xs text-text-muted">
+              使用方案冻结预算：运行 Token {formatBudget(selected.maxRunTokens, Boolean(selected.runBudgetUnlimited))} · 上下文字符 {formatBudget(selected.maxContextChars, Boolean(selected.contextBudgetUnlimited))}。测试不再单独设置限额。
+            </p>
+          );
+        })()}
+        <div className="mt-4"><Button variant="primary" onClick={() => void previewRun()} disabled={busy || !profile || !catalog || selectedCaseIDs.length === 0} className="w-full md:w-auto">预览费用与运行</Button></div>
         {catalog && <fieldset className="mt-4"><legend className="text-sm font-medium text-text mb-2">选择 case（{selectedCaseIDs.length}）</legend><div className="grid grid-cols-2 lg:grid-cols-4 gap-2">{catalog.dataset.cases.filter((item) => mode === 'full' || Boolean(item.ci_reduced)).map((item) => { const id = String(item.case_id); return <label key={id} className="flex items-start gap-2 rounded-md border border-border p-2 text-xs text-text-sub"><input type="checkbox" checked={selectedCaseIDs.includes(id)} onChange={(event) => setSelectedCaseIDs((current) => event.target.checked ? [...current, id] : current.filter((value) => value !== id))}/><span>{id}<br/><span className="text-text-muted">{String(item.genre)} · {String(item.task_kind)}</span></span></label>; })}</div></fieldset>}
       </section>
 
@@ -193,7 +203,39 @@ export default function Lab() {
       {selectedRun?.report && <section aria-labelledby="lab-compare" className="bg-surface border border-border rounded-xl p-5 shadow-sm"><h2 id="lab-compare" className="font-medium text-text mb-3">5. 版本比较与退化下钻</h2><div className="flex flex-wrap items-end gap-3"><label className="text-sm text-text-sub">基准运行<select value={baseRunID} onChange={(event) => setBaseRunID(event.target.value)} className="block mt-1 min-w-72 rounded-md border border-border bg-surface px-3 py-2"><option value="">选择另一条已完成运行</option>{runs.filter((item) => item.report && item.run.id !== selectedRun.run.id).map((item) => <option key={item.run.id} value={item.run.id}>{String(item.run.binding.variant_id || 'minimal')} · {item.run.id.slice(0, 8)}</option>)}</select></label><Button onClick={() => void compareRuns()} disabled={!baseRunID || busy}>比较冻结版本</Button></div>{comparison && <pre aria-label="版本比较结果" className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-atmosphere p-4 text-xs text-text-sub">{JSON.stringify(comparison, null, 2)}</pre>}</section>}
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="确认真实模型运行">
-        {preview && <div className="space-y-4"><div className="grid grid-cols-2 gap-3 text-sm"><p>Provider<br/><strong>{preview.provider}</strong></p><p>模型<br/><strong>{preview.model}</strong></p><p>最大调用次数<br/><strong>{preview.estimatedCalls}</strong></p><p>最大输出 Token<br/><strong>{preview.maximumOutputTokens.toLocaleString()}</strong></p></div><p className="rounded-lg bg-warning/10 p-3 text-xs text-text-sub">{preview.currencyEstimate}</p><label className="flex items-start gap-2 text-sm text-text"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1"/>我确认上述 Provider、模型与最大预算，并同意发起可能产生费用的真实调用。</label><div className="flex justify-end gap-2"><Button onClick={() => setConfirmOpen(false)}>取消</Button><Button variant="primary" disabled={!confirmed || busy} onClick={() => void createAndRun()}>创建并运行</Button></div></div>}
+        {preview && <div className="space-y-4">
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-hover text-text-sub">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">角色</th>
+                  <th className="text-left px-3 py-2 font-medium">Provider</th>
+                  <th className="text-left px-3 py-2 font-medium">模型</th>
+                  <th className="text-left px-3 py-2 font-medium">推理强度</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(preview.roles || []).map((row) => (
+                  <tr key={row.role} className="border-t border-border">
+                    <td className="px-3 py-2 text-text">{row.role}</td>
+                    <td className="px-3 py-2 text-text-sub">{row.provider}</td>
+                    <td className="px-3 py-2 text-text-sub">{row.model}</td>
+                    <td className="px-3 py-2 text-text-sub">{reasoningLabel(row.reasoning_effort || 'auto')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <p>最大调用次数<br/><strong>{preview.estimatedCalls}</strong></p>
+            <p>运行 Token 预算<br/><strong>{formatBudget(preview.maxRunTokens || 0, Boolean(preview.runBudgetUnlimited))}</strong></p>
+            <p>上下文字符预算<br/><strong>{formatBudget(preview.maxContextChars || 0, Boolean(preview.contextBudgetUnlimited))}</strong></p>
+            <p>工作流<br/><strong>{preview.workflowId}@{preview.workflowVersion}</strong></p>
+          </div>
+          <p className="rounded-lg bg-warning/10 p-3 text-xs text-text-sub">{preview.currencyEstimate}</p>
+          <label className="flex items-start gap-2 text-sm text-text"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1"/>我确认上述 Provider、模型、推理强度与方案预算，并同意发起可能产生费用的真实调用。</label>
+          <div className="flex justify-end gap-2"><Button onClick={() => setConfirmOpen(false)}>取消</Button><Button variant="primary" disabled={!confirmed || busy} onClick={() => void createAndRun()}>创建并运行</Button></div>
+        </div>}
       </Modal>
     </div>
   );

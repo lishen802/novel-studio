@@ -56,7 +56,7 @@ func TestNewCreativeProfileVersionRejectsDuplicateWriterReviewer(t *testing.T) {
 		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "same-model", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
 		{Role: agent.RoleContinuityReviewer, ConnectionID: "c1", Model: "same-model", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
 	}
-	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, agent.ErrReviewerNotIndependent) {
+	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, false, false, time.Now()); !errors.Is(err, agent.ErrReviewerNotIndependent) {
 		t.Fatalf("err = %v, want ErrReviewerNotIndependent", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestNewCreativeProfileVersionRejectsMissingRole(t *testing.T) {
 		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", MaxOutputTokens: 1000, Temperature: 0.7, Enabled: true},
 		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
 	}
-	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, ErrInvalidRoleCount) {
+	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, false, false, time.Now()); !errors.Is(err, ErrInvalidRoleCount) {
 		t.Fatalf("err = %v, want ErrInvalidRoleCount", err)
 	}
 }
@@ -80,7 +80,7 @@ func TestNewCreativeProfileVersionRejectsDuplicateRoles(t *testing.T) {
 		{Role: agent.RolePlanner, ConnectionID: "c2", Model: "gpt-4", MaxOutputTokens: 1000, Temperature: 0.7, Enabled: true},
 		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
 	}
-	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, ErrInvalidRoleCount) {
+	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, false, false, time.Now()); !errors.Is(err, ErrInvalidRoleCount) {
 		t.Fatalf("err = %v, want ErrInvalidRoleCount", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestNewCreativeProfileVersionRejectsInvalidGenerationParams(t *testing.T) {
 				{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", MaxOutputTokens: 2000, Temperature: 0.8, Enabled: true},
 				{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer-model", MaxOutputTokens: 1000, Temperature: 0.2, Enabled: true},
 			}
-			if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, ErrInvalidGenerationParams) {
+			if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, false, false, time.Now()); !errors.Is(err, ErrInvalidGenerationParams) {
 				t.Fatalf("err = %v, want ErrInvalidGenerationParams", err)
 			}
 		})
@@ -121,8 +121,41 @@ func TestNewCreativeProfileVersionRejectsBudgetExceeded(t *testing.T) {
 		{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer-model", MaxOutputTokens: 6000, Temperature: 0.2, Enabled: true},
 	}
 	// 15000 + 10000 + 6000 = 31000 > 30000
-	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, time.Now()); !errors.Is(err, agent.ErrInvalidBudget) {
+	if _, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 30000, 120000, false, false, time.Now()); !errors.Is(err, agent.ErrInvalidBudget) {
 		t.Fatalf("err = %v, want ErrInvalidBudget", err)
+	}
+}
+
+func TestNewCreativeProfileVersionAcceptsProfileBudgetWithoutMaxOutput(t *testing.T) {
+	roles := []RoleBinding{
+		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", Temperature: 0.7, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget, ReasoningEffort: agent.ReasoningHigh},
+		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", Temperature: 0.8, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget},
+		{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer-model", Temperature: 0.2, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget},
+	}
+	version, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 10_000*10_000, 10_000*10_000, false, false, time.Now())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if version.Roles[0].MaxOutputTokens != 0 || version.Roles[0].ReasoningEffort != agent.ReasoningHigh {
+		t.Fatalf("roles = %#v", version.Roles[0])
+	}
+}
+
+func TestNewCreativeProfileVersionAcceptsUnlimitedBudget(t *testing.T) {
+	roles := []RoleBinding{
+		{Role: agent.RolePlanner, ConnectionID: "c1", Model: "gpt-4", Temperature: 0.7, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget},
+		{Role: agent.RoleWriter, ConnectionID: "c1", Model: "writer-model", Temperature: 0.8, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget},
+		{Role: agent.RoleContinuityReviewer, ConnectionID: "c2", Model: "reviewer-model", Temperature: 0.2, Enabled: true, OutputLimitMode: agent.OutputLimitProfileBudget},
+	}
+	version, err := NewCreativeProfileVersion("profile-1", 1, "方案", roles, 0, 0, true, true, time.Now())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !version.RunBudgetUnlimited || !version.ContextBudgetUnlimited {
+		t.Fatalf("unlimited flags = %#v", version)
+	}
+	if version.MaxRunTokens != agent.UnlimitedBudgetSentinel || version.MaxContextChars != agent.UnlimitedBudgetSentinel {
+		t.Fatalf("sentinels = %d/%d", version.MaxRunTokens, version.MaxContextChars)
 	}
 }
 

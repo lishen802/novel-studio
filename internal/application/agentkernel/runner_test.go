@@ -75,6 +75,44 @@ func TestServiceRejectsInsufficientFrozenBudgetBeforeProviderCall(t *testing.T) 
 	}
 }
 
+func TestCreateRunUsesProfileBudgetAndFreezesReasoning(t *testing.T) {
+	service, _, _ := newRunnerHarness(t, nil)
+	request := baselineRequest()
+	request.Profile.MaxRunTokens = 20_000
+	request.Profile.Roles[0].OutputLimitMode = agentdomain.OutputLimitProfileBudget
+	request.Profile.Roles[0].MaxOutputTokens = 0
+	request.Profile.Roles[0].ReasoningEffort = agentdomain.ReasoningHigh
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if run.TokenBudget != 20_000 || run.TokenBudgetUnlimited {
+		t.Fatalf("token budget = %d unlimited=%v", run.TokenBudget, run.TokenBudgetUnlimited)
+	}
+	if run.Steps[0].OutputLimitMode != agentdomain.OutputLimitProfileBudget || run.Steps[0].MaxOutputTokens != 0 {
+		t.Fatalf("step output limit = %#v", run.Steps[0])
+	}
+	if run.Steps[0].ReasoningEffort != agentdomain.ReasoningHigh {
+		t.Fatalf("reasoning = %s", run.Steps[0].ReasoningEffort)
+	}
+}
+
+func TestCreateRunPersistsUnlimitedBudgetIdentity(t *testing.T) {
+	service, _, _ := newRunnerHarness(t, nil)
+	request := baselineRequest()
+	request.Profile.RunBudgetUnlimited = true
+	request.Profile.MaxRunTokens = 0
+	request.Profile.Roles[0].OutputLimitMode = agentdomain.OutputLimitProfileBudget
+	request.Profile.Roles[0].MaxOutputTokens = 0
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if !run.TokenBudgetUnlimited || run.TokenBudget != agentdomain.UnlimitedBudgetSentinel {
+		t.Fatalf("unlimited run = %#v", run)
+	}
+}
+
 func TestServiceRejectsRequiredContextThatCannotFit(t *testing.T) {
 	service, _, provider := newRunnerHarness(t, nil)
 	request := baselineRequest()

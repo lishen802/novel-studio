@@ -62,7 +62,7 @@ func sampleProfile(profileID string, version int64, writerModel string) appsetti
 	v, _ := appsettings.NewCreativeProfileVersion(
 		profileID, version, "默认方案",
 		testRoles("conn-1", writerModel, "reviewer-model"),
-		30000, 120000, time.Now(),
+		30000, 120000, false, false, time.Now(),
 	)
 	return v
 }
@@ -109,6 +109,31 @@ func TestPublishProfileVersionPersistsAllRolesInOneTransaction(t *testing.T) {
 	}
 	if roleMap[agent.RoleWriter].Model != "writer-v1" {
 		t.Fatalf("writer model = %q", roleMap[agent.RoleWriter].Model)
+	}
+}
+
+func TestPublishProfileVersionPersistsReasoningAndUnlimitedBudget(t *testing.T) {
+	store := newTestStore(t)
+	roles := testRoles("conn-1", "writer-v1", "reviewer-model")
+	for i := range roles {
+		roles[i].ReasoningEffort = agent.ReasoningMax
+		roles[i].OutputLimitMode = agent.OutputLimitProfileBudget
+		roles[i].MaxOutputTokens = 0
+	}
+	v, err := appsettings.NewCreativeProfileVersion("profile-1", 1, "默认方案", roles, 0, 0, true, true, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustPublish(t, store, v)
+	got, err := store.ProfileVersion(context.Background(), "profile-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.RunBudgetUnlimited || !got.ContextBudgetUnlimited {
+		t.Fatalf("unlimited flags = %#v", got)
+	}
+	if got.Roles[0].ReasoningEffort != agent.ReasoningMax || got.Roles[0].OutputLimitMode != agent.OutputLimitProfileBudget {
+		t.Fatalf("roles = %#v", got.Roles[0])
 	}
 }
 

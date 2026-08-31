@@ -72,9 +72,9 @@ export const defaultSettings: AppSettings = {
       version: 1,
       published: true,
       roles: {
-        planner: { connectionId: 'model-openai', model: 'gpt-4.1', maxOutputTokens: 4096, temperature: 0.7 },
-        writer: { connectionId: 'model-openai', model: 'gpt-4.1', maxOutputTokens: 4096, temperature: 0.7 },
-        continuity_reviewer: { connectionId: 'model-claude', model: 'claude-sonnet', maxOutputTokens: 4096, temperature: 0.2 },
+        planner: { connectionId: 'model-openai', model: 'gpt-4.1', reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.7 },
+        writer: { connectionId: 'model-openai', model: 'gpt-4.1', reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.7 },
+        continuity_reviewer: { connectionId: 'model-claude', model: 'claude-sonnet', reasoningEffort: 'auto', outputLimitMode: 'profile_budget', temperature: 0.2 },
       },
     },
   ],

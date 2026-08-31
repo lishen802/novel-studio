@@ -682,6 +682,41 @@ func TestResolveCreativeProfileReturnsConnectionMetadata(t *testing.T) {
 	}
 }
 
+func TestPublishProfileBudgetModeOmitsMaxOutputAndKeepsUnlimitedIdentity(t *testing.T) {
+	svc, repo, creds := newServiceHarness(t)
+	seedDefaultConnection(t, svc, repo, creds)
+	input := profileInput("方案预算", "writer-model")
+	input.RunBudgetUnlimited = true
+	input.ContextBudgetUnlimited = true
+	input.MaxRunTokens = 0
+	input.MaxContextChars = 0
+	for i := range input.Roles {
+		input.Roles[i].MaxOutputTokens = 0
+		input.Roles[i].OutputLimitMode = agent.OutputLimitProfileBudget
+		input.Roles[i].ReasoningEffort = agent.ReasoningHigh
+	}
+	version, err := svc.PublishCreativeProfile(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !version.RunBudgetUnlimited || version.MaxRunTokens != agent.UnlimitedBudgetSentinel {
+		t.Fatalf("published = %#v", version)
+	}
+	if version.Roles[0].MaxOutputTokens != 0 || version.Roles[0].ReasoningEffort != agent.ReasoningHigh {
+		t.Fatalf("roles = %#v", version.Roles[0])
+	}
+	resolved, err := svc.ResolveCreativeProfile(context.Background(), version.ProfileID, version.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved.RunBudgetUnlimited || resolved.MaxRunTokens != agent.UnlimitedBudgetSentinel {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+	if resolved.Roles[0].OutputLimitMode != agent.OutputLimitProfileBudget || resolved.Roles[0].ReasoningEffort != agent.ReasoningHigh {
+		t.Fatalf("resolved roles = %#v", resolved.Roles[0])
+	}
+}
+
 func TestResolveCreativeProfileMissingCredential(t *testing.T) {
 	svc, _, creds := newServiceHarness(t)
 	provider := mustSaveProvider(t, svc)

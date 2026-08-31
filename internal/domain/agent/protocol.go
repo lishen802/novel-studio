@@ -138,22 +138,32 @@ func (binding VersionBinding) Validate() error {
 }
 
 type ExecutionBinding struct {
-	RoleSlot             Role         `json:"role_slot"`
-	ProviderConnectionID string       `json:"provider_connection_id"`
-	ProviderName         string       `json:"provider_name"`
-	ProviderKind         ProviderKind `json:"provider_kind"`
-	BaseURL              string       `json:"base_url"`
-	CredentialRef        string       `json:"credential_ref"`
-	Model                string       `json:"model"`
-	MaxOutputTokens      int          `json:"max_output_tokens"`
-	Temperature          float64      `json:"temperature"`
+	RoleSlot             Role            `json:"role_slot"`
+	ProviderConnectionID string          `json:"provider_connection_id"`
+	ProviderName         string          `json:"provider_name"`
+	ProviderKind         ProviderKind    `json:"provider_kind"`
+	BaseURL              string          `json:"base_url"`
+	CredentialRef        string          `json:"credential_ref"`
+	Model                string          `json:"model"`
+	MaxOutputTokens      int             `json:"max_output_tokens"`
+	ReasoningEffort      ReasoningEffort `json:"reasoning_effort"`
+	OutputLimitMode      OutputLimitMode `json:"output_limit_mode"`
+	Temperature          float64         `json:"temperature"`
 }
 
 func (binding ExecutionBinding) Validate(capability Capability) error {
 	if !ValidRoleForCapability(capability, binding.RoleSlot) || blank(binding.ProviderConnectionID) ||
 		blank(binding.ProviderName) || blank(binding.CredentialRef) || blank(binding.Model) ||
 		(binding.ProviderKind != ProviderOpenAI && binding.ProviderKind != ProviderAnthropic) ||
-		binding.MaxOutputTokens < 1 || binding.Temperature < 0 || binding.Temperature > 2 {
+		binding.Temperature < 0 || binding.Temperature > 2 ||
+		!binding.ReasoningEffort.Valid() || !binding.OutputLimitMode.Valid() {
+		return ErrInvalidTaskProtocol
+	}
+	if binding.OutputLimitMode.OmitsConfiguredMaxOutput() {
+		if binding.MaxOutputTokens < 0 {
+			return ErrInvalidTaskProtocol
+		}
+	} else if binding.MaxOutputTokens < 1 {
 		return ErrInvalidTaskProtocol
 	}
 	if _, err := NormalizeEndpoint(binding.BaseURL); err != nil {
@@ -232,8 +242,11 @@ func (envelope TaskEnvelope) Validate() error {
 	if err := envelope.Budget.Validate(); err != nil {
 		return err
 	}
-	if envelope.Execution.MaxOutputTokens+envelope.Budget.RepairReserve+envelope.Budget.RevisionReserve > envelope.Budget.RemainingTokens ||
-		hasBlankOrDuplicate(envelope.InputRefs) || hasBlankOrDuplicate(envelope.ConstraintRefs) {
+	if hasBlankOrDuplicate(envelope.InputRefs) || hasBlankOrDuplicate(envelope.ConstraintRefs) {
+		return ErrInvalidTaskProtocol
+	}
+	if !envelope.Execution.OutputLimitMode.OmitsConfiguredMaxOutput() &&
+		envelope.Execution.MaxOutputTokens+envelope.Budget.RepairReserve+envelope.Budget.RevisionReserve > envelope.Budget.RemainingTokens {
 		return ErrInvalidTaskProtocol
 	}
 	return nil

@@ -20,6 +20,7 @@ type ModelGenerateRequest struct {
 	System          string
 	Input           string
 	MaxOutputTokens int
+	ReasoningEffort agentdomain.ReasoningEffort
 	Temperature     float64
 	JSONSchema      json.RawMessage
 	SchemaName      string

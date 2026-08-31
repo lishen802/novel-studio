@@ -36,6 +36,12 @@ func TestPreviewFreezesCostDigestAndCreateRequiresExactConfirmation(t *testing.T
 	if preview.ConfirmationDigest == "" || preview.CaseCount < 3 || preview.MaximumOutputTokens == 0 {
 		t.Fatalf("preview = %+v", preview)
 	}
+	if preview.MaxRunTokens != 50_000 || preview.RunBudgetUnlimited || len(preview.Roles) != 3 {
+		t.Fatalf("preview budget/roles = %+v", preview)
+	}
+	if preview.Roles[1].ReasoningEffort != string(agentdomain.ReasoningHigh) {
+		t.Fatalf("writer reasoning = %#v", preview.Roles)
+	}
 	if _, err := service.Create(context.Background(), RunInput{PreviewInput: input, CostConfirmed: true, ConfirmationDigest: "stale"}); !errors.Is(err, ErrConfirmationRequired) {
 		t.Fatalf("stale confirmation error = %v", err)
 	}
@@ -85,9 +91,9 @@ type testProfiles struct{}
 
 func (testProfiles) ResolveCreativeProfile(context.Context, string, int64) (agentdomain.ResolvedCreativeProfile, error) {
 	roles := []agentdomain.ResolvedRole{
-		{Role: agentdomain.RolePlanner, ConnectionID: "provider", ProviderName: "Provider", ProviderKind: agentdomain.ProviderOpenAI, CredentialRef: "planner", Model: "model", MaxOutputTokens: 6000},
-		{Role: agentdomain.RoleWriter, ConnectionID: "provider", ProviderName: "Provider", ProviderKind: agentdomain.ProviderOpenAI, CredentialRef: "writer", Model: "model", MaxOutputTokens: 6000},
-		{Role: agentdomain.RoleContinuityReviewer, ConnectionID: "provider", ProviderName: "Provider", ProviderKind: agentdomain.ProviderOpenAI, CredentialRef: "review", Model: "model", MaxOutputTokens: 6000},
+		{Role: agentdomain.RolePlanner, ConnectionID: "provider", ProviderName: "Provider", ProviderKind: agentdomain.ProviderOpenAI, CredentialRef: "planner", Model: "planner-model", OutputLimitMode: agentdomain.OutputLimitProfileBudget, ReasoningEffort: agentdomain.ReasoningAuto},
+		{Role: agentdomain.RoleWriter, ConnectionID: "provider", ProviderName: "Provider", ProviderKind: agentdomain.ProviderOpenAI, CredentialRef: "writer", Model: "writer-model", OutputLimitMode: agentdomain.OutputLimitProfileBudget, ReasoningEffort: agentdomain.ReasoningHigh},
+		{Role: agentdomain.RoleContinuityReviewer, ConnectionID: "provider", ProviderName: "Provider", ProviderKind: agentdomain.ProviderOpenAI, CredentialRef: "review", Model: "review-model", OutputLimitMode: agentdomain.OutputLimitProfileBudget, ReasoningEffort: agentdomain.ReasoningLow},
 	}
 	return agentdomain.ResolvedCreativeProfile{ProfileID: "profile", Version: 1, MaxRunTokens: 50_000, MaxContextChars: 100_000, Roles: roles}, nil
 }

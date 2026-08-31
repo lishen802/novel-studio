@@ -165,7 +165,13 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 		if !ok {
 			return agentdomain.Run{}, fmt.Errorf("%w: missing role %s", ErrCreateRun, node.RoleSlot)
 		}
-		maxOutputTokens := min(node.MaxOutputTokens, role.MaxOutputTokens)
+		maxOutputTokens := node.MaxOutputTokens
+		outputLimitMode := role.OutputLimitMode.Normalized()
+		if outputLimitMode.OmitsConfiguredMaxOutput() {
+			maxOutputTokens = 0
+		} else {
+			maxOutputTokens = min(node.MaxOutputTokens, role.MaxOutputTokens)
+		}
 		temperature := role.Temperature
 		if node.TemperatureOverride != nil {
 			temperature = *node.TemperatureOverride
@@ -176,25 +182,29 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 			CreativeProfileID: request.Profile.ProfileID, CreativeProfileVersion: request.Profile.Version,
 			ProviderConnectionID: role.ConnectionID, ProviderName: role.ProviderName,
 			ProviderKind: role.ProviderKind, BaseURL: role.BaseURL, CredentialRef: role.CredentialRef,
-			Model: role.Model, MaxOutputTokens: maxOutputTokens, Temperature: temperature,
+			Model: role.Model, MaxOutputTokens: maxOutputTokens, ReasoningEffort: role.ReasoningEffort.Normalized(),
+			OutputLimitMode: outputLimitMode, Temperature: temperature,
 			NodeID: node.ID, PublicStageID: node.PublicStageID, Capability: node.Capability, PromptBinding: node.Prompt,
 			SchemaBinding: node.Schema, AssemblerID: node.Assembler.ID,
 			AssemblerVersion: node.Assembler.Version, InputDigest: nodeDigest,
 		})
 	}
-	tokenBudget := min(request.Profile.MaxRunTokens, compiled.MaxRunTokens)
-	if requiredFrozenBudget(specs, compiled) > tokenBudget {
+	tokenBudget := agentdomain.EffectiveBudget(request.Profile.MaxRunTokens, request.Profile.RunBudgetUnlimited)
+	contextBudget := agentdomain.EffectiveBudget(request.Profile.MaxContextChars, request.Profile.ContextBudgetUnlimited)
+	if !request.Profile.RunBudgetUnlimited && compiled.RequiredTokenBudget() > tokenBudget {
 		return agentdomain.Run{}, fmt.Errorf("%w: frozen node limits exceed %d", ErrTokenBudget, tokenBudget)
 	}
 	run, err := agentdomain.NewWorkflowRun(
 		strings.TrimSpace(request.RunID), strings.TrimSpace(request.ProjectID), strings.TrimSpace(request.ChapterID),
 		request.ChapterBaseRevision, request.AuthorInstruction, compiled.Workflow, compiled.TaskKind,
 		request.CanonicalHead, inputDigest, compiled.BudgetPolicyVersion, compiled.QualityPolicyVersion,
-		compiled.MaxRevisionAttempts, tokenBudget, request.Profile.MaxContextChars, specs, service.clock.Now(),
+		compiled.MaxRevisionAttempts, tokenBudget, contextBudget, specs, service.clock.Now(),
 	)
 	if err != nil {
 		return agentdomain.Run{}, fmt.Errorf("%w: %w", ErrCreateRun, err)
 	}
+	run.TokenBudgetUnlimited = request.Profile.RunBudgetUnlimited
+	run.ContextBudgetUnlimited = request.Profile.ContextBudgetUnlimited
 	run.RetryOf = strings.TrimSpace(request.RetryOf)
 	artifact := newArtifact(service.ids.NewID(), run.ID, "", agentdomain.ArtifactTaskInput, string(encoded), service.clock.Now())
 	if err := service.store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run, Artifacts: []agentdomain.Artifact{artifact}}); err != nil {
@@ -398,7 +408,11 @@ func (service *Service) executeNode(
 	remaining := run.RemainingTokens()
 	estimatedInput := max(1, utf8.RuneCountInString(assembled)/tokenCharRatio)
 	reserve := compiled.RepairReserve + compiled.RevisionReserve
-	if estimatedInput+step.MaxOutputTokens+reserve > remaining {
+	needed := estimatedInput + reserve
+	if !step.OutputLimitMode.OmitsConfiguredMaxOutput() {
+		needed += step.MaxOutputTokens
+	}
+	if needed > remaining {
 		return service.failStep(ctx, run, step, "token_budget_exceeded", ErrTokenBudget, nil)
 	}
 	apiKey, err := service.credentials.Get(ctx, step.CredentialRef)
@@ -416,11 +430,7 @@ func (service *Service) executeNode(
 	if err != nil {
 		return service.failStep(ctx, run, step, "prompt_render_failed", err, nil)
 	}
-	generated, err := provider.Generate(ctx, apiKey, ports.ModelGenerateRequest{
-		Model: step.Model, System: capabilityInstruction(step.Capability), Input: rendered,
-		MaxOutputTokens: step.MaxOutputTokens, Temperature: step.Temperature,
-		JSONSchema: append([]byte(nil), schema.JSON...), SchemaName: node.Schema.ID,
-	}, nil)
+	generated, err := provider.Generate(ctx, apiKey, generateRequest(step, remaining, capabilityInstruction(step.Capability), rendered, schema, node.Schema.ID), nil)
 	step.InputTokens = generated.InputTokens
 	step.OutputTokens = generated.OutputTokens
 	step.ProviderRequestID = generated.ProviderRequestID
@@ -532,8 +542,9 @@ func (service *Service) repairOutput(
 	if decoded != nil || remaining < 1 {
 		return decoded, original, produced, 0, 0, "", ErrInvalidOutput
 	}
-	maxOutput := min(step.MaxOutputTokens, remaining)
-	if maxOutput < 1 {
+	maxOutput := protocolMaxOutput(step, remaining)
+	omitMax := step.OutputLimitMode.OmitsConfiguredMaxOutput() && step.ProviderKind == agentdomain.ProviderOpenAI
+	if remaining < 1 || (!omitMax && maxOutput < 1) {
 		return nil, original, produced, 0, 0, "", ErrTokenBudget
 	}
 	apiKey, err := service.credentials.Get(ctx, step.CredentialRef)
@@ -547,12 +558,13 @@ func (service *Service) repairOutput(
 	if err != nil {
 		return nil, original, produced, 0, 0, "", err
 	}
-	repaired, err := provider.Generate(ctx, apiKey, ports.ModelGenerateRequest{
-		Model:  step.Model,
-		System: "你只负责修复 JSON 结构，使其符合给定 Schema；不得增加事实、删改正文或改变语义。",
-		Input:  original, MaxOutputTokens: maxOutput, Temperature: 0,
-		JSONSchema: append([]byte(nil), schema.JSON...), SchemaName: node.Schema.ID,
-	}, nil)
+	repairStep := step
+	repairStep.Temperature = 0
+	repaired, err := provider.Generate(ctx, apiKey, generateRequest(
+		repairStep, remaining,
+		"你只负责修复 JSON 结构，使其符合给定 Schema；不得增加事实、删改正文或改变语义。",
+		original, schema, node.Schema.ID,
+	), nil)
 	if err != nil {
 		return nil, original, produced, repaired.InputTokens, repaired.OutputTokens, repaired.ProviderRequestID, err
 	}
@@ -608,7 +620,7 @@ func (service *Service) assemble(
 		}
 	}
 	manifestID := service.ids.NewID()
-	remaining := run.ContextCharBudget
+	remaining := run.RemainingContextChars()
 	selected := make([]string, 0, len(parts))
 	refs := make([]string, 0, len(parts))
 	items := make([]agentdomain.ContextManifestItem, 0, len(parts))
@@ -797,7 +809,9 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 		strings.TrimSpace(request.BranchID) == "" || strings.TrimSpace(request.ChapterID) == "" ||
 		request.ChapterBaseRevision < 1 || strings.TrimSpace(request.CanonicalHead) == "" ||
 		strings.TrimSpace(request.AuthorInstruction) == "" || strings.TrimSpace(request.Profile.ProfileID) == "" ||
-		request.Profile.Version < 1 || request.Profile.MaxRunTokens < 1 || request.Profile.MaxContextChars < 1 {
+		request.Profile.Version < 1 ||
+		(!request.Profile.RunBudgetUnlimited && request.Profile.MaxRunTokens < 1) ||
+		(!request.Profile.ContextBudgetUnlimited && request.Profile.MaxContextChars < 1) {
 		return agentdomain.ErrInvalidRun
 	}
 	if request.QualitySpec.Validate() != nil {
@@ -843,7 +857,8 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 		binding := agentdomain.ExecutionBinding{
 			RoleSlot: node.RoleSlot, ProviderConnectionID: role.ConnectionID, ProviderName: role.ProviderName,
 			ProviderKind: role.ProviderKind, BaseURL: role.BaseURL, CredentialRef: role.CredentialRef,
-			Model: role.Model, MaxOutputTokens: role.MaxOutputTokens, Temperature: role.Temperature,
+			Model: role.Model, MaxOutputTokens: role.MaxOutputTokens, ReasoningEffort: role.ReasoningEffort,
+			OutputLimitMode: role.OutputLimitMode, Temperature: role.Temperature,
 		}
 		if !ok || binding.Validate(node.Capability) != nil {
 			return agentdomain.ErrInvalidProfile
@@ -881,7 +896,8 @@ func taskEnvelope(
 		Execution: agentdomain.ExecutionBinding{
 			RoleSlot: step.Role, ProviderConnectionID: step.ProviderConnectionID, ProviderName: step.ProviderName,
 			ProviderKind: step.ProviderKind, BaseURL: step.BaseURL, CredentialRef: step.CredentialRef,
-			Model: step.Model, MaxOutputTokens: step.MaxOutputTokens, Temperature: step.Temperature,
+			Model: step.Model, MaxOutputTokens: step.MaxOutputTokens, ReasoningEffort: step.ReasoningEffort,
+			OutputLimitMode: step.OutputLimitMode, Temperature: step.Temperature,
 		},
 		Prompt: node.Prompt, Schema: node.Schema, Assembler: node.Assembler,
 		Budget: agentdomain.TaskBudget{
@@ -1336,12 +1352,42 @@ func replaceStep(run agentdomain.Run, replacement agentdomain.RunStep) agentdoma
 	return run
 }
 
-func requiredFrozenBudget(specs []agentdomain.RunStepSpec, compiled CompiledWorkflow) int {
-	total := compiled.RepairReserve + compiled.RevisionReserve
-	for _, spec := range specs {
-		total += spec.MaxOutputTokens
+// protocolMaxOutput 计算本次请求实际发送的上限：方案预算模式在 OpenAI 上省略，
+// 在强制要求上限的协议上使用剩余预算或技术封顶。
+func protocolMaxOutput(step agentdomain.RunStep, remaining int) int {
+	if step.OutputLimitMode.OmitsConfiguredMaxOutput() {
+		if step.ProviderKind == agentdomain.ProviderOpenAI {
+			return 0
+		}
+		cap := remaining
+		if cap > agentdomain.ProviderTechnicalMaxOutput {
+			cap = agentdomain.ProviderTechnicalMaxOutput
+		}
+		if cap < 1 {
+			return 0
+		}
+		return cap
 	}
-	return total
+	return min(step.MaxOutputTokens, remaining)
+}
+
+func generateRequest(
+	step agentdomain.RunStep,
+	remaining int,
+	system, input string,
+	schema ports.SchemaAsset,
+	schemaName string,
+) ports.ModelGenerateRequest {
+	return ports.ModelGenerateRequest{
+		Model:           step.Model,
+		System:          system,
+		Input:           input,
+		MaxOutputTokens: protocolMaxOutput(step, remaining),
+		ReasoningEffort: step.ReasoningEffort.Normalized(),
+		Temperature:     step.Temperature,
+		JSONSchema:      append([]byte(nil), schema.JSON...),
+		SchemaName:      schemaName,
+	}
 }
 
 func newArtifact(id, runID, stepID string, kind agentdomain.ArtifactKind, content string, now time.Time) agentdomain.Artifact {

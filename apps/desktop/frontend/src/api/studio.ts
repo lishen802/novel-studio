@@ -70,6 +70,8 @@ export interface RoleBindingView {
   connectionId: string;
   model: string;
   maxOutputTokens: number;
+  reasoningEffort?: string;
+  outputLimitMode?: string;
   temperature: number;
   enabled: boolean;
 }
@@ -81,6 +83,8 @@ export interface CreativeProfileView {
   roles: RoleBindingView[];
   maxRunTokens: number;
   maxContextChars: number;
+  runBudgetUnlimited?: boolean;
+  contextBudgetUnlimited?: boolean;
   createdAt: string;
 }
 
@@ -180,6 +184,8 @@ export interface AgentRunStepView {
   providerKind: string;
   model: string;
   maxOutputTokens: number;
+  reasoningEffort?: string;
+  outputLimitMode?: string;
   temperature: number;
 }
 
@@ -194,6 +200,8 @@ export interface AgentRunView {
   retryOf: string;
   tokenBudget: number;
   contextCharBudget: number;
+  tokenBudgetUnlimited?: boolean;
+  contextBudgetUnlimited?: boolean;
   inputTokens: number;
   outputTokens: number;
   contextChars: number;
@@ -240,8 +248,11 @@ export interface HarnessDatasetView {
 export interface HarnessPreviewView {
   datasetId: string; datasetVersion: string; datasetSha256: string; caseCount: number;
   estimatedCalls: number; maximumOutputTokens: number; currencyEstimate: string;
+  runBudgetUnlimited?: boolean; contextBudgetUnlimited?: boolean;
+  maxRunTokens?: number; maxContextChars?: number;
   provider: string; model: string; workflowId: string; workflowVersion: number;
   confirmationDigest: string; binding: Record<string, unknown>;
+  roles?: Array<{ role: string; provider: string; model: string; reasoning_effort?: string }>;
 }
 
 export interface HarnessRunView {
