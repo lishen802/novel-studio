@@ -576,8 +576,9 @@ func (service *Service) repairOutput(
 	}
 	repairStep := step
 	repairStep.Temperature = 0
+	repairStep.ReasoningEffort = agentdomain.ReasoningNone
 	repaired, err := provider.Generate(ctx, apiKey, generateRequest(
-		repairStep, availableOutput, run.TokenBudgetUnlimited,
+		repairStep, availableOutput, false,
 		"你只负责修复 JSON 结构，使其符合给定 Schema；不得增加事实、删改正文或改变语义。",
 		original, schema, node.Schema.ID,
 	), nil)

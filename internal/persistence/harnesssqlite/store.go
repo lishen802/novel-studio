@@ -224,6 +224,18 @@ func (store *Store) ListRuns(ctx context.Context) ([]quality.HarnessRun, error) 
 	return runs, nil
 }
 
+// DeleteRun 删除一条隔离实验及其级联结果、评分与报告。
+func (store *Store) DeleteRun(ctx context.Context, runID string) error {
+	result, err := store.db.ExecContext(ctx, `DELETE FROM harness_runs WHERE id = ?`, strings.TrimSpace(runID))
+	if err != nil {
+		return fmt.Errorf("delete harness run: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return fmt.Errorf("delete harness run: %w", sql.ErrNoRows)
+	}
+	return nil
+}
+
 func (store *Store) ListCaseResults(ctx context.Context, runID string) ([]quality.HarnessCaseResult, error) {
 	rows, err := store.db.QueryContext(ctx, `SELECT case_id, genre, task_kind, candidates_json, anonymous_order_json FROM harness_case_results WHERE run_id = ? ORDER BY case_id`, runID)
 	if err != nil {

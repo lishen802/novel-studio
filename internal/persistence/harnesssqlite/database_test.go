@@ -2,6 +2,7 @@ package harnesssqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -110,6 +111,15 @@ func TestStoreRoundTripBlindProjectionAndDeleteIsolation(t *testing.T) {
 	ratings, err := store.ListRatingSubmissions(context.Background(), run.ID)
 	if err != nil || len(ratings) != 1 || ratings[0].ID != submission.ID {
 		t.Fatalf("ratings = %+v, err = %v", ratings, err)
+	}
+	if err := store.DeleteRun(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetRun(context.Background(), run.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted run error = %v", err)
+	}
+	if results, err := store.ListCaseResults(context.Background(), run.ID); err != nil || len(results) != 0 {
+		t.Fatalf("deleted run results = %+v, %v", results, err)
 	}
 
 	if err := store.DeleteAll(context.Background()); err != nil {

@@ -23,12 +23,14 @@ var (
 	ErrUnavailable          = errors.New("creative harness unavailable")
 	ErrConfirmationRequired = errors.New("creative harness cost confirmation required")
 	ErrRatingRequired       = errors.New("creative harness rating required before reveal")
+	ErrRunActive            = errors.New("creative harness run is active")
 )
 
 type Store interface {
 	quality.HarnessStore
 	quality.HarnessReportReader
 	ListRuns(context.Context) ([]quality.HarnessRun, error)
+	DeleteRun(context.Context, string) error
 	GetBlindCaseResult(context.Context, string, string) ([]quality.AnonymousHarnessCandidate, error)
 	GetCaseResult(context.Context, string, string) (quality.HarnessCaseResult, error)
 	SaveRatingSubmission(context.Context, quality.HarnessRatingSubmission) error
@@ -330,17 +332,23 @@ func (service *Service) Create(ctx context.Context, input RunInput) (RunView, er
 
 // Execute 异步启动或恢复实验；页面通过持久化投影观察，不依赖 Bridge 持续在线。
 func (service *Service) Execute(ctx context.Context, runID string) (RunView, error) {
-	run, err := service.store.GetRun(ctx, runID)
-	if err != nil {
-		return RunView{}, err
-	}
-	if run.Status != quality.HarnessRunQueued && run.Status != quality.HarnessRunRecoverable && run.Status != quality.HarnessRunFailed && run.Status != quality.HarnessRunCancelled {
-		return RunView{}, quality.ErrInvalidHarnessRun
-	}
 	service.mu.Lock()
 	if _, running := service.cancels[runID]; running {
 		service.mu.Unlock()
+		run, err := service.store.GetRun(ctx, runID)
+		if err != nil {
+			return RunView{}, err
+		}
 		return service.runView(ctx, run)
+	}
+	run, err := service.store.GetRun(ctx, runID)
+	if err != nil {
+		service.mu.Unlock()
+		return RunView{}, err
+	}
+	if run.Status != quality.HarnessRunQueued && run.Status != quality.HarnessRunRecoverable && run.Status != quality.HarnessRunFailed && run.Status != quality.HarnessRunCancelled {
+		service.mu.Unlock()
+		return RunView{}, quality.ErrInvalidHarnessRun
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	service.cancels[runID] = cancel
@@ -356,6 +364,23 @@ func (service *Service) Execute(ctx context.Context, runID string) (RunView, err
 		_, _ = service.runner.Execute(runCtx, runID, service.dataset)
 	}()
 	return service.runView(ctx, run)
+}
+
+// DeleteRun 删除未在执行的实验记录；数据库外键负责级联清理盲评与报告。
+func (service *Service) DeleteRun(ctx context.Context, runID string) error {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	run, err := service.store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status == quality.HarnessRunRunning {
+		return ErrRunActive
+	}
+	if _, running := service.cancels[runID]; running {
+		return ErrRunActive
+	}
+	return service.store.DeleteRun(ctx, runID)
 }
 
 func (service *Service) Cancel(ctx context.Context, runID string) error {

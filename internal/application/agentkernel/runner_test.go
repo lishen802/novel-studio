@@ -62,6 +62,28 @@ func TestServiceRepairsInvalidJSONOnceAndAccountsUsage(t *testing.T) {
 	}
 }
 
+func TestServiceCapsFormatRepairEvenWhenProfileBudgetIsUnlimited(t *testing.T) {
+	service, _, provider := newRunnerHarness(t, []providerReply{
+		{text: `{"title":`, inputTokens: 10, outputTokens: 5},
+		{text: `{"title":"修复","body":"正文未改变。","completion_note":"完成"}`, inputTokens: 8, outputTokens: 12},
+	})
+	request := baselineRequest()
+	request.Profile.MaxRunTokens = 0
+	request.Profile.RunBudgetUnlimited = true
+	request.Profile.Roles[0].OutputLimitMode = agentdomain.OutputLimitProfileBudget
+	request.Profile.Roles[0].MaxOutputTokens = 0
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecuteRun(context.Background(), run.ID, "head-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 2 || provider.requests[0].MaxOutputTokens != 0 || provider.requests[1].MaxOutputTokens != 1000 || provider.requests[1].ReasoningEffort != agentdomain.ReasoningNone {
+		t.Fatalf("provider max outputs = %#v", provider.requests)
+	}
+}
+
 func TestServiceRejectsInsufficientFrozenBudgetBeforeProviderCall(t *testing.T) {
 	service, _, provider := newRunnerHarness(t, nil)
 	request := baselineRequest()

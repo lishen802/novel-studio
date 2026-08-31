@@ -2,6 +2,7 @@ package creativeharness
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +52,45 @@ func TestPreviewFreezesCostDigestAndCreateRequiresExactConfirmation(t *testing.T
 	created, err := service.Create(context.Background(), RunInput{PreviewInput: input, CostConfirmed: true, ConfirmationDigest: preview.ConfirmationDigest})
 	if err != nil || created.Run.Status != quality.HarnessRunQueued || created.CompletedCases != 0 {
 		t.Fatalf("created = %+v, err = %v", created, err)
+	}
+}
+
+func TestDeleteRunRemovesIdleRunAndRejectsActiveRun(t *testing.T) {
+	db, err := harnesssqlite.Open(context.Background(), filepath.Join(t.TempDir(), "harness.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := harnesssqlite.NewStore(db)
+	service, err := New(ServiceConfig{Store: store, Profiles: testProfiles{}, Credentials: testCredentials{}, Providers: testProviders{}, Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := PreviewInput{ProfileID: "profile", ProfileVersion: 1, VariantID: "minimal", Mode: quality.HarnessModeReduced, Seed: 9}
+	preview, err := service.Preview(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.Create(context.Background(), RunInput{PreviewInput: input, CostConfirmed: true, ConfirmationDigest: preview.ConfirmationDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteRun(context.Background(), created.Run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetRun(context.Background(), created.Run.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted run error = %v", err)
+	}
+	active, err := service.Create(context.Background(), RunInput{PreviewInput: input, CostConfirmed: true, ConfirmationDigest: preview.ConfirmationDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active.Run.Status = quality.HarnessRunRunning
+	if err := store.UpdateRun(context.Background(), active.Run); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteRun(context.Background(), active.Run.ID); !errors.Is(err, ErrRunActive) {
+		t.Fatalf("active delete error = %v", err)
 	}
 }
 

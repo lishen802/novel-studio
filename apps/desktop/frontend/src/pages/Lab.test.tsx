@@ -17,6 +17,7 @@ describe('智能体实验室盲评', () => {
       ApplicationBootstrap: vi.fn().mockResolvedValue({ preferences: { theme: 'light', defaultCreativeProfileId: 'profile-1' }, recentProjects: [], providers: [], profiles: [{ profileId: 'profile-1', version: 1, name: '参考方案', roles: [], maxRunTokens: 1000, maxContextChars: 1000, createdAt: '' }] }),
       ListCreativeHarnessDatasets: vi.fn().mockResolvedValue({ dataset: { dataset_id: 'set', version: '1', sha256: 'x', originality_note: '原创', cases: [{}] }, variants: [{ id: 'minimal', workflow_id: 'quality.chapter', workflow_version: 1, default_enabled: true }] }),
       ListCreativeHarnessRuns: vi.fn().mockResolvedValue([run]),
+      DeleteCreativeHarnessRun: vi.fn().mockResolvedValue(undefined),
       GetCreativeHarnessCaseResult: vi.fn().mockResolvedValue(blind),
       SaveCreativeHarnessRating: vi.fn().mockResolvedValue({ ...blind, rating: { id: 'rating-1' }, revealed: { '候选-1': 'revised' }, binding: { model: 'writer-model' } }),
     } } };
@@ -42,5 +43,14 @@ describe('智能体实验室盲评', () => {
     render(<MemoryRouter><AppProvider><Lab /></AppProvider></MemoryRouter>);
     expect((await screen.findByRole('alert')).textContent).toContain('Bridge 暂不可用');
     expect(screen.getByRole('button', { name: '重试加载' })).toBeTruthy();
+  });
+
+  it('终态运行经确认后可以删除', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><AppProvider><Lab /></AppProvider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '删除运行 run-1' }));
+    expect(screen.getByText(/同时删除对应的结果、评分和报告/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '确认删除运行' }));
+    expect(window.go!.main!.DesktopAPI!.DeleteCreativeHarnessRun).toHaveBeenCalledWith('run-1');
   });
 });

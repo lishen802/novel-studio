@@ -432,6 +432,13 @@ func (a *DesktopAPI) GetCreativeHarnessRun(runID string) (creativeharness.RunVie
 	return safeResult(a.harness.Run(a.ctx, runID))
 }
 
+func (a *DesktopAPI) DeleteCreativeHarnessRun(runID string) error {
+	if a.harness == nil {
+		return safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeDesktopError(a.harness.DeleteRun(a.ctx, runID))
+}
+
 func (a *DesktopAPI) RetryCreativeHarnessCase(runID, caseID string) (creativeharness.RunView, error) {
 	if a.harness == nil {
 		return creativeharness.RunView{}, safeDesktopError(errFeatureNotAvailable)

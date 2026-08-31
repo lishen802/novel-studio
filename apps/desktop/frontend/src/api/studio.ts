@@ -398,6 +398,7 @@ export const studio = {
   cancelCreativeHarnessRun: (id: string) => call<void>('CancelCreativeHarnessRun', id),
   listCreativeHarnessRuns: () => call<HarnessRunView[]>('ListCreativeHarnessRuns'),
   getCreativeHarnessRun: (id: string) => call<HarnessRunView>('GetCreativeHarnessRun', id),
+  deleteCreativeHarnessRun: (id: string) => call<void>('DeleteCreativeHarnessRun', id),
   retryCreativeHarnessCase: (runId: string, caseId: string) => call<HarnessRunView>('RetryCreativeHarnessCase', runId, caseId),
   getCreativeHarnessCaseResult: (runId: string, caseId: string, raterId: string) => call<HarnessCaseView>('GetCreativeHarnessCaseResult', runId, caseId, raterId),
   saveCreativeHarnessRating: (input: Record<string, unknown>) => call<HarnessCaseView>('SaveCreativeHarnessRating', input),

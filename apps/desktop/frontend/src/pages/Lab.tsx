@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FlaskConical, Play, RefreshCw, Square, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Play, RefreshCw, Square, Trash2, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -27,6 +27,8 @@ export default function Lab() {
   const [selectedCaseIDs, setSelectedCaseIDs] = useState<string[]>([]);
   const [preview, setPreview] = useState<HarnessPreviewView | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<HarnessRunView | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [ratings, setRatings] = useState<RatingDraft>({});
   const [baseRunID, setBaseRunID] = useState('');
@@ -40,7 +42,7 @@ export default function Lab() {
       const [nextCatalog, nextRuns] = await Promise.all([studio.listCreativeHarnessDatasets(), studio.listCreativeHarnessRuns()]);
       setCatalog(nextCatalog);
       setRuns(nextRuns);
-      setSelectedRun((current) => current ? nextRuns.find((item) => item.run.id === current.run.id) || current : nextRuns[0] || null);
+      setSelectedRun((current) => current ? nextRuns.find((item) => item.run.id === current.run.id) || nextRuns[0] || null : nextRuns[0] || null);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '实验室加载失败');
@@ -137,6 +139,21 @@ export default function Lab() {
     finally { setBusy(false); }
   }
 
+  async function confirmDeleteRun() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true); setError('');
+    try {
+      const deletedID = deleteTarget.run.id;
+      await studio.deleteCreativeHarnessRun(deletedID);
+      setDeleteTarget(null);
+      setCaseView(null);
+      setComparison(null);
+      setBaseRunID((current) => current === deletedID ? '' : current);
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '删除实验运行失败'); }
+    finally { setDeleteBusy(false); }
+  }
+
   const completedCaseIDs = selectedRun?.completedCaseIds || [];
   const reportStats: Array<[string, unknown]> = selectedRun?.report ? [
     ['Case', selectedRun.report.case_count], ['候选', selectedRun.report.candidate_count],
@@ -182,7 +199,7 @@ export default function Lab() {
       <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5">
         <section aria-labelledby="lab-runs" className="bg-surface border border-border rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3"><h2 id="lab-runs" className="font-medium text-text">2. 运行观察器</h2><button aria-label="刷新运行" onClick={() => void refresh()}><RefreshCw className="w-4 h-4 text-text-muted" /></button></div>
-          {runs.length === 0 ? <p className="text-sm text-text-muted py-8 text-center">尚无实验运行</p> : <div className="space-y-2">{runs.map((item) => <button key={item.run.id} onClick={() => { setSelectedRun(item); setCaseView(null); }} className={`w-full rounded-lg border p-3 text-left ${selectedRun?.run.id === item.run.id ? 'border-primary bg-primary-subtle' : 'border-border hover:bg-surface-hover'}`}><div className="flex justify-between text-sm"><span className="font-medium text-text">{String(item.run.binding.variant_id || 'minimal')}</span><span className="text-text-sub">{item.run.status}</span></div><div className="mt-2 h-1.5 rounded-full bg-surface-hover overflow-hidden"><div className="h-full bg-primary" style={{ width: `${item.totalCases ? item.completedCases / item.totalCases * 100 : 0}%` }} /></div><p className="text-xs text-text-muted mt-2">{item.completedCases}/{item.totalCases} cases · {item.run.public_stage_id || '等待开始'} · {(item.run.input_tokens || 0) + (item.run.output_tokens || 0)} Token · {item.run.calls || 0} 次调用</p></button>)}</div>}
+          {runs.length === 0 ? <p className="text-sm text-text-muted py-8 text-center">尚无实验运行</p> : <div className="space-y-2">{runs.map((item) => <div key={item.run.id} className={`group relative rounded-lg border ${selectedRun?.run.id === item.run.id ? 'border-primary bg-primary-subtle' : 'border-border hover:bg-surface-hover'}`}><button onClick={() => { setSelectedRun(item); setCaseView(null); }} className="w-full p-3 pr-10 text-left"><div className="flex justify-between text-sm"><span className="font-medium text-text">{String(item.run.binding.variant_id || 'minimal')}</span><span className="text-text-sub">{item.run.status}</span></div><div className="mt-2 h-1.5 rounded-full bg-surface-hover overflow-hidden"><div className="h-full bg-primary" style={{ width: `${item.totalCases ? item.completedCases / item.totalCases * 100 : 0}%` }} /></div><p className="text-xs text-text-muted mt-2">{item.completedCases}/{item.totalCases} cases · {item.run.public_stage_id || '等待开始'} · {(item.run.input_tokens || 0) + (item.run.output_tokens || 0)} Token · {item.run.calls || 0} 次调用</p></button>{item.run.status !== 'running' && <button aria-label={`删除运行 ${item.run.id}`} title="删除运行" onClick={() => setDeleteTarget(item)} className="absolute right-2 top-2 rounded-md p-1.5 text-text-muted opacity-70 hover:bg-danger/10 hover:text-danger hover:opacity-100 focus:opacity-100"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>}
           {selectedRun && <div className="flex gap-2 mt-4">{selectedRun.run.status === 'running' ? <Button onClick={() => void studio.cancelCreativeHarnessRun(selectedRun.run.id).then(refresh)}><Square className="w-3.5 h-3.5" />取消</Button> : ['queued', 'recoverable', 'failed', 'cancelled'].includes(selectedRun.run.status) ? <Button variant="primary" onClick={() => void studio.executeCreativeHarnessRun(selectedRun.run.id).then(refresh)}><Play className="w-3.5 h-3.5" />{selectedRun.completedCases ? '恢复运行' : '开始运行'}</Button> : null}</div>}
           {selectedRun?.run.failure && <p className="mt-3 text-xs text-danger">{selectedRun.run.failure}</p>}
         </section>
@@ -201,6 +218,14 @@ export default function Lab() {
       {selectedRun?.report && <section className="bg-surface border border-border rounded-xl p-5 shadow-sm"><div className="flex items-center justify-between gap-3 mb-3"><h2 className="font-medium text-text">4. 回归报告</h2><Button size="sm" onClick={() => void exportReport()} disabled={busy}>导出 JSON 报告</Button></div><div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">{reportStats.map(([label, value]) => <div key={label} className="rounded-lg bg-atmosphere p-3"><p className="text-text-muted text-xs">{label}</p><p className="text-lg text-text mt-1">{String(value ?? 0)}</p></div>)}</div><div className="mt-4 rounded-lg border border-border p-3 text-sm text-text-sub">人工盲评：{selectedRun.ratings?.submissions || 0} 组 · 可直接接受/少量修改 {selectedRun.ratings?.candidateRatings ? Math.round((selectedRun.ratings.acceptable / selectedRun.ratings.candidateRatings) * 100) : 0}% · 重写 {selectedRun.ratings?.candidateRatings ? Math.round((selectedRun.ratings.rewrite / selectedRun.ratings.candidateRatings) * 100) : 0}%</div><p className="text-xs text-text-muted mt-4">导出包含冻结模型与资源版本、内容哈希、门禁、用量和退化证据，不包含 API Key、完整 Prompt 或生成正文。版本比较保留退化 case，不以总平均掩盖。</p></section>}
 
       {selectedRun?.report && <section aria-labelledby="lab-compare" className="bg-surface border border-border rounded-xl p-5 shadow-sm"><h2 id="lab-compare" className="font-medium text-text mb-3">5. 版本比较与退化下钻</h2><div className="flex flex-wrap items-end gap-3"><label className="text-sm text-text-sub">基准运行<select value={baseRunID} onChange={(event) => setBaseRunID(event.target.value)} className="block mt-1 min-w-72 rounded-md border border-border bg-surface px-3 py-2"><option value="">选择另一条已完成运行</option>{runs.filter((item) => item.report && item.run.id !== selectedRun.run.id).map((item) => <option key={item.run.id} value={item.run.id}>{String(item.run.binding.variant_id || 'minimal')} · {item.run.id.slice(0, 8)}</option>)}</select></label><Button onClick={() => void compareRuns()} disabled={!baseRunID || busy}>比较冻结版本</Button></div>{comparison && <pre aria-label="版本比较结果" className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-atmosphere p-4 text-xs text-text-sub">{JSON.stringify(comparison, null, 2)}</pre>}</section>}
+
+      <Modal open={Boolean(deleteTarget)} onClose={() => !deleteBusy && setDeleteTarget(null)} title="确认删除实验运行">
+        <div className="space-y-4">
+          <p className="text-sm text-text-sub">确认删除这条实验运行？此操作会同时删除对应的结果、评分和报告，且无法撤销。</p>
+          <p className="rounded-md bg-surface-hover px-3 py-2 text-xs text-text-muted">{deleteTarget?.run.id}</p>
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>取消</Button><Button variant="danger" onClick={() => void confirmDeleteRun()} disabled={deleteBusy}>{deleteBusy ? '删除中...' : '确认删除运行'}</Button></div>
+        </div>
+      </Modal>
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="确认真实模型运行">
         {preview && <div className="space-y-4">

@@ -140,6 +140,8 @@ func safeDesktopError(err error) error {
 	switch {
 	case errors.Is(err, creativeharness.ErrConfirmationRequired):
 		code, message = errorHarnessConfirmation, "运行配置或费用确认已变化，请重新预览并确认。"
+	case errors.Is(err, creativeharness.ErrRunActive):
+		code, message = errorOperationFailed, "运行中的实验不能删除，请先取消并等待任务结束。"
 	case errors.Is(err, quality.ErrHarnessRatingExists):
 		code, message = errorHarnessRatingExists, "该 case 已提交评分，不能重复覆盖。"
 	case errors.Is(err, context.Canceled):
