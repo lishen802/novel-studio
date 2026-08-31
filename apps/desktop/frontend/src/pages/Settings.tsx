@@ -14,8 +14,10 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { Modal } from '../components/ui/Modal';
 import { studio } from '../api/studio';
 import type { ProviderTestView } from '../api/studio';
+import { getModelVendor, inferModelVendor, modelVendors } from '../modelCatalog';
 
 type TabKey = 'model' | 'writing' | 'templates' | 'appearance' | 'advanced';
 
@@ -43,7 +45,7 @@ const creativeRoleLabels: Record<CreativeRole, string> = {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { state, saveSettings, refreshBootstrap } = useApp();
+  const { state, dispatch, saveSettings } = useApp();
   const [activeTab, setActiveTab] = useState<TabKey>('model');
   const [search, setSearch] = useState('');
   const [saved, setSaved] = useState(false);
@@ -52,12 +54,18 @@ export default function Settings() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testOkId, setTestOkId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<ProviderTestView | null>(null);
+  const [testModels, setTestModels] = useState<Record<string, string>>({});
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const [models, setModels] = useState<ModelConfig[]>(state.settings.models);
   const [activeModelId, setActiveModelId] = useState(state.settings.activeModelId);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const activeModel = useMemo(() => getActiveModel({ ...state.settings, models, activeModelId }), [state.settings, models, activeModelId]);
+  const activeVendor = activeModel ? inferModelVendor(activeModel.provider, activeModel.baseUrl) : getModelVendor('openai');
+  const activeTestModel = activeModel
+    ? testModels[activeModel.id] ?? activeVendor.models[0]?.id ?? ''
+    : '';
 
   const [creativeProfiles, setCreativeProfiles] = useState<CreativeProfile[]>(state.settings.creativeProfiles);
   const [defaultCreativeProfileId, setDefaultCreativeProfileId] = useState(state.settings.defaultCreativeProfileId);
@@ -99,16 +107,28 @@ export default function Settings() {
     const id = `m-${Date.now()}`;
     setModels((prev) => [
       ...prev,
-      { id, name: `模型 ${prev.length + 1}`, provider: 'openai', baseUrl: 'https://api.openai.com/v1', modelName: '', apiKeyConfigured: false },
+      { id, name: `模型 ${prev.length + 1}`, provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKeyConfigured: false },
     ]);
     setActiveModelId(id);
   };
 
-  const deleteModel = async (id: string) => {
+  const deleteTarget = models.find((model) => model.id === deleteTargetId);
+  const deleteReferences = deleteTargetId
+    ? creativeProfiles.filter((profile) => Object.values(profile.roles).some((role) => role.connectionId === deleteTargetId))
+    : [];
+
+  /** 使用应用内对话框确认删除，避免桌面 WebView 的原生 confirm 被窗口层级遮挡。 */
+  const deleteModel = (id: string) => {
     const target = models.find((m) => m.id === id);
     if (!target) return;
-    // 删除前必须确认：被方案引用时后端会拒绝，但作者主动删除连接属于破坏性操作。
-    if (!window.confirm(`确认删除连接“${target.name}”？此操作不可撤销。`)) return;
+    setSettingError(null);
+    setDeleteTargetId(id);
+  };
+
+  /** 删除未被当前方案引用的连接；历史版本引用仍由后端权威校验。 */
+  const confirmDeleteModel = async () => {
+    const id = deleteTargetId;
+    if (!id || deleteReferences.length > 0) return;
     setDeleteBusyId(id);
     setSettingError(null);
     try {
@@ -128,6 +148,7 @@ export default function Settings() {
         delete next[id];
         return next;
       });
+      setDeleteTargetId(null);
     } catch (error) {
       setSettingError(error instanceof Error ? error.message : '删除连接失败');
     } finally {
@@ -142,8 +163,8 @@ export default function Settings() {
     setSettingError(null);
     try {
       if (id.startsWith('m-')) throw new Error('请先保存连接，再测试。');
-      if (!activeModel.modelName.trim()) throw new Error('请先填写模型名称。');
-      const result = await studio.testApplicationProvider({ providerId: id, model: activeModel.modelName });
+      if (!activeTestModel.trim()) throw new Error('请先选择或填写测试模型。');
+      const result = await studio.testApplicationProvider({ providerId: id, model: activeTestModel });
       setTestResult(result);
       setTestOkId(id);
       setTimeout(() => setTestOkId(null), 3000);
@@ -152,6 +173,14 @@ export default function Settings() {
     } finally {
       setTestingId(null);
     }
+  };
+
+  /** 厂商选择只映射到现有 Provider 协议和接口地址，不引入新的后端枚举。 */
+  const selectVendor = (vendorId: string) => {
+    if (!activeModel) return;
+    const vendor = getModelVendor(vendorId);
+    updateModel(activeModel.id, { provider: vendor.protocol, baseUrl: vendor.defaultBaseUrl });
+    setTestModels((previous) => ({ ...previous, [activeModel.id]: vendor.models[0]?.id || '' }));
   };
 
   const handleSave = async () => {
@@ -171,14 +200,14 @@ export default function Settings() {
         });
         idMapping.set(model.id, saved.id);
       }
-      setModels((prev) => prev.map((m) => {
-        const newId = idMapping.get(m.id);
-        return newId && newId !== m.id
-          ? { ...m, id: newId, apiKeyConfigured: m.apiKeyConfigured || (apiKeys[m.id]?.trim().length ?? 0) > 0 }
-          : { ...m, apiKeyConfigured: m.apiKeyConfigured || (apiKeys[m.id]?.trim().length ?? 0) > 0 };
+      const mappedModels = models.map((model) => ({
+        ...model,
+        id: idMapping.get(model.id) || model.id,
+        apiKeyConfigured: model.apiKeyConfigured || (apiKeys[model.id]?.trim().length ?? 0) > 0,
       }));
-      // 角色绑定中可能引用了临时 ID，保存后需要映射到真实 ID。
-      setCreativeProfiles((prev) => prev.map((profile) => ({
+      // 角色绑定中可能引用临时 ID，必须先同步计算出完整快照再保存 Store，不能依赖
+      // React 异步 setState，否则保存后仍会带着旧 ID 或被 Bootstrap 清空。
+      const mappedProfiles = creativeProfiles.map((profile) => ({
         ...profile,
         roles: Object.fromEntries(
           (Object.keys(profile.roles) as CreativeRole[]).map((role) => {
@@ -187,22 +216,18 @@ export default function Settings() {
             return [role, mapped ? { ...binding, connectionId: mapped } : binding];
           }),
         ) as Record<CreativeRole, CreativeProfileRole>,
-      })));
-      // 同步 activeModelId 与 selectedProfile 引用。
-      setActiveModelId((prev) => idMapping.get(prev) || prev);
+      }));
+      const mappedActiveModelId = idMapping.get(activeModelId) || activeModelId;
+      setModels(mappedModels);
+      setCreativeProfiles(mappedProfiles);
+      setActiveModelId(mappedActiveModelId);
+      setTestModels((previous) => Object.fromEntries(Object.entries(previous).map(([id, model]) => [idMapping.get(id) || id, model])));
       // API Key 已经写入凭据库，不再保留在 React 状态中，避免内存中残留明文密钥。
       setApiKeys({});
       const next: AppSettings = {
-        models: models.map((m) => {
-          const newId = idMapping.get(m.id) || m.id;
-          return {
-            ...m,
-            id: newId,
-            apiKeyConfigured: m.apiKeyConfigured || (apiKeys[m.id]?.trim().length ?? 0) > 0,
-          };
-        }),
-        activeModelId: idMapping.get(activeModelId) || activeModelId,
-        creativeProfiles,
+        models: mappedModels,
+        activeModelId: mappedActiveModelId,
+        creativeProfiles: mappedProfiles,
         defaultCreativeProfileId,
         writingPlan: selectedProfile?.name || state.settings.writingPlan,
         theme,
@@ -213,7 +238,6 @@ export default function Settings() {
         indent,
       };
       await saveSettings(next);
-      await refreshBootstrap();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (error) {
@@ -287,11 +311,39 @@ export default function Settings() {
         maxRunTokens: selectedProfile.maxRunTokens || 30000,
         maxContextChars: selectedProfile.maxContextChars || 120000,
       });
-      setCreativeProfiles((profiles) => profiles.map((profile) => (
+      const updatedProfiles = creativeProfiles.map((profile) => (
         profile.id === selectedProfile.id
           ? { ...profile, version: published.version, published: true, maxRunTokens: selectedProfile.maxRunTokens || 30000, maxContextChars: selectedProfile.maxContextChars || 120000 }
           : profile
-      )));
+      ));
+      setCreativeProfiles(updatedProfiles);
+      await saveSettings({
+        ...state.settings,
+        models,
+        activeModelId,
+        creativeProfiles: updatedProfiles,
+        defaultCreativeProfileId,
+        writingPlan: selectedProfile.name,
+        theme,
+        fontSize,
+        lineHeight,
+        canvasColorId,
+        marginSize,
+        indent,
+      });
+      // Harness 直接读取 Bootstrap；发布成功后同步替换对应最新版本，使其无需重启即可运行。
+      if (state.bootstrap) {
+        dispatch({
+          type: 'SET_BOOTSTRAP',
+          payload: {
+            ...state.bootstrap,
+            profiles: [
+              ...state.bootstrap.profiles.filter((profile) => profile.profileId !== published.profileId),
+              published,
+            ],
+          },
+        });
+      }
     } catch (error) {
       setSettingError(error instanceof Error ? error.message : '发布方案失败');
     }
@@ -301,15 +353,18 @@ export default function Settings() {
   const createProfileDraft = () => {
     const id = `profile-${Date.now()}`;
     const connectionId = activeModelId;
+    const initialModel = activeModel
+      ? inferModelVendor(activeModel.provider, activeModel.baseUrl).models[0]?.id || ''
+      : '';
     const profile: CreativeProfile = {
       id,
       name: '长篇创作方案',
       version: 0,
       published: false,
       roles: {
-        planner: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.7 },
-        writer: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.7 },
-        continuity_reviewer: { connectionId, model: '', maxOutputTokens: 4096, temperature: 0.2 },
+        planner: { connectionId, model: initialModel, maxOutputTokens: 4096, temperature: 0.7 },
+        writer: { connectionId, model: initialModel, maxOutputTokens: 4096, temperature: 0.7 },
+        continuity_reviewer: { connectionId, model: initialModel, maxOutputTokens: 4096, temperature: 0.2 },
       },
       maxRunTokens: 30000,
       maxContextChars: 120000,
@@ -423,7 +478,9 @@ export default function Settings() {
                           <span className="w-2 h-2 rounded-full bg-warning shrink-0" title="未配置" />
                         )}
                       </div>
-                      <div className="text-xs text-text-muted truncate mt-0.5">{m.modelName || '未命名模型'}</div>
+                      <div className="text-xs text-text-muted truncate mt-0.5">
+                        {inferModelVendor(m.provider, m.baseUrl).label}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -438,31 +495,62 @@ export default function Settings() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-text-sub mb-1.5">提供商</label>
+                  <label className="block text-xs text-text-sub mb-1.5">模型厂商</label>
                   <select
-                    value={activeModel.provider}
-                    onChange={(e) => updateModel(activeModel.id, { provider: e.target.value })}
+                    aria-label="模型厂商"
+                    value={activeVendor.id}
+                    onChange={(e) => selectVendor(e.target.value)}
                     className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
                   >
-                    <option value="openai">OpenAI 兼容</option>
-                    <option value="anthropic">Anthropic</option>
+                    {modelVendors.map((vendor) => (
+                      <option key={vendor.id} value={vendor.id}>{vendor.label}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs text-text-sub mb-1.5">接口地址</label>
                   <Input
+                    aria-label="接口地址"
                     value={activeModel.baseUrl || ''}
                     onChange={(e) => updateModel(activeModel.id, { baseUrl: e.target.value })}
                     placeholder="https://api.openai.com/v1"
                   />
+                  {activeVendor.endpointHint && <p className="text-xs text-text-muted mt-1.5">{activeVendor.endpointHint}</p>}
                 </div>
                 <div>
-                  <label className="block text-xs text-text-sub mb-1.5">模型名称</label>
-                  <Input
-                    value={activeModel.modelName}
-                    onChange={(e) => updateModel(activeModel.id, { modelName: e.target.value })}
-                    placeholder="例如 gpt-4.1-mini"
-                  />
+                  <label className="block text-xs text-text-sub mb-1.5">测试模型</label>
+                  {activeVendor.models.length > 0 ? (
+                    <div className="space-y-2">
+                      <select
+                        aria-label="测试模型"
+                        value={activeVendor.models.some((model) => model.id === activeTestModel) ? activeTestModel : '__custom__'}
+                        onChange={(event) => setTestModels((previous) => ({
+                          ...previous,
+                          [activeModel.id]: event.target.value === '__custom__' ? '' : event.target.value,
+                        }))}
+                        className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
+                      >
+                        {activeVendor.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                        <option value="__custom__">自定义模型 ID…</option>
+                      </select>
+                      {!activeVendor.models.some((model) => model.id === activeTestModel) && (
+                        <Input
+                          aria-label="自定义测试模型 ID"
+                          value={activeTestModel}
+                          onChange={(event) => setTestModels((previous) => ({ ...previous, [activeModel.id]: event.target.value }))}
+                          placeholder="输入厂商提供的模型 ID"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <Input
+                      aria-label="测试模型"
+                      value={activeTestModel}
+                      onChange={(event) => setTestModels((previous) => ({ ...previous, [activeModel.id]: event.target.value }))}
+                      placeholder="输入兼容服务的模型 ID"
+                    />
+                  )}
+                  <p className="text-xs text-text-muted mt-1.5">这里只用于连接测试；长期使用的模型在“创作方案”中保存。</p>
                 </div>
                 <div>
                   <label className="block text-xs text-text-sub mb-1.5">API Key</label>
@@ -493,7 +581,7 @@ export default function Settings() {
                       variant="ghost"
                       size="sm"
                       className="gap-1 text-danger hover:text-danger"
-                      onClick={() => void deleteModel(activeModel.id)}
+                      onClick={() => deleteModel(activeModel.id)}
                       disabled={deleteBusyId === activeModel.id}
                     >
                       <Trash2 className="w-4 h-4" />
@@ -565,6 +653,11 @@ export default function Settings() {
                 <div className="space-y-4">
                   {(Object.keys(creativeRoleLabels) as CreativeRole[]).map((role) => {
                     const binding = selectedProfile.roles[role];
+                    const connection = models.find((model) => model.id === binding.connectionId) || models[0];
+                    const vendor = connection
+                      ? inferModelVendor(connection.provider, connection.baseUrl)
+                      : getModelVendor('openai');
+                    const knownModel = vendor.models.some((model) => model.id === binding.model);
                     return (
                       <div key={role} className="rounded-lg border border-border bg-surface px-3 py-3 space-y-2">
                         <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-center">
@@ -573,19 +666,40 @@ export default function Settings() {
                             id={`role-${role}`}
                             aria-label={creativeRoleLabels[role]}
                             value={binding.connectionId}
-                            onChange={(event) => updateProfileRole(role, event.target.value)}
+                            onChange={(event) => {
+                              const connectionId = event.target.value;
+                              updateProfileRole(role, connectionId);
+                              const nextConnection = models.find((model) => model.id === connectionId);
+                              const nextVendor = nextConnection
+                                ? inferModelVendor(nextConnection.provider, nextConnection.baseUrl)
+                                : getModelVendor('openai');
+                              updateProfileRoleModel(role, nextVendor.models[0]?.id || '');
+                            }}
                             className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
                           >
                             {models.map((model) => (
                               <option key={model.id} value={model.id}>{model.name}</option>
                             ))}
                           </select>
-                          <Input
-                            value={binding.model}
-                            onChange={(event) => updateProfileRoleModel(role, event.target.value)}
-                            placeholder="模型名称"
-                            aria-label={`${creativeRoleLabels[role]}模型`}
-                          />
+                          <div className="space-y-2">
+                            <select
+                              value={knownModel ? binding.model : '__custom__'}
+                              onChange={(event) => updateProfileRoleModel(role, event.target.value === '__custom__' ? '' : event.target.value)}
+                              aria-label={`${creativeRoleLabels[role]}模型`}
+                              className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
+                            >
+                              {vendor.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                              <option value="__custom__">自定义模型 ID…</option>
+                            </select>
+                            {!knownModel && (
+                              <Input
+                                value={binding.model}
+                                onChange={(event) => updateProfileRoleModel(role, event.target.value)}
+                                placeholder="输入厂商提供的模型 ID"
+                                aria-label={`${creativeRoleLabels[role]}自定义模型 ID`}
+                              />
+                            )}
+                          </div>
                         </div>
                         <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-center">
                           <span className="text-xs text-text-sub">生成参数</span>
@@ -858,6 +972,35 @@ export default function Settings() {
           </div>
         </footer>
       </section>
+      <Modal
+        open={Boolean(deleteTarget)}
+        onClose={() => !deleteBusyId && setDeleteTargetId(null)}
+        title={deleteReferences.length > 0 ? '无法删除连接' : '确认删除连接'}
+      >
+        {deleteReferences.length > 0 ? (
+          <div className="space-y-4">
+            <p className="text-sm text-text-sub">当前连接仍被以下创作方案引用：</p>
+            <ul className="rounded-md border border-border bg-surface-hover px-4 py-3 space-y-1">
+              {deleteReferences.map((profile) => <li key={profile.id} className="text-sm text-text">{profile.name}</li>)}
+            </ul>
+            <p className="text-sm text-text-sub">草稿可先把角色切换到其他连接；已发布方案会永久保留不可变历史引用，因此该连接不能物理删除。这样旧项目和历史运行仍能解释原来的模型来源。</p>
+            <div className="flex justify-end">
+              <Button variant="primary" onClick={() => setDeleteTargetId(null)}>知道了</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-text-sub">确认删除连接“{deleteTarget?.name}”？对应的系统凭据也会被删除，此操作不可撤销。</p>
+            {settingError && <p className="text-sm text-danger">{settingError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setDeleteTargetId(null)} disabled={Boolean(deleteBusyId)}>取消</Button>
+              <Button variant="danger" onClick={() => void confirmDeleteModel()} disabled={Boolean(deleteBusyId)}>
+                {deleteBusyId ? '删除中...' : '确认删除'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

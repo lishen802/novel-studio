@@ -14,6 +14,8 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input, Textarea } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { Modal } from '../components/ui/Modal';
+import { inferVendor, modelVendors } from '../modelCatalog';
 
 type TabKey = 'model' | 'writing' | 'templates' | 'appearance' | 'advanced';
 
@@ -60,11 +62,14 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testOkId, setTestOkId] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const [models, setModels] = useState<ModelConfig[]>(state.settings.models);
   const [activeModelId, setActiveModelId] = useState(state.settings.activeModelId);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const activeModel = useMemo(() => getActiveModel({ ...state.settings, models, activeModelId }), [state.settings, models, activeModelId]);
+  const activeVendor = inferVendor(activeModel.provider, activeModel.baseUrl);
+  const deleteTarget = models.find((model) => model.id === deleteTargetId);
 
   const [creativeProfiles, setCreativeProfiles] = useState<CreativeProfile[]>(state.settings.creativeProfiles);
   const [defaultCreativeProfileId, setDefaultCreativeProfileId] = useState(state.settings.defaultCreativeProfileId);
@@ -110,7 +115,7 @@ export default function Settings() {
     const id = `m-${Date.now()}`;
     setModels((prev) => [
       ...prev,
-      { id, name: `模型 ${prev.length + 1}`, provider: 'OpenAI 兼容', modelName: '', apiKeyConfigured: false },
+      { id, name: `模型 ${prev.length + 1}`, provider: 'openai', baseUrl: 'https://api.openai.com/v1', modelName: 'gpt-4.1-mini', apiKeyConfigured: false },
     ]);
     setActiveModelId(id);
   };
@@ -123,6 +128,7 @@ export default function Settings() {
       }
       return next;
     });
+    setDeleteTargetId(null);
   };
 
   const handleTestConnection = (id: string) => {
@@ -285,7 +291,7 @@ export default function Settings() {
                           <span className="w-2 h-2 rounded-full bg-warning shrink-0" title="未配置" />
                         )}
                       </div>
-                      <div className="text-xs text-text-muted truncate mt-0.5">{m.modelName || '未命名模型'}</div>
+                      <div className="text-xs text-text-muted truncate mt-0.5">{inferVendor(m.provider, m.baseUrl).label}</div>
                     </button>
                   ))}
                 </div>
@@ -300,25 +306,47 @@ export default function Settings() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-text-sub mb-1.5">提供商</label>
+                  <label className="block text-xs text-text-sub mb-1.5">模型厂商</label>
                   <select
-                    value={activeModel.provider}
-                    onChange={(e) => updateModel(activeModel.id, { provider: e.target.value })}
+                    value={activeVendor.id}
+                    onChange={(event) => {
+                      const vendor = modelVendors.find((item) => item.id === event.target.value) || modelVendors[0];
+                      updateModel(activeModel.id, {
+                        provider: vendor.protocol,
+                        baseUrl: vendor.defaultBaseUrl,
+                        modelName: vendor.models[0]?.id || '',
+                      });
+                    }}
                     className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
                   >
-                    <option>OpenAI 兼容</option>
-                    <option>Anthropic</option>
-                    <option>本地模型</option>
-                    <option>Azure OpenAI</option>
+                    {modelVendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-text-sub mb-1.5">模型名称</label>
+                  <label className="block text-xs text-text-sub mb-1.5">接口地址</label>
                   <Input
-                    value={activeModel.modelName}
-                    onChange={(e) => updateModel(activeModel.id, { modelName: e.target.value })}
-                    placeholder="例如 gpt-4.1-mini"
+                    value={activeModel.baseUrl || ''}
+                    onChange={(e) => updateModel(activeModel.id, { baseUrl: e.target.value })}
+                    placeholder="https://api.openai.com/v1"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-text-sub mb-1.5">测试模型</label>
+                  {activeVendor.models.length > 0 ? (
+                    <select
+                      value={activeVendor.models.some((model) => model.id === activeModel.modelName) ? activeModel.modelName : '__custom__'}
+                      onChange={(event) => updateModel(activeModel.id, { modelName: event.target.value === '__custom__' ? '' : event.target.value })}
+                      className="h-9 px-3 w-full bg-surface border border-border rounded-md text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/35"
+                    >
+                      {activeVendor.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                      <option value="__custom__">自定义模型 ID…</option>
+                    </select>
+                  ) : (
+                    <Input value={activeModel.modelName} onChange={(e) => updateModel(activeModel.id, { modelName: e.target.value })} placeholder="输入模型 ID" />
+                  )}
+                  {!activeVendor.models.some((model) => model.id === activeModel.modelName) && activeVendor.models.length > 0 && (
+                    <Input className="mt-2" value={activeModel.modelName} onChange={(e) => updateModel(activeModel.id, { modelName: e.target.value })} placeholder="输入模型 ID" />
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs text-text-sub mb-1.5">API Key</label>
@@ -342,12 +370,10 @@ export default function Settings() {
                     </Button>
                     {testOkId === activeModel.id && <span className="text-sm text-success">连接成功</span>}
                   </div>
-                  {models.length > 1 && (
-                    <Button variant="ghost" size="sm" className="gap-1 text-danger hover:text-danger" onClick={() => deleteModel(activeModel.id)}>
-                      <Trash2 className="w-4 h-4" />
-                      删除
-                    </Button>
-                  )}
+                  <Button variant="ghost" size="sm" className="gap-1 text-danger hover:text-danger" onClick={() => setDeleteTargetId(activeModel.id)}>
+                    <Trash2 className="w-4 h-4" />
+                    删除
+                  </Button>
                 </div>
               </Card>
             </div>
@@ -643,6 +669,15 @@ export default function Settings() {
           </div>
         </footer>
       </section>
+      <Modal open={Boolean(deleteTarget)} onClose={() => setDeleteTargetId(null)} title="确认删除连接">
+        <div className="space-y-4">
+          <p className="text-sm text-text-sub">确认删除连接“{deleteTarget?.name}”？正式应用会同时检查不可变方案引用并清理系统凭据。</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDeleteTargetId(null)}>取消</Button>
+            <Button variant="danger" onClick={() => deleteTarget && deleteModel(deleteTarget.id)}>确认删除</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

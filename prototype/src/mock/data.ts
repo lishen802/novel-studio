@@ -52,14 +52,16 @@ export const defaultSettings: AppSettings = {
     {
       id: 'model-openai',
       name: '主力 API 模型',
-      provider: 'OpenAI 兼容',
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
       modelName: 'gpt-4.1-mini',
       apiKeyConfigured: false,
     },
     {
       id: 'model-claude',
       name: '审阅模型',
-      provider: 'Anthropic',
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
       modelName: 'claude-sonnet',
       apiKeyConfigured: false,
     },

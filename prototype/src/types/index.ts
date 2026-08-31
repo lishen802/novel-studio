@@ -127,6 +127,7 @@ export interface ModelConfig {
   id: string;
   name: string;
   provider: string;
+  baseUrl?: string;
   modelName: string;
   apiKeyConfigured: boolean;
 }

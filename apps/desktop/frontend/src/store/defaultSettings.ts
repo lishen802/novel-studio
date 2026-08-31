@@ -7,7 +7,6 @@ export const defaultSettings: AppSettings = {
     name: '新模型连接',
     provider: 'openai',
     baseUrl: 'https://api.openai.com/v1',
-    modelName: '',
     apiKeyConfigured: false,
   }],
   activeModelId: 'm-new',

@@ -41,7 +41,6 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
     name: provider.name,
     provider: provider.kind,
     baseUrl: provider.baseUrl,
-    modelName: '',
     apiKeyConfigured: provider.hasCredential,
   }));
   const models = configuredModels.length > 0 ? configuredModels : [{
@@ -49,10 +48,9 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
     name: '新模型连接',
     provider: 'openai',
     baseUrl: 'https://api.openai.com/v1',
-    modelName: '',
     apiKeyConfigured: false,
   }];
-  const profiles = bootstrap.profiles.map((profile) => ({
+  const publishedProfiles = bootstrap.profiles.map((profile) => ({
     id: profile.profileId,
     name: profile.name,
     version: profile.version,
@@ -66,6 +64,11 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
     maxRunTokens: profile.maxRunTokens,
     maxContextChars: profile.maxContextChars,
   })) as AppSettings['creativeProfiles'];
+  // Bootstrap 只包含不可变的已发布版本；本地未发布草稿必须合并保留，避免保存连接
+  // 或发布另一方案后被刷新静默清空。
+  const publishedIDs = new Set(publishedProfiles.map((profile) => profile.id));
+  const localDrafts = previous.creativeProfiles.filter((profile) => !profile.published && !publishedIDs.has(profile.id));
+  const profiles = [...publishedProfiles, ...localDrafts];
   // 默认方案必须忠实反映后端返回值：后端清空就是清空，不能用第一个方案回退，
   // 否则“取消默认”操作会在 bootstrap 刷新后被静默撤销。
   const defaultProfileId = bootstrap.preferences.defaultCreativeProfileId || '';
@@ -74,7 +77,9 @@ function settingsFromBootstrap(bootstrap: ApplicationBootstrapView, previous: Ap
     ...previous,
     theme: (bootstrap.preferences.theme as AppSettings['theme']) || previous.theme,
     models,
-    activeModelId: models[0]?.id || '',
+    activeModelId: models.some((model) => model.id === previous.activeModelId)
+      ? previous.activeModelId
+      : models[0]?.id || '',
     creativeProfiles: profiles,
     defaultCreativeProfileId: defaultProfileId,
     writingPlan: defaultProfile?.name || '尚未配置创作方案',
