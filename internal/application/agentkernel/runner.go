@@ -1,10 +1,12 @@
 package agentkernel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"text/template"
@@ -451,13 +453,16 @@ func (service *Service) executeNode(
 		return service.failStep(ctx, run, step, "token_budget_exceeded", ErrTokenBudget, nil)
 	}
 	outputKind := taskKindForNode(compiled.TaskKind, node.Capability)
-	decoded, decodeErr := agentdomain.DecodeTaskOutput(outputKind, []byte(generated.Text))
+	decodeOutput := func(content string) (agentdomain.TaskOutput, error) {
+		return decodeNodeOutput(outputKind, node, latest, artifacts, content)
+	}
+	decoded, decodeErr := decodeOutput(generated.Text)
 	produced := make([]agentdomain.Artifact, 0, 3)
 	if decodeErr != nil {
 		var repairInputTokens, repairOutputTokens int
 		var repairRequestID string
 		decoded, generated.Text, produced, repairInputTokens, repairOutputTokens, repairRequestID, decodeErr = service.repairOutput(
-			ctx, run, step, node, schema, generated.Text, generated.ProviderRequestID, decoded, produced,
+			ctx, run, step, node, schema, generated.Text, generated.ProviderRequestID, decoded, produced, decodeOutput,
 			min(compiled.RepairReserve, remaining-step.InputTokens-step.OutputTokens),
 		)
 		step.InputTokens += repairInputTokens
@@ -547,6 +552,7 @@ func (service *Service) repairOutput(
 	originalRequestID string,
 	decoded agentdomain.TaskOutput,
 	produced []agentdomain.Artifact,
+	decodeOutput func(string) (agentdomain.TaskOutput, error),
 	remaining int,
 ) (agentdomain.TaskOutput, string, []agentdomain.Artifact, int, int, string, error) {
 	if decoded != nil || remaining < 1 {
@@ -590,7 +596,7 @@ func (service *Service) repairOutput(
 		"initial_provider_request_id": originalRequestID, "repair_provider_request_id": repaired.ProviderRequestID,
 	})
 	produced = append(produced, newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactFormatRepair, string(artifactContent), service.clock.Now()))
-	decoded, err = agentdomain.DecodeTaskOutput(taskKindForNode(run.TaskKind, node.Capability), []byte(repaired.Text))
+	decoded, err = decodeOutput(repaired.Text)
 	return decoded, repaired.Text, produced, repaired.InputTokens, repaired.OutputTokens, repaired.ProviderRequestID, err
 }
 
@@ -1044,6 +1050,152 @@ func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.C
 	default:
 		return workflowKind
 	}
+}
+
+// decodeNodeOutput 对模型审阅先做确定性证据归一化，再执行领域校验。
+// 模型不负责可靠计算 Unicode 偏移，也不能自行决定问题已解决或最终质量状态。
+func decodeNodeOutput(
+	kind agentdomain.TaskKind,
+	node FrozenNode,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+	content string,
+) (agentdomain.TaskOutput, error) {
+	if node.Capability != agentdomain.CapabilityContinuityReview &&
+		node.Capability != agentdomain.CapabilityContentReview &&
+		node.Capability != agentdomain.CapabilityStyleReview {
+		return agentdomain.DecodeTaskOutput(kind, []byte(content))
+	}
+	if kind != agentdomain.TaskReviewBundle {
+		return nil, agentdomain.ErrInvalidTaskOutput
+	}
+	var review agentdomain.ReviewBundleOutput
+	decoder := json.NewDecoder(bytes.NewReader([]byte(content)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&review); err != nil {
+		return nil, fmt.Errorf("%w: %v", agentdomain.ErrInvalidTaskOutput, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, agentdomain.ErrInvalidTaskOutput
+	}
+	candidate, _, err := revisionInputs(node, latest, artifacts)
+	if err != nil {
+		return nil, err
+	}
+	if err := normalizeModelReview(&review, candidate); err != nil {
+		return nil, err
+	}
+	if err := review.Validate(); err != nil {
+		return nil, err
+	}
+	return &review, nil
+}
+
+// normalizeModelReview 将模型给出的引文落到候选文本，并由应用重算状态。
+func normalizeModelReview(review *agentdomain.ReviewBundleOutput, candidate string) error {
+	if review == nil {
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	qualityStatus := agentdomain.QualityPassed
+	for index := range review.Findings {
+		finding := &review.Findings[index]
+		if finding.Source != agentdomain.FindingModelReview {
+			return fmt.Errorf("review finding %s has invalid source", finding.ID)
+		}
+		finding.Status = agentdomain.FindingOpen
+		if err := normalizeFindingEvidence(finding, candidate); err != nil {
+			return fmt.Errorf("review finding %s: %w", finding.ID, err)
+		}
+		switch finding.Severity {
+		case agentdomain.SeverityBlocker:
+			qualityStatus = agentdomain.QualityBlocked
+		case agentdomain.SeverityMajor:
+			if qualityStatus != agentdomain.QualityBlocked {
+				qualityStatus = agentdomain.QualityNeedsReview
+			}
+		case agentdomain.SeverityMinor, agentdomain.SeverityNote:
+			if qualityStatus == agentdomain.QualityPassed {
+				qualityStatus = agentdomain.QualityNeedsReview
+			}
+		}
+	}
+	review.QualityStatus = qualityStatus
+	return nil
+}
+
+func normalizeFindingEvidence(finding *agentdomain.ReviewFinding, candidate string) error {
+	quote := finding.Quote
+	if strings.TrimSpace(quote) == "" {
+		if strings.TrimSpace(finding.ConstraintRef) == "" {
+			return errors.New("missing quote and constraint reference")
+		}
+		finding.Quote, finding.ScopeStart, finding.ScopeEnd = "", nil, nil
+		return nil
+	}
+	candidateRunes, quoteRunes := []rune(candidate), []rune(quote)
+	starts := quoteRuneStarts(candidateRunes, quoteRunes)
+	if len(starts) == 0 {
+		if strings.TrimSpace(finding.ConstraintRef) != "" {
+			finding.Quote, finding.ScopeStart, finding.ScopeEnd = "", nil, nil
+			return nil
+		}
+		return errors.New("quoted evidence is not present in candidate")
+	}
+	start, ok := chooseQuoteStart(starts, finding.ScopeStart)
+	if !ok {
+		return errors.New("quoted evidence is ambiguous")
+	}
+	end := start + len(quoteRunes)
+	finding.ScopeStart, finding.ScopeEnd = &start, &end
+	return nil
+}
+
+func quoteRuneStarts(candidate, quote []rune) []int {
+	if len(quote) == 0 || len(quote) > len(candidate) {
+		return nil
+	}
+	starts := make([]int, 0, 1)
+	for start := 0; start+len(quote) <= len(candidate); start++ {
+		matched := true
+		for offset := range quote {
+			if candidate[start+offset] != quote[offset] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			starts = append(starts, start)
+		}
+	}
+	return starts
+}
+
+func chooseQuoteStart(starts []int, hint *int) (int, bool) {
+	if len(starts) == 1 {
+		return starts[0], true
+	}
+	if hint == nil || len(starts) == 0 {
+		return 0, false
+	}
+	best, bestDistance, tied := starts[0], absInt(starts[0]-*hint), false
+	for _, start := range starts[1:] {
+		distance := absInt(start - *hint)
+		switch {
+		case distance < bestDistance:
+			best, bestDistance, tied = start, distance, false
+		case distance == bestDistance:
+			tied = true
+		}
+	}
+	return best, !tied
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // validateCapabilityOutput 执行 JSON Schema 无法表达的评审来源、定位与有限修订约束。

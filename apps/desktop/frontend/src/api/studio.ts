@@ -256,7 +256,7 @@ export interface HarnessPreviewView {
 }
 
 export interface HarnessRunView {
-  run: { id: string; status: string; case_ids: string[]; failure?: string; binding: Record<string, unknown>; started_at: string; current_case_id?: string; public_stage_id?: string; input_tokens?: number; output_tokens?: number; calls?: number };
+  run: { id: string; status: string; case_ids: string[]; failure?: string; binding: Record<string, unknown>; started_at: string; retry_of?: string; current_case_id?: string; public_stage_id?: string; input_tokens?: number; output_tokens?: number; calls?: number };
   completedCases: number; completedCaseIds?: string[]; totalCases: number; report?: Record<string, unknown>;
   ratings?: { submissions: number; candidateRatings: number; acceptable: number; rewrite: number; dimensionAverage: Record<string, number> };
 }

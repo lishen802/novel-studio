@@ -18,6 +18,31 @@ import (
 	"github.com/lishen802/novel-studio/internal/quality"
 )
 
+func TestKernelRunProgressCountsPaidFailedStep(t *testing.T) {
+	run := agentdomain.Run{Steps: []agentdomain.RunStep{
+		{Status: agentdomain.StepCompleted, PublicStageID: agentdomain.PublicStageStoryPlanning, InputTokens: 10, OutputTokens: 20},
+		{Status: agentdomain.StepFailed, PublicStageID: agentdomain.PublicStageIndependentReview, InputTokens: 30, OutputTokens: 40},
+	}}
+	stage, calls := kernelRunProgress(run)
+	if stage != string(agentdomain.PublicStageIndependentReview) || calls != 2 {
+		t.Fatalf("progress = %s/%d, want independent_review/2", stage, calls)
+	}
+}
+
+func TestCountFormatRepairCallsRespectsCandidateSteps(t *testing.T) {
+	artifacts := []agentdomain.Artifact{
+		{StepID: "plan", Kind: agentdomain.ArtifactFormatRepair},
+		{StepID: "review", Kind: agentdomain.ArtifactFormatRepair},
+		{StepID: "review", Kind: agentdomain.ArtifactReview},
+	}
+	if got := countFormatRepairCalls(artifacts, nil); got != 2 {
+		t.Fatalf("all repair calls = %d, want 2", got)
+	}
+	if got := countFormatRepairCalls(artifacts, map[string]struct{}{"review": {}}); got != 1 {
+		t.Fatalf("review repair calls = %d, want 1", got)
+	}
+}
+
 func TestPreviewFreezesCostDigestAndCreateRequiresExactConfirmation(t *testing.T) {
 	db, err := harnesssqlite.Open(context.Background(), filepath.Join(t.TempDir(), "harness.db"))
 	if err != nil {

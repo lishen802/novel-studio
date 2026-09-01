@@ -62,6 +62,56 @@ func TestServiceRepairsInvalidJSONOnceAndAccountsUsage(t *testing.T) {
 	}
 }
 
+func TestDecodeModelReviewNormalizesRuneRangeAndModelStates(t *testing.T) {
+	candidate := "潮声漫过盐路。阿绫停在关隘前。"
+	node := FrozenNode{Capability: agentdomain.CapabilityContinuityReview, InputSelectors: []string{"node:blueprint"}}
+	latest := map[string]agentdomain.RunStep{"blueprint": {
+		NodeID: "blueprint", Status: agentdomain.StepCompleted, PrimaryArtifactID: "artifact-1",
+	}}
+	artifacts := []agentdomain.Artifact{{ID: "artifact-1", Content: candidate}}
+	content := `{"quality_status":"passed","summary":"仍有一处问题","findings":[{"id":"f1","category":"causality","severity":"major","status":"resolved","source":"model_review","message":"动机不足","quote":"阿绫停在关隘前","scope_start":0,"scope_end":2}]}`
+
+	decoded, err := decodeNodeOutput(agentdomain.TaskReviewBundle, node, latest, artifacts, content)
+	if err != nil {
+		t.Fatalf("decodeNodeOutput: %v", err)
+	}
+	review := decoded.(*agentdomain.ReviewBundleOutput)
+	finding := review.Findings[0]
+	if review.QualityStatus != agentdomain.QualityNeedsReview || finding.Status != agentdomain.FindingOpen {
+		t.Fatalf("normalized states = %s/%s", review.QualityStatus, finding.Status)
+	}
+	if finding.ScopeStart == nil || finding.ScopeEnd == nil ||
+		string([]rune(candidate)[*finding.ScopeStart:*finding.ScopeEnd]) != finding.Quote {
+		t.Fatalf("normalized evidence = %#v", finding)
+	}
+}
+
+func TestNormalizeModelReviewUsesHintForRepeatedQuoteAndRejectsAmbiguity(t *testing.T) {
+	candidate := "钟响。钟响。门开。"
+	hint := 3
+	finding := agentdomain.ReviewFinding{Quote: "钟响", ScopeStart: &hint}
+	if err := normalizeFindingEvidence(&finding, candidate); err != nil {
+		t.Fatalf("normalizeFindingEvidence: %v", err)
+	}
+	if finding.ScopeStart == nil || *finding.ScopeStart != 3 {
+		t.Fatalf("scope start = %#v, want 3", finding.ScopeStart)
+	}
+	ambiguous := agentdomain.ReviewFinding{Quote: "钟响"}
+	if err := normalizeFindingEvidence(&ambiguous, candidate); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous evidence error = %v", err)
+	}
+}
+
+func TestNormalizeModelReviewFallsBackToConstraintReference(t *testing.T) {
+	finding := agentdomain.ReviewFinding{Quote: "模型概括而非原文", ConstraintRef: "blueprint:core_conflict"}
+	if err := normalizeFindingEvidence(&finding, "真实候选正文"); err != nil {
+		t.Fatalf("normalizeFindingEvidence: %v", err)
+	}
+	if finding.Quote != "" || finding.ScopeStart != nil || finding.ScopeEnd != nil {
+		t.Fatalf("constraint fallback kept invalid range: %#v", finding)
+	}
+}
+
 func TestServiceCapsFormatRepairEvenWhenProfileBudgetIsUnlimited(t *testing.T) {
 	service, _, provider := newRunnerHarness(t, []providerReply{
 		{text: `{"title":`, inputTokens: 10, outputTokens: 5},

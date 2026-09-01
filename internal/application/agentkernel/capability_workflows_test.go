@@ -175,6 +175,30 @@ func TestQualityBlueprintWorkflowReturnsStructuredRevision(t *testing.T) {
 	}
 }
 
+func TestQualityBlueprintWorkflowNormalizesReviewEvidenceBeforeRevision(t *testing.T) {
+	service, _, provider := newRunnerHarness(t, []providerReply{
+		{text: `{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`},
+		{text: `{"quality_status":"passed","summary":"核心冲突仍需加强","findings":[{"id":"f1","category":"causality","severity":"major","status":"resolved","source":"model_review","message":"冲突缺少亲情代价","quote":"追查失踪","scope_start":0,"scope_end":1}]}`},
+		{text: `{"blueprint":{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪与守护亲情冲突","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]},"resolutions":[{"finding_id":"f1","status":"resolved","note":"补入亲情代价"}],"changes":[{"finding_id":"f1","original_text":"追查失踪","revised_text":"追查失踪与守护亲情冲突"}]}`},
+	})
+	request := qualityRequest(agentassets.QualityBlueprintWorkflowID, agentassets.QualityBlueprintWorkflowVersion, 11500)
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if err != nil {
+		t.Fatalf("ExecuteRun: %v", err)
+	}
+	if completed.Status != agentdomain.RunCompleted || len(provider.requests) != 3 {
+		t.Fatalf("completed=%#v requests=%d", completed, len(provider.requests))
+	}
+	review := completed.Steps[1]
+	if review.QualityStatus != agentdomain.QualityNeedsReview {
+		t.Fatalf("review quality = %s", review.QualityStatus)
+	}
+}
+
 func TestBoundedRevisionRejectsLostRequiredAnchor(t *testing.T) {
 	service, _, _ := newRunnerHarness(t, []providerReply{
 		{text: `{"chapter_goal":"潜入","opening_hook":"空船","ending_hook":"门开","scenes":[{"id":"s1","goal":"登船","conflict":"守卫","outcome":"成功"}]}`},

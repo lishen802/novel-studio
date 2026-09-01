@@ -68,7 +68,7 @@ func (executor *kernelExecutor) executeWorkflow(ctx context.Context, item qualit
 	if content == "" {
 		return quality.HarnessCandidate{}, errorsNoCandidate(workflowID)
 	}
-	candidate := candidateFromRun(kind, content, run, elapsed, func(agentdomain.RunStep) bool { return true })
+	candidate := candidateFromRun(kind, content, run, artifacts, elapsed, func(agentdomain.RunStep) bool { return true })
 	applyCandidateEvidence(&candidate, run, artifacts)
 	return candidate, nil
 }
@@ -87,10 +87,10 @@ func (executor *kernelExecutor) executeQualityWorkflow(ctx context.Context, item
 	if initialContent == "" || revisedContent == "" {
 		return quality.HarnessCandidate{}, quality.HarnessCandidate{}, errorsNoCandidate(workflowID)
 	}
-	initial := candidateFromRun(quality.CandidateInitial, initialContent, run, elapsed, func(step agentdomain.RunStep) bool {
+	initial := candidateFromRun(quality.CandidateInitial, initialContent, run, artifacts, elapsed, func(step agentdomain.RunStep) bool {
 		return step.Capability == agentdomain.CapabilityStoryArchitect || step.Capability == agentdomain.CapabilityChapterPlanner || step.Capability == agentdomain.CapabilityProseWriter
 	})
-	revised := candidateFromRun(quality.CandidateRevised, revisedContent, run, elapsed, func(step agentdomain.RunStep) bool {
+	revised := candidateFromRun(quality.CandidateRevised, revisedContent, run, artifacts, elapsed, func(step agentdomain.RunStep) bool {
 		return step.Capability != agentdomain.CapabilityStoryArchitect && step.Capability != agentdomain.CapabilityChapterPlanner && step.Capability != agentdomain.CapabilityProseWriter
 	})
 	applyCandidateEvidence(&initial, run, artifacts)
@@ -104,6 +104,8 @@ func (executor *kernelExecutor) runKernel(ctx context.Context, item quality.Harn
 		run, loadErr := store.AgentRun(callbackContext, runID)
 		if loadErr == nil {
 			stage, calls := kernelRunProgress(run)
+			artifacts, _ := store.ListAgentArtifacts(callbackContext, runID)
+			calls += countFormatRepairCalls(artifacts, nil)
 			onProgress(stage, run.InputTokens, run.OutputTokens, calls)
 		}
 	})
@@ -130,11 +132,15 @@ func kernelRunProgress(run agentdomain.Run) (string, int) {
 	stage := "preparing"
 	calls := 0
 	for _, step := range run.Steps {
-		if step.Status == agentdomain.StepRunning {
+		if step.Status == agentdomain.StepRunning || step.Status == agentdomain.StepFailed || step.Status == agentdomain.StepCancelled {
 			stage = string(step.PublicStageID)
 		}
 		if step.Status == agentdomain.StepCompleted {
 			stage = string(step.PublicStageID)
+			calls++
+		} else if (step.Status == agentdomain.StepFailed || step.Status == agentdomain.StepCancelled) &&
+			(step.InputTokens > 0 || step.OutputTokens > 0 || step.ProviderRequestID != "") {
+			// 失败不会抹掉已经发生的付费调用；观察器必须如实计数。
 			calls++
 		}
 	}
@@ -205,10 +211,12 @@ func finalArtifactContent(run agentdomain.Run, artifacts []agentdomain.Artifact,
 	return initialArtifactContent(run, artifacts, taskKind)
 }
 
-func candidateFromRun(kind quality.HarnessCandidateKind, content string, run agentdomain.Run, elapsed time.Duration, include func(agentdomain.RunStep) bool) quality.HarnessCandidate {
+func candidateFromRun(kind quality.HarnessCandidateKind, content string, run agentdomain.Run, artifacts []agentdomain.Artifact, elapsed time.Duration, include func(agentdomain.RunStep) bool) quality.HarnessCandidate {
 	metrics := quality.HarnessCandidateMetrics{GatePassed: run.QualityStatus == agentdomain.QualityPassed}
+	includedSteps := make(map[string]struct{})
 	for _, step := range run.Steps {
 		if step.Status == agentdomain.StepCompleted && include(step) {
+			includedSteps[step.ID] = struct{}{}
 			metrics.Calls++
 			metrics.InputTokens += step.InputTokens
 			metrics.OutputTokens += step.OutputTokens
@@ -217,10 +225,27 @@ func candidateFromRun(kind quality.HarnessCandidateKind, content string, run age
 			}
 		}
 	}
+	metrics.Calls += countFormatRepairCalls(artifacts, includedSteps)
 	if metrics.DurationMillis == 0 && metrics.Calls > 0 {
 		metrics.DurationMillis = elapsed.Milliseconds() * int64(metrics.Calls) / int64(max(1, len(run.Steps)))
 	}
 	return quality.HarnessCandidate{Kind: kind, Content: content, Metrics: metrics}
+}
+
+func countFormatRepairCalls(artifacts []agentdomain.Artifact, includedSteps map[string]struct{}) int {
+	calls := 0
+	for _, artifact := range artifacts {
+		if artifact.Kind != agentdomain.ArtifactFormatRepair {
+			continue
+		}
+		if includedSteps != nil {
+			if _, included := includedSteps[artifact.StepID]; !included {
+				continue
+			}
+		}
+		calls++
+	}
+	return calls
 }
 
 func errorsNoCandidate(workflowID string) error {

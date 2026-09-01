@@ -53,4 +53,14 @@ describe('智能体实验室盲评', () => {
     await user.click(screen.getByRole('button', { name: '确认删除运行' }));
     expect(window.go!.main!.DesktopAPI!.DeleteCreativeHarnessRun).toHaveBeenCalledWith('run-1');
   });
+
+  it('单 case 重试与当前配置选择明确区分', async () => {
+    window.go!.main!.DesktopAPI!.ListCreativeHarnessRuns = vi.fn().mockResolvedValue([{
+      ...run,
+      run: { ...run.run, retry_of: 'parent-run', current_case_id: 'case-1' },
+    }]);
+    render(<MemoryRouter><AppProvider><Lab /></AppProvider></MemoryRouter>);
+    expect(await screen.findByText(/单 case 重试/)).toBeTruthy();
+    expect(screen.getAllByText(/1\/1 cases（本次冻结：case-1）/).length).toBeGreaterThan(0);
+  });
 });
