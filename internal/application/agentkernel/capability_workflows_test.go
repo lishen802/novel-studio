@@ -227,8 +227,8 @@ func TestBoundedRevisionRejectsLostRequiredAnchor(t *testing.T) {
 	}
 }
 
-func TestBoundedRevisionRejectsUndeclaredRewrite(t *testing.T) {
-	service, _, _ := newRunnerHarness(t, []providerReply{
+func TestBoundedRevisionRestoresUndeclaredRewrite(t *testing.T) {
+	service, store, _ := newRunnerHarness(t, []providerReply{
 		{text: `{"chapter_goal":"潜入","opening_hook":"空船","ending_hook":"门开","scenes":[{"id":"s1","goal":"登船","conflict":"守卫","outcome":"成功"}]}`},
 		{text: `{"title":"空船","body":"雾港钟楼三响。潮声里没有脚步。","completion_note":"完成"}`},
 		{text: `{"quality_status":"needs_review","summary":"需修改","findings":[{"id":"f1","category":"style","severity":"major","status":"open","source":"model_review","message":"修改尾句","constraint_ref":"style:suspense"}]}`},
@@ -239,9 +239,14 @@ func TestBoundedRevisionRejectsUndeclaredRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
-	if !errors.Is(err, ErrInvalidOutput) || !strings.Contains(err.Error(), "outside declared evidence") || failed.Status != agentdomain.RunFailed {
-		t.Fatalf("failed=%#v err=%v", failed, err)
+	completed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if err != nil || completed.Status != agentdomain.RunCompleted {
+		t.Fatalf("completed=%#v err=%v", completed, err)
+	}
+	last := completed.Steps[len(completed.Steps)-1]
+	artifact, ok := artifactByID(store.artifacts, last.PrimaryArtifactID)
+	if !ok || artifact.Content != "雾港钟楼三响。潮声里仍没有脚步。" {
+		t.Fatalf("bounded revision artifact=%#v", artifact)
 	}
 }
 

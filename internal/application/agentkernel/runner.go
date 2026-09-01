@@ -1072,6 +1072,9 @@ func decodeNodeOutput(
 	artifacts []agentdomain.Artifact,
 	content string,
 ) (agentdomain.TaskOutput, error) {
+	if node.Capability == agentdomain.CapabilityBoundedRevision && kind == agentdomain.TaskReviseDraft {
+		return decodeDraftRevisionOutput(node, latest, artifacts, content)
+	}
 	if node.Capability != agentdomain.CapabilityContinuityReview &&
 		node.Capability != agentdomain.CapabilityContentReview &&
 		node.Capability != agentdomain.CapabilityStyleReview {
