@@ -27,6 +27,8 @@ var (
 	ErrTokenBudget        = errors.New("agent kernel token budget exceeded")
 	ErrContextBudget      = errors.New("agent kernel context budget exceeded")
 	ErrInvalidOutput      = errors.New("agent kernel structured output invalid")
+	ErrInvalidReviewProof = errors.New("agent kernel review evidence invalid")
+	ErrInvalidRevision    = errors.New("agent kernel revision boundary invalid")
 	ErrQualityPolicy      = errors.New("agent kernel quality policy unavailable")
 	ErrRuntimeUnavailable = errors.New("agent kernel runtime unavailable")
 )
@@ -478,15 +480,24 @@ func (service *Service) executeNode(
 		}
 	}
 	if validateErr := validateCapabilityOutput(decoded, node, input, latest, artifacts); validateErr != nil {
-		return service.failStep(ctx, run, step, "invalid_structured_output", fmt.Errorf("%w: %v", ErrInvalidOutput, validateErr), produced)
+		code, cause := capabilityValidationError(node.Capability, validateErr)
+		return service.failStep(ctx, run, step, code, cause, produced)
 	}
-	structured := newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactStructuredOutput, generated.Text, service.clock.Now())
+	normalizedOutput, err := json.Marshal(decoded)
+	if err != nil {
+		return service.failStep(ctx, run, step, "invalid_structured_output", fmt.Errorf("%w: encode normalized output", ErrInvalidOutput), produced)
+	}
+	structured := newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactStructuredOutput, string(normalizedOutput), service.clock.Now())
 	primaryContent, quality, findings := outputDetails(decoded, run, step, service.clock.Now())
 	primaryContent, quality, findings, qualityArtifacts, qualityErr := service.applyQuality(
 		run, input, compiled, node, step, latest, artifacts, decoded, primaryContent, quality, findings,
 	)
 	if qualityErr != nil {
-		return service.failStep(ctx, run, step, errorCode(qualityErr), qualityErr, produced)
+		code, cause := errorCode(qualityErr), qualityErr
+		if code == "invalid_structured_output" {
+			code, cause = capabilityValidationError(node.Capability, qualityErr)
+		}
+		return service.failStep(ctx, run, step, code, cause, produced)
 	}
 	primaryKind := artifactKind(node.Capability)
 	primary := newArtifact(service.ids.NewID(), run.ID, step.ID, primaryKind, primaryContent, service.clock.Now())
@@ -506,7 +517,7 @@ func (service *Service) executeNode(
 	completedAt := service.clock.Now().UTC()
 	step.Status = agentdomain.StepCompleted
 	step.Output = agentdomain.BoundedStepPreview(primaryContent)
-	step.OutputDigest = agentdomain.SHA256Hex([]byte(generated.Text))
+	step.OutputDigest = agentdomain.SHA256Hex(normalizedOutput)
 	step.PrimaryArtifactID = primary.ID
 	step.QualityStatus = quality
 	step.CompletedAt = &completedAt
@@ -1299,17 +1310,20 @@ func validateBoundedRevision(
 	var revised string
 	var resolutions []agentdomain.FindingResolution
 	var changes []agentdomain.RevisionChange
+	var blueprint *agentdomain.ReviseBlueprintOutput
 	switch value := output.(type) {
 	case *agentdomain.ReviseDraftOutput:
 		revised, resolutions, changes = value.Body, value.Resolutions, value.Changes
 	case *agentdomain.ReviseBlueprintOutput:
-		encoded, marshalErr := json.Marshal(value.Blueprint)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		revised, resolutions, changes = string(encoded), value.Resolutions, value.Changes
+		blueprint, resolutions, changes = value, value.Resolutions, value.Changes
 	default:
 		return agentdomain.ErrInvalidTaskOutput
+	}
+	if err := normalizeResolutionIDs(review.Findings, resolutions, changes); err != nil {
+		return err
+	}
+	if blueprint != nil {
+		return validateBlueprintRevision(original, review, blueprint, input.Sources)
 	}
 	if err := validateResolutionCoverage(review.Findings, resolutions); err != nil {
 		return err
@@ -1327,6 +1341,52 @@ func validateBoundedRevision(
 	for _, source := range input.Sources {
 		if source.Kind == agentdomain.ManifestAnchor && source.Required && strings.Contains(original, source.Content) && !strings.Contains(revised, source.Content) {
 			return fmt.Errorf("revision lost required anchor %s", source.ID)
+		}
+	}
+	return nil
+}
+
+// normalizeResolutionIDs 修正模型对 finding ID 的无意改名，保持一对一顺序和状态不变。
+func normalizeResolutionIDs(
+	findings []agentdomain.ReviewFinding,
+	resolutions []agentdomain.FindingResolution,
+	changes []agentdomain.RevisionChange,
+) error {
+	if len(findings) != len(resolutions) {
+		return errors.New("revision resolutions do not cover review findings")
+	}
+	wanted := make(map[string]struct{}, len(findings))
+	for _, finding := range findings {
+		wanted[finding.ID] = struct{}{}
+	}
+	used := make(map[string]struct{}, len(resolutions))
+	unmatchedResolutions := make([]int, 0)
+	for index, resolution := range resolutions {
+		if _, exists := wanted[resolution.FindingID]; exists {
+			used[resolution.FindingID] = struct{}{}
+			continue
+		}
+		unmatchedResolutions = append(unmatchedResolutions, index)
+	}
+	unmatchedFindings := make([]string, 0, len(unmatchedResolutions))
+	for _, finding := range findings {
+		if _, exists := used[finding.ID]; !exists {
+			unmatchedFindings = append(unmatchedFindings, finding.ID)
+		}
+	}
+	if len(unmatchedFindings) != len(unmatchedResolutions) {
+		return errors.New("revision resolutions contain duplicate or unknown finding IDs")
+	}
+	if len(unmatchedResolutions) > 1 {
+		return errors.New("revision renamed multiple finding IDs ambiguously")
+	}
+	for index, resolutionIndex := range unmatchedResolutions {
+		oldID, newID := resolutions[resolutionIndex].FindingID, unmatchedFindings[index]
+		resolutions[resolutionIndex].FindingID = newID
+		for changeIndex := range changes {
+			if changes[changeIndex].FindingID == oldID {
+				changes[changeIndex].FindingID = newID
+			}
 		}
 	}
 	return nil
@@ -1635,6 +1695,10 @@ func errorCode(err error) string {
 		return "token_budget_exceeded"
 	case errors.Is(err, ErrContextBudget):
 		return "context_budget_exceeded"
+	case errors.Is(err, ErrInvalidReviewProof):
+		return "invalid_review_evidence"
+	case errors.Is(err, ErrInvalidRevision):
+		return "invalid_revision_boundary"
 	case errors.Is(err, ErrInvalidOutput):
 		return "invalid_structured_output"
 	case errors.Is(err, providers.ErrAuthentication):
@@ -1682,6 +1746,10 @@ func safeErrorMessage(code string) string {
 		return "必要约束无法装入上下文预算。"
 	case "invalid_structured_output":
 		return "模型输出未通过结构化契约校验。"
+	case "invalid_review_evidence":
+		return "审阅问题缺少可定位的原文或约束证据。"
+	case "invalid_revision_boundary":
+		return "修订稿修改了评审未覆盖的内容，或变更证据无法对应到修订字段。"
 	case "provider_authentication_failed":
 		return "API Key 无效或无权访问当前模型。"
 	case "provider_model_not_found":
@@ -1712,5 +1780,16 @@ func safeErrorMessage(code string) string {
 		return "冻结的智能体资源无法执行。"
 	default:
 		return "模型调用失败，请检查连接、额度或服务状态。"
+	}
+}
+
+func capabilityValidationError(capability agentdomain.Capability, cause error) (string, error) {
+	switch capability {
+	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
+		return "invalid_review_evidence", fmt.Errorf("%w: %w: %v", ErrInvalidOutput, ErrInvalidReviewProof, cause)
+	case agentdomain.CapabilityBoundedRevision:
+		return "invalid_revision_boundary", fmt.Errorf("%w: %w: %v", ErrInvalidOutput, ErrInvalidRevision, cause)
+	default:
+		return errorCode(cause), cause
 	}
 }

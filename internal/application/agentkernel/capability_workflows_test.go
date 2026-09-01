@@ -176,10 +176,10 @@ func TestQualityBlueprintWorkflowReturnsStructuredRevision(t *testing.T) {
 }
 
 func TestQualityBlueprintWorkflowNormalizesReviewEvidenceBeforeRevision(t *testing.T) {
-	service, _, provider := newRunnerHarness(t, []providerReply{
+	service, store, provider := newRunnerHarness(t, []providerReply{
 		{text: `{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`},
 		{text: `{"quality_status":"passed","summary":"核心冲突仍需加强","findings":[{"id":"f1","category":"causality","severity":"major","status":"resolved","source":"model_review","message":"冲突缺少亲情代价","quote":"追查失踪","scope_start":0,"scope_end":1}]}`},
-		{text: `{"blueprint":{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪与守护亲情冲突","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]},"resolutions":[{"finding_id":"f1","status":"resolved","note":"补入亲情代价"}],"changes":[{"finding_id":"f1","original_text":"追查失踪","revised_text":"追查失踪与守护亲情冲突"}]}`},
+		{text: `{"blueprint":{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪与守护亲情冲突","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]},"resolutions":[{"finding_id":"f1","status":"resolved","note":"补入亲情代价"}],"changes":[{"finding_id":"f1","original_text":"追查","revised_text":"守护亲情"}]}`},
 	})
 	request := qualityRequest(agentassets.QualityBlueprintWorkflowID, agentassets.QualityBlueprintWorkflowVersion, 11500)
 	run, err := service.CreateRun(context.Background(), request)
@@ -196,6 +196,16 @@ func TestQualityBlueprintWorkflowNormalizesReviewEvidenceBeforeRevision(t *testi
 	review := completed.Steps[1]
 	if review.QualityStatus != agentdomain.QualityNeedsReview {
 		t.Fatalf("review quality = %s", review.QualityStatus)
+	}
+	var normalized string
+	for _, artifact := range store.artifacts {
+		if artifact.StepID == completed.Steps[2].ID && artifact.Kind == agentdomain.ArtifactStructuredOutput {
+			normalized = artifact.Content
+		}
+	}
+	if !strings.Contains(normalized, `"original_text":"追查失踪"`) ||
+		!strings.Contains(normalized, `"revised_text":"追查失踪与守护亲情冲突"`) {
+		t.Fatalf("normalized revision evidence = %s", normalized)
 	}
 }
 

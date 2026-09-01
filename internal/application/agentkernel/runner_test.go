@@ -112,6 +112,18 @@ func TestNormalizeModelReviewFallsBackToConstraintReference(t *testing.T) {
 	}
 }
 
+func TestNormalizeResolutionIDsPreservesMatchesAndRepairsUnknownIDs(t *testing.T) {
+	findings := []agentdomain.ReviewFinding{{ID: "f1"}, {ID: "f2"}}
+	resolutions := []agentdomain.FindingResolution{{FindingID: "f2"}, {FindingID: "model-1"}}
+	changes := []agentdomain.RevisionChange{{FindingID: "model-1", OriginalText: "旧", RevisedText: "新"}}
+	if err := normalizeResolutionIDs(findings, resolutions, changes); err != nil {
+		t.Fatalf("normalizeResolutionIDs: %v", err)
+	}
+	if resolutions[0].FindingID != "f2" || resolutions[1].FindingID != "f1" || changes[0].FindingID != "f1" {
+		t.Fatalf("normalized IDs = %#v / %#v", resolutions, changes)
+	}
+}
+
 func TestServiceCapsFormatRepairEvenWhenProfileBudgetIsUnlimited(t *testing.T) {
 	service, _, provider := newRunnerHarness(t, []providerReply{
 		{text: `{"title":`, inputTokens: 10, outputTokens: 5},
@@ -226,6 +238,8 @@ func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 		{providers.ErrEmptyResponse, "provider_empty_response", "模型返回了空内容，请检查模型能力或生成参数。"},
 		{providers.ErrInvalidStream, "provider_invalid_stream", "模型流式响应提前中断或格式不兼容。"},
 		{providers.ErrSchemaRejected, "provider_schema_rejected", "模型服务拒绝了结构化输出格式，请更新应用或切换兼容模型。"},
+		{ErrInvalidReviewProof, "invalid_review_evidence", "审阅问题缺少可定位的原文或约束证据。"},
+		{ErrInvalidRevision, "invalid_revision_boundary", "修订稿修改了评审未覆盖的内容，或变更证据无法对应到修订字段。"},
 	}
 	for _, test := range tests {
 		if got := errorCode(test.err); got != test.code {
