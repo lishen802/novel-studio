@@ -674,6 +674,7 @@ const (
 	ArtifactLintReport       ArtifactKind = "lint_report"
 	ArtifactQualityReport    ArtifactKind = "quality_report"
 	ArtifactFormatRepair     ArtifactKind = "format_repair"
+	ArtifactSlotJoin         ArtifactKind = "slot_join"
 )
 
 type Artifact struct {

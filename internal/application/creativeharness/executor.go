@@ -88,10 +88,10 @@ func (executor *kernelExecutor) executeQualityWorkflow(ctx context.Context, item
 		return quality.HarnessCandidate{}, quality.HarnessCandidate{}, errorsNoCandidate(workflowID)
 	}
 	initial := candidateFromRun(quality.CandidateInitial, initialContent, run, artifacts, elapsed, func(step agentdomain.RunStep) bool {
-		return step.Capability == agentdomain.CapabilityStoryArchitect || step.Capability == agentdomain.CapabilityChapterPlanner || step.Capability == agentdomain.CapabilityProseWriter
+		return isInitialCapability(step.Capability)
 	})
 	revised := candidateFromRun(quality.CandidateRevised, revisedContent, run, artifacts, elapsed, func(step agentdomain.RunStep) bool {
-		return step.Capability != agentdomain.CapabilityStoryArchitect && step.Capability != agentdomain.CapabilityChapterPlanner && step.Capability != agentdomain.CapabilityProseWriter
+		return !isInitialCapability(step.Capability)
 	})
 	applyCandidateEvidence(&initial, run, artifacts)
 	applyCandidateEvidence(&revised, run, artifacts)
@@ -232,6 +232,16 @@ func candidateFromRun(kind quality.HarnessCandidateKind, content string, run age
 	return quality.HarnessCandidate{Kind: kind, Content: content, Metrics: metrics}
 }
 
+func isInitialCapability(capability agentdomain.Capability) bool {
+	switch capability {
+	case agentdomain.CapabilityStoryArchitect, agentdomain.CapabilityChapterPlanner, agentdomain.CapabilityProseWriter,
+		agentdomain.CapabilitySkeletonWriter, agentdomain.CapabilitySlotWriter, agentdomain.CapabilityIntegrationWriter:
+		return true
+	default:
+		return false
+	}
+}
+
 func countFormatRepairCalls(artifacts []agentdomain.Artifact, includedSteps map[string]struct{}) int {
 	calls := 0
 	for _, artifact := range artifacts {
@@ -253,6 +263,7 @@ func errorsNoCandidate(workflowID string) error {
 }
 
 func applyCandidateEvidence(candidate *quality.HarnessCandidate, run agentdomain.Run, artifacts []agentdomain.Artifact) {
+	applySlotEvidence(candidate, run, artifacts)
 	stepID := candidateStepID(run, artifacts, candidate.Kind)
 	for _, artifact := range artifacts {
 		if artifact.StepID != stepID || artifact.Kind != agentdomain.ArtifactQualityReport || !json.Valid([]byte(artifact.Content)) {
@@ -282,12 +293,60 @@ func applyCandidateEvidence(candidate *quality.HarnessCandidate, run agentdomain
 	}
 }
 
+func applySlotEvidence(candidate *quality.HarnessCandidate, run agentdomain.Run, artifacts []agentdomain.Artifact) {
+	steps := make(map[string]agentdomain.RunStep, len(run.Steps))
+	for _, step := range run.Steps {
+		steps[step.ID] = step
+	}
+	var mechanical string
+	var integrated string
+	for _, artifact := range artifacts {
+		step := steps[artifact.StepID]
+		switch {
+		case step.Capability == agentdomain.CapabilitySkeletonWriter && artifact.ID == step.PrimaryArtifactID:
+			decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterSkeleton, []byte(artifact.Content))
+			if err != nil {
+				continue
+			}
+			candidate.Metrics.SlotDistribution = map[string]int{}
+			for _, beat := range decoded.(*agentdomain.ChapterSkeletonOutput).Beats {
+				for _, slot := range beat.Slots {
+					candidate.Metrics.SlotDistribution[string(slot.Type)]++
+				}
+			}
+		case artifact.Kind == agentdomain.ArtifactSlotJoin:
+			var join agentdomain.SlotJoin
+			if json.Unmarshal([]byte(artifact.Content), &join) == nil {
+				mechanical = join.Body
+			}
+		case step.Capability == agentdomain.CapabilityIntegrationWriter && artifact.ID == step.PrimaryArtifactID:
+			integrated = artifact.Content
+		case step.Capability == agentdomain.CapabilityIntegrationWriter && artifact.Kind == agentdomain.ArtifactLintReport:
+			var report quality.Report
+			if json.Unmarshal([]byte(artifact.Content), &report) != nil {
+				continue
+			}
+			for _, finding := range report.Findings {
+				switch finding.ConstraintRef {
+				case "rule:slot.coverage":
+					candidate.Metrics.SlotCoverageFailures++
+				case "rule:slot.cross_repetition":
+					candidate.Metrics.CrossSlotRepetitions++
+				}
+			}
+		}
+	}
+	if mechanical != "" && integrated != "" {
+		candidate.Metrics.IntegrationDriftRatio = quality.RuneEditRatio(mechanical, integrated)
+	}
+}
+
 // candidateStepID 选择候选的权威门禁步骤。
 // 存在已执行的修订复核时以复核结论为准；复核被条件跳过时退回修订步骤。
 func candidateStepID(run agentdomain.Run, artifacts []agentdomain.Artifact, kind quality.HarnessCandidateKind) string {
 	var initial, revision string
 	for _, step := range run.Steps {
-		if step.Capability == agentdomain.CapabilityStoryArchitect || step.Capability == agentdomain.CapabilityProseWriter {
+		if step.Capability == agentdomain.CapabilityStoryArchitect || step.Capability == agentdomain.CapabilityProseWriter || step.Capability == agentdomain.CapabilityIntegrationWriter {
 			initial = step.ID
 		}
 		if kind != quality.CandidateRevised || step.Status != agentdomain.StepCompleted {

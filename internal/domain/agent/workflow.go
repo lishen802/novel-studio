@@ -57,7 +57,7 @@ func DefaultPublicStageForCapability(capability Capability) PublicStageID {
 		return PublicStageStoryPlanning
 	case CapabilityChapterPlanner:
 		return PublicStageChapterDirecting
-	case CapabilityProseWriter:
+	case CapabilityProseWriter, CapabilitySkeletonWriter, CapabilitySlotWriter, CapabilityIntegrationWriter:
 		return PublicStageProseWriting
 	case CapabilityContinuityReview, CapabilityContentReview, CapabilityStyleReview:
 		return PublicStageIndependentReview
@@ -285,7 +285,7 @@ func reachableFrom(entry string, adjacency map[string][]string) map[string]bool 
 
 func validateSelectors(node WorkflowNode, nodes map[string]WorkflowNode, adjacency map[string][]string, position map[string]int) error {
 	for _, selector := range node.InputSelectors {
-		if selector == "$task" || selector == "$context" {
+		if selector == "$task" || selector == "$context" || selector == "$slot_join" && node.Capability == CapabilityIntegrationWriter {
 			continue
 		}
 		if !strings.HasPrefix(selector, "node:") {

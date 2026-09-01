@@ -25,19 +25,24 @@ const (
 	TaskReviseBlueprint TaskKind = "revise_blueprint"
 	TaskBaselineDraft   TaskKind = "baseline_draft"
 	TaskVerifyRevision  TaskKind = "verify_revision"
+	TaskChapterSkeleton TaskKind = "chapter_skeleton"
+	TaskFillSlot        TaskKind = "fill_slot"
 )
 
 type Capability string
 
 const (
-	CapabilityStoryArchitect   Capability = "story_architect"
-	CapabilityChapterPlanner   Capability = "chapter_planner"
-	CapabilityProseWriter      Capability = "prose_writer"
-	CapabilityContinuityReview Capability = "continuity_review"
-	CapabilityContentReview    Capability = "content_review"
-	CapabilityStyleReview      Capability = "style_review"
-	CapabilityBoundedRevision  Capability = "bounded_revision"
-	CapabilityRevisionVerify   Capability = "revision_verify"
+	CapabilityStoryArchitect    Capability = "story_architect"
+	CapabilityChapterPlanner    Capability = "chapter_planner"
+	CapabilityProseWriter       Capability = "prose_writer"
+	CapabilityContinuityReview  Capability = "continuity_review"
+	CapabilityContentReview     Capability = "content_review"
+	CapabilityStyleReview       Capability = "style_review"
+	CapabilityBoundedRevision   Capability = "bounded_revision"
+	CapabilityRevisionVerify    Capability = "revision_verify"
+	CapabilitySkeletonWriter    Capability = "skeleton_writer"
+	CapabilitySlotWriter        Capability = "slot_writer"
+	CapabilityIntegrationWriter Capability = "integration_writer"
 )
 
 type QualityStatus string
@@ -311,7 +316,7 @@ func ValidSHA256(value string) bool {
 func ValidTaskKind(kind TaskKind) bool {
 	switch kind {
 	case TaskStoryBlueprint, TaskChapterPlan, TaskChapterDraft, TaskReviewBundle, TaskReviseDraft, TaskReviseBlueprint,
-		TaskBaselineDraft, TaskVerifyRevision:
+		TaskBaselineDraft, TaskVerifyRevision, TaskChapterSkeleton, TaskFillSlot:
 		return true
 	default:
 		return false
@@ -329,7 +334,8 @@ func ValidRoleForCapability(capability Capability, role Role) bool {
 func ValidCapability(capability Capability) bool {
 	switch capability {
 	case CapabilityStoryArchitect, CapabilityChapterPlanner, CapabilityProseWriter, CapabilityContinuityReview,
-		CapabilityContentReview, CapabilityStyleReview, CapabilityBoundedRevision, CapabilityRevisionVerify:
+		CapabilityContentReview, CapabilityStyleReview, CapabilityBoundedRevision, CapabilityRevisionVerify,
+		CapabilitySkeletonWriter, CapabilitySlotWriter, CapabilityIntegrationWriter:
 		return true
 	default:
 		return false
@@ -340,7 +346,7 @@ func DefaultRoleForCapability(capability Capability) Role {
 	switch capability {
 	case CapabilityStoryArchitect, CapabilityChapterPlanner:
 		return RolePlanner
-	case CapabilityProseWriter, CapabilityBoundedRevision:
+	case CapabilityProseWriter, CapabilityBoundedRevision, CapabilitySkeletonWriter, CapabilitySlotWriter, CapabilityIntegrationWriter:
 		return RoleWriter
 	case CapabilityContinuityReview, CapabilityContentReview, CapabilityStyleReview, CapabilityRevisionVerify:
 		// 修订验证必须落在审阅槽：让写作模型复核自己的修订等同于再次自证。

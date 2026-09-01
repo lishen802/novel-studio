@@ -243,13 +243,13 @@ func TestExportHarnessReportRejectsSecretShapedMetadata(t *testing.T) {
 }
 
 func TestCompareHarnessReportsDoesNotHideGenreRegression(t *testing.T) {
-	base := HarnessReport{RunID: "base", DatasetID: "set", DatasetVersion: "1", ByGenre: []HarnessBreakdown{{Name: "东方幻想", PassRate: 1}, {Name: "都市悬疑", PassRate: .5}}}
-	candidate := HarnessReport{RunID: "next", DatasetID: "set", DatasetVersion: "1", ByGenre: []HarnessBreakdown{{Name: "东方幻想", PassRate: .5}, {Name: "都市悬疑", PassRate: 1}}}
+	base := HarnessReport{RunID: "base", DatasetID: "set", DatasetVersion: "1", Calls: 4, InputTokens: 100, OutputTokens: 100, ByGenre: []HarnessBreakdown{{Name: "东方幻想", PassRate: 1}, {Name: "都市悬疑", PassRate: .5}}}
+	candidate := HarnessReport{RunID: "next", DatasetID: "set", DatasetVersion: "1", Calls: 10, InputTokens: 250, OutputTokens: 250, ByGenre: []HarnessBreakdown{{Name: "东方幻想", PassRate: .5}, {Name: "都市悬疑", PassRate: 1}}}
 	comparison, err := CompareHarnessReports(base, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(comparison.Regressions) != 1 || comparison.Regressions[0].Name != "东方幻想" {
+	if len(comparison.Regressions) != 1 || comparison.Regressions[0].Name != "东方幻想" || comparison.CallMultiplier != 2.5 || comparison.TokenMultiplier != 2.5 {
 		t.Fatalf("regressions = %+v", comparison.Regressions)
 	}
 }

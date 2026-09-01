@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["filled_slots"],
+  "properties": {
+    "filled_slots": {
+      "type": "array", "minItems": 1, "maxItems": 250,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["slot_id", "content", "anchor_hits"],
+        "properties": {
+          "slot_id": {"type": "string", "minLength": 1},
+          "content": {"type": "string", "minLength": 1},
+          "anchor_hits": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    }
+  }
+}

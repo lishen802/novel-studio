@@ -27,7 +27,10 @@ func TestBuiltinRegistryRequiresExactImmutablePolicyVersion(t *testing.T) {
 	if err != nil || again.Rules[0].ID == "mutated" {
 		t.Fatal("registry leaked mutable policy")
 	}
-	if _, err := registry.Policy(2); !errors.Is(err, ErrPolicyNotFound) {
+	if policy2, err := registry.Policy(2); err != nil || policy2.Version != 2 || len(policy2.Rules) != len(again.Rules)+5 {
+		t.Fatalf("slot policy unavailable: %+v, %v", policy2, err)
+	}
+	if _, err := registry.Policy(3); !errors.Is(err, ErrPolicyNotFound) {
 		t.Fatalf("expected exact version failure, got %v", err)
 	}
 }

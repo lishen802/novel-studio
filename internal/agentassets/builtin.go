@@ -18,6 +18,8 @@ const (
 	EnhancedChapterWorkflowVersion  = 1
 	SplitReviewWorkflowID           = "quality.chapter.split-review"
 	SplitReviewWorkflowVersion      = 1
+	SlotParallelWorkflowID          = "quality.chapter.slot-parallel"
+	SlotParallelWorkflowVersion     = 1
 )
 
 // v2 在既有工作流末尾追加修订复核节点；v1 保留不变，供 Harness 判断复核节点是否值得这次调用。
@@ -56,6 +58,20 @@ var (
 	verifyRevisionPrompt string
 	//go:embed assets/prompts/verify_revision_blueprint_v1.tmpl
 	verifyRevisionBlueprintPrompt string
+	//go:embed assets/prompts/chapter_skeleton_v1.tmpl
+	chapterSkeletonPrompt string
+	//go:embed assets/prompts/fill_slot_dialogue_v1.tmpl
+	fillSlotDialoguePrompt string
+	//go:embed assets/prompts/fill_slot_action_v1.tmpl
+	fillSlotActionPrompt string
+	//go:embed assets/prompts/fill_slot_interiority_v1.tmpl
+	fillSlotInteriorityPrompt string
+	//go:embed assets/prompts/fill_slot_description_v1.tmpl
+	fillSlotDescriptionPrompt string
+	//go:embed assets/prompts/fill_slot_transition_v1.tmpl
+	fillSlotTransitionPrompt string
+	//go:embed assets/prompts/integrate_slots_v1.tmpl
+	integrateSlotsPrompt string
 	//go:embed assets/schemas/chapter_draft_v1.json
 	chapterDraftSchema []byte
 	//go:embed assets/schemas/story_blueprint_v1.json
@@ -76,6 +92,10 @@ var (
 	authorReviseBlueprintSchema []byte
 	//go:embed assets/schemas/verify_revision_v1.json
 	verifyRevisionSchema []byte
+	//go:embed assets/schemas/chapter_skeleton_v1.json
+	chapterSkeletonSchema []byte
+	//go:embed assets/schemas/fill_slot_v1.json
+	fillSlotSchema []byte
 	//go:embed assets/assemblers/json_v1.json
 	jsonAssembler []byte
 )
@@ -105,6 +125,15 @@ func Builtin() (*Registry, error) {
 	verifyPromptBinding := BindingForText("verify_revision.prompt", 1, []byte(verifyRevisionPrompt))
 	verifyBlueprintPromptBinding := BindingForText("verify_revision_blueprint.prompt", 1, []byte(verifyRevisionBlueprintPrompt))
 	verifySchema := BindingForText("verify_revision.schema", 1, verifyRevisionSchema)
+	skeletonPromptBinding := BindingForText("chapter_skeleton.prompt", 1, []byte(chapterSkeletonPrompt))
+	dialoguePromptBinding := BindingForText("fill_slot.dialogue.prompt", 1, []byte(fillSlotDialoguePrompt))
+	actionPromptBinding := BindingForText("fill_slot.action.prompt", 1, []byte(fillSlotActionPrompt))
+	interiorityPromptBinding := BindingForText("fill_slot.interiority.prompt", 1, []byte(fillSlotInteriorityPrompt))
+	descriptionPromptBinding := BindingForText("fill_slot.description.prompt", 1, []byte(fillSlotDescriptionPrompt))
+	transitionPromptBinding := BindingForText("fill_slot.transition.prompt", 1, []byte(fillSlotTransitionPrompt))
+	integrationPromptBinding := BindingForText("integrate_slots.prompt", 1, []byte(integrateSlotsPrompt))
+	skeletonSchemaBinding := BindingForText("chapter_skeleton.schema", 1, chapterSkeletonSchema)
+	fillSlotSchemaBinding := BindingForText("fill_slot.schema", 1, fillSlotSchema)
 	assembler := BindingForText("json.assembler", 1, jsonAssembler)
 	baseline := agentdomain.WorkflowDefinition{
 		ID: BaselineWorkflowID, Version: BaselineWorkflowVersion, TaskKind: agentdomain.TaskBaselineDraft,
@@ -222,9 +251,41 @@ func Builtin() (*Registry, error) {
 		OutputKind:     agentdomain.OutputFindings, MaxOutputTokens: verifyMaxOutputTokens,
 		Condition: "on_quality_issue", FailurePolicy: agentdomain.FailureFailRun,
 	})
+	slotParallel := agentdomain.WorkflowDefinition{
+		ID: SlotParallelWorkflowID, Version: SlotParallelWorkflowVersion, TaskKind: agentdomain.TaskChapterDraft,
+		EntryNodeID: "director", ResultNodeID: "revision", BudgetPolicyVersion: 1, QualityPolicyVersion: 2,
+		MaxRevisionAttempts: 1, MaxRunTokens: 40000, RepairReserve: 1000, RevisionReserve: 1000,
+		Nodes: []agentdomain.WorkflowNode{
+			{ID: "director", PublicStageID: agentdomain.PublicStageChapterDirecting, Capability: agentdomain.CapabilityChapterPlanner, RoleSlot: agentdomain.RolePlanner,
+				Prompt: directorPromptBinding, Schema: directorSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3000, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "skeleton", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilitySkeletonWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: skeletonPromptBinding, Schema: skeletonSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:director"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 2500, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "slots_dialogue", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilitySlotWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: dialoguePromptBinding, Schema: fillSlotSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:skeleton"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "slots_action", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilitySlotWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: actionPromptBinding, Schema: fillSlotSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:skeleton"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "slots_interiority", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilitySlotWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: interiorityPromptBinding, Schema: fillSlotSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:skeleton"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "slots_description", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilitySlotWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: descriptionPromptBinding, Schema: fillSlotSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:skeleton"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "slots_transition", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilitySlotWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: transitionPromptBinding, Schema: fillSlotSchemaBinding, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:skeleton"}, OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "integrate", PublicStageID: agentdomain.PublicStageProseWriting, Capability: agentdomain.CapabilityIntegrationWriter, RoleSlot: agentdomain.RoleWriter,
+				Prompt: integrationPromptBinding, Schema: draftSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:skeleton", "node:slots_dialogue", "node:slots_action", "node:slots_interiority", "node:slots_description", "node:slots_transition", "$slot_join"}, OutputKind: agentdomain.OutputPrimaryContent, MaxOutputTokens: 5000, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "review", PublicStageID: agentdomain.PublicStageIndependentReview, Capability: agentdomain.CapabilityContinuityReview, RoleSlot: agentdomain.RoleContinuityReviewer,
+				Prompt: chapterReviewPromptBinding, Schema: reviewSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:integrate"}, OutputKind: agentdomain.OutputFindings, MaxOutputTokens: 3000, FailurePolicy: agentdomain.FailureFailRun},
+			{ID: "revision", PublicStageID: agentdomain.PublicStageBoundedRevision, Capability: agentdomain.CapabilityBoundedRevision, RoleSlot: agentdomain.RoleWriter,
+				Prompt: draftRevisionPromptBinding, Schema: draftRevisionSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:integrate", "node:review"}, OutputKind: agentdomain.OutputPrimaryContent, MaxOutputTokens: 5000, Condition: "on_quality_issue", FailurePolicy: agentdomain.FailureFailRun},
+		},
+		Edges: []agentdomain.WorkflowEdge{
+			{From: "director", To: "skeleton"}, {From: "skeleton", To: "slots_dialogue"}, {From: "slots_dialogue", To: "slots_action"},
+			{From: "slots_action", To: "slots_interiority"}, {From: "slots_interiority", To: "slots_description"}, {From: "slots_description", To: "slots_transition"},
+			{From: "slots_transition", To: "integrate"}, {From: "integrate", To: "review"}, {From: "review", To: "revision"},
+		},
+	}
 	workflows := []ports.WorkflowAsset{
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
-		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit),
+		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
 	}
 	return New(
 		workflows,
@@ -242,6 +303,13 @@ func Builtin() (*Registry, error) {
 			{Binding: authorBlueprintPromptBinding, Template: authorReviseBlueprintPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint"}},
 			{Binding: verifyPromptBinding, Template: verifyRevisionPrompt, Variables: []string{"Task", "Context", "Draft", "Review", "Changes", "Revision"}},
 			{Binding: verifyBlueprintPromptBinding, Template: verifyRevisionBlueprintPrompt, Variables: []string{"Task", "Context", "Blueprint", "Review", "Changes", "Revision"}},
+			{Binding: skeletonPromptBinding, Template: chapterSkeletonPrompt, Variables: []string{"Task", "Context"}},
+			{Binding: dialoguePromptBinding, Template: fillSlotDialoguePrompt, Variables: []string{"Task", "Context", "Skeleton"}},
+			{Binding: actionPromptBinding, Template: fillSlotActionPrompt, Variables: []string{"Task", "Context", "Skeleton"}},
+			{Binding: interiorityPromptBinding, Template: fillSlotInteriorityPrompt, Variables: []string{"Task", "Context", "Skeleton"}},
+			{Binding: descriptionPromptBinding, Template: fillSlotDescriptionPrompt, Variables: []string{"Task", "Context", "Skeleton"}},
+			{Binding: transitionPromptBinding, Template: fillSlotTransitionPrompt, Variables: []string{"Task", "Context", "Skeleton"}},
+			{Binding: integrationPromptBinding, Template: integrateSlotsPrompt, Variables: []string{"Task", "Context", "Skeleton", "MechanicalJoin"}},
 		},
 		[]ports.SchemaAsset{
 			{Binding: draftSchema, JSON: chapterDraftSchema},
@@ -254,6 +322,8 @@ func Builtin() (*Registry, error) {
 			{Binding: authorDraftSchemaBinding, JSON: authorReviseDraftSchema},
 			{Binding: authorBlueprintSchemaBinding, JSON: authorReviseBlueprintSchema},
 			{Binding: verifySchema, JSON: verifyRevisionSchema},
+			{Binding: skeletonSchemaBinding, JSON: chapterSkeletonSchema},
+			{Binding: fillSlotSchemaBinding, JSON: fillSlotSchema},
 		},
 		[]ports.AssemblerAsset{{Binding: assembler, JSON: jsonAssembler}},
 	)

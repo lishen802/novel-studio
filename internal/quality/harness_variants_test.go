@@ -4,7 +4,7 @@ import "testing"
 
 func TestHarnessWorkflowVariantsKeepExperimentalComplexityDisabled(t *testing.T) {
 	variants := BuiltinHarnessWorkflowVariants()
-	if len(variants) != 4 || !variants[0].DefaultEnabled {
+	if len(variants) != 5 || !variants[0].DefaultEnabled {
 		t.Fatalf("variants = %+v", variants)
 	}
 	for _, variant := range variants[1:] {
@@ -14,6 +14,22 @@ func TestHarnessWorkflowVariantsKeepExperimentalComplexityDisabled(t *testing.T)
 	}
 	if !variants[2].SplitIndependentReview || len(variants[2].ProfessionalAnalyses) != 0 {
 		t.Fatalf("split review variant = %+v", variants[2])
+	}
+}
+
+func TestSlotParallelVariantUsesEnhancedDirectorAsSingleVariableControl(t *testing.T) {
+	variants := BuiltinHarnessWorkflowVariants()
+	var director, slot HarnessWorkflowVariant
+	for _, variant := range variants {
+		if variant.ID == "enhanced-director" {
+			director = variant
+		}
+		if variant.ID == "slot-parallel" {
+			slot = variant
+		}
+	}
+	if slot.ID == "" || !slot.SlotParallel || slot.DefaultEnabled || slot.EnhancedDirector != director.EnhancedDirector || slot.SplitIndependentReview != director.SplitIndependentReview || slot.VerifiedRevision != director.VerifiedRevision {
+		t.Fatalf("slot variant is not isolated from enhanced director: %+v vs %+v", slot, director)
 	}
 }
 

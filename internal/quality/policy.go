@@ -71,6 +71,11 @@ type Policy struct {
 	HighFrequencyPhraseRunes int              `json:"high_frequency_phrase_runes"`
 	HighFrequencyPhraseCount int              `json:"high_frequency_phrase_count"`
 	MechanicalParallelCount  int              `json:"mechanical_parallel_count"`
+	SkeletonIntentMaxRunes   int              `json:"skeleton_intent_max_runes,omitempty"`
+	SlotTargetDeviationRatio float64          `json:"slot_target_deviation_ratio,omitempty"`
+	IntegrationMajorRatio    float64          `json:"integration_major_ratio,omitempty"`
+	IntegrationBlockerRatio  float64          `json:"integration_blocker_ratio,omitempty"`
+	CrossSlotPhraseRunes     int              `json:"cross_slot_phrase_runes,omitempty"`
 	MetaPhrases              []string         `json:"meta_phrases"`
 	SummaryPhrases           []string         `json:"summary_phrases"`
 	Rules                    []RuleDefinition `json:"rules"`
@@ -91,6 +96,10 @@ func (policy Policy) Validate() error {
 		policy.RepeatedOpeningCount < 2 || policy.HighFrequencyPhraseRunes < 2 || policy.HighFrequencyPhraseCount < 2 ||
 		policy.MechanicalParallelCount < 2 || len(policy.Rules) == 0 || !agentdomain.ValidSHA256(policy.Hash) ||
 		policy.Hash != policy.ContentHash() || hasBlankOrDuplicate(policy.MetaPhrases) || hasBlankOrDuplicate(policy.SummaryPhrases) {
+		return ErrInvalidPolicy
+	}
+	if policy.Version >= 2 && (policy.SkeletonIntentMaxRunes < 1 || policy.SlotTargetDeviationRatio <= 0 ||
+		policy.IntegrationMajorRatio <= 0 || policy.IntegrationBlockerRatio <= policy.IntegrationMajorRatio || policy.CrossSlotPhraseRunes < 2) {
 		return ErrInvalidPolicy
 	}
 	seen := map[string]struct{}{}
@@ -174,7 +183,22 @@ func BuiltinRegistry() (*Registry, error) {
 		},
 	}
 	policy.Hash = policy.ContentHash()
-	return NewRegistry(policy)
+	slotPolicy := copyPolicy(policy)
+	slotPolicy.Version = 2
+	slotPolicy.SkeletonIntentMaxRunes = 120
+	slotPolicy.SlotTargetDeviationRatio = 0.2
+	slotPolicy.IntegrationMajorRatio = 0.3
+	slotPolicy.IntegrationBlockerRatio = 0.5
+	slotPolicy.CrossSlotPhraseRunes = 8
+	slotPolicy.Rules = append(slotPolicy.Rules,
+		RuleDefinition{ID: "slot.skeleton_overreach", Version: 1, Category: agentdomain.FindingFormat, Severity: agentdomain.SeverityMajor},
+		RuleDefinition{ID: "slot.length_allocation", Version: 1, Category: agentdomain.FindingInformationDensity, Severity: agentdomain.SeverityMajor},
+		RuleDefinition{ID: "slot.coverage", Version: 1, Category: agentdomain.FindingFormat, Severity: agentdomain.SeverityBlocker},
+		RuleDefinition{ID: "slot.integration_drift", Version: 1, Category: agentdomain.FindingContinuity, Severity: agentdomain.SeverityMajor},
+		RuleDefinition{ID: "slot.cross_repetition", Version: 1, Category: agentdomain.FindingRepetition, Severity: agentdomain.SeverityMajor},
+	)
+	slotPolicy.Hash = slotPolicy.ContentHash()
+	return NewRegistry(policy, slotPolicy)
 }
 
 func copyPolicy(policy Policy) Policy {
