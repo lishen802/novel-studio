@@ -35,6 +35,7 @@ const (
 	PublicStageProseWriting       PublicStageID = "prose_writing"
 	PublicStageIndependentReview  PublicStageID = "independent_review"
 	PublicStageBoundedRevision    PublicStageID = "bounded_revision"
+	PublicStageRevisionVerify     PublicStageID = "revision_verify"
 	PublicStageCandidateReady     PublicStageID = "candidate_ready"
 )
 
@@ -42,7 +43,7 @@ func ValidPublicStageID(stage PublicStageID) bool {
 	switch stage {
 	case PublicStageContextPreparing, PublicStageStoryPlanning, PublicStageChapterDirecting,
 		PublicStageProfessionalReview, PublicStageProseWriting, PublicStageIndependentReview,
-		PublicStageBoundedRevision, PublicStageCandidateReady:
+		PublicStageBoundedRevision, PublicStageRevisionVerify, PublicStageCandidateReady:
 		return true
 	default:
 		return false
@@ -62,6 +63,8 @@ func DefaultPublicStageForCapability(capability Capability) PublicStageID {
 		return PublicStageIndependentReview
 	case CapabilityBoundedRevision:
 		return PublicStageBoundedRevision
+	case CapabilityRevisionVerify:
+		return PublicStageRevisionVerify
 	default:
 		return ""
 	}

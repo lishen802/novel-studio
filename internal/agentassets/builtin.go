@@ -20,6 +20,15 @@ const (
 	SplitReviewWorkflowVersion      = 1
 )
 
+// v2 在既有工作流末尾追加修订复核节点；v1 保留不变，供 Harness 判断复核节点是否值得这次调用。
+const (
+	VerifiedChapterWorkflowVersion     = 2
+	VerifiedBlueprintWorkflowVersion   = 2
+	VerifiedEnhancedWorkflowVersion    = 2
+	VerifiedSplitReviewWorkflowVersion = 2
+	verifyMaxOutputTokens              = 2500
+)
+
 var (
 	//go:embed assets/prompts/baseline_chapter_v1.tmpl
 	baselinePrompt string
@@ -43,6 +52,10 @@ var (
 	authorReviseDraftPrompt string
 	//go:embed assets/prompts/author_revise_blueprint_v1.tmpl
 	authorReviseBlueprintPrompt string
+	//go:embed assets/prompts/verify_revision_v1.tmpl
+	verifyRevisionPrompt string
+	//go:embed assets/prompts/verify_revision_blueprint_v1.tmpl
+	verifyRevisionBlueprintPrompt string
 	//go:embed assets/schemas/chapter_draft_v1.json
 	chapterDraftSchema []byte
 	//go:embed assets/schemas/story_blueprint_v1.json
@@ -61,6 +74,8 @@ var (
 	authorReviseDraftSchema []byte
 	//go:embed assets/schemas/author_revise_blueprint_v1.json
 	authorReviseBlueprintSchema []byte
+	//go:embed assets/schemas/verify_revision_v1.json
+	verifyRevisionSchema []byte
 	//go:embed assets/assemblers/json_v1.json
 	jsonAssembler []byte
 )
@@ -87,6 +102,9 @@ func Builtin() (*Registry, error) {
 	blueprintRevisionSchema := BindingForText("revise_blueprint.schema", 1, reviseBlueprintSchema)
 	authorDraftSchemaBinding := BindingForText("author_revise_draft.schema", 1, authorReviseDraftSchema)
 	authorBlueprintSchemaBinding := BindingForText("author_revise_blueprint.schema", 1, authorReviseBlueprintSchema)
+	verifyPromptBinding := BindingForText("verify_revision.prompt", 1, []byte(verifyRevisionPrompt))
+	verifyBlueprintPromptBinding := BindingForText("verify_revision_blueprint.prompt", 1, []byte(verifyRevisionBlueprintPrompt))
+	verifySchema := BindingForText("verify_revision.schema", 1, verifyRevisionSchema)
 	assembler := BindingForText("json.assembler", 1, jsonAssembler)
 	baseline := agentdomain.WorkflowDefinition{
 		ID: BaselineWorkflowID, Version: BaselineWorkflowVersion, TaskKind: agentdomain.TaskBaselineDraft,
@@ -176,7 +194,38 @@ func Builtin() (*Registry, error) {
 		},
 		Edges: []agentdomain.WorkflowEdge{{From: "director", To: "draft"}, {From: "draft", To: "continuity"}, {From: "draft", To: "content"}, {From: "draft", To: "style"}, {From: "continuity", To: "revision"}, {From: "content", To: "revision"}, {From: "style", To: "revision"}},
 	}
-	workflows := []ports.WorkflowAsset{workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split)}
+	verifiedChapter := withVerification(chapter, VerifiedChapterWorkflowVersion, agentdomain.WorkflowNode{
+		ID: "verify", PublicStageID: agentdomain.PublicStageRevisionVerify, Capability: agentdomain.CapabilityRevisionVerify,
+		RoleSlot: agentdomain.RoleContinuityReviewer, Prompt: verifyPromptBinding, Schema: verifySchema, Assembler: assembler,
+		InputSelectors: []string{"$task", "$context", "node:draft", "node:review", "node:revision"},
+		OutputKind:     agentdomain.OutputFindings, MaxOutputTokens: verifyMaxOutputTokens,
+		Condition: "on_quality_issue", FailurePolicy: agentdomain.FailureFailRun,
+	})
+	verifiedBlueprint := withVerification(blueprint, VerifiedBlueprintWorkflowVersion, agentdomain.WorkflowNode{
+		ID: "verify", PublicStageID: agentdomain.PublicStageRevisionVerify, Capability: agentdomain.CapabilityRevisionVerify,
+		RoleSlot: agentdomain.RoleContinuityReviewer, Prompt: verifyBlueprintPromptBinding, Schema: verifySchema, Assembler: assembler,
+		InputSelectors: []string{"$task", "$context", "node:blueprint", "node:review", "node:revision"},
+		OutputKind:     agentdomain.OutputFindings, MaxOutputTokens: verifyMaxOutputTokens,
+		Condition: "on_quality_issue", FailurePolicy: agentdomain.FailureFailRun,
+	})
+	verifiedEnhanced := withVerification(enhanced, VerifiedEnhancedWorkflowVersion, agentdomain.WorkflowNode{
+		ID: "verify", PublicStageID: agentdomain.PublicStageRevisionVerify, Capability: agentdomain.CapabilityRevisionVerify,
+		RoleSlot: agentdomain.RoleContinuityReviewer, Prompt: verifyPromptBinding, Schema: verifySchema, Assembler: assembler,
+		InputSelectors: []string{"$task", "$context", "node:draft", "node:review", "node:revision"},
+		OutputKind:     agentdomain.OutputFindings, MaxOutputTokens: verifyMaxOutputTokens,
+		Condition: "on_quality_issue", FailurePolicy: agentdomain.FailureFailRun,
+	})
+	verifiedSplit := withVerification(split, VerifiedSplitReviewWorkflowVersion, agentdomain.WorkflowNode{
+		ID: "verify", PublicStageID: agentdomain.PublicStageRevisionVerify, Capability: agentdomain.CapabilityRevisionVerify,
+		RoleSlot: agentdomain.RoleContinuityReviewer, Prompt: verifyPromptBinding, Schema: verifySchema, Assembler: assembler,
+		InputSelectors: []string{"$task", "$context", "node:draft", "node:continuity", "node:content", "node:style", "node:revision"},
+		OutputKind:     agentdomain.OutputFindings, MaxOutputTokens: verifyMaxOutputTokens,
+		Condition: "on_quality_issue", FailurePolicy: agentdomain.FailureFailRun,
+	})
+	workflows := []ports.WorkflowAsset{
+		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
+		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit),
+	}
 	return New(
 		workflows,
 		[]ports.PromptAsset{
@@ -191,6 +240,8 @@ func Builtin() (*Registry, error) {
 			{Binding: blueprintRevisionPromptBinding, Template: reviseBlueprintPrompt, Variables: []string{"Task", "Context", "Blueprint", "Review"}},
 			{Binding: authorDraftPromptBinding, Template: authorReviseDraftPrompt, Variables: []string{"Task", "Context", "Directive", "Draft"}},
 			{Binding: authorBlueprintPromptBinding, Template: authorReviseBlueprintPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint"}},
+			{Binding: verifyPromptBinding, Template: verifyRevisionPrompt, Variables: []string{"Task", "Context", "Draft", "Review", "Changes", "Revision"}},
+			{Binding: verifyBlueprintPromptBinding, Template: verifyRevisionBlueprintPrompt, Variables: []string{"Task", "Context", "Blueprint", "Review", "Changes", "Revision"}},
 		},
 		[]ports.SchemaAsset{
 			{Binding: draftSchema, JSON: chapterDraftSchema},
@@ -202,9 +253,23 @@ func Builtin() (*Registry, error) {
 			{Binding: blueprintRevisionSchema, JSON: reviseBlueprintSchema},
 			{Binding: authorDraftSchemaBinding, JSON: authorReviseDraftSchema},
 			{Binding: authorBlueprintSchemaBinding, JSON: authorReviseBlueprintSchema},
+			{Binding: verifySchema, JSON: verifyRevisionSchema},
 		},
 		[]ports.AssemblerAsset{{Binding: assembler, JSON: jsonAssembler}},
 	)
+}
+
+// withVerification 在既有工作流末尾追加修订复核节点，并把复核节点定为结果节点。
+// 基础定义按值复制，切片深拷贝，保证已发布的 v1 定义哈希不受影响。
+func withVerification(base agentdomain.WorkflowDefinition, version int, verify agentdomain.WorkflowNode) agentdomain.WorkflowDefinition {
+	definition := base
+	definition.Version = version
+	definition.ResultNodeID = verify.ID
+	definition.MaxRunTokens = base.MaxRunTokens + verify.MaxOutputTokens
+	definition.Nodes = append(append([]agentdomain.WorkflowNode(nil), base.Nodes...), verify)
+	definition.Edges = append(append([]agentdomain.WorkflowEdge(nil), base.Edges...), agentdomain.WorkflowEdge{From: base.ResultNodeID, To: verify.ID})
+	definition.DefinitionHash = ""
+	return definition
 }
 
 func workflowAsset(definition agentdomain.WorkflowDefinition) ports.WorkflowAsset {

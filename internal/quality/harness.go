@@ -170,6 +170,10 @@ type HarnessCandidateMetrics struct {
 	ProfessionalConstraintsUsed int   `json:"professional_constraints_used"`
 	ReviewIndependencePassed    bool  `json:"review_independence_passed"`
 	MergeConflicts              int   `json:"merge_conflicts"`
+	ClaimedResolved             int   `json:"claimed_resolved"`
+	ConfirmedResolved           int   `json:"confirmed_resolved"`
+	OverturnedResolutions       int   `json:"overturned_resolutions"`
+	RevisionRegressions         int   `json:"revision_regressions"`
 }
 
 type HarnessCandidate struct {
@@ -443,6 +447,10 @@ type HarnessCandidateReport struct {
 	ProfessionalConstraintsUsed int                  `json:"professional_constraints_used"`
 	ReviewIndependencePassed    bool                 `json:"review_independence_passed"`
 	MergeConflicts              int                  `json:"merge_conflicts"`
+	ClaimedResolved             int                  `json:"claimed_resolved"`
+	ConfirmedResolved           int                  `json:"confirmed_resolved"`
+	OverturnedResolutions       int                  `json:"overturned_resolutions"`
+	RevisionRegressions         int                  `json:"revision_regressions"`
 }
 
 type HarnessCaseReport struct {
@@ -755,6 +763,10 @@ func buildHarnessReport(run HarnessRun, results []HarnessCaseResult, generatedAt
 				ProfessionalConstraintsUsed: candidate.Metrics.ProfessionalConstraintsUsed,
 				ReviewIndependencePassed:    candidate.Metrics.ReviewIndependencePassed,
 				MergeConflicts:              candidate.Metrics.MergeConflicts,
+				ClaimedResolved:             candidate.Metrics.ClaimedResolved,
+				ConfirmedResolved:           candidate.Metrics.ConfirmedResolved,
+				OverturnedResolutions:       candidate.Metrics.OverturnedResolutions,
+				RevisionRegressions:         candidate.Metrics.RevisionRegressions,
 			})
 		}
 		if baseline, exists := byKind[CandidateBaseline]; exists {
