@@ -263,6 +263,56 @@ func TestOpenAIResponsesRequiresCompletedTerminalAndText(t *testing.T) {
 	}
 }
 
+func TestDeepSeekResponsesRetriesStreamEndedBeforeText(t *testing.T) {
+	requests := 0
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		if requests == 1 {
+			return sseResponse("event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n"), nil
+		}
+		stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"恢复\"}\n\n" +
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n"
+		return sseResponse(stream), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if requests != 2 || result.Text != "恢复" || result.ProviderRequestID != "resp_retry" {
+		t.Fatalf("requests=%d result=%#v", requests, result)
+	}
+}
+
+func TestDeepSeekResponsesDoesNotRetryPartialStream(t *testing.T) {
+	requests := 0
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return sseResponse("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"未完成\"}\n\n"), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	if !errors.Is(err, ErrInvalidStream) || requests != 1 {
+		t.Fatalf("requests=%d error=%v", requests, err)
+	}
+}
+
+func TestDeepSeekResponsesDoesNotRetryAfterReasoningStarted(t *testing.T) {
+	requests := 0
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return sseResponse("event: response.reasoning_text.delta\ndata: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"分析中\"}\n\n"), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	if !errors.Is(err, ErrInvalidStream) || requests != 1 {
+		t.Fatalf("requests=%d error=%v", requests, err)
+	}
+}
+
 func TestAnthropicMessagesStreamsTextAndUsage(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

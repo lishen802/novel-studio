@@ -85,6 +85,24 @@ func (client *OpenAIClient) Generate(
 	request GenerateRequest,
 	onDelta func(string),
 ) (GenerateResult, error) {
+	generationStarted := false
+	result, err := client.generateOnce(ctx, apiKey, request, onDelta, &generationStarted)
+	// DeepSeek Responses 流偶尔会在正文开始前无终态断开；此时重试不会
+	// 混合两份正文。收到推理或正文后不再自动重试，避免重复生成与重复计费。
+	if err != nil && errors.Is(err, ErrInvalidStream) && isDeepSeekEndpoint(client.baseURL) &&
+		!generationStarted && ctx.Err() == nil {
+		return client.generateOnce(ctx, apiKey, request, onDelta, nil)
+	}
+	return result, err
+}
+
+func (client *OpenAIClient) generateOnce(
+	ctx context.Context,
+	apiKey string,
+	request GenerateRequest,
+	onDelta func(string),
+	generationStarted *bool,
+) (GenerateResult, error) {
 	payload := map[string]any{
 		"model":        request.Model,
 		"instructions": request.System,
@@ -155,7 +173,14 @@ func (client *OpenAIClient) Generate(
 			eventType = event
 		}
 		switch eventType {
+		case "response.reasoning_text.delta":
+			if generationStarted != nil && envelope.Delta != "" {
+				*generationStarted = true
+			}
 		case "response.output_text.delta":
+			if generationStarted != nil && envelope.Delta != "" {
+				*generationStarted = true
+			}
 			result.Text += envelope.Delta
 			if onDelta != nil {
 				onDelta(envelope.Delta)
