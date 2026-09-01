@@ -156,24 +156,28 @@ const (
 )
 
 type HarnessCandidateMetrics struct {
-	GatePassed                  bool  `json:"gate_passed"`
-	Blockers                    int   `json:"blockers"`
-	Majors                      int   `json:"majors"`
-	Minors                      int   `json:"minors"`
-	Resolved                    int   `json:"resolved"`
-	InputTokens                 int   `json:"input_tokens"`
-	OutputTokens                int   `json:"output_tokens"`
-	Calls                       int   `json:"calls"`
-	DurationMillis              int64 `json:"duration_millis"`
-	Retries                     int   `json:"retries"`
-	DirectorProtocolPassed      bool  `json:"director_protocol_passed"`
-	ProfessionalConstraintsUsed int   `json:"professional_constraints_used"`
-	ReviewIndependencePassed    bool  `json:"review_independence_passed"`
-	MergeConflicts              int   `json:"merge_conflicts"`
-	ClaimedResolved             int   `json:"claimed_resolved"`
-	ConfirmedResolved           int   `json:"confirmed_resolved"`
-	OverturnedResolutions       int   `json:"overturned_resolutions"`
-	RevisionRegressions         int   `json:"revision_regressions"`
+	GatePassed                  bool           `json:"gate_passed"`
+	Blockers                    int            `json:"blockers"`
+	Majors                      int            `json:"majors"`
+	Minors                      int            `json:"minors"`
+	Resolved                    int            `json:"resolved"`
+	InputTokens                 int            `json:"input_tokens"`
+	OutputTokens                int            `json:"output_tokens"`
+	Calls                       int            `json:"calls"`
+	DurationMillis              int64          `json:"duration_millis"`
+	Retries                     int            `json:"retries"`
+	DirectorProtocolPassed      bool           `json:"director_protocol_passed"`
+	ProfessionalConstraintsUsed int            `json:"professional_constraints_used"`
+	ReviewIndependencePassed    bool           `json:"review_independence_passed"`
+	MergeConflicts              int            `json:"merge_conflicts"`
+	ClaimedResolved             int            `json:"claimed_resolved"`
+	ConfirmedResolved           int            `json:"confirmed_resolved"`
+	OverturnedResolutions       int            `json:"overturned_resolutions"`
+	RevisionRegressions         int            `json:"revision_regressions"`
+	SlotDistribution            map[string]int `json:"slot_distribution,omitempty"`
+	SlotCoverageFailures        int            `json:"slot_coverage_failures,omitempty"`
+	IntegrationDriftRatio       float64        `json:"integration_drift_ratio,omitempty"`
+	CrossSlotRepetitions        int            `json:"cross_slot_repetitions,omitempty"`
 }
 
 type HarnessCandidate struct {
@@ -451,6 +455,10 @@ type HarnessCandidateReport struct {
 	ConfirmedResolved           int                  `json:"confirmed_resolved"`
 	OverturnedResolutions       int                  `json:"overturned_resolutions"`
 	RevisionRegressions         int                  `json:"revision_regressions"`
+	SlotDistribution            map[string]int       `json:"slot_distribution,omitempty"`
+	SlotCoverageFailures        int                  `json:"slot_coverage_failures,omitempty"`
+	IntegrationDriftRatio       float64              `json:"integration_drift_ratio,omitempty"`
+	CrossSlotRepetitions        int                  `json:"cross_slot_repetitions,omitempty"`
 }
 
 type HarnessCaseReport struct {
@@ -472,9 +480,11 @@ type HarnessReportRegression struct {
 }
 
 type HarnessReportComparison struct {
-	BaseRunID      string                    `json:"base_run_id"`
-	CandidateRunID string                    `json:"candidate_run_id"`
-	Regressions    []HarnessReportRegression `json:"regressions"`
+	BaseRunID       string                    `json:"base_run_id"`
+	CandidateRunID  string                    `json:"candidate_run_id"`
+	CallMultiplier  float64                   `json:"call_multiplier"`
+	TokenMultiplier float64                   `json:"token_multiplier"`
+	Regressions     []HarnessReportRegression `json:"regressions"`
 }
 
 type HarnessReportReader interface {
@@ -767,6 +777,10 @@ func buildHarnessReport(run HarnessRun, results []HarnessCaseResult, generatedAt
 				ConfirmedResolved:           candidate.Metrics.ConfirmedResolved,
 				OverturnedResolutions:       candidate.Metrics.OverturnedResolutions,
 				RevisionRegressions:         candidate.Metrics.RevisionRegressions,
+				SlotDistribution:            candidate.Metrics.SlotDistribution,
+				SlotCoverageFailures:        candidate.Metrics.SlotCoverageFailures,
+				IntegrationDriftRatio:       candidate.Metrics.IntegrationDriftRatio,
+				CrossSlotRepetitions:        candidate.Metrics.CrossSlotRepetitions,
 			})
 		}
 		if baseline, exists := byKind[CandidateBaseline]; exists {
@@ -833,6 +847,13 @@ func CompareHarnessReports(base, candidate HarnessReport) (HarnessReportComparis
 		return HarnessReportComparison{}, ErrInvalidHarnessRun
 	}
 	comparison := HarnessReportComparison{BaseRunID: base.RunID, CandidateRunID: candidate.RunID}
+	if base.Calls > 0 {
+		comparison.CallMultiplier = float64(candidate.Calls) / float64(base.Calls)
+	}
+	baseTokens := base.InputTokens + base.OutputTokens
+	if baseTokens > 0 {
+		comparison.TokenMultiplier = float64(candidate.InputTokens+candidate.OutputTokens) / float64(baseTokens)
+	}
 	compareBreakdown := func(dimension string, baseItems, candidateItems []HarnessBreakdown) {
 		baseByName := make(map[string]HarnessBreakdown, len(baseItems))
 		for _, item := range baseItems {

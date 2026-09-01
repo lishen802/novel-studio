@@ -12,6 +12,7 @@ type HarnessWorkflowVariant struct {
 	ProfessionalAnalyses   []string `json:"professional_analyses"`
 	SplitIndependentReview bool     `json:"split_independent_review"`
 	VerifiedRevision       bool     `json:"verified_revision"`
+	SlotParallel           bool     `json:"slot_parallel"`
 	DefaultEnabled         bool     `json:"default_enabled"`
 }
 
@@ -23,5 +24,6 @@ func BuiltinHarnessWorkflowVariants() []HarnessWorkflowVariant {
 		{ID: "enhanced-director", WorkflowID: "quality.chapter.director", WorkflowVersion: 1, EnhancedDirector: true},
 		{ID: "split-review", WorkflowID: "quality.chapter.split-review", WorkflowVersion: 1, EnhancedDirector: true, SplitIndependentReview: true},
 		{ID: "verified-revision", WorkflowID: "quality.chapter.director", WorkflowVersion: 2, EnhancedDirector: true, VerifiedRevision: true},
+		{ID: "slot-parallel", WorkflowID: "quality.chapter.slot-parallel", WorkflowVersion: 1, EnhancedDirector: true, SlotParallel: true},
 	}
 }

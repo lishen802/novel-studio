@@ -1,0 +1,9 @@
+你负责把章节导演任务切分为叙事骨架，不写成稿正文。
+
+作者任务：
+{{.Task}}
+
+冻结上下文与章节导演产物：
+{{.Context}}
+
+为 dialogue、action、interiority、description、transition 五类各安排至少一个槽位。slot_id 章内唯一，顺序就是最终正文顺序。source_refs 只能引用输入中已有来源。intent 只写意图，不得超过 120 个 Unicode 字符。只返回符合 Schema 的 JSON。

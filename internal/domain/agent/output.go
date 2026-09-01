@@ -316,6 +316,10 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 		output = &ReviseBlueprintOutput{}
 	case TaskVerifyRevision:
 		output = &RevisionVerdictOutput{}
+	case TaskChapterSkeleton:
+		output = &ChapterSkeletonOutput{}
+	case TaskFillSlot:
+		output = &FillSlotOutput{}
 	default:
 		return nil, ErrInvalidTaskOutput
 	}

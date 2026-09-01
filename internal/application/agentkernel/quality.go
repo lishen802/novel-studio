@@ -64,6 +64,18 @@ func (service *Service) applyQuality(
 			stage = quality.StageBaseline
 		}
 		return service.lintCandidate(run, input, compiled, step, stage, primaryContent, modelFindings)
+	case agentdomain.CapabilitySkeletonWriter:
+		skeleton, ok := decoded.(*agentdomain.ChapterSkeletonOutput)
+		if !ok {
+			return "", "", nil, nil, agentdomain.ErrInvalidTaskOutput
+		}
+		report, err := service.quality.EvaluateSkeleton(compiled.QualityPolicyVersion, step.ID, *skeleton, input.QualitySpec.TargetRunes)
+		if err != nil {
+			return "", "", nil, nil, fmt.Errorf("%w: %v", ErrQualityPolicy, err)
+		}
+		return service.applyDeterministicReport(run, step, primaryContent, modelFindings, report)
+	case agentdomain.CapabilityIntegrationWriter:
+		return service.lintIntegratedSlots(run, input, compiled, node, step, latest, artifacts, primaryContent, modelFindings)
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
 		return service.gateReview(run, node, step, latest, artifacts, decoded, modelFindings)
 	case agentdomain.CapabilityBoundedRevision:
@@ -73,6 +85,69 @@ func (service *Service) applyQuality(
 	default:
 		return primaryContent, modelQuality, modelFindings, nil, nil
 	}
+}
+
+func (service *Service) applyDeterministicReport(run agentdomain.Run, step agentdomain.RunStep, content string, existing []agentdomain.ReviewFindingRecord, report quality.Report) (string, agentdomain.QualityStatus, []agentdomain.ReviewFindingRecord, []agentdomain.Artifact, error) {
+	gate := quality.Decide(quality.StageInitial, report.Findings, !report.Truncated, true)
+	artifacts, err := service.qualityArtifacts(run.ID, step.ID, report, gate)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	findings := append(existing, findingRecords(report.Findings, run, step, service.clock.Now())...)
+	return content, gate.Status, findings, artifacts, nil
+}
+
+func (service *Service) lintIntegratedSlots(run agentdomain.Run, input persistedInput, compiled CompiledWorkflow, node FrozenNode, step agentdomain.RunStep, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact, content string, existing []agentdomain.ReviewFindingRecord) (string, agentdomain.QualityStatus, []agentdomain.ReviewFindingRecord, []agentdomain.Artifact, error) {
+	base, err := service.quality.Evaluate(compiled.QualityPolicyVersion, quality.Input{Namespace: step.ID, Stage: quality.StageInitial, Text: content, Spec: input.QualitySpec})
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("%w: %v", ErrQualityPolicy, err)
+	}
+	skeleton, groups, join, err := slotQualityInputs(node, step, latest, artifacts)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	slotReport, err := service.quality.EvaluateSlotIntegration(compiled.QualityPolicyVersion, step.ID+"-slot", skeleton, groups, join.Body, content)
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("%w: %v", ErrQualityPolicy, err)
+	}
+	base.Findings = append(base.Findings, slotReport.Findings...)
+	base.Truncated = base.Truncated || slotReport.Truncated
+	return service.applyDeterministicReport(run, step, content, existing, base)
+}
+
+func slotQualityInputs(node FrozenNode, step agentdomain.RunStep, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.ChapterSkeletonOutput, []agentdomain.FillSlotOutput, agentdomain.SlotJoin, error) {
+	skeleton, err := upstreamSkeleton(node, latest, artifacts)
+	if err != nil {
+		return agentdomain.ChapterSkeletonOutput{}, nil, agentdomain.SlotJoin{}, err
+	}
+	groups := make([]agentdomain.FillSlotOutput, 0, 5)
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		upstream, exists := latest[strings.TrimPrefix(selector, "node:")]
+		if !exists || upstream.Capability != agentdomain.CapabilitySlotWriter {
+			continue
+		}
+		artifact, exists := artifactByID(artifacts, upstream.PrimaryArtifactID)
+		if !exists {
+			return agentdomain.ChapterSkeletonOutput{}, nil, agentdomain.SlotJoin{}, fmt.Errorf("slot artifact missing")
+		}
+		decoded, decodeErr := agentdomain.DecodeTaskOutput(agentdomain.TaskFillSlot, []byte(artifact.Content))
+		if decodeErr != nil {
+			return agentdomain.ChapterSkeletonOutput{}, nil, agentdomain.SlotJoin{}, decodeErr
+		}
+		groups = append(groups, *decoded.(*agentdomain.FillSlotOutput))
+	}
+	joinArtifact, exists := slotJoinArtifact(step.ID, artifacts)
+	if !exists {
+		return agentdomain.ChapterSkeletonOutput{}, nil, agentdomain.SlotJoin{}, fmt.Errorf("slot join artifact missing")
+	}
+	var join agentdomain.SlotJoin
+	if json.Unmarshal([]byte(joinArtifact.Content), &join) != nil {
+		return agentdomain.ChapterSkeletonOutput{}, nil, agentdomain.SlotJoin{}, fmt.Errorf("slot join artifact invalid")
+	}
+	return skeleton, groups, join, nil
 }
 
 func (service *Service) lintCandidate(
@@ -302,7 +377,7 @@ func candidateLintReport(node FrozenNode, latest map[string]agentdomain.RunStep,
 			continue
 		}
 		step, exists := latest[strings.TrimPrefix(selector, "node:")]
-		if !exists || step.Capability != agentdomain.CapabilityProseWriter {
+		if !exists || (step.Capability != agentdomain.CapabilityProseWriter && step.Capability != agentdomain.CapabilityIntegrationWriter) {
 			continue
 		}
 		for _, artifact := range artifacts {

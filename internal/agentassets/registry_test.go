@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/application/agentkernel"
@@ -56,6 +57,7 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{QualityBlueprintWorkflowID, VerifiedBlueprintWorkflowVersion, []string{"blueprint", "review", "revision", "verify"}},
 		{EnhancedChapterWorkflowID, VerifiedEnhancedWorkflowVersion, []string{"director", "draft", "review", "revision", "verify"}},
 		{SplitReviewWorkflowID, VerifiedSplitReviewWorkflowVersion, []string{"director", "draft", "content", "continuity", "style", "revision", "verify"}},
+		{SlotParallelWorkflowID, SlotParallelWorkflowVersion, []string{"director", "skeleton", "slots_dialogue", "slots_action", "slots_interiority", "slots_description", "slots_transition", "integrate", "review", "revision"}},
 	}
 	for _, test := range cases {
 		compiled, compileErr := agentkernel.Compile(context.Background(), agentkernel.Registries{
@@ -118,5 +120,21 @@ func TestBuiltinRegistersAuthorRevisionContracts(t *testing.T) {
 		if schemaErr != nil || len(schema.JSON) == 0 {
 			t.Fatalf("schema %s: %v", contract.schema, schemaErr)
 		}
+	}
+}
+
+func TestSlotParallelKeepsEnhancedDirectorAndDownstreamContract(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	director, _ := registry.Workflow(context.Background(), EnhancedChapterWorkflowID, EnhancedChapterWorkflowVersion)
+	slot, _ := registry.Workflow(context.Background(), SlotParallelWorkflowID, SlotParallelWorkflowVersion)
+	if !reflect.DeepEqual(director.Definition.Nodes[0], slot.Definition.Nodes[0]) {
+		t.Fatalf("director contract differs: %+v vs %+v", director.Definition.Nodes[0], slot.Definition.Nodes[0])
+	}
+	if slot.Definition.Nodes[len(slot.Definition.Nodes)-2].Capability != director.Definition.Nodes[len(director.Definition.Nodes)-2].Capability ||
+		slot.Definition.Nodes[len(slot.Definition.Nodes)-1].Capability != director.Definition.Nodes[len(director.Definition.Nodes)-1].Capability {
+		t.Fatal("review or revision contract changed in slot experiment")
 	}
 }

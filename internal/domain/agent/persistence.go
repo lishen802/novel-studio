@@ -24,7 +24,7 @@ func ValidArtifactKind(kind ArtifactKind) bool {
 	switch kind {
 	case ArtifactContext, ArtifactTaskInput, ArtifactPlan, ArtifactDraft, ArtifactReview,
 		ArtifactRevision, ArtifactStructuredOutput, ArtifactLintReport, ArtifactQualityReport,
-		ArtifactFormatRepair:
+		ArtifactFormatRepair, ArtifactSlotJoin:
 		return true
 	default:
 		return false

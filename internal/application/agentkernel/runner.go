@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -382,6 +383,13 @@ func (service *Service) executeNode(
 	latest map[string]agentdomain.RunStep,
 	artifacts []agentdomain.Artifact,
 ) (agentdomain.RunStep, []agentdomain.Artifact, error) {
+	if node.Capability == agentdomain.CapabilityIntegrationWriter {
+		joinArtifact, joinErr := service.persistMechanicalJoin(ctx, run, node, step, latest, artifacts)
+		if joinErr != nil {
+			return service.failStep(ctx, run, step, "invalid_slot_coverage", joinErr, nil)
+		}
+		artifacts = append(artifacts, joinArtifact)
+	}
 	prompt, err := service.registries.Prompts.Prompt(ctx, node.Prompt.ID, node.Prompt.Version)
 	if err != nil {
 		return service.failStep(ctx, run, step, "asset_missing", err, nil)
@@ -643,6 +651,15 @@ func (service *Service) assemble(
 			for _, source := range input.Sources {
 				parts = append(parts, part{source: source, content: source.Content})
 			}
+		case selector == "$slot_join":
+			artifact, ok := slotJoinArtifact(step.ID, artifacts)
+			if !ok {
+				return "", agentdomain.ContextManifest{}, nil, errors.New("missing mechanical slot join")
+			}
+			parts = append(parts, part{source: Source{
+				Kind: agentdomain.ManifestUpstreamArtifact, ID: artifact.ID, Version: fmt.Sprintf("attempt-%d", step.Attempt),
+				Priority: 850, SelectionReason: "确定性槽位拼接", Required: true,
+			}, content: artifact.Content})
 		case strings.HasPrefix(selector, "node:"):
 			nodeID := strings.TrimPrefix(selector, "node:")
 			upstream, ok := latest[nodeID]
@@ -999,6 +1016,16 @@ func renderPrompt(
 				return "", encodeErr
 			}
 			values[variable] = evidence
+		case "MechanicalJoin":
+			artifact, ok := slotJoinArtifactForNode(node, latest, artifacts)
+			if !ok {
+				return "", errors.New("prompt mechanical join missing")
+			}
+			var join agentdomain.SlotJoin
+			if json.Unmarshal([]byte(artifact.Content), &join) != nil || strings.TrimSpace(join.Body) == "" {
+				return "", errors.New("prompt mechanical join invalid")
+			}
+			values[variable] = join.Body
 		default:
 			if variable == "Review" && len(reviewContents) > 1 {
 				merged, mergeErr := mergeReviewContents(reviewContents)
@@ -1081,6 +1108,12 @@ func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.C
 		return agentdomain.TaskReviseDraft
 	case agentdomain.CapabilityRevisionVerify:
 		return agentdomain.TaskVerifyRevision
+	case agentdomain.CapabilitySkeletonWriter:
+		return agentdomain.TaskChapterSkeleton
+	case agentdomain.CapabilitySlotWriter:
+		return agentdomain.TaskFillSlot
+	case agentdomain.CapabilityIntegrationWriter:
+		return agentdomain.TaskChapterDraft
 	default:
 		return workflowKind
 	}
@@ -1304,6 +1337,10 @@ func validateCapabilityOutput(
 	switch node.Capability {
 	case agentdomain.CapabilityChapterPlanner:
 		return validateChapterDirector(output, input)
+	case agentdomain.CapabilitySkeletonWriter:
+		return validateSkeletonOutput(output, input)
+	case agentdomain.CapabilitySlotWriter:
+		return validateSlotOutput(output, node, latest, artifacts)
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
 		return validateModelReview(output, node, latest, artifacts)
 	case agentdomain.CapabilityBoundedRevision:
@@ -1391,6 +1428,145 @@ func validateChapterDirector(output agentdomain.TaskOutput, input persistedInput
 		}
 	}
 	return nil
+}
+
+// validateSkeletonOutput 限制骨架只能引用本次运行冻结的来源。
+func validateSkeletonOutput(output agentdomain.TaskOutput, input persistedInput) error {
+	skeleton, ok := output.(*agentdomain.ChapterSkeletonOutput)
+	if !ok {
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	allowed := map[string]struct{}{"author-instruction": {}}
+	for _, source := range input.Sources {
+		allowed[source.ID] = struct{}{}
+		allowed[source.ID+"@"+source.Version] = struct{}{}
+	}
+	for _, beat := range skeleton.Beats {
+		for _, slot := range beat.Slots {
+			for _, ref := range slot.SourceRefs {
+				if _, exists := allowed[ref]; !exists {
+					return fmt.Errorf("%w: skeleton references source outside frozen manifest: %s", agentdomain.ErrInvalidTaskOutput, ref)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateSlotOutput 保证专项写手只返回骨架中属于自身类型的全部槽位。
+func validateSlotOutput(output agentdomain.TaskOutput, node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) error {
+	filled, ok := output.(*agentdomain.FillSlotOutput)
+	if !ok {
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	kind, ok := slotTypeForNode(node.ID)
+	if !ok {
+		return fmt.Errorf("%w: unknown slot writer node", agentdomain.ErrInvalidTaskOutput)
+	}
+	skeleton, err := upstreamSkeleton(node, latest, artifacts)
+	if err != nil {
+		return err
+	}
+	want := skeleton.SlotIDs(kind)
+	got := make([]string, 0, len(filled.FilledSlots))
+	for _, slot := range filled.FilledSlots {
+		got = append(got, slot.ID)
+	}
+	sort.Strings(got)
+	if !slices.Equal(want, got) {
+		return fmt.Errorf("%w: slot writer coverage mismatch", agentdomain.ErrInvalidTaskOutput)
+	}
+	return nil
+}
+
+func slotTypeForNode(nodeID string) (agentdomain.SlotType, bool) {
+	for _, kind := range []agentdomain.SlotType{agentdomain.SlotDialogue, agentdomain.SlotAction, agentdomain.SlotInteriority, agentdomain.SlotDescription, agentdomain.SlotTransition} {
+		if strings.HasSuffix(nodeID, string(kind)) {
+			return kind, true
+		}
+	}
+	return "", false
+}
+
+func upstreamSkeleton(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.ChapterSkeletonOutput, error) {
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		step, exists := latest[strings.TrimPrefix(selector, "node:")]
+		if !exists || step.Capability != agentdomain.CapabilitySkeletonWriter {
+			continue
+		}
+		artifact, exists := artifactByID(artifacts, step.PrimaryArtifactID)
+		if !exists {
+			break
+		}
+		decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterSkeleton, []byte(artifact.Content))
+		if err != nil {
+			return agentdomain.ChapterSkeletonOutput{}, err
+		}
+		return *decoded.(*agentdomain.ChapterSkeletonOutput), nil
+	}
+	return agentdomain.ChapterSkeletonOutput{}, fmt.Errorf("%w: skeleton input missing", agentdomain.ErrInvalidTaskOutput)
+}
+
+// persistMechanicalJoin 在整合模型调用前落盘确定性拼接，使整合失败也保留写作段结果。
+func (service *Service) persistMechanicalJoin(ctx context.Context, run agentdomain.Run, node FrozenNode, step agentdomain.RunStep, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.Artifact, error) {
+	if existing, ok := slotJoinArtifact(step.ID, artifacts); ok {
+		return existing, nil
+	}
+	skeleton, err := upstreamSkeleton(node, latest, artifacts)
+	if err != nil {
+		return agentdomain.Artifact{}, err
+	}
+	groups := make([]agentdomain.FillSlotOutput, 0, 5)
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		upstream, exists := latest[strings.TrimPrefix(selector, "node:")]
+		if !exists || upstream.Capability != agentdomain.CapabilitySlotWriter {
+			continue
+		}
+		artifact, exists := artifactByID(artifacts, upstream.PrimaryArtifactID)
+		if !exists {
+			return agentdomain.Artifact{}, errors.New("slot output artifact missing")
+		}
+		decoded, decodeErr := agentdomain.DecodeTaskOutput(agentdomain.TaskFillSlot, []byte(artifact.Content))
+		if decodeErr != nil {
+			return agentdomain.Artifact{}, decodeErr
+		}
+		groups = append(groups, *decoded.(*agentdomain.FillSlotOutput))
+	}
+	join, err := agentdomain.MechanicalJoin(skeleton, groups...)
+	if err != nil {
+		return agentdomain.Artifact{}, err
+	}
+	encoded, err := json.Marshal(join)
+	if err != nil {
+		return agentdomain.Artifact{}, err
+	}
+	artifact := newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactSlotJoin, string(encoded), service.clock.Now())
+	if err := service.store.SaveAgentStepBundle(context.WithoutCancel(ctx), agentdomain.StepBundle{Step: step, Artifacts: []agentdomain.Artifact{artifact}}); err != nil {
+		return agentdomain.Artifact{}, err
+	}
+	return artifact, nil
+}
+
+func slotJoinArtifact(stepID string, artifacts []agentdomain.Artifact) (agentdomain.Artifact, bool) {
+	for _, artifact := range artifacts {
+		if artifact.Kind == agentdomain.ArtifactSlotJoin && (stepID == "" || artifact.StepID == stepID) {
+			return artifact, true
+		}
+	}
+	return agentdomain.Artifact{}, false
+}
+
+func slotJoinArtifactForNode(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.Artifact, bool) {
+	if step, exists := latest[node.ID]; exists {
+		return slotJoinArtifact(step.ID, artifacts)
+	}
+	return agentdomain.Artifact{}, false
 }
 
 func validateModelReview(output agentdomain.TaskOutput, node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) error {
@@ -1647,10 +1823,12 @@ func mergeReviewContents(contents []string) (string, error) {
 
 func artifactKind(capability agentdomain.Capability) agentdomain.ArtifactKind {
 	switch capability {
-	case agentdomain.CapabilityStoryArchitect, agentdomain.CapabilityChapterPlanner:
+	case agentdomain.CapabilityStoryArchitect, agentdomain.CapabilityChapterPlanner, agentdomain.CapabilitySkeletonWriter:
 		return agentdomain.ArtifactPlan
-	case agentdomain.CapabilityProseWriter:
+	case agentdomain.CapabilityProseWriter, agentdomain.CapabilityIntegrationWriter:
 		return agentdomain.ArtifactDraft
+	case agentdomain.CapabilitySlotWriter:
+		return agentdomain.ArtifactStructuredOutput
 	case agentdomain.CapabilityBoundedRevision:
 		return agentdomain.ArtifactRevision
 	default:
