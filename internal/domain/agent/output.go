@@ -170,6 +170,70 @@ func (output ReviseDraftOutput) Validate() error {
 	return nil
 }
 
+// ResolutionVerdict 是独立验证者对某条问题在修订稿中实际状态的裁定。
+// 判定“已解决”必须附带修订稿中的证据，判定仍未解决不需要举证；
+// 这一不对称让默认方向从“通过”变为“证明后才通过”。
+type ResolutionVerdict struct {
+	FindingID      string        `json:"finding_id"`
+	VerifiedStatus FindingStatus `json:"verified_status"`
+	Rationale      string        `json:"rationale"`
+	Quote          string        `json:"quote,omitempty"`
+	ScopeStart     *int          `json:"scope_start,omitempty"`
+	ScopeEnd       *int          `json:"scope_end,omitempty"`
+}
+
+func (verdict ResolutionVerdict) Validate() error {
+	if blank(verdict.FindingID) || blank(verdict.Rationale) || !validFindingStatus(verdict.VerifiedStatus) {
+		return ErrInvalidTaskOutput
+	}
+	if (verdict.ScopeStart == nil) != (verdict.ScopeEnd == nil) {
+		return ErrInvalidTaskOutput
+	}
+	if verdict.ScopeStart != nil {
+		if *verdict.ScopeStart < 0 || *verdict.ScopeEnd <= *verdict.ScopeStart || blank(verdict.Quote) {
+			return ErrInvalidTaskOutput
+		}
+	}
+	if verdict.VerifiedStatus == FindingResolved && verdict.ScopeStart == nil {
+		return ErrInvalidTaskOutput
+	}
+	return nil
+}
+
+// RevisionVerdictOutput 是修订复核节点的输出：逐条裁定原问题，并登记修订引入的新问题。
+type RevisionVerdictOutput struct {
+	Summary     string              `json:"summary"`
+	Verdicts    []ResolutionVerdict `json:"verdicts"`
+	Regressions []ReviewFinding     `json:"regressions"`
+}
+
+func (output RevisionVerdictOutput) Validate() error {
+	if blank(output.Summary) || len(output.Verdicts) == 0 || len(output.Verdicts) > MaxResolutions ||
+		len(output.Regressions) > MaxReviewFindings {
+		return ErrInvalidTaskOutput
+	}
+	seen := make(map[string]bool, len(output.Verdicts)+len(output.Regressions))
+	for _, verdict := range output.Verdicts {
+		if err := verdict.Validate(); err != nil {
+			return err
+		}
+		if seen[verdict.FindingID] {
+			return ErrInvalidTaskOutput
+		}
+		seen[verdict.FindingID] = true
+	}
+	for _, regression := range output.Regressions {
+		if err := regression.Validate(); err != nil {
+			return err
+		}
+		if seen[regression.ID] {
+			return ErrInvalidTaskOutput
+		}
+		seen[regression.ID] = true
+	}
+	return nil
+}
+
 type RevisionChange struct {
 	FindingID    string `json:"finding_id"`
 	TargetRef    string `json:"target_ref,omitempty"`
@@ -250,6 +314,8 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 		output = &ReviseDraftOutput{}
 	case TaskReviseBlueprint:
 		output = &ReviseBlueprintOutput{}
+	case TaskVerifyRevision:
+		output = &RevisionVerdictOutput{}
 	default:
 		return nil, ErrInvalidTaskOutput
 	}

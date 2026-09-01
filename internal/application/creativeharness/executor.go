@@ -253,7 +253,7 @@ func errorsNoCandidate(workflowID string) error {
 }
 
 func applyCandidateEvidence(candidate *quality.HarnessCandidate, run agentdomain.Run, artifacts []agentdomain.Artifact) {
-	stepID := candidateStepID(run, candidate.Kind)
+	stepID := candidateStepID(run, artifacts, candidate.Kind)
 	for _, artifact := range artifacts {
 		if artifact.StepID != stepID || artifact.Kind != agentdomain.ArtifactQualityReport || !json.Valid([]byte(artifact.Content)) {
 			continue
@@ -272,19 +272,48 @@ func applyCandidateEvidence(candidate *quality.HarnessCandidate, run agentdomain
 				candidate.Metrics.Resolved++
 			}
 		}
+		if gate.Verification != nil {
+			candidate.Metrics.ClaimedResolved = gate.Verification.ClaimedResolved
+			candidate.Metrics.ConfirmedResolved = gate.Verification.ConfirmedResolved
+			candidate.Metrics.OverturnedResolutions = gate.Verification.Overturned
+			candidate.Metrics.RevisionRegressions = gate.Verification.Regressions
+		}
 		return
 	}
 }
 
-func candidateStepID(run agentdomain.Run, kind quality.HarnessCandidateKind) string {
-	var initial string
+// candidateStepID 选择候选的权威门禁步骤。
+// 存在已执行的修订复核时以复核结论为准；复核被条件跳过时退回修订步骤。
+func candidateStepID(run agentdomain.Run, artifacts []agentdomain.Artifact, kind quality.HarnessCandidateKind) string {
+	var initial, revision string
 	for _, step := range run.Steps {
 		if step.Capability == agentdomain.CapabilityStoryArchitect || step.Capability == agentdomain.CapabilityProseWriter {
 			initial = step.ID
 		}
-		if kind == quality.CandidateRevised && step.Capability == agentdomain.CapabilityBoundedRevision && step.Status == agentdomain.StepCompleted {
-			return step.ID
+		if kind != quality.CandidateRevised || step.Status != agentdomain.StepCompleted {
+			continue
+		}
+		switch step.Capability {
+		case agentdomain.CapabilityBoundedRevision:
+			revision = step.ID
+		case agentdomain.CapabilityRevisionVerify:
+			if executedVerification(step, artifacts) {
+				return step.ID
+			}
 		}
 	}
+	if revision != "" {
+		return revision
+	}
 	return initial
+}
+
+// executedVerification 区分真正执行的复核与条件未满足的跳过记录；跳过时主产物是质量报告。
+func executedVerification(step agentdomain.RunStep, artifacts []agentdomain.Artifact) bool {
+	for _, artifact := range artifacts {
+		if artifact.ID == step.PrimaryArtifactID {
+			return artifact.Kind == agentdomain.ArtifactReview
+		}
+	}
+	return false
 }

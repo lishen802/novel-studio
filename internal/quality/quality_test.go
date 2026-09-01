@@ -173,6 +173,80 @@ func TestReconcileAppliesResolutionAndKeepsNewFinalViolations(t *testing.T) {
 	}
 }
 
+// 修订模型声称已解决但未通过独立验证时，问题必须重新计入未解决，不能借自述通过门禁。
+func TestReconcileVerifiedOverturnsUnprovenResolution(t *testing.T) {
+	before := []agentdomain.ReviewFinding{
+		testFinding("f1", agentdomain.SeverityBlocker, agentdomain.FindingOpen),
+		testFinding("f2", agentdomain.SeverityMajor, agentdomain.FindingOpen),
+	}
+	resolutions := []agentdomain.FindingResolution{
+		{FindingID: "f1", Status: agentdomain.FindingResolved, Note: "已改写"},
+		{FindingID: "f2", Status: agentdomain.FindingResolved, Note: "已改写"},
+	}
+	verdicts := []agentdomain.ResolutionVerdict{
+		{FindingID: "f1", VerifiedStatus: agentdomain.FindingOpen, Rationale: "改动未触及问题实质"},
+		{FindingID: "f2", VerifiedStatus: agentdomain.FindingResolved, Rationale: "修订稿已补足动机", Quote: "证据"},
+	}
+	result, report, err := ReconcileVerified(before, resolutions, verdicts, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result[0].Status != agentdomain.FindingOpen || result[1].Status != agentdomain.FindingResolved {
+		t.Fatalf("statuses = %#v", result)
+	}
+	if report.ClaimedResolved != 2 || report.ConfirmedResolved != 1 || report.Overturned != 1 {
+		t.Fatalf("verification report = %+v", report)
+	}
+	if Decide(StageFinal, result, true, true).Status != agentdomain.QualityBlocked {
+		t.Fatal("overturned blocker must keep the run blocked")
+	}
+}
+
+// 验证者不能把修订模型自己都未声称解决的问题升级为已解决。
+func TestReconcileVerifiedCannotUpgradeUnclaimedResolution(t *testing.T) {
+	before := []agentdomain.ReviewFinding{testFinding("f1", agentdomain.SeverityMajor, agentdomain.FindingOpen)}
+	resolutions := []agentdomain.FindingResolution{{FindingID: "f1", Status: agentdomain.FindingRetained, Note: "保留"}}
+	verdicts := []agentdomain.ResolutionVerdict{{FindingID: "f1", VerifiedStatus: agentdomain.FindingResolved, Rationale: "认为已解决", Quote: "证据"}}
+	result, report, err := ReconcileVerified(before, resolutions, verdicts, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result[0].Status != agentdomain.FindingRetained {
+		t.Fatalf("status = %s", result[0].Status)
+	}
+	if report.ClaimedResolved != 0 || report.ConfirmedResolved != 0 || report.Overturned != 0 {
+		t.Fatalf("verification report = %+v", report)
+	}
+}
+
+// 修订引入的回归与最终 lint 一并计入未解决，缺失裁定必须拒绝而不是默认放行。
+func TestReconcileVerifiedMergesRegressionsAndRejectsMissingVerdict(t *testing.T) {
+	before := []agentdomain.ReviewFinding{testFinding("f1", agentdomain.SeverityMinor, agentdomain.FindingOpen)}
+	resolutions := []agentdomain.FindingResolution{{FindingID: "f1", Status: agentdomain.FindingResolved, Note: "已改写"}}
+	verdicts := []agentdomain.ResolutionVerdict{{FindingID: "f1", VerifiedStatus: agentdomain.FindingResolved, Rationale: "确认", Quote: "证据"}}
+	regression := testFinding("revision-regression-1", agentdomain.SeverityMajor, agentdomain.FindingOpen)
+	lint := testFinding("final:new", agentdomain.SeverityMinor, agentdomain.FindingOpen)
+
+	result, report, err := ReconcileVerified(before, resolutions, verdicts,
+		[]agentdomain.ReviewFinding{regression}, []agentdomain.ReviewFinding{lint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 3 || report.Regressions != 1 {
+		t.Fatalf("result = %#v report = %+v", result, report)
+	}
+	if Decide(StageFinal, result, true, true).Status != agentdomain.QualityNeedsReview {
+		t.Fatal("revision regression must keep the run out of passed")
+	}
+	if _, _, err := ReconcileVerified(before, resolutions, nil, nil, nil); !errors.Is(err, ErrInvalidReconciliation) {
+		t.Fatalf("missing verdict error = %v", err)
+	}
+	duplicate := testFinding("f1", agentdomain.SeverityMajor, agentdomain.FindingOpen)
+	if _, _, err := ReconcileVerified(before, resolutions, verdicts, []agentdomain.ReviewFinding{duplicate}, nil); !errors.Is(err, ErrInvalidReconciliation) {
+		t.Fatalf("duplicate regression error = %v", err)
+	}
+}
+
 func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
 	registry, err := BuiltinRegistry()

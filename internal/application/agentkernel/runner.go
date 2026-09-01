@@ -986,6 +986,19 @@ func renderPrompt(
 			values[variable] = input.AuthorInstruction
 		case "Context":
 			values[variable] = assembled
+		case "Changes":
+			if node.Capability != agentdomain.CapabilityRevisionVerify {
+				return "", fmt.Errorf("prompt variable %s has no input", variable)
+			}
+			_, _, changes, _, inputErr := verificationInputs(node, latest, artifacts)
+			if inputErr != nil {
+				return "", inputErr
+			}
+			evidence, encodeErr := changeEvidence(changes)
+			if encodeErr != nil {
+				return "", encodeErr
+			}
+			values[variable] = evidence
 		default:
 			if variable == "Review" && len(reviewContents) > 1 {
 				merged, mergeErr := mergeReviewContents(reviewContents)
@@ -1066,6 +1079,8 @@ func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.C
 			return agentdomain.TaskReviseBlueprint
 		}
 		return agentdomain.TaskReviseDraft
+	case agentdomain.CapabilityRevisionVerify:
+		return agentdomain.TaskVerifyRevision
 	default:
 		return workflowKind
 	}
@@ -1082,6 +1097,12 @@ func decodeNodeOutput(
 ) (agentdomain.TaskOutput, error) {
 	if node.Capability == agentdomain.CapabilityBoundedRevision && kind == agentdomain.TaskReviseDraft {
 		return decodeDraftRevisionOutput(node, latest, artifacts, content)
+	}
+	if node.Capability == agentdomain.CapabilityRevisionVerify {
+		if kind != agentdomain.TaskVerifyRevision {
+			return nil, agentdomain.ErrInvalidTaskOutput
+		}
+		return decodeRevisionVerdictOutput(node, latest, artifacts, content)
 	}
 	if node.Capability != agentdomain.CapabilityContinuityReview &&
 		node.Capability != agentdomain.CapabilityContentReview &&
@@ -1287,9 +1308,61 @@ func validateCapabilityOutput(
 		return validateModelReview(output, node, latest, artifacts)
 	case agentdomain.CapabilityBoundedRevision:
 		return validateBoundedRevision(output, node, input, latest, artifacts)
+	case agentdomain.CapabilityRevisionVerify:
+		return validateRevisionVerify(output, node, latest, artifacts)
 	default:
 		return nil
 	}
+}
+
+// validateRevisionVerify 确认裁定覆盖冻结问题清单，且引文范围指向真实修订稿。
+func validateRevisionVerify(
+	output agentdomain.TaskOutput,
+	node FrozenNode,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+) error {
+	verdict, ok := output.(*agentdomain.RevisionVerdictOutput)
+	if !ok {
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	findings, _, _, revised, err := verificationInputs(node, latest, artifacts)
+	if err != nil {
+		return err
+	}
+	if len(verdict.Verdicts) != len(findings) {
+		return errors.New("revision verdicts do not cover review findings")
+	}
+	want := make(map[string]struct{}, len(findings))
+	for _, finding := range findings {
+		want[finding.ID] = struct{}{}
+	}
+	for _, item := range verdict.Verdicts {
+		if _, exists := want[item.FindingID]; !exists {
+			return fmt.Errorf("revision verdict references unknown finding %s", item.FindingID)
+		}
+	}
+	runes := []rune(revised)
+	for _, item := range verdict.Verdicts {
+		if item.ScopeStart == nil {
+			continue
+		}
+		if *item.ScopeEnd > len(runes) || string(runes[*item.ScopeStart:*item.ScopeEnd]) != item.Quote {
+			return fmt.Errorf("revision verdict %s has invalid text range", item.FindingID)
+		}
+	}
+	for _, regression := range verdict.Regressions {
+		if regression.Source != agentdomain.FindingModelReview {
+			return fmt.Errorf("regression finding %s has invalid source", regression.ID)
+		}
+		if regression.ScopeStart == nil {
+			continue
+		}
+		if *regression.ScopeEnd > len(runes) || string(runes[*regression.ScopeStart:*regression.ScopeEnd]) != regression.Quote {
+			return fmt.Errorf("regression finding %s has invalid text range", regression.ID)
+		}
+	}
+	return nil
 }
 
 func validateChapterDirector(output agentdomain.TaskOutput, input persistedInput) error {
@@ -1528,7 +1601,7 @@ func revisionInputs(node FrozenNode, latest map[string]agentdomain.RunStep, arti
 	if candidate == "" {
 		return "", "", errors.New("missing review candidate")
 	}
-	if node.Capability == agentdomain.CapabilityBoundedRevision && len(reviews) == 0 {
+	if (node.Capability == agentdomain.CapabilityBoundedRevision || node.Capability == agentdomain.CapabilityRevisionVerify) && len(reviews) == 0 {
 		return "", "", errors.New("missing structured review")
 	}
 	review, err := mergeReviewContents(reviews)
@@ -1606,8 +1679,12 @@ func shouldRunNode(condition string, latest map[string]agentdomain.RunStep) bool
 
 func aggregateQuality(compiled CompiledWorkflow, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) agentdomain.QualityStatus {
 	if result, ok := latest[compiled.ResultNodeID]; ok {
-		if artifact, exists := artifactByID(artifacts, result.PrimaryArtifactID); exists && artifact.Kind == agentdomain.ArtifactRevision {
-			return result.QualityStatus
+		if artifact, exists := artifactByID(artifacts, result.PrimaryArtifactID); exists {
+			// 修订复核是最终权威；节点被条件跳过时主产物是质量报告，此时退回逐节点聚合。
+			if artifact.Kind == agentdomain.ArtifactRevision ||
+				(artifact.Kind == agentdomain.ArtifactReview && result.Capability == agentdomain.CapabilityRevisionVerify) {
+				return result.QualityStatus
+			}
 		}
 	}
 	result := agentdomain.QualityPassed

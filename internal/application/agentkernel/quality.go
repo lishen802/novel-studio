@@ -68,6 +68,8 @@ func (service *Service) applyQuality(
 		return service.gateReview(run, node, step, latest, artifacts, decoded, modelFindings)
 	case agentdomain.CapabilityBoundedRevision:
 		return service.gateRevision(run, input, compiled, node, step, latest, artifacts, decoded, primaryContent, modelFindings)
+	case agentdomain.CapabilityRevisionVerify:
+		return service.gateVerification(run, input, compiled, node, step, latest, artifacts, decoded, primaryContent, modelFindings)
 	default:
 		return primaryContent, modelQuality, modelFindings, nil, nil
 	}
@@ -196,6 +198,91 @@ func (service *Service) gateRevision(
 	qualityArtifacts = append(qualityArtifacts, gateArtifact)
 	findings := append(existing, findingRecords(lintReport.Findings, run, step, service.clock.Now())...)
 	return primaryContent, gate.Status, findings, qualityArtifacts, nil
+}
+
+// gateVerification 用独立验证结论取代修订自述作为最终质量结论。
+// 修订模型声称已解决只是待核实声明；只有验证者也确认，问题才退出未解决计数。
+func (service *Service) gateVerification(
+	run agentdomain.Run,
+	input persistedInput,
+	compiled CompiledWorkflow,
+	node FrozenNode,
+	step agentdomain.RunStep,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+	decoded agentdomain.TaskOutput,
+	primaryContent string,
+	existing []agentdomain.ReviewFindingRecord,
+) (string, agentdomain.QualityStatus, []agentdomain.ReviewFindingRecord, []agentdomain.Artifact, error) {
+	verdict, ok := decoded.(*agentdomain.RevisionVerdictOutput)
+	if !ok {
+		return "", "", nil, nil, agentdomain.ErrInvalidTaskOutput
+	}
+	findings, resolutions, _, revised, err := verificationInputs(node, latest, artifacts)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	var lintReport quality.Report
+	if run.TaskKind == agentdomain.TaskChapterDraft || run.TaskKind == agentdomain.TaskBaselineDraft {
+		lintReport, err = service.quality.Evaluate(compiled.QualityPolicyVersion, quality.Input{
+			Namespace: step.ID, Stage: quality.StageFinal, Text: revised, Spec: input.QualitySpec,
+		})
+		if err != nil {
+			return "", "", nil, nil, fmt.Errorf("%w: %v", ErrQualityPolicy, err)
+		}
+	}
+	allFindings, verification, err := quality.ReconcileVerified(
+		findings, resolutions, verdict.Verdicts, verdict.Regressions, lintReport.Findings,
+	)
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("%w: %v", ErrInvalidOutput, err)
+	}
+	reviewComplete := !lintReport.Truncated
+	if priorGate, found := verificationPriorGate(node, latest, artifacts); found {
+		reviewComplete = reviewComplete && priorGate.ReviewComplete
+	}
+	gate := quality.Decide(quality.StageFinal, allFindings, reviewComplete, true)
+	gate.Verification = &verification
+	qualityArtifacts := make([]agentdomain.Artifact, 0, 2)
+	if lintReport.PolicyVersion != 0 {
+		lintArtifact, marshalErr := service.lintArtifact(run.ID, step.ID, lintReport)
+		if marshalErr != nil {
+			return "", "", nil, nil, marshalErr
+		}
+		qualityArtifacts = append(qualityArtifacts, lintArtifact)
+	}
+	gateArtifact, err := service.gateArtifact(run.ID, step.ID, gate)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	qualityArtifacts = append(qualityArtifacts, gateArtifact)
+	now := service.clock.Now()
+	records := append(existing, findingRecords(verdict.Regressions, run, step, now)...)
+	records = append(records, findingRecords(lintReport.Findings, run, step, now)...)
+	return primaryContent, gate.Status, records, qualityArtifacts, nil
+}
+
+// verificationPriorGate 继承修订门禁的审阅完整性，避免上游截断在复核阶段被遗忘。
+func verificationPriorGate(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (quality.GateReport, bool) {
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		step, exists := latest[strings.TrimPrefix(selector, "node:")]
+		if !exists || step.Capability != agentdomain.CapabilityBoundedRevision {
+			continue
+		}
+		for _, artifact := range artifacts {
+			if artifact.StepID != step.ID || artifact.Kind != agentdomain.ArtifactQualityReport {
+				continue
+			}
+			var report quality.GateReport
+			if json.Unmarshal([]byte(artifact.Content), &report) == nil {
+				return report, true
+			}
+		}
+	}
+	return quality.GateReport{}, false
 }
 
 func revisionResolutions(output agentdomain.TaskOutput) ([]agentdomain.FindingResolution, error) {

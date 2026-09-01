@@ -3,6 +3,7 @@ package agentassets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/application/agentkernel"
@@ -37,9 +38,9 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacyHashes := map[string]string{
-		BaselineWorkflowID:         "d3b99323219a347153d613743dad46e50f5dfe7f060c8b531464b61c845f2b5b",
-		QualityChapterWorkflowID:   "8cd791a01ce61989c61f4c4f057cb040cd0f6d1e28f06ef116e5022285582a68",
-		QualityBlueprintWorkflowID: "2ae580fe57ef8ad6960717925b098c545359a419c8b0406d8533d25410fadeba",
+		BaselineWorkflowID + "@1":         "d3b99323219a347153d613743dad46e50f5dfe7f060c8b531464b61c845f2b5b",
+		QualityChapterWorkflowID + "@1":   "8cd791a01ce61989c61f4c4f057cb040cd0f6d1e28f06ef116e5022285582a68",
+		QualityBlueprintWorkflowID + "@1": "2ae580fe57ef8ad6960717925b098c545359a419c8b0406d8533d25410fadeba",
 	}
 	cases := []struct {
 		id      string
@@ -51,15 +52,19 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{QualityBlueprintWorkflowID, QualityBlueprintWorkflowVersion, []string{"blueprint", "review", "revision"}},
 		{EnhancedChapterWorkflowID, EnhancedChapterWorkflowVersion, []string{"director", "draft", "review", "revision"}},
 		{SplitReviewWorkflowID, SplitReviewWorkflowVersion, []string{"director", "draft", "content", "continuity", "style", "revision"}},
+		{QualityChapterWorkflowID, VerifiedChapterWorkflowVersion, []string{"plan", "draft", "review", "revision", "verify"}},
+		{QualityBlueprintWorkflowID, VerifiedBlueprintWorkflowVersion, []string{"blueprint", "review", "revision", "verify"}},
+		{EnhancedChapterWorkflowID, VerifiedEnhancedWorkflowVersion, []string{"director", "draft", "review", "revision", "verify"}},
+		{SplitReviewWorkflowID, VerifiedSplitReviewWorkflowVersion, []string{"director", "draft", "content", "continuity", "style", "revision", "verify"}},
 	}
 	for _, test := range cases {
 		compiled, compileErr := agentkernel.Compile(context.Background(), agentkernel.Registries{
 			Workflows: registry, Prompts: registry, Schemas: registry, Assemblers: registry,
 		}, test.id, test.version)
 		if compileErr != nil {
-			t.Fatalf("compile %s: %v", test.id, compileErr)
+			t.Fatalf("compile %s@%d: %v", test.id, test.version, compileErr)
 		}
-		if want, ok := legacyHashes[test.id]; ok && compiled.Workflow.Hash != want {
+		if want, ok := legacyHashes[fmt.Sprintf("%s@%d", test.id, test.version)]; ok && compiled.Workflow.Hash != want {
 			t.Fatalf("%s hash = %s, want immutable v1 hash %s", test.id, compiled.Workflow.Hash, want)
 		}
 		if len(compiled.Nodes) != len(test.nodes) {
