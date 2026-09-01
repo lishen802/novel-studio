@@ -463,9 +463,17 @@ func (service *Service) executeNode(
 	if decodeErr != nil {
 		var repairInputTokens, repairOutputTokens int
 		var repairRequestID string
+		repairRemaining := remaining - step.InputTokens - step.OutputTokens
+		repairAllowance := min(compiled.RepairReserve, repairRemaining)
+		if run.TokenBudgetUnlimited {
+			// 无限预算方案仍保留节点级技术封顶，但修复必须有能力重写与原节点
+			// 同等规模的完整结构，不能被较小的通用预留截断；若实际输出已
+			// 超过节点建议值，则以 Provider 回报的实际用量作为下限。
+			repairAllowance = min(max(compiled.RepairReserve, node.MaxOutputTokens, step.OutputTokens), repairRemaining)
+		}
 		decoded, generated.Text, produced, repairInputTokens, repairOutputTokens, repairRequestID, decodeErr = service.repairOutput(
 			ctx, run, step, node, schema, generated.Text, generated.ProviderRequestID, decoded, produced, decodeOutput,
-			min(compiled.RepairReserve, remaining-step.InputTokens-step.OutputTokens),
+			repairAllowance,
 		)
 		step.InputTokens += repairInputTokens
 		step.OutputTokens += repairOutputTokens
