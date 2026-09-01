@@ -1094,7 +1094,7 @@ func decodeNodeOutput(
 	if err != nil {
 		return nil, err
 	}
-	if err := normalizeModelReview(&review, candidate); err != nil {
+	if err := normalizeModelReview(&review, candidate, reviewCandidateRef(node, latest)); err != nil {
 		return nil, err
 	}
 	if err := review.Validate(); err != nil {
@@ -1103,19 +1103,26 @@ func decodeNodeOutput(
 	return &review, nil
 }
 
-// normalizeModelReview 将模型给出的引文落到候选文本，并由应用重算状态。
-func normalizeModelReview(review *agentdomain.ReviewBundleOutput, candidate string) error {
+// normalizeModelReview 将模型审阅归一为可信的应用状态与可追溯证据。
+func normalizeModelReview(review *agentdomain.ReviewBundleOutput, candidate, fallbackRef string) error {
 	if review == nil {
 		return agentdomain.ErrInvalidTaskOutput
 	}
+	if strings.TrimSpace(review.Summary) == "" {
+		if len(review.Findings) == 0 {
+			review.Summary = "模型审阅未发现问题。"
+		} else {
+			review.Summary = fmt.Sprintf("模型审阅返回 %d 个问题。", len(review.Findings))
+		}
+	}
 	qualityStatus := agentdomain.QualityPassed
+	seenIDs := make(map[string]struct{}, len(review.Findings))
 	for index := range review.Findings {
 		finding := &review.Findings[index]
-		if finding.Source != agentdomain.FindingModelReview {
-			return fmt.Errorf("review finding %s has invalid source", finding.ID)
-		}
+		finding.ID = normalizedReviewFindingID(finding.ID, index, seenIDs)
+		finding.Source = agentdomain.FindingModelReview
 		finding.Status = agentdomain.FindingOpen
-		if err := normalizeFindingEvidence(finding, candidate); err != nil {
+		if err := normalizeFindingEvidence(finding, candidate, fallbackRef); err != nil {
 			return fmt.Errorf("review finding %s: %w", finding.ID, err)
 		}
 		switch finding.Severity {
@@ -1135,11 +1142,52 @@ func normalizeModelReview(review *agentdomain.ReviewBundleOutput, candidate stri
 	return nil
 }
 
-func normalizeFindingEvidence(finding *agentdomain.ReviewFinding, candidate string) error {
+// normalizedReviewFindingID 保留首个有效模型 ID，并确定性修复空值或重复值。
+func normalizedReviewFindingID(modelID string, index int, seen map[string]struct{}) string {
+	id := strings.TrimSpace(modelID)
+	if id != "" {
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			return id
+		}
+	}
+	for suffix := index + 1; ; suffix++ {
+		id = fmt.Sprintf("model-review-%d", suffix)
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			return id
+		}
+	}
+}
+
+// reviewCandidateRef 根据候选产物能力生成文档级结构引用，供无可靠引文时降级。
+func reviewCandidateRef(node FrozenNode, latest map[string]agentdomain.RunStep) string {
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		step, ok := latest[strings.TrimPrefix(selector, "node:")]
+		if !ok {
+			continue
+		}
+		switch step.Capability {
+		case agentdomain.CapabilityStoryArchitect:
+			return "blueprint:document"
+		case agentdomain.CapabilityProseWriter:
+			return "chapter:document"
+		}
+	}
+	return "candidate:document"
+}
+
+func normalizeFindingEvidence(finding *agentdomain.ReviewFinding, candidate, fallbackRef string) error {
+	if strings.TrimSpace(fallbackRef) == "" {
+		return errors.New("missing fallback evidence reference")
+	}
 	quote := finding.Quote
 	if strings.TrimSpace(quote) == "" {
 		if strings.TrimSpace(finding.ConstraintRef) == "" {
-			return errors.New("missing quote and constraint reference")
+			finding.ConstraintRef = fallbackRef
 		}
 		finding.Quote, finding.ScopeStart, finding.ScopeEnd = "", nil, nil
 		return nil
@@ -1147,15 +1195,19 @@ func normalizeFindingEvidence(finding *agentdomain.ReviewFinding, candidate stri
 	candidateRunes, quoteRunes := []rune(candidate), []rune(quote)
 	starts := quoteRuneStarts(candidateRunes, quoteRunes)
 	if len(starts) == 0 {
-		if strings.TrimSpace(finding.ConstraintRef) != "" {
-			finding.Quote, finding.ScopeStart, finding.ScopeEnd = "", nil, nil
-			return nil
+		if strings.TrimSpace(finding.ConstraintRef) == "" {
+			finding.ConstraintRef = fallbackRef
 		}
-		return errors.New("quoted evidence is not present in candidate")
+		finding.Quote, finding.ScopeStart, finding.ScopeEnd = "", nil, nil
+		return nil
 	}
 	start, ok := chooseQuoteStart(starts, finding.ScopeStart)
 	if !ok {
-		return errors.New("quoted evidence is ambiguous")
+		if strings.TrimSpace(finding.ConstraintRef) == "" {
+			finding.ConstraintRef = fallbackRef
+		}
+		finding.Quote, finding.ScopeStart, finding.ScopeEnd = "", nil, nil
+		return nil
 	}
 	end := start + len(quoteRunes)
 	finding.ScopeStart, finding.ScopeEnd = &start, &end

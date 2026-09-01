@@ -86,29 +86,59 @@ func TestDecodeModelReviewNormalizesRuneRangeAndModelStates(t *testing.T) {
 	}
 }
 
-func TestNormalizeModelReviewUsesHintForRepeatedQuoteAndRejectsAmbiguity(t *testing.T) {
+func TestNormalizeModelReviewUsesHintForRepeatedQuoteAndFallsBackOnAmbiguity(t *testing.T) {
 	candidate := "钟响。钟响。门开。"
 	hint := 3
 	finding := agentdomain.ReviewFinding{Quote: "钟响", ScopeStart: &hint}
-	if err := normalizeFindingEvidence(&finding, candidate); err != nil {
+	if err := normalizeFindingEvidence(&finding, candidate, "chapter:document"); err != nil {
 		t.Fatalf("normalizeFindingEvidence: %v", err)
 	}
 	if finding.ScopeStart == nil || *finding.ScopeStart != 3 {
 		t.Fatalf("scope start = %#v, want 3", finding.ScopeStart)
 	}
 	ambiguous := agentdomain.ReviewFinding{Quote: "钟响"}
-	if err := normalizeFindingEvidence(&ambiguous, candidate); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("ambiguous evidence error = %v", err)
+	if err := normalizeFindingEvidence(&ambiguous, candidate, "chapter:document"); err != nil {
+		t.Fatalf("ambiguous evidence fallback: %v", err)
+	}
+	if ambiguous.Quote != "" || ambiguous.ConstraintRef != "chapter:document" || ambiguous.ScopeStart != nil || ambiguous.ScopeEnd != nil {
+		t.Fatalf("ambiguous evidence = %#v", ambiguous)
 	}
 }
 
 func TestNormalizeModelReviewFallsBackToConstraintReference(t *testing.T) {
 	finding := agentdomain.ReviewFinding{Quote: "模型概括而非原文", ConstraintRef: "blueprint:core_conflict"}
-	if err := normalizeFindingEvidence(&finding, "真实候选正文"); err != nil {
+	if err := normalizeFindingEvidence(&finding, "真实候选正文", "blueprint:document"); err != nil {
 		t.Fatalf("normalizeFindingEvidence: %v", err)
 	}
 	if finding.Quote != "" || finding.ScopeStart != nil || finding.ScopeEnd != nil {
 		t.Fatalf("constraint fallback kept invalid range: %#v", finding)
+	}
+}
+
+func TestDecodeModelReviewRepairsIncompleteFindingContract(t *testing.T) {
+	candidate := `{"title":"盐路","premise":"守关人必须放走仇敌","themes":["代价"],"setting":"潮汐关","characters":[{"name":"阿绫","role":"守关人","goal":"守城","motivation":"赎罪","conflict":"仇敌求援","arc":"学会取舍"}],"core_conflict":"守城与救人冲突","plot_beats":["敌船靠岸"],"ending_direction":"开关救人","chapter_objectives":["作出选择"]}`
+	node := FrozenNode{Capability: agentdomain.CapabilityContinuityReview, InputSelectors: []string{"node:blueprint"}}
+	latest := map[string]agentdomain.RunStep{"blueprint": {
+		NodeID: "blueprint", Capability: agentdomain.CapabilityStoryArchitect, Status: agentdomain.StepCompleted, PrimaryArtifactID: "artifact-1",
+	}}
+	artifacts := []agentdomain.Artifact{{ID: "artifact-1", Content: candidate}}
+	content := `{"quality_status":"passed","summary":" ","findings":[{"id":"f1","category":"causality","severity":"major","status":"resolved","source":"deterministic_lint","message":"代价不足"},{"id":"f1","category":"motivation","severity":"minor","status":"resolved","source":"author_feedback","message":"动机偏弱","quote":"模型概括而非原文"}]}`
+
+	decoded, err := decodeNodeOutput(agentdomain.TaskReviewBundle, node, latest, artifacts, content)
+	if err != nil {
+		t.Fatalf("decodeNodeOutput: %v", err)
+	}
+	review := decoded.(*agentdomain.ReviewBundleOutput)
+	if review.Summary != "模型审阅返回 2 个问题。" || review.QualityStatus != agentdomain.QualityNeedsReview {
+		t.Fatalf("normalized review = %#v", review)
+	}
+	if review.Findings[0].ID != "f1" || review.Findings[1].ID == "f1" || review.Findings[0].ConstraintRef != "blueprint:document" || review.Findings[1].ConstraintRef != "blueprint:document" {
+		t.Fatalf("normalized findings = %#v", review.Findings)
+	}
+	for _, finding := range review.Findings {
+		if finding.Source != agentdomain.FindingModelReview || finding.Status != agentdomain.FindingOpen || finding.Quote != "" {
+			t.Fatalf("normalized finding state = %#v", finding)
+		}
 	}
 }
 
