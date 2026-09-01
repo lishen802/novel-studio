@@ -1,9 +1,11 @@
 package agentkernel
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -13,6 +15,144 @@ type blueprintFieldChange struct {
 	ref    string
 	before string
 	after  string
+}
+
+// decodeBlueprintRevisionOutput 在严格领域校验前修复模型常见的追踪 ID 与安全结构漂移。
+func decodeBlueprintRevisionOutput(
+	node FrozenNode,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+	content string,
+) (agentdomain.TaskOutput, error) {
+	var revision agentdomain.ReviseBlueprintOutput
+	decoder := json.NewDecoder(bytes.NewReader([]byte(content)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&revision); err != nil {
+		return nil, fmt.Errorf("%w: %v", agentdomain.ErrInvalidTaskOutput, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, agentdomain.ErrInvalidTaskOutput
+	}
+	original, reviewJSON, err := revisionInputs(node, latest, artifacts)
+	if err != nil {
+		return nil, err
+	}
+	decodedReview, err := agentdomain.DecodeTaskOutput(agentdomain.TaskReviewBundle, []byte(reviewJSON))
+	if err != nil {
+		return nil, err
+	}
+	if err := normalizeBlueprintRevision(decodedReview.(*agentdomain.ReviewBundleOutput), original, &revision); err != nil {
+		return nil, err
+	}
+	if err := revision.Validate(); err != nil {
+		return nil, err
+	}
+	return &revision, nil
+}
+
+// normalizeBlueprintRevision 将可确定恢复的格式漂移收口，并只保留能映射到方案字段的修订。
+func normalizeBlueprintRevision(
+	review *agentdomain.ReviewBundleOutput,
+	original string,
+	revision *agentdomain.ReviseBlueprintOutput,
+) error {
+	if review == nil || revision == nil || strings.TrimSpace(original) == "" {
+		return agentdomain.ErrInvalidTaskOutput
+	}
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryBlueprint, []byte(original))
+	if err != nil {
+		return err
+	}
+	before := decoded.(*agentdomain.StoryBlueprintOutput)
+	normalizeBlueprintShape(&revision.Blueprint, *before)
+	changed := make(map[string]blueprintFieldChange)
+	for _, field := range blueprintFields(*before, revision.Blueprint) {
+		if field.before != field.after {
+			changed[field.ref] = field
+		}
+	}
+	assigned := assignDraftResolutions(review.Findings, revision.Resolutions)
+	usedChanges := make([]bool, len(revision.Changes))
+	normalizedChanges := make([]agentdomain.RevisionChange, 0, len(review.Findings))
+	for index := range assigned {
+		item := &assigned[index]
+		resolution := &item.resolution
+		if strings.TrimSpace(resolution.Note) == "" {
+			resolution.Note = "模型未提供处理说明。"
+		}
+		if resolution.Status != agentdomain.FindingResolved &&
+			resolution.Status != agentdomain.FindingRetained &&
+			resolution.Status != agentdomain.FindingCannotResolve {
+			resolution.Status = agentdomain.FindingCannotResolve
+		}
+		if resolution.Status != agentdomain.FindingResolved {
+			continue
+		}
+		changeIndex := matchingDraftChange(revision.Changes, usedChanges, item.modelID, resolution.FindingID)
+		if changeIndex < 0 {
+			changeIndex = nextUnusedResolution(usedChanges)
+		}
+		var declared agentdomain.RevisionChange
+		if changeIndex >= 0 {
+			declared = revision.Changes[changeIndex]
+		}
+		field, resolveErr := resolveBlueprintField(review.Findings[index], declared, changed)
+		if resolveErr != nil {
+			resolution.Status = agentdomain.FindingCannotResolve
+			continue
+		}
+		if changeIndex >= 0 {
+			usedChanges[changeIndex] = true
+		}
+		normalizedChanges = append(normalizedChanges, agentdomain.RevisionChange{
+			FindingID: resolution.FindingID, OriginalText: field.before, RevisedText: field.after,
+		})
+	}
+	revision.Resolutions = make([]agentdomain.FindingResolution, len(assigned))
+	for index := range assigned {
+		revision.Resolutions[index] = assigned[index].resolution
+	}
+	revision.Changes = normalizedChanges
+	return nil
+}
+
+// normalizeBlueprintShape 对空字段和重复列表做无歧义恢复，不替模型创造新方案内容。
+func normalizeBlueprintShape(target *agentdomain.StoryBlueprintOutput, fallback agentdomain.StoryBlueprintOutput) {
+	if strings.TrimSpace(target.Title) == "" {
+		target.Title = fallback.Title
+	}
+	if strings.TrimSpace(target.Positioning) == "" {
+		target.Positioning = fallback.Positioning
+	}
+	if strings.TrimSpace(target.CoreConflict) == "" {
+		target.CoreConflict = fallback.CoreConflict
+	}
+	if strings.TrimSpace(target.ProtagonistArc) == "" {
+		target.ProtagonistArc = fallback.ProtagonistArc
+	}
+	target.WorldRules = normalizeBlueprintList(target.WorldRules, fallback.WorldRules, 1)
+	target.MajorMilestones = normalizeBlueprintList(target.MajorMilestones, fallback.MajorMilestones, 3)
+}
+
+func normalizeBlueprintList(values, fallback []string, minimum int) []string {
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) < minimum || len(normalized) > agentdomain.MaxBlueprintItems {
+		return append([]string(nil), fallback...)
+	}
+	return normalized
 }
 
 // validateBlueprintRevision 按结构字段核对修订边界，并把模型证据归一化为精确字段前后值。

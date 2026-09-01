@@ -175,6 +175,34 @@ func TestQualityBlueprintWorkflowReturnsStructuredRevision(t *testing.T) {
 	}
 }
 
+func TestQualityBlueprintWorkflowNormalizesRevisionBeforeFormatRepair(t *testing.T) {
+	service, store, provider := newRunnerHarness(t, []providerReply{
+		{text: `{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`},
+		{text: `{"quality_status":"needs_review","summary":"两处需要补强","findings":[{"id":"f1","category":"causality","severity":"major","status":"open","source":"model_review","message":"冲突缺少代价","constraint_ref":"blueprint:core_conflict"},{"id":"f2","category":"pacing","severity":"major","status":"open","source":"model_review","message":"里程碑不足","constraint_ref":"blueprint:major_milestones"}]}`},
+		{text: `{"blueprint":{"title":"","positioning":"悬疑成长","core_conflict":"追查失踪并付出亲情代价","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路","潮汐决定航路"],"major_milestones":["失踪","追查","抉择","偿还代价"]},"resolutions":[{"finding_id":"issue","status":"resolved","note":""},{"finding_id":"issue","status":"resolved","note":"完成"}],"changes":[{"finding_id":"issue","original_text":"不精确","revised_text":"也不精确"}]}`},
+	})
+	request := qualityRequest(agentassets.QualityBlueprintWorkflowID, agentassets.QualityBlueprintWorkflowVersion, 11500)
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if err != nil {
+		t.Fatalf("ExecuteRun: %v", err)
+	}
+	if completed.Status != agentdomain.RunCompleted || len(provider.requests) != 3 {
+		t.Fatalf("completed=%#v requests=%d", completed, len(provider.requests))
+	}
+	if countArtifacts(store.artifacts, agentdomain.ArtifactFormatRepair) != 0 {
+		t.Fatalf("unexpected paid format repair: %#v", store.artifacts)
+	}
+	last := completed.Steps[len(completed.Steps)-1]
+	artifact, ok := artifactByID(store.artifacts, last.PrimaryArtifactID)
+	if !ok || !strings.Contains(artifact.Content, "追查失踪并付出亲情代价") {
+		t.Fatalf("blueprint revision artifact=%#v", artifact)
+	}
+}
+
 func TestQualityBlueprintWorkflowNormalizesReviewEvidenceBeforeRevision(t *testing.T) {
 	service, store, provider := newRunnerHarness(t, []providerReply{
 		{text: `{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`},
