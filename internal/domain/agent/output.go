@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -298,7 +296,8 @@ func validateRevisionTrace(resolutions []FindingResolution, changes []RevisionCh
 	return nil
 }
 
-// DecodeTaskOutput 严格解码模型 JSON，拒绝未知字段、尾随内容和领域约束不合法的结果。
+// DecodeTaskOutput 把模型文本投影到任务契约：取出第一个 JSON 值并忽略未知字段，
+// 再用领域 Validate 拒绝缺字段、空值和重复。围栏、尾随说明和额外键属于传输噪声。
 func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 	var output TaskOutput
 	switch kind {
@@ -323,26 +322,53 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 	default:
 		return nil, ErrInvalidTaskOutput
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(output); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidTaskOutput, err)
-	}
-	if err := ensureJSONEOF(decoder); err != nil {
+	if err := UnmarshalModelJSON(data, output); err != nil {
 		return nil, err
 	}
 	if err := output.Validate(); err != nil {
-		return nil, err
+		if errors.Is(err, ErrInvalidTaskOutput) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidTaskOutput, err)
 	}
 	return output, nil
 }
 
-func ensureJSONEOF(decoder *json.Decoder) error {
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return ErrInvalidTaskOutput
+// UnmarshalModelJSON 从模型文本取出第一个 JSON 值并解码到 dest。
+// 未知字段按编码/json 默认规则忽略，不把传输层噪声当成契约失败。
+func UnmarshalModelJSON(data []byte, dest any) error {
+	payload, err := extractJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidTaskOutput, err)
+	}
+	if err := json.Unmarshal(payload, dest); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidTaskOutput, err)
 	}
 	return nil
+}
+
+func extractJSONValue(data []byte) ([]byte, error) {
+	text := strings.TrimSpace(strings.TrimPrefix(string(data), "\uFEFF"))
+	if strings.HasPrefix(text, "```") {
+		text = strings.TrimPrefix(text, "```")
+		if newline := strings.IndexByte(text, '\n'); newline >= 0 {
+			text = text[newline+1:]
+		}
+		if end := strings.LastIndex(text, "```"); end >= 0 {
+			text = text[:end]
+		}
+		text = strings.TrimSpace(text)
+	}
+	start := strings.IndexAny(text, "{[")
+	if start < 0 {
+		return nil, ErrInvalidTaskOutput
+	}
+	decoder := json.NewDecoder(strings.NewReader(text[start:]))
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func hasBlankOrDuplicate(values []string) bool {

@@ -85,13 +85,23 @@ func TestDecodeTaskOutputIsStrict(t *testing.T) {
 	if output.(*ChapterDraftOutput).Title != "第一章" {
 		t.Fatal("unexpected output")
 	}
-	for _, invalid := range [][]byte{
-		[]byte(`{"title":"第一章","body":"正文","completion_note":"完成","unknown":true}`),
-		[]byte(`{"title":"第一章","body":"","completion_note":"完成"}`),
-		[]byte(`{"title":"第一章","body":"正文","completion_note":"完成"}{}`),
-	} {
-		if _, err := DecodeTaskOutput(TaskChapterDraft, invalid); !errors.Is(err, ErrInvalidTaskOutput) {
-			t.Fatalf("expected strict error, got %v", err)
+	if _, err := DecodeTaskOutput(TaskChapterDraft, []byte(`{"title":"第一章","body":"","completion_note":"完成"}`)); !errors.Is(err, ErrInvalidTaskOutput) {
+		t.Fatal("expected empty body to fail domain validation")
+	}
+}
+
+func TestDecodeTaskOutputProjectsTransportNoiseOntoContract(t *testing.T) {
+	cases := [][]byte{
+		[]byte("```json\n{\"title\":\"第一章\",\"body\":\"雨落在门槛上。\",\"completion_note\":\"完成目标\",\"extra\":true}\n``` 说明到此结束"),
+		[]byte(`请查看结果 {"title":"第一章","body":"雨落在门槛上。","completion_note":"完成目标","note":"附加"} 以上为 JSON`),
+	}
+	for _, payload := range cases {
+		output, err := DecodeTaskOutput(TaskChapterDraft, payload)
+		if err != nil {
+			t.Fatalf("transport noise rejected: %v payload=%s", err, payload)
+		}
+		if output.(*ChapterDraftOutput).Title != "第一章" {
+			t.Fatalf("projected output = %+v", output)
 		}
 	}
 }

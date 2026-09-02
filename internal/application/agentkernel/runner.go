@@ -1,12 +1,10 @@
 package agentkernel
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"sort"
 	"strings"
@@ -481,7 +479,7 @@ func (service *Service) executeNode(
 		}
 		decoded, generated.Text, produced, repairInputTokens, repairOutputTokens, repairRequestID, decodeErr = service.repairOutput(
 			ctx, run, step, node, schema, generated.Text, generated.ProviderRequestID, decoded, produced, decodeOutput,
-			repairAllowance,
+			decodeErr, repairAllowance,
 		)
 		step.InputTokens += repairInputTokens
 		step.OutputTokens += repairOutputTokens
@@ -580,6 +578,7 @@ func (service *Service) repairOutput(
 	decoded agentdomain.TaskOutput,
 	produced []agentdomain.Artifact,
 	decodeOutput func(string) (agentdomain.TaskOutput, error),
+	cause error,
 	remaining int,
 ) (agentdomain.TaskOutput, string, []agentdomain.Artifact, int, int, string, error) {
 	if decoded != nil || remaining < 1 {
@@ -610,10 +609,14 @@ func (service *Service) repairOutput(
 	repairStep := step
 	repairStep.Temperature = 0
 	repairStep.ReasoningEffort = agentdomain.ReasoningNone
+	repairInput := original
+	if cause != nil {
+		repairInput = original + "\n\n【契约校验失败】\n" + cause.Error()
+	}
 	repaired, err := provider.Generate(ctx, apiKey, generateRequest(
 		repairStep, availableOutput, false,
 		"你只负责修复 JSON 结构，使其符合给定 Schema；不得增加事实、删改正文或改变语义。",
-		original, schema, node.Schema.ID,
+		repairInput, schema, node.Schema.ID,
 	), nil)
 	if err != nil {
 		return nil, original, produced, repaired.InputTokens, repaired.OutputTokens, repaired.ProviderRequestID, err
@@ -825,6 +828,13 @@ func (service *Service) failRun(ctx context.Context, run agentdomain.Run, cause 
 		return service.cancelRun(context.WithoutCancel(ctx), run)
 	}
 	code := errorCode(cause)
+	for _, step := range latestSteps(run.Steps) {
+		if step.Status == agentdomain.StepFailed && strings.TrimSpace(step.ErrorCode) != "" {
+			// 步骤已经选定对作者可见的错误码；不能再用未分类 cause 覆盖成泛化的模型调用失败。
+			code = step.ErrorCode
+			break
+		}
+	}
 	run.ErrorCode = code
 	run.QualityStatus = agentdomain.QualityBlocked
 	failed, err := run.Transition(agentdomain.RunFailed, safeErrorMessage(code), service.clock.Now())
@@ -1042,6 +1052,9 @@ func renderPrompt(
 				}
 				values[variable] = merged
 			}
+			if values[variable] == "" {
+				values[variable] = promptVariableFromArtifacts(variable, node, latest, artifacts)
+			}
 			if values[variable] == "" && len(upstream) == 1 {
 				values[variable] = upstream[0]
 			}
@@ -1059,6 +1072,46 @@ func renderPrompt(
 		return "", err
 	}
 	return rendered.String(), nil
+}
+
+// promptVariableFromArtifacts 按产物类型而不是节点 ID 绑定 Prompt 槽。
+// 拆分写作把正文节点叫 integrate，修订模板仍声明 Draft；二者必须靠产物类型对齐。
+func promptVariableFromArtifacts(
+	variable string,
+	node FrozenNode,
+	latest map[string]agentdomain.RunStep,
+	artifacts []agentdomain.Artifact,
+) string {
+	var kinds []agentdomain.ArtifactKind
+	switch variable {
+	case "Draft":
+		kinds = []agentdomain.ArtifactKind{agentdomain.ArtifactDraft}
+	case "Plan", "Blueprint":
+		kinds = []agentdomain.ArtifactKind{agentdomain.ArtifactPlan}
+	case "Revision":
+		kinds = []agentdomain.ArtifactKind{agentdomain.ArtifactRevision}
+	default:
+		return ""
+	}
+	for _, selector := range node.InputSelectors {
+		if !strings.HasPrefix(selector, "node:") {
+			continue
+		}
+		step, ok := latest[strings.TrimPrefix(selector, "node:")]
+		if !ok {
+			continue
+		}
+		artifact, ok := artifactByID(artifacts, step.PrimaryArtifactID)
+		if !ok {
+			continue
+		}
+		for _, kind := range kinds {
+			if artifact.Kind == kind {
+				return artifact.Content
+			}
+		}
+	}
+	return ""
 }
 
 func outputDetails(
@@ -1157,14 +1210,8 @@ func decodeNodeOutput(
 		return nil, agentdomain.ErrInvalidTaskOutput
 	}
 	var review agentdomain.ReviewBundleOutput
-	decoder := json.NewDecoder(bytes.NewReader([]byte(content)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&review); err != nil {
-		return nil, fmt.Errorf("%w: %v", agentdomain.ErrInvalidTaskOutput, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, agentdomain.ErrInvalidTaskOutput
+	if err := agentdomain.UnmarshalModelJSON([]byte(content), &review); err != nil {
+		return nil, err
 	}
 	candidate, _, err := revisionInputs(node, latest, artifacts)
 	if err != nil {
@@ -1416,19 +1463,14 @@ func validateRevisionVerify(
 
 func validateChapterDirector(output agentdomain.TaskOutput, manifest agentdomain.ContextManifest) error {
 	plan, ok := output.(*agentdomain.ChapterPlanOutput)
-	if !ok || len(plan.CanonicalSourceRefs) == 0 {
+	if !ok {
 		return nil
 	}
-	allowed := manifestSourceRefs(manifest)
-	for _, ref := range plan.CanonicalSourceRefs {
-		if _, exists := allowed[ref]; !exists {
-			return fmt.Errorf("chapter director references source outside frozen manifest: %s", ref)
-		}
-	}
+	plan.CanonicalSourceRefs = resolveManifestRefs(plan.CanonicalSourceRefs, manifest)
 	for _, scene := range plan.Scenes {
 		for _, release := range scene.InformationRelease {
 			for _, forbidden := range plan.ForbiddenReveals {
-				if strings.Contains(release, forbidden) {
+				if strings.TrimSpace(release) == strings.TrimSpace(forbidden) && strings.TrimSpace(forbidden) != "" {
 					return fmt.Errorf("chapter director reveals forbidden information: %s", forbidden)
 				}
 			}
@@ -1437,23 +1479,77 @@ func validateChapterDirector(output agentdomain.TaskOutput, manifest agentdomain
 	return nil
 }
 
-// validateSkeletonOutput 限制骨架只能引用本次运行冻结的来源。
+// validateSkeletonOutput 把槽位来源引用归一到本次冻结 Manifest，不要求模型抄对内部标识。
 func validateSkeletonOutput(output agentdomain.TaskOutput, manifest agentdomain.ContextManifest) error {
 	skeleton, ok := output.(*agentdomain.ChapterSkeletonOutput)
 	if !ok {
 		return agentdomain.ErrInvalidTaskOutput
 	}
-	allowed := manifestSourceRefs(manifest)
-	for _, beat := range skeleton.Beats {
-		for _, slot := range beat.Slots {
-			for _, ref := range slot.SourceRefs {
-				if _, exists := allowed[ref]; !exists {
-					return fmt.Errorf("%w: skeleton references source outside frozen manifest: %s", agentdomain.ErrInvalidTaskOutput, ref)
-				}
-			}
+	for beatIndex := range skeleton.Beats {
+		for slotIndex := range skeleton.Beats[beatIndex].Slots {
+			skeleton.Beats[beatIndex].Slots[slotIndex].SourceRefs = resolveManifestRefs(
+				skeleton.Beats[beatIndex].Slots[slotIndex].SourceRefs, manifest,
+			)
 		}
 	}
 	return nil
+}
+
+// resolveManifestRefs 将模型给出的来源引用投影到本次已纳入 Manifest。
+// 能对应到展示 ID@version 的予以保留；全部无法对应时回退为本次冻结来源，由内核盖章。
+func resolveManifestRefs(refs []string, manifest agentdomain.ContextManifest) []string {
+	allowed := manifestSourceRefs(manifest)
+	resolved := make([]string, 0, len(refs))
+	seen := map[string]bool{}
+	for _, raw := range refs {
+		ref := canonicalManifestRef(raw, manifest, allowed)
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		resolved = append(resolved, ref)
+	}
+	if len(resolved) > 0 {
+		return resolved
+	}
+	return displayedManifestRefs(manifest)
+}
+
+func canonicalManifestRef(raw string, manifest agentdomain.ContextManifest, allowed map[string]struct{}) string {
+	ref := strings.TrimSpace(raw)
+	const prefix, suffix = "【冻结来源 ", "】"
+	if strings.HasPrefix(ref, prefix) && strings.HasSuffix(ref, suffix) {
+		ref = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(ref, prefix), suffix))
+	}
+	if _, exists := allowed[ref]; !exists {
+		return ""
+	}
+	if strings.Contains(ref, "@") {
+		return ref
+	}
+	for _, item := range manifest.Items {
+		if item.Included && item.SourceID == ref {
+			return item.SourceID + "@" + item.SourceVersion
+		}
+	}
+	return ref
+}
+
+func displayedManifestRefs(manifest agentdomain.ContextManifest) []string {
+	refs := make([]string, 0, len(manifest.Items))
+	seen := map[string]bool{}
+	for _, item := range manifest.Items {
+		if !item.Included {
+			continue
+		}
+		ref := item.SourceID + "@" + item.SourceVersion
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		refs = append(refs, ref)
+	}
+	return refs
 }
 
 // manifestSourceRefs 从节点实际冻结且已纳入输入的 Manifest 生成允许集合。

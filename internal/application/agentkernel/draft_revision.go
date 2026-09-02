@@ -1,10 +1,6 @@
 package agentkernel
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
 	"strings"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -18,14 +14,8 @@ func decodeDraftRevisionOutput(
 	content string,
 ) (agentdomain.TaskOutput, error) {
 	var revision agentdomain.ReviseDraftOutput
-	decoder := json.NewDecoder(bytes.NewReader([]byte(content)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&revision); err != nil {
-		return nil, fmt.Errorf("%w: %v", agentdomain.ErrInvalidTaskOutput, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, agentdomain.ErrInvalidTaskOutput
+	if err := agentdomain.UnmarshalModelJSON([]byte(content), &revision); err != nil {
+		return nil, err
 	}
 	original, reviewJSON, err := revisionInputs(node, latest, artifacts)
 	if err != nil {

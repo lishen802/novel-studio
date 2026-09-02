@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/agentassets"
+	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 )
 
@@ -45,6 +46,56 @@ func TestSlotParallelWorkflowKeepsWritersIsolatedAndPersistsMechanicalJoin(t *te
 	}
 }
 
+func TestSlotParallelRevisionReceivesIntegratedDraft(t *testing.T) {
+	replies := slotParallelReplies()
+	replies[8] = providerReply{text: `{"quality_status":"needs_review","summary":"一处动作需收紧","findings":[{"id":"f1","category":"style","severity":"major","status":"open","source":"model_review","message":"奔出缺少阻力","suggestion":"补一句门轴阻力","constraint_ref":"style:action"}]}`}
+	replies = append(replies, providerReply{text: `{"title":"雨夜钟楼","body":"“现在就走。”她低声催促。\n\n她推门奔出，鞋底擦过积水。\n\n恐惧顶住喉咙，她没有回头。\n\n钟楼三响，冷雨敲打破窗。\n\n转过狭窄走廊，楼梯口已经在前。","resolutions":[{"finding_id":"f1","status":"retained","note":"门轴阻力会破坏节奏"}],"changes":[]}`})
+	service, _, provider := newRunnerHarness(t, replies)
+	request := qualityRequest(agentassets.SlotParallelWorkflowID, agentassets.SlotParallelWorkflowVersion, 40000)
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if err != nil {
+		t.Fatalf("revision failed: %v status=%s message=%s", err, completed.Status, completed.ErrorMessage)
+	}
+	if completed.Status != agentdomain.RunCompleted || len(provider.requests) != 10 {
+		t.Fatalf("completed=%+v requests=%d", completed, len(provider.requests))
+	}
+	revisionInput := provider.requests[9].Input
+	if !strings.Contains(revisionInput, "她推门奔出") || !strings.Contains(revisionInput, `"id":"f1"`) {
+		t.Fatalf("revision did not receive integrate draft and review: %q", revisionInput)
+	}
+}
+
+func TestRenderPromptBindsDraftFromIntegrateWhenReviewAlsoPresent(t *testing.T) {
+	node := FrozenNode{
+		ID: "revision", Capability: agentdomain.CapabilityBoundedRevision,
+		InputSelectors: []string{"$task", "$context", "node:integrate", "node:review"},
+	}
+	prompt := ports.PromptAsset{
+		Binding:   agentdomain.VersionBinding{ID: "revise_draft.prompt", Version: 1},
+		Template:  "正文：{{.Draft}}\n审阅：{{.Review}}",
+		Variables: []string{"Draft", "Review"},
+	}
+	latest := map[string]agentdomain.RunStep{
+		"integrate": {NodeID: "integrate", Status: agentdomain.StepCompleted, PrimaryArtifactID: "draft-1", Capability: agentdomain.CapabilityIntegrationWriter},
+		"review":    {NodeID: "review", Status: agentdomain.StepCompleted, PrimaryArtifactID: "review-1", Capability: agentdomain.CapabilityContinuityReview},
+	}
+	artifacts := []agentdomain.Artifact{
+		{ID: "draft-1", Kind: agentdomain.ArtifactDraft, Content: "她推门奔出。"},
+		{ID: "review-1", Kind: agentdomain.ArtifactReview, Content: `{"summary":"需修订"}`},
+	}
+	rendered, err := renderPrompt(prompt, persistedInput{AuthorInstruction: "写一章"}, node, latest, artifacts, "冻结上下文")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "她推门奔出。") || !strings.Contains(rendered, "需修订") {
+		t.Fatalf("rendered=%q", rendered)
+	}
+}
+
 func TestSlotParallelIntegrationFailureRetainsMechanicalJoin(t *testing.T) {
 	replies := slotParallelReplies()[:7]
 	replies = append(replies, providerReply{err: errors.New("integration unavailable")})
@@ -60,7 +111,7 @@ func TestSlotParallelIntegrationFailureRetainsMechanicalJoin(t *testing.T) {
 	}
 }
 
-func TestSkeletonRejectsSourceOutsideFrozenManifest(t *testing.T) {
+func TestSkeletonRewritesSourceOutsideFrozenManifest(t *testing.T) {
 	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterSkeleton, []byte(slotParallelReplies()[1].text))
 	if err != nil {
 		t.Fatal(err)
@@ -71,8 +122,11 @@ func TestSkeletonRejectsSourceOutsideFrozenManifest(t *testing.T) {
 	}
 	skeleton := decoded.(*agentdomain.ChapterSkeletonOutput)
 	skeleton.Beats[0].Slots[0].SourceRefs = []string{"outside@1"}
-	if err := validateSkeletonOutput(skeleton, manifest); err == nil {
-		t.Fatal("source outside frozen manifest accepted")
+	if err := validateSkeletonOutput(skeleton, manifest); err != nil {
+		t.Fatalf("unknown skeleton refs should be rewritten, got %v", err)
+	}
+	if len(skeleton.Beats[0].Slots[0].SourceRefs) != 1 || skeleton.Beats[0].Slots[0].SourceRefs[0] != "anchor-1@1" {
+		t.Fatalf("rewritten refs = %v", skeleton.Beats[0].Slots[0].SourceRefs)
 	}
 }
 
@@ -82,12 +136,49 @@ func TestChapterDirectorAcceptsEveryDisplayedFrozenSourceReference(t *testing.T)
 		t.Fatal(err)
 	}
 	plan := decoded.(*agentdomain.ChapterPlanOutput)
-	for _, reference := range []string{"author-instruction@1", "anchor-1@1"} {
+	for _, reference := range []string{"author-instruction@1", "anchor-1@1", "【冻结来源 anchor-1@1】"} {
 		plan.CanonicalSourceRefs = []string{reference}
 		manifest := testSourceManifest("author-instruction", "1", "anchor-1", "1")
 		if err := validateChapterDirector(plan, manifest); err != nil {
 			t.Fatalf("displayed reference %q rejected: %v", reference, err)
 		}
+		if plan.CanonicalSourceRefs[0] != "author-instruction@1" && plan.CanonicalSourceRefs[0] != "anchor-1@1" {
+			t.Fatalf("canonical refs not stamped: %v", plan.CanonicalSourceRefs)
+		}
+	}
+}
+
+func TestChapterDirectorStampsManifestWhenModelRefsAreUnknown(t *testing.T) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterPlan, []byte(slotParallelReplies()[0].text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := decoded.(*agentdomain.ChapterPlanOutput)
+	plan.CanonicalSourceRefs = []string{"story-spec", "潮汐钟"}
+	manifest := testSourceManifest("author-instruction", "1", "anchor-1", "1")
+	if err := validateChapterDirector(plan, manifest); err != nil {
+		t.Fatalf("unknown refs should be rewritten, got %v", err)
+	}
+	if len(plan.CanonicalSourceRefs) != 2 || plan.CanonicalSourceRefs[0] != "author-instruction@1" || plan.CanonicalSourceRefs[1] != "anchor-1@1" {
+		t.Fatalf("stamped refs = %v", plan.CanonicalSourceRefs)
+	}
+}
+
+func TestChapterDirectorRejectsExactForbiddenReleaseOnly(t *testing.T) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterPlan, []byte(slotParallelReplies()[0].text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := decoded.(*agentdomain.ChapterPlanOutput)
+	plan.ForbiddenReveals = []string{"闹鬼"}
+	plan.Scenes[0].InformationRelease = []string{"排除闹鬼，只呈现钟慢七秒"}
+	manifest := testSourceManifest("anchor-1", "1")
+	if err := validateChapterDirector(plan, manifest); err != nil {
+		t.Fatalf("mentioning a forbidden word in a longer release failed: %v", err)
+	}
+	plan.Scenes[0].InformationRelease = []string{"闹鬼"}
+	if err := validateChapterDirector(plan, manifest); err == nil {
+		t.Fatal("exact forbidden release accepted")
 	}
 }
 
