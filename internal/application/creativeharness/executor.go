@@ -158,7 +158,11 @@ func harnessInstruction(item quality.HarnessCase) string {
 }
 
 func harnessSources(item quality.HarnessCase) []agentkernel.Source {
-	content := fmt.Sprintf("原创种子：%s\n故事设定：%s\n章节目标：%s\n确认约束：%v\n人物声音：%v", item.OriginalSeed, item.StorySpec, item.ChapterGoal, item.ConfirmedConstraints, item.CharacterVoices)
+	content := fmt.Sprintf(
+		"原创种子：%s\n故事设定：%s\n章节目标：%s\n确认约束：%v\n人物声音：%v\n必需锚点：%v\n软锚点：%v\n禁止项：%v\n目标长度：%d 字",
+		item.OriginalSeed, item.StorySpec, item.ChapterGoal, item.ConfirmedConstraints, item.CharacterVoices,
+		item.RequiredAnchors, item.SoftAnchors, item.ForbiddenItems, item.TargetLength,
+	)
 	return []agentkernel.Source{{Kind: agentdomain.ManifestHarnessSpec, ID: item.ID, Version: item.DatasetVersion, Content: content, Priority: 100, SelectionReason: "固定原创 Harness case", Required: true}}
 }
 

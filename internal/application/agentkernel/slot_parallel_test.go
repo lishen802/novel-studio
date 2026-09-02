@@ -25,6 +25,9 @@ func TestSlotParallelWorkflowKeepsWritersIsolatedAndPersistsMechanicalJoin(t *te
 	if completed.Status != agentdomain.RunCompleted || completed.QualityStatus != agentdomain.QualityPassed || len(provider.requests) != 9 {
 		t.Fatalf("completed=%+v requests=%d", completed, len(provider.requests))
 	}
+	if !strings.Contains(provider.requests[0].Input, "【冻结来源 anchor-1@1】") {
+		t.Fatalf("director received anonymous context: %q", provider.requests[0].Input)
+	}
 	for index := 2; index <= 6; index++ {
 		if strings.Contains(provider.requests[index].Input, "她推门奔出") || strings.Contains(provider.requests[index].Input, "雨水沿屋檐") {
 			t.Fatalf("slot writer %d saw another writer output", index)
@@ -62,15 +65,52 @@ func TestSkeletonRejectsSourceOutsideFrozenManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := persistedInput{Sources: []Source{{ID: "anchor-1", Version: "1"}}}
-	if err := validateSkeletonOutput(decoded, input); err != nil {
+	manifest := testSourceManifest("anchor-1", "1")
+	if err := validateSkeletonOutput(decoded, manifest); err != nil {
 		t.Fatalf("frozen source rejected: %v", err)
 	}
 	skeleton := decoded.(*agentdomain.ChapterSkeletonOutput)
 	skeleton.Beats[0].Slots[0].SourceRefs = []string{"outside@1"}
-	if err := validateSkeletonOutput(skeleton, input); err == nil {
+	if err := validateSkeletonOutput(skeleton, manifest); err == nil {
 		t.Fatal("source outside frozen manifest accepted")
 	}
+}
+
+func TestChapterDirectorAcceptsEveryDisplayedFrozenSourceReference(t *testing.T) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterPlan, []byte(slotParallelReplies()[0].text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := decoded.(*agentdomain.ChapterPlanOutput)
+	for _, reference := range []string{"author-instruction@1", "anchor-1@1"} {
+		plan.CanonicalSourceRefs = []string{reference}
+		manifest := testSourceManifest("author-instruction", "1", "anchor-1", "1")
+		if err := validateChapterDirector(plan, manifest); err != nil {
+			t.Fatalf("displayed reference %q rejected: %v", reference, err)
+		}
+	}
+}
+
+func TestSkeletonAcceptsDisplayedUpstreamArtifactReference(t *testing.T) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskChapterSkeleton, []byte(slotParallelReplies()[1].text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skeleton := decoded.(*agentdomain.ChapterSkeletonOutput)
+	skeleton.Beats[0].Slots[0].SourceRefs = []string{"director-artifact@attempt-1"}
+	if err := validateSkeletonOutput(skeleton, testSourceManifest("director-artifact", "attempt-1", "anchor-1", "1")); err != nil {
+		t.Fatalf("displayed upstream artifact rejected: %v", err)
+	}
+}
+
+func testSourceManifest(values ...string) agentdomain.ContextManifest {
+	manifest := agentdomain.ContextManifest{}
+	for index := 0; index+1 < len(values); index += 2 {
+		manifest.Items = append(manifest.Items, agentdomain.ContextManifestItem{
+			SourceID: values[index], SourceVersion: values[index+1], Included: true,
+		})
+	}
+	return manifest
 }
 
 func slotParallelReplies() []providerReply {

@@ -301,6 +301,13 @@ func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 	}
 }
 
+func TestLocalCapabilityValidationNeverMasqueradesAsProviderFailure(t *testing.T) {
+	code, cause := capabilityValidationError(agentdomain.CapabilityChapterPlanner, errors.New("source reference outside manifest"))
+	if code != "invalid_structured_output" || !errors.Is(cause, ErrInvalidOutput) || errorCode(cause) == "provider_error" {
+		t.Fatalf("code=%q cause=%v mapped=%q", code, cause, errorCode(cause))
+	}
+}
+
 func TestServiceSkipsConditionalNodeWithoutProviderCall(t *testing.T) {
 	registry := twoNodeRegistry(t, "on_quality_issue")
 	store := newMemoryStore()

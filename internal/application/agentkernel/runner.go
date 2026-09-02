@@ -495,7 +495,7 @@ func (service *Service) executeNode(
 			return service.failStep(ctx, run, step, "invalid_structured_output", fmt.Errorf("%w: %v", ErrInvalidOutput, decodeErr), produced)
 		}
 	}
-	if validateErr := validateCapabilityOutput(decoded, node, input, latest, artifacts); validateErr != nil {
+	if validateErr := validateCapabilityOutput(decoded, node, input, latest, artifacts, manifest); validateErr != nil {
 		code, cause := capabilityValidationError(node.Capability, validateErr)
 		return service.failStep(ctx, run, step, code, cause, produced)
 	}
@@ -686,7 +686,8 @@ func (service *Service) assemble(
 	truncated := false
 	for index, value := range parts {
 		content := strings.TrimSpace(value.content)
-		characters := utf8.RuneCountInString(content)
+		renderedSource := renderFrozenSource(value.source, content)
+		characters := utf8.RuneCountInString(renderedSource)
 		if len(selected) > 0 {
 			characters += 2
 		}
@@ -700,7 +701,7 @@ func (service *Service) assemble(
 			truncated = true
 		} else {
 			remaining -= characters
-			selected = append(selected, content)
+			selected = append(selected, renderedSource)
 			refs = append(refs, value.source.ID+"@"+value.source.Version+":"+agentdomain.SHA256Hex([]byte(content)))
 		}
 		items = append(items, agentdomain.ContextManifestItem{
@@ -722,6 +723,13 @@ func (service *Service) assemble(
 		return "", agentdomain.ContextManifest{}, nil, ErrContextBudget
 	}
 	return assembled, manifest, refs, nil
+}
+
+// renderFrozenSource 把来源身份与正文一起交给模型。需要回填 source_refs 的
+// 节点只能复制这里公开的 ID@version，不能凭正文猜测内部清单标识。
+func renderFrozenSource(source Source, content string) string {
+	reference := source.ID + "@" + source.Version
+	return "【冻结来源 " + reference + "】\n" + content + "\n【冻结来源结束】"
 }
 
 func (service *Service) loadExecutable(
@@ -1336,12 +1344,13 @@ func validateCapabilityOutput(
 	input persistedInput,
 	latest map[string]agentdomain.RunStep,
 	artifacts []agentdomain.Artifact,
+	manifest agentdomain.ContextManifest,
 ) error {
 	switch node.Capability {
 	case agentdomain.CapabilityChapterPlanner:
-		return validateChapterDirector(output, input)
+		return validateChapterDirector(output, manifest)
 	case agentdomain.CapabilitySkeletonWriter:
-		return validateSkeletonOutput(output, input)
+		return validateSkeletonOutput(output, manifest)
 	case agentdomain.CapabilitySlotWriter:
 		return validateSlotOutput(output, node, latest, artifacts)
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
@@ -1405,17 +1414,12 @@ func validateRevisionVerify(
 	return nil
 }
 
-func validateChapterDirector(output agentdomain.TaskOutput, input persistedInput) error {
+func validateChapterDirector(output agentdomain.TaskOutput, manifest agentdomain.ContextManifest) error {
 	plan, ok := output.(*agentdomain.ChapterPlanOutput)
 	if !ok || len(plan.CanonicalSourceRefs) == 0 {
 		return nil
 	}
-	allowed := make(map[string]struct{}, len(input.Sources)+1)
-	allowed["author-instruction"] = struct{}{}
-	for _, source := range input.Sources {
-		allowed[source.ID] = struct{}{}
-		allowed[source.ID+"@"+source.Version] = struct{}{}
-	}
+	allowed := manifestSourceRefs(manifest)
 	for _, ref := range plan.CanonicalSourceRefs {
 		if _, exists := allowed[ref]; !exists {
 			return fmt.Errorf("chapter director references source outside frozen manifest: %s", ref)
@@ -1434,16 +1438,12 @@ func validateChapterDirector(output agentdomain.TaskOutput, input persistedInput
 }
 
 // validateSkeletonOutput 限制骨架只能引用本次运行冻结的来源。
-func validateSkeletonOutput(output agentdomain.TaskOutput, input persistedInput) error {
+func validateSkeletonOutput(output agentdomain.TaskOutput, manifest agentdomain.ContextManifest) error {
 	skeleton, ok := output.(*agentdomain.ChapterSkeletonOutput)
 	if !ok {
 		return agentdomain.ErrInvalidTaskOutput
 	}
-	allowed := map[string]struct{}{"author-instruction": {}}
-	for _, source := range input.Sources {
-		allowed[source.ID] = struct{}{}
-		allowed[source.ID+"@"+source.Version] = struct{}{}
-	}
+	allowed := manifestSourceRefs(manifest)
 	for _, beat := range skeleton.Beats {
 		for _, slot := range beat.Slots {
 			for _, ref := range slot.SourceRefs {
@@ -1454,6 +1454,20 @@ func validateSkeletonOutput(output agentdomain.TaskOutput, input persistedInput)
 		}
 	}
 	return nil
+}
+
+// manifestSourceRefs 从节点实际冻结且已纳入输入的 Manifest 生成允许集合。
+// 组装与校验由同一份清单驱动，上游工件和原始来源不再各自维护白名单。
+func manifestSourceRefs(manifest agentdomain.ContextManifest) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(manifest.Items)*2)
+	for _, source := range manifest.Items {
+		if !source.Included {
+			continue
+		}
+		allowed[source.SourceID] = struct{}{}
+		allowed[source.SourceID+"@"+source.SourceVersion] = struct{}{}
+	}
+	return allowed
 }
 
 // validateSlotOutput 保证专项写手只返回骨架中属于自身类型的全部槽位。
@@ -2119,6 +2133,6 @@ func capabilityValidationError(capability agentdomain.Capability, cause error) (
 	case agentdomain.CapabilityBoundedRevision:
 		return "invalid_revision_boundary", fmt.Errorf("%w: %w: %v", ErrInvalidOutput, ErrInvalidRevision, cause)
 	default:
-		return errorCode(cause), cause
+		return "invalid_structured_output", fmt.Errorf("%w: %v", ErrInvalidOutput, cause)
 	}
 }

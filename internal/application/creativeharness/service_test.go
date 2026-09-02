@@ -43,6 +43,22 @@ func TestCountFormatRepairCallsRespectsCandidateSteps(t *testing.T) {
 	}
 }
 
+func TestHarnessSourcesExposeAllAuthorFacingChapterConstraints(t *testing.T) {
+	sources := harnessSources(quality.HarnessCase{
+		ID: "case-1", DatasetVersion: "1", OriginalSeed: "种子", StorySpec: "设定", ChapterGoal: "目标",
+		ConfirmedConstraints: []string{"固定视角"}, CharacterVoices: []string{"短句"},
+		RequiredAnchors: []string{"必须出现钟声"}, SoftAnchors: []string{"可以出现雨"}, ForbiddenItems: []string{"不得揭示凶手"}, TargetLength: 3000,
+	})
+	if len(sources) != 1 {
+		t.Fatalf("sources = %#v", sources)
+	}
+	for _, want := range []string{"必须出现钟声", "可以出现雨", "不得揭示凶手", "3000"} {
+		if !strings.Contains(sources[0].Content, want) {
+			t.Fatalf("harness source omitted %q: %s", want, sources[0].Content)
+		}
+	}
+}
+
 func TestPreviewFreezesCostDigestAndCreateRequiresExactConfirmation(t *testing.T) {
 	db, err := harnesssqlite.Open(context.Background(), filepath.Join(t.TempDir(), "harness.db"))
 	if err != nil {
