@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -29,6 +30,19 @@ const (
 	menuCmdExport             = "export"
 	menuCmdProjectMaintenance = "project_maintenance"
 	menuCmdAbout              = "about"
+	menuCmdEditUndo           = "edit_undo"
+	menuCmdEditRedo           = "edit_redo"
+	menuCmdEditCut            = "edit_cut"
+	menuCmdEditCopy           = "edit_copy"
+	menuCmdEditPaste          = "edit_paste"
+	menuCmdEditPastePlain     = "edit_paste_plain"
+	menuCmdEditDelete         = "edit_delete"
+	menuCmdEditSelectAll      = "edit_select_all"
+	menuCmdSpeechStart        = "speech_start"
+	menuCmdSpeechStop         = "speech_stop"
+	menuCmdWindowMinimise     = "window_minimise"
+	menuCmdWindowZoom         = "window_zoom"
+	menuCmdWindowFullscreen   = "window_fullscreen"
 )
 
 // menuCommandPrefixes are used to build dynamic commands like
@@ -76,18 +90,45 @@ func buildMenu(emit func(string)) *menu.Menu {
 		menu.Separator(),
 		menu.Text("报告问题…", nil, nil),
 	)
-	editMenu := menu.EditMenu()
-	editMenu.Label = "编辑"
-	windowMenu := menu.WindowMenu()
-	windowMenu.Label = "窗口"
 
 	return menu.NewMenuFromItems(
 		appMenu,
 		menu.SubMenu("文件", fileMenu),
-		editMenu,
+		menu.SubMenu("编辑", buildEditMenu(emit)),
 		menu.SubMenu("显示", viewMenu),
-		windowMenu,
+		menu.SubMenu("窗口", buildWindowMenu(emit)),
 		menu.SubMenu("帮助", helpMenu),
+	)
+}
+
+// buildEditMenu 使用自定义原生菜单规避 Wails 在 macOS 上硬编码的英文系统角色菜单。
+func buildEditMenu(emit func(string)) *menu.Menu {
+	speechMenu := menu.NewMenuFromItems(
+		menu.Text("开始朗读", nil, clickFor(emit, menuCmdSpeechStart)),
+		menu.Text("停止朗读", nil, clickFor(emit, menuCmdSpeechStop)),
+	)
+	return menu.NewMenuFromItems(
+		menu.Text("撤销", keys.CmdOrCtrl("z"), clickFor(emit, menuCmdEditUndo)),
+		menu.Text("重做", keys.Combo("z", keys.CmdOrCtrlKey, keys.ShiftKey), clickFor(emit, menuCmdEditRedo)),
+		menu.Separator(),
+		menu.Text("剪切", keys.CmdOrCtrl("x"), clickFor(emit, menuCmdEditCut)),
+		menu.Text("复制", keys.CmdOrCtrl("c"), clickFor(emit, menuCmdEditCopy)),
+		menu.Text("粘贴", keys.CmdOrCtrl("v"), clickFor(emit, menuCmdEditPaste)),
+		menu.Text("粘贴并匹配样式", keys.Combo("v", keys.CmdOrCtrlKey, keys.OptionOrAltKey, keys.ShiftKey), clickFor(emit, menuCmdEditPastePlain)),
+		menu.Text("删除", keys.Key("backspace"), clickFor(emit, menuCmdEditDelete)),
+		menu.Text("全选", keys.CmdOrCtrl("a"), clickFor(emit, menuCmdEditSelectAll)),
+		menu.Separator(),
+		menu.SubMenu("语音", speechMenu),
+	)
+}
+
+// buildWindowMenu 提供中文窗口操作，同时保留系统常用快捷键。
+func buildWindowMenu(emit func(string)) *menu.Menu {
+	return menu.NewMenuFromItems(
+		menu.Text("最小化", keys.CmdOrCtrl("m"), clickFor(emit, menuCmdWindowMinimise)),
+		menu.Text("缩放", nil, clickFor(emit, menuCmdWindowZoom)),
+		menu.Separator(),
+		menu.Text("进入全屏", keys.Combo("f", keys.ControlKey, keys.CmdOrCtrlKey), clickFor(emit, menuCmdWindowFullscreen)),
 	)
 }
 

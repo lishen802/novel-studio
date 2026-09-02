@@ -163,31 +163,21 @@ func TestViewMenuContainsToggleCommands(t *testing.T) {
 	assertMenuContains(t, viewMenu, "切换导航面板", "切换 AI 面板", "聚焦 AI 输入")
 }
 
-func TestMenuContainsEditAndWindowRoles(t *testing.T) {
+func TestEditAndWindowMenusAreLocalized(t *testing.T) {
 	model := buildMenuModel()
-
-	foundEdit := false
-	foundWindow := false
-	for _, item := range model.Items {
-		if item.Role == menu.EditMenuRole {
-			foundEdit = true
-			if item.Label != "编辑" {
-				t.Errorf("编辑菜单标题 = %q，期望 编辑", item.Label)
-			}
-		}
-		if item.Role == menu.WindowMenuRole {
-			foundWindow = true
-			if item.Label != "窗口" {
-				t.Errorf("窗口菜单标题 = %q，期望 窗口", item.Label)
-			}
-		}
+	editMenu := findSubmenu(model, "编辑")
+	if editMenu == nil {
+		t.Fatal("未找到编辑菜单")
 	}
-	if !foundEdit {
-		t.Fatal("menu missing EditMenu role")
+	assertMenuContains(t, editMenu,
+		"撤销", "重做", "剪切", "复制", "粘贴", "粘贴并匹配样式", "删除", "全选",
+	)
+	windowMenu := findSubmenu(model, "窗口")
+	if windowMenu == nil {
+		t.Fatal("未找到窗口菜单")
 	}
-	if !foundWindow {
-		t.Fatal("menu missing WindowMenu role")
-	}
+	assertMenuContains(t, windowMenu, "最小化", "缩放", "进入全屏")
+	assertMenuOmits(t, model, "Edit", "Window")
 }
 
 func TestMenuCommandValuesAreStable(t *testing.T) {

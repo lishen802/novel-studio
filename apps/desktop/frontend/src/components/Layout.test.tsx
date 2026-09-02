@@ -12,6 +12,7 @@ Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  delete (window as Window & { runtime?: unknown }).runtime;
   vi.restoreAllMocks();
 });
 
@@ -90,5 +91,47 @@ describe('应用与项目工作区边界', () => {
 
     expect(screen.getByRole('heading', { name: '首页' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '正文编辑' })).toBeNull();
+  });
+
+  it('中文自定义菜单仍会执行编辑与窗口动作', () => {
+    const listeners = new Map<string, (data: { type?: string }) => void>();
+    const execCommand = vi.fn();
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    });
+    const windowMinimise = vi.fn();
+    (window as Window & { runtime?: unknown }).runtime = {
+      EventsOn: (name: string, callback: (data: { type?: string }) => void) => {
+        listeners.set(name, callback);
+        return () => listeners.delete(name);
+      },
+      ClipboardGetText: vi.fn().mockResolvedValue(''),
+      WindowMinimise: windowMinimise,
+      WindowToggleMaximise: vi.fn(),
+      WindowIsFullscreen: vi.fn().mockResolvedValue(false),
+      WindowFullscreen: vi.fn(),
+      WindowUnfullscreen: vi.fn(),
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <AppProvider>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route path="settings" element={<h1>应用设置内容</h1>} />
+            </Route>
+          </Routes>
+        </AppProvider>
+      </MemoryRouter>,
+    );
+
+    const menuListener = listeners.get('app:menu-command');
+    expect(menuListener).toBeTruthy();
+    menuListener?.({ type: 'edit_copy' });
+    menuListener?.({ type: 'window_minimise' });
+
+    expect(execCommand).toHaveBeenCalledWith('copy');
+    expect(windowMinimise).toHaveBeenCalledOnce();
   });
 });
