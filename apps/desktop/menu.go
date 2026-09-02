@@ -76,13 +76,17 @@ func buildMenu(emit func(string)) *menu.Menu {
 		menu.Separator(),
 		menu.Text("报告问题…", nil, nil),
 	)
+	editMenu := menu.EditMenu()
+	editMenu.Label = "编辑"
+	windowMenu := menu.WindowMenu()
+	windowMenu.Label = "窗口"
 
 	return menu.NewMenuFromItems(
 		appMenu,
 		menu.SubMenu("文件", fileMenu),
-		menu.EditMenu(),
+		editMenu,
 		menu.SubMenu("显示", viewMenu),
-		menu.WindowMenu(),
+		windowMenu,
 		menu.SubMenu("帮助", helpMenu),
 	)
 }

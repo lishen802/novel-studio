@@ -171,9 +171,15 @@ func TestMenuContainsEditAndWindowRoles(t *testing.T) {
 	for _, item := range model.Items {
 		if item.Role == menu.EditMenuRole {
 			foundEdit = true
+			if item.Label != "编辑" {
+				t.Errorf("编辑菜单标题 = %q，期望 编辑", item.Label)
+			}
 		}
 		if item.Role == menu.WindowMenuRole {
 			foundWindow = true
+			if item.Label != "窗口" {
+				t.Errorf("窗口菜单标题 = %q，期望 窗口", item.Label)
+			}
 		}
 	}
 	if !foundEdit {
