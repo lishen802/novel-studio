@@ -260,6 +260,21 @@ func TestServiceKeepsProviderDetailsOutOfPersistedError(t *testing.T) {
 	}
 }
 
+func TestServicePersistsUsageFromProviderFailureTerminal(t *testing.T) {
+	service, store, _ := newRunnerHarness(t, []providerReply{{
+		inputTokens: 17, outputTokens: 29, err: providers.ErrResponseFailed,
+	}})
+	run := createBaselineRun(t, service)
+	failed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if !errors.Is(err, providers.ErrResponseFailed) || failed.ErrorCode != "provider_response_failed" {
+		t.Fatalf("ExecuteRun = %#v, %v", failed, err)
+	}
+	loaded := store.runs[run.ID]
+	if len(loaded.Steps) != 1 || loaded.Steps[0].InputTokens != 17 || loaded.Steps[0].OutputTokens != 29 {
+		t.Fatalf("failed usage = %#v", loaded.Steps)
+	}
+}
+
 func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 	tests := []struct {
 		err     error
@@ -271,6 +286,7 @@ func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 		{providers.ErrEmptyResponse, "provider_empty_response", "模型返回了空内容，请检查模型能力或生成参数。"},
 		{providers.ErrInvalidStream, "provider_invalid_stream", "模型流式响应提前中断或格式不兼容。"},
 		{providers.ErrSchemaRejected, "provider_schema_rejected", "模型服务拒绝了结构化输出格式，请更新应用或切换兼容模型。"},
+		{providers.ErrInvalidRequest, "provider_invalid_request", "模型服务拒绝了本次请求参数；这不是连接或余额问题，请检查模型兼容性。"},
 		{ErrInvalidReviewProof, "invalid_review_evidence", "审阅问题缺少可定位的原文或约束证据。"},
 		{ErrInvalidRevision, "invalid_revision_boundary", "修订稿修改了评审未覆盖的内容，或变更证据无法对应到修订字段。"},
 	}
