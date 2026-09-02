@@ -53,6 +53,59 @@ func TestOpenAIResponsesStreamsTextAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesBuffersWithoutDeltaConsumer(t *testing.T) {
+	var received map[string]any
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(`{
+			"id":"resp_buffered","status":"completed",
+			"output":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"内部推理"}]},{"type":"message","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],
+			"usage":{"input_tokens":7,"output_tokens":19}
+		}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if received["stream"] != false {
+		t.Fatalf("stream = %#v, want false", received["stream"])
+	}
+	if result.Text != `{"ok":true}` || result.ProviderRequestID != "resp_buffered" || result.InputTokens != 7 || result.OutputTokens != 19 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestOpenAIResponsesClassifiesBufferedFailure(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{"id":"resp_failed","status":"failed","error":{"code":"insufficient_quota","message":"sensitive detail"},"output":[],"usage":{"input_tokens":11,"output_tokens":23}}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("Generate() error = %v, want ErrQuotaExceeded", err)
+	}
+	if result.ProviderRequestID != "resp_failed" || result.InputTokens != 11 || result.OutputTokens != 23 {
+		t.Fatalf("failed result = %#v", result)
+	}
+	if strings.Contains(err.Error(), "sensitive detail") {
+		t.Fatalf("Generate() leaked provider detail: %v", err)
+	}
+}
+
+func TestOpenAIResponsesClassifiesStreamErrorEvent(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return sseResponse("event: error\ndata: {\"type\":\"error\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"sensitive detail\"}}\n\n"), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, discardDelta)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("Generate() error = %v, want ErrRateLimited", err)
+	}
+}
+
 func TestDeepSeekResponsesOmitsStrictModeForOptionalSchemaFields(t *testing.T) {
 	var received map[string]any
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -72,7 +125,7 @@ func TestDeepSeekResponsesOmitsStrictModeForOptionalSchemaFields(t *testing.T) {
 				"detail":{"type":"object","additionalProperties":false,"properties":{"quote":{"type":"string"}}}
 			}
 		}`),
-	}, nil)
+	}, discardDelta)
 	if err != nil && !errors.Is(err, ErrEmptyResponse) {
 		t.Fatal(err)
 	}
@@ -107,7 +160,7 @@ func TestOpenAIResponsesDisablesStrictModeForOptionalSchemaFields(t *testing.T) 
 			"type":"object","required":["message"],
 			"properties":{"message":{"type":"string"},"suggestion":{"type":"string"}}
 		}`),
-	}, nil)
+	}, discardDelta)
 	if err != nil && !errors.Is(err, ErrEmptyResponse) {
 		t.Fatal(err)
 	}
@@ -129,7 +182,7 @@ func TestOpenAIOmitsMaxOutputAndSendsReasoningEffort(t *testing.T) {
 	client := NewOpenAIClient(httpClient, "https://api.example.test/v1")
 	_, err := client.Generate(context.Background(), "secret", GenerateRequest{
 		Model: "gpt-test", Input: "input", ReasoningEffort: agentdomain.ReasoningHigh,
-	}, nil)
+	}, discardDelta)
 	if err != nil && !errors.Is(err, ErrEmptyResponse) {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -151,7 +204,7 @@ func TestDeepSeekPreservesMaximumReasoningEffort(t *testing.T) {
 		return sseResponse("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"usage\":{}}}\n\n"), nil
 	})}
 	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
-	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input", ReasoningEffort: agentdomain.ReasoningMax}, nil)
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input", ReasoningEffort: agentdomain.ReasoningMax}, discardDelta)
 	if err != nil && !errors.Is(err, ErrEmptyResponse) {
 		t.Fatal(err)
 	}
@@ -218,7 +271,7 @@ func TestOpenAIResponsesRejectsIncompleteTerminalEvent(t *testing.T) {
 	})}
 
 	client := NewOpenAIClient(httpClient, "https://api.example.test")
-	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, nil)
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, discardDelta)
 	if !errors.Is(err, ErrResponseIncomplete) {
 		t.Fatalf("Generate() error = %v, want ErrResponseIncomplete", err)
 	}
@@ -231,7 +284,7 @@ func TestOpenAIResponsesRejectsFailedTerminalEvent(t *testing.T) {
 	})}
 
 	client := NewOpenAIClient(httpClient, "https://api.example.test")
-	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, nil)
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, discardDelta)
 	if !errors.Is(err, ErrResponseFailed) {
 		t.Fatalf("Generate() error = %v, want ErrResponseFailed", err)
 	}
@@ -255,7 +308,7 @@ func TestOpenAIResponsesRequiresCompletedTerminalAndText(t *testing.T) {
 				return sseResponse(test.stream), nil
 			})}
 			client := NewOpenAIClient(httpClient, "https://api.example.test")
-			_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, nil)
+			_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "model", Input: "input", MaxOutputTokens: 10}, discardDelta)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("Generate() error = %v, want %v", err, test.want)
 			}
@@ -276,7 +329,7 @@ func TestDeepSeekResponsesRetriesStreamEndedBeforeText(t *testing.T) {
 	})}
 	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
 
-	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, discardDelta)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -293,7 +346,7 @@ func TestDeepSeekResponsesDoesNotRetryPartialStream(t *testing.T) {
 	})}
 	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
 
-	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, discardDelta)
 	if !errors.Is(err, ErrInvalidStream) || requests != 1 {
 		t.Fatalf("requests=%d error=%v", requests, err)
 	}
@@ -307,7 +360,7 @@ func TestDeepSeekResponsesDoesNotRetryAfterReasoningStarted(t *testing.T) {
 	})}
 	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
 
-	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, discardDelta)
 	if !errors.Is(err, ErrInvalidStream) || requests != 1 {
 		t.Fatalf("requests=%d error=%v", requests, err)
 	}
@@ -420,7 +473,7 @@ func TestProviderClientsPreserveStreamCancellation(t *testing.T) {
 			go func() {
 				_, err := test.client(httpClient).Generate(ctx, "secret", GenerateRequest{
 					Model: "model", Input: "input", MaxOutputTokens: 10,
-				}, nil)
+				}, discardDelta)
 				result <- err
 			}()
 			<-started
@@ -469,6 +522,16 @@ func sseResponse(body string) *http.Response {
 	}
 }
 
+func jsonResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func discardDelta(string) {}
+
 func TestFactoryCreatesProtocolSpecificClient(t *testing.T) {
 	factory := NewFactory(http.DefaultClient)
 	if _, err := factory.New(agentdomain.ProviderConnection{Kind: agentdomain.ProviderOpenAI, BaseURL: "https://example.com/v1"}); err != nil {
@@ -496,8 +559,9 @@ func TestClassifyStatusMapsStableProviderErrors(t *testing.T) {
 		{"quota via 429", http.StatusTooManyRequests, `{"error":{"type":"insufficient_quota"}}`, ErrQuotaExceeded},
 		{"content rejected", http.StatusBadRequest, `{"error":{"type":"invalid_request_error","message":"content policy violation"}}`, ErrContentRejected},
 		{"strict schema rejected", http.StatusBadRequest, `{"error":{"message":"Invalid JSON schema: every property must be listed in required"}}`, ErrSchemaRejected},
+		{"invalid request", http.StatusUnprocessableEntity, `{"error":{"type":"invalid_request_error"}}`, ErrInvalidRequest},
 		{"server overloaded", http.StatusInternalServerError, `{"error":{"type":"overloaded_error"}}`, ErrRateLimited},
-		{"generic server error", http.StatusInternalServerError, "", ErrProvider},
+		{"generic server error", http.StatusInternalServerError, "", ErrResponseFailed},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

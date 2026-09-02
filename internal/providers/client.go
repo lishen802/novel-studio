@@ -33,6 +33,8 @@ var (
 	ErrIncompatible = errors.New("provider incompatible")
 	// ErrSchemaRejected 表示 Provider 拒绝了结构化输出 Schema。
 	ErrSchemaRejected = errors.New("provider schema rejected")
+	// ErrInvalidRequest 表示 Provider 拒绝了当前请求参数或请求格式。
+	ErrInvalidRequest = errors.New("provider request invalid")
 	// ErrProvider 表示未细分的 Provider 请求失败。
 	ErrProvider = errors.New("provider request failed")
 	// ErrInvalidStream 表示流式响应格式损坏。
@@ -85,6 +87,11 @@ func (client *OpenAIClient) Generate(
 	request GenerateRequest,
 	onDelta func(string),
 ) (GenerateResult, error) {
+	// Agent Kernel 等后台调用不消费增量，使用完整响应可避免长推理在 SSE
+	// 终态前断流，也能完整读取 Provider 的失败状态和用量。
+	if onDelta == nil {
+		return client.generateBuffered(ctx, apiKey, request)
+	}
 	generationStarted := false
 	result, err := client.generateOnce(ctx, apiKey, request, onDelta, &generationStarted)
 	// DeepSeek Responses 流偶尔会在正文开始前无终态断开；此时重试不会
@@ -103,41 +110,9 @@ func (client *OpenAIClient) generateOnce(
 	onDelta func(string),
 	generationStarted *bool,
 ) (GenerateResult, error) {
-	payload := map[string]any{
-		"model":        request.Model,
-		"instructions": request.System,
-		"input":        request.Input,
-		"stream":       true,
-	}
-	if request.MaxOutputTokens > 0 {
-		payload["max_output_tokens"] = request.MaxOutputTokens
-	}
-	// 发送方案冻结的温度，使 writer/reviewer 等角色的生成参数真正生效。
-	// temperature=0 通常用于探测或刻意使用 Provider 默认值，此时不发送。
-	if request.Temperature > 0 {
-		payload["temperature"] = request.Temperature
-	}
-	effort, sendEffort, err := openaiReasoningEffort(client.baseURL, request.ReasoningEffort)
+	payload, err := client.responsesPayload(request, true)
 	if err != nil {
 		return GenerateResult{}, err
-	}
-	if sendEffort {
-		payload["reasoning"] = map[string]any{"effort": effort}
-	}
-	if len(request.JSONSchema) > 0 {
-		var schema any
-		if err := json.Unmarshal(request.JSONSchema, &schema); err != nil {
-			return GenerateResult{}, fmt.Errorf("decode output schema: %w", err)
-		}
-		format := map[string]any{
-			"type": "json_schema", "name": request.SchemaName, "schema": schema,
-		}
-		// 官方 DeepSeek Responses 接口不接受 text.format.strict；仅对其他
-		// OpenAI 兼容端点发送该扩展字段，避免审阅等可选字段 Schema 被拒绝。
-		if !isDeepSeekEndpoint(client.baseURL) {
-			format["strict"] = strictJSONSchemaCompatible(schema)
-		}
-		payload["text"] = map[string]any{"format": format}
 	}
 	response, err := client.post(ctx, "/responses", apiKey, payload)
 	if err != nil {
@@ -148,23 +123,7 @@ func (client *OpenAIClient) generateOnce(
 	var result GenerateResult
 	completed := false
 	err = readSSE(response.Body, func(event string, data []byte) error {
-		var envelope struct {
-			Type     string `json:"type"`
-			Delta    string `json:"delta"`
-			Response struct {
-				ID    string `json:"id"`
-				Error struct {
-					Code string `json:"code"`
-				} `json:"error"`
-				IncompleteDetails struct {
-					Reason string `json:"reason"`
-				} `json:"incomplete_details"`
-				Usage struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
-				} `json:"usage"`
-			} `json:"response"`
-		}
+		var envelope responseEvent
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			return err
 		}
@@ -191,20 +150,23 @@ func (client *OpenAIClient) generateOnce(
 			result.InputTokens = envelope.Response.Usage.InputTokens
 			result.OutputTokens = envelope.Response.Usage.OutputTokens
 		case "response.incomplete":
-			if strings.EqualFold(envelope.Response.IncompleteDetails.Reason, "content_filter") {
-				return ErrContentRejected
-			}
-			return ErrResponseIncomplete
+			result.ProviderRequestID = envelope.Response.ID
+			result.InputTokens = envelope.Response.Usage.InputTokens
+			result.OutputTokens = envelope.Response.Usage.OutputTokens
+			return classifyIncompleteReason(envelope.Response.IncompleteDetails.Reason)
 		case "response.failed":
+			result.ProviderRequestID = envelope.Response.ID
+			result.InputTokens = envelope.Response.Usage.InputTokens
+			result.OutputTokens = envelope.Response.Usage.OutputTokens
 			return classifyResponseFailure(envelope.Response.Error.Code)
 		case "error":
-			return ErrProvider
+			return classifyResponseFailure(envelope.Error.Code)
 		}
 		return nil
 	})
 	if err != nil {
 		if isStableProviderError(err) {
-			return GenerateResult{}, err
+			return result, err
 		}
 		return GenerateResult{}, fmt.Errorf("%w: %w", ErrInvalidStream, err)
 	}
@@ -215,6 +177,134 @@ func (client *OpenAIClient) generateOnce(
 		return GenerateResult{}, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+type responseError struct {
+	Code string `json:"code"`
+}
+
+type responseUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type responseState struct {
+	ID                string        `json:"id"`
+	Status            string        `json:"status"`
+	Error             responseError `json:"error"`
+	IncompleteDetails struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
+	Usage  responseUsage `json:"usage"`
+	Output []struct {
+		Type    string `json:"type"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"output"`
+}
+
+type responseEvent struct {
+	Type     string        `json:"type"`
+	Delta    string        `json:"delta"`
+	Error    responseError `json:"error"`
+	Response responseState `json:"response"`
+}
+
+func (client *OpenAIClient) generateBuffered(ctx context.Context, apiKey string, request GenerateRequest) (GenerateResult, error) {
+	payload, err := client.responsesPayload(request, false)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	response, err := client.post(ctx, "/responses", apiKey, payload)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	defer response.Body.Close()
+
+	var envelope responseState
+	decoder := json.NewDecoder(response.Body)
+	if err := decoder.Decode(&envelope); err != nil {
+		return GenerateResult{}, fmt.Errorf("%w: decode buffered response", ErrProvider)
+	}
+	result := GenerateResult{
+		ProviderRequestID: envelope.ID,
+		InputTokens:       envelope.Usage.InputTokens,
+		OutputTokens:      envelope.Usage.OutputTokens,
+	}
+	switch strings.ToLower(strings.TrimSpace(envelope.Status)) {
+	case "completed":
+	case "incomplete":
+		return result, classifyIncompleteReason(envelope.IncompleteDetails.Reason)
+	case "failed":
+		return result, classifyResponseFailure(envelope.Error.Code)
+	default:
+		return result, ErrResponseFailed
+	}
+	var text strings.Builder
+	for _, item := range envelope.Output {
+		if item.Type != "message" {
+			continue
+		}
+		for _, content := range item.Content {
+			if content.Type == "output_text" {
+				text.WriteString(content.Text)
+			}
+		}
+	}
+	result.Text = text.String()
+	if strings.TrimSpace(result.Text) == "" {
+		return GenerateResult{}, ErrEmptyResponse
+	}
+	return result, nil
+}
+
+func classifyIncompleteReason(reason string) error {
+	if strings.EqualFold(strings.TrimSpace(reason), "content_filter") {
+		return ErrContentRejected
+	}
+	return ErrResponseIncomplete
+}
+
+func (client *OpenAIClient) responsesPayload(request GenerateRequest, stream bool) (map[string]any, error) {
+	payload := map[string]any{
+		"model":        request.Model,
+		"instructions": request.System,
+		"input":        request.Input,
+		"stream":       stream,
+	}
+	if request.MaxOutputTokens > 0 {
+		payload["max_output_tokens"] = request.MaxOutputTokens
+	}
+	// 发送方案冻结的温度，使 writer/reviewer 等角色的生成参数真正生效。
+	// temperature=0 通常用于探测或刻意使用 Provider 默认值，此时不发送。
+	if request.Temperature > 0 {
+		payload["temperature"] = request.Temperature
+	}
+	effort, sendEffort, err := openaiReasoningEffort(client.baseURL, request.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	if sendEffort {
+		payload["reasoning"] = map[string]any{"effort": effort}
+	}
+	if len(request.JSONSchema) > 0 {
+		var schema any
+		if err := json.Unmarshal(request.JSONSchema, &schema); err != nil {
+			return nil, fmt.Errorf("decode output schema: %w", err)
+		}
+		format := map[string]any{
+			"type": "json_schema", "name": request.SchemaName, "schema": schema,
+		}
+		// 官方 DeepSeek Responses 接口不接受 text.format.strict；仅对其他
+		// OpenAI 兼容端点发送该扩展字段，避免审阅等可选字段 Schema 被拒绝。
+		if !isDeepSeekEndpoint(client.baseURL) {
+			format["strict"] = strictJSONSchemaCompatible(schema)
+		}
+		payload["text"] = map[string]any{"format": format}
+	}
+	return payload, nil
 }
 
 // classifyResponseFailure 只读取 Provider 的稳定错误码，避免把响应正文写入日志或界面。
@@ -233,6 +323,8 @@ func classifyResponseFailure(code string) error {
 		return ErrRateLimited
 	case strings.Contains(normalized, "content"), strings.Contains(normalized, "safety"), strings.Contains(normalized, "policy"):
 		return ErrContentRejected
+	case strings.Contains(normalized, "invalid_request"), strings.Contains(normalized, "invalid_parameter"), strings.Contains(normalized, "bad_request"):
+		return ErrInvalidRequest
 	default:
 		return ErrResponseFailed
 	}
@@ -241,7 +333,7 @@ func classifyResponseFailure(code string) error {
 func isStableProviderError(err error) bool {
 	return errors.Is(err, ErrAuthentication) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrQuotaExceeded) ||
 		errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrIncompatible) ||
-		errors.Is(err, ErrSchemaRejected) ||
+		errors.Is(err, ErrSchemaRejected) || errors.Is(err, ErrInvalidRequest) ||
 		errors.Is(err, ErrProvider) || errors.Is(err, ErrResponseIncomplete) || errors.Is(err, ErrResponseFailed) ||
 		errors.Is(err, ErrEmptyResponse)
 }
@@ -513,12 +605,12 @@ func classifyStatus(status int, body []byte) error {
 		if has("content", "policy", "safety", "moderation", "refusal", "unsafe") {
 			return ErrContentRejected
 		}
-		return ErrProvider
+		return ErrInvalidRequest
 	case status >= 500:
 		if has("overloaded") {
 			return ErrRateLimited
 		}
-		return ErrProvider
+		return ErrResponseFailed
 	default:
 		return fmt.Errorf("%w: HTTP %d", ErrProvider, status)
 	}
