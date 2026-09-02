@@ -287,6 +287,7 @@ func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 		{providers.ErrInvalidStream, "provider_invalid_stream", "模型流式响应提前中断或格式不兼容。"},
 		{providers.ErrSchemaRejected, "provider_schema_rejected", "模型服务拒绝了结构化输出格式，请更新应用或切换兼容模型。"},
 		{providers.ErrInvalidRequest, "provider_invalid_request", "模型服务拒绝了本次请求参数；这不是连接或余额问题，请检查模型兼容性。"},
+		{providers.ErrInvalidResponse, "provider_invalid_response", "模型服务返回的响应不完整或格式不兼容；连接和额度可能正常，请检查服务协议或稍后重试。"},
 		{ErrInvalidReviewProof, "invalid_review_evidence", "审阅问题缺少可定位的原文或约束证据。"},
 		{ErrInvalidRevision, "invalid_revision_boundary", "修订稿修改了评审未覆盖的内容，或变更证据无法对应到修订字段。"},
 	}

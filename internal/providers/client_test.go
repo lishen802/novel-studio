@@ -78,6 +78,69 @@ func TestOpenAIResponsesBuffersWithoutDeltaConsumer(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesAcceptsSSEWhenBufferedEndpointIgnoresStreamFalse(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"兼容\"}\n\n" +
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n"
+		return sseResponse(stream), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if result.Text != "兼容" || result.ProviderRequestID != "resp_sse" || result.InputTokens != 3 || result.OutputTokens != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestOpenAIResponsesClassifiesMalformedBufferedBody(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{"id":"resp_truncated","status":"completed"`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil)
+	if !errors.Is(err, ErrInvalidResponse) || errors.Is(err, ErrProvider) {
+		t.Fatalf("Generate() error = %v, want ErrInvalidResponse only", err)
+	}
+}
+
+func TestOpenAIResponsesClassifiesInterruptedBufferedBodyAsNetworkFailure(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       &interruptedBody{data: []byte(`{"id":"resp_interrupted"`)},
+		}, nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+
+	_, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil)
+	if !errors.Is(err, ErrNetwork) || errors.Is(err, ErrProvider) {
+		t.Fatalf("Generate() error = %v, want ErrNetwork only", err)
+	}
+}
+
+func TestOpenAIResponsesAdvertisesModeAndIsolatesLongRequestConnection(t *testing.T) {
+	var accept string
+	var closeConnection bool
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		accept = request.Header.Get("Accept")
+		closeConnection = request.Close
+		return jsonResponse(`{"id":"resp","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{}}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.example.test/v1")
+
+	if _, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if accept != "application/json" || !closeConnection {
+		t.Fatalf("Accept=%q Close=%v", accept, closeConnection)
+	}
+}
+
 func TestOpenAIResponsesClassifiesBufferedFailure(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return jsonResponse(`{"id":"resp_failed","status":"failed","error":{"code":"insufficient_quota","message":"sensitive detail"},"output":[],"usage":{"input_tokens":11,"output_tokens":23}}`), nil
@@ -497,6 +560,21 @@ type cancelledStreamBody struct {
 	started chan struct{}
 	once    sync.Once
 }
+
+type interruptedBody struct {
+	data []byte
+	done bool
+}
+
+func (body *interruptedBody) Read(buffer []byte) (int, error) {
+	if body.done {
+		return 0, errors.New("connection interrupted")
+	}
+	body.done = true
+	return copy(buffer, body.data), nil
+}
+
+func (*interruptedBody) Close() error { return nil }
 
 func (body *cancelledStreamBody) Read([]byte) (int, error) {
 	body.once.Do(func() { close(body.started) })

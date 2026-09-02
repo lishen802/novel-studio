@@ -37,6 +37,8 @@ var (
 	ErrInvalidRequest = errors.New("provider request invalid")
 	// ErrProvider 表示未细分的 Provider 请求失败。
 	ErrProvider = errors.New("provider request failed")
+	// ErrInvalidResponse 表示 HTTP 成功但响应体不是完整、可识别的 Provider 响应。
+	ErrInvalidResponse = errors.New("provider response invalid")
 	// ErrInvalidStream 表示流式响应格式损坏。
 	ErrInvalidStream = errors.New("invalid provider stream")
 	// ErrResponseIncomplete 表示 Provider 在达到输出上限等情况下提前结束生成。
@@ -49,6 +51,8 @@ var (
 
 type GenerateRequest = ports.ModelGenerateRequest
 type GenerateResult = ports.ModelGenerateResult
+
+const maxBufferedResponseBytes = 64 * 1024 * 1024
 
 type Factory struct {
 	httpClient *http.Client
@@ -114,15 +118,21 @@ func (client *OpenAIClient) generateOnce(
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	response, err := client.post(ctx, "/responses", apiKey, payload)
+	response, err := client.post(ctx, "/responses", apiKey, payload, true)
 	if err != nil {
 		return GenerateResult{}, err
 	}
 	defer response.Body.Close()
 
+	return readOpenAIStream(response.Body, onDelta, generationStarted)
+}
+
+// readOpenAIStream 统一解释 Responses SSE，供实时流和“服务端忽略
+// stream=false”时的后台兼容路径复用。
+func readOpenAIStream(body io.Reader, onDelta func(string), generationStarted *bool) (GenerateResult, error) {
 	var result GenerateResult
 	completed := false
-	err = readSSE(response.Body, func(event string, data []byte) error {
+	err := readSSE(body, func(event string, data []byte) error {
 		var envelope responseEvent
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			return err
@@ -217,16 +227,28 @@ func (client *OpenAIClient) generateBuffered(ctx context.Context, apiKey string,
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	response, err := client.post(ctx, "/responses", apiKey, payload)
+	response, err := client.post(ctx, "/responses", apiKey, payload, false)
 	if err != nil {
 		return GenerateResult{}, err
 	}
 	defer response.Body.Close()
 
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxBufferedResponseBytes+1))
+	if err != nil {
+		return GenerateResult{}, classifyNetworkError(err)
+	}
+	if len(data) > maxBufferedResponseBytes {
+		return GenerateResult{}, fmt.Errorf("%w: buffered response too large", ErrInvalidResponse)
+	}
+	trimmed := bytes.TrimSpace(data)
+	contentType := strings.ToLower(response.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "text/event-stream") || bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:")) {
+		return readOpenAIStream(bytes.NewReader(data), nil, nil)
+	}
+
 	var envelope responseState
-	decoder := json.NewDecoder(response.Body)
-	if err := decoder.Decode(&envelope); err != nil {
-		return GenerateResult{}, fmt.Errorf("%w: decode buffered response", ErrProvider)
+	if len(trimmed) == 0 || json.Unmarshal(trimmed, &envelope) != nil {
+		return GenerateResult{}, fmt.Errorf("%w: decode buffered response", ErrInvalidResponse)
 	}
 	result := GenerateResult{
 		ProviderRequestID: envelope.ID,
@@ -333,7 +355,7 @@ func classifyResponseFailure(code string) error {
 func isStableProviderError(err error) bool {
 	return errors.Is(err, ErrAuthentication) || errors.Is(err, ErrRateLimited) || errors.Is(err, ErrQuotaExceeded) ||
 		errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrIncompatible) ||
-		errors.Is(err, ErrSchemaRejected) || errors.Is(err, ErrInvalidRequest) ||
+		errors.Is(err, ErrSchemaRejected) || errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrInvalidResponse) ||
 		errors.Is(err, ErrProvider) || errors.Is(err, ErrResponseIncomplete) || errors.Is(err, ErrResponseFailed) ||
 		errors.Is(err, ErrEmptyResponse)
 }
@@ -381,6 +403,7 @@ func (client *OpenAIClient) post(
 	ctx context.Context,
 	path, apiKey string,
 	payload any,
+	stream bool,
 ) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -392,6 +415,14 @@ func (client *OpenAIClient) post(
 	}
 	request.Header.Set("Authorization", "Bearer "+apiKey)
 	request.Header.Set("Content-Type", "application/json")
+	if stream {
+		request.Header.Set("Accept", "text/event-stream")
+	} else {
+		request.Header.Set("Accept", "application/json")
+	}
+	// 模型长生成是独立计费单元，不复用可能已老化的长连接；牺牲一次握手
+	// 换取批量运行中每次响应边界的确定性。
+	request.Close = true
 	response, err := client.httpClient.Do(request)
 	if err != nil {
 		return nil, classifyNetworkError(err)
