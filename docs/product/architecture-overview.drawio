@@ -1,0 +1,416 @@
+<mxfile host="app.diagrams.net" modified="2026-09-02T05:36:00.000Z" agent="Cursor" version="22.1.0" type="device">
+  <diagram id="topo" name="01 系统拓扑">
+    <mxGraphModel dx="1400" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="2100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t-title" value="织境 Story Studio · 运行时拓扑（对照当前代码）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#1c1917;" vertex="1" parent="1">
+          <mxGeometry x="80" y="20" width="720" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-note" value="权威规格：docs/product/architecture.md。本图把该规格映射到现有包与 R3 工作流。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#57534e;" vertex="1" parent="1">
+          <mxGeometry x="80" y="48" width="900" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ui" value="&lt;b&gt;React UI&lt;/b&gt;&lt;br&gt;创作驾驶舱 / 正文工作台 / 审阅与候选 / Lab 观察器&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;apps/desktop/frontend · Cockpit · Chapters · Review · Lab · Archive&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;align=center;" vertex="1" parent="1">
+          <mxGeometry x="280" y="88" width="1040" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-e1" value="1. 命令 / 状态查询（薄 Wails DTO）" style="endArrow=classic;html=1;rounded=0;strokeWidth=1.5;fontSize=11;fontColor=#57534e;" edge="1" parent="1" source="t-ui" target="t-app">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-app" value="&lt;b&gt;应用编排层 Application Service&lt;/b&gt;&lt;br&gt;权威工作台投影 RunProjection / JobPublicProjection · 状态机与幂等 JobLease / JobEvent / JobSnapshot&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;internal/application/workspace · agentkernel.Service · appshell · appsettings · creativeharness&lt;/font&gt;&lt;br&gt;React 不推断阶段、候选可应用性或 stale；Wails binding 只做 DTO 转换与事件唤醒" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="210" width="1440" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-e2" value="2. 上下文装配" style="endArrow=classic;html=1;rounded=0;fontSize=11;fontColor=#57534e;" edge="1" parent="1" source="t-app" target="t-ctx">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-e3" value="3. 编译与调度" style="endArrow=classic;html=1;rounded=0;fontSize=11;fontColor=#57534e;" edge="1" parent="1" source="t-app" target="t-router">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-e4" value="4. 读写校验" style="endArrow=classic;html=1;rounded=0;fontSize=11;fontColor=#57534e;" edge="1" parent="1" source="t-app" target="t-store">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ctx" value="&lt;b&gt;Context Assembler&lt;/b&gt;&lt;br&gt;确定性规则筛选&lt;br&gt;预算 / Token 计算&lt;br&gt;Context Manifest&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;workspace/context_manifest.go&lt;br&gt;agentkernel 节点装配&lt;br&gt;json.assembler v1&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="370" width="420" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-router" value="&lt;b&gt;Agent Kernel Router&lt;/b&gt;&lt;br&gt;动态工作流加载（不可变版本）&lt;br&gt;能力与模型槽解耦&lt;br&gt;确定性门禁 Lint / Quality Gate&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;agentkernel.Compile + Service&lt;br&gt;agentassets.Builtin 注册表&lt;br&gt;quality.Engine&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="590" y="370" width="420" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-store" value="&lt;b&gt;Domain Model Store&lt;/b&gt;&lt;br&gt;SQLite WAL + Goose 迁移&lt;br&gt;.zjproject 项目包&lt;br&gt;候选与正式资产隔离&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;persistence/sqlite&lt;br&gt;ports.ProjectStore&lt;br&gt;ChangeSet / Artifact&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="370" width="420" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-e5" style="endArrow=classic;html=1;rounded=0;strokeWidth=1.5;" edge="1" parent="1" source="t-router" target="t-kernel">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-kernel" value="智能体能力执行内核  Agent Execution Kernel    ·    internal/application/agentkernel + domain/agent" style="swimlane;fontStyle=1;childLayout=0;horizontal=1;startSize=40;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="580" width="1440" height="1180" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-a-label" value="阶段 A · 导演与分析　　公开阶段 chapter_directing / professional_analysis" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+          <mxGeometry x="24" y="52" width="700" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-director" value="&lt;b&gt;Chapter Director&lt;/b&gt;&lt;br&gt;能力 chapter_planner · 槽 planner&lt;br&gt;把路线图与冻结 Manifest 转成可执行叙事任务&lt;br&gt;chapter_goal / scenes / anchors / forbidden_reveals / improvisation_bounds&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;节点 director · Prompt chapter_plan.prompt v2 · Schema chapter_plan.schema v2&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="84" width="640" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-analysis" value="&lt;b&gt;Specialized State Analysis&lt;/b&gt;&lt;br&gt;连续性 / 人物动机与知识边界 / 伏笔与叙事债务 / 世界规则&lt;br&gt;只输出 ConstraintNote 与风险，不拼写正文&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#b45309&quot;&gt;协议已落地（ConstraintNotesOutput）；默认导演工作流尚未插入独立节点，Harness 可加变体&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#ea580c;fontSize=12;align=center;dashed=1;" vertex="1" parent="t-kernel">
+          <mxGeometry x="740" y="84" width="660" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ea" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-director" target="t-analysis">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-eb" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-analysis" target="t-writer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-b-label" value="阶段 B · 正文生成　　公开阶段 prose_writing　　默认单一主写，拒绝多模型拼接成章" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+          <mxGeometry x="24" y="214" width="900" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-writer" value="&lt;b&gt;Prose Writer&lt;/b&gt;　能力 prose_writer · 槽 writer&lt;br&gt;只读任务、冻结上下文与导演产物，不读审阅标准答案或其它模型隐藏推理&lt;br&gt;输出 ChapterDraftOutput.body　·　节点 draft　·　Prompt prose_writer.prompt v1&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;实验变体 slot-parallel：skeleton_writer → 五类 slot_writer（互不可见）→ 确定性拼接 mechanical_join → integration_writer 缝合；仍映射同一公开阶段&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="244" width="1360" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ec" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-writer" target="t-cont">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-c-label" value="阶段 C · 隔离审阅 &amp; Finding Merger　　公开阶段 independent_review　　审阅者互不读取结论" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+          <mxGeometry x="24" y="360" width="1000" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-cont" value="&lt;b&gt;Continuity Review&lt;/b&gt;&lt;br&gt;continuity_review&lt;br&gt;事实 / 状态 / 知识边界 / 时间线 / 伏笔&lt;br&gt;槽 continuity_reviewer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="392" width="400" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-content" value="&lt;b&gt;Content Review&lt;/b&gt;&lt;br&gt;content_review&lt;br&gt;节奏 / 因果 / 动机 / 钩子 / 信息密度&lt;br&gt;槽 continuity_reviewer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="520" y="392" width="400" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-style" value="&lt;b&gt;Style Review&lt;/b&gt;&lt;br&gt;style_review&lt;br&gt;重复 / 套话 / 机械排比 / 总结腔&lt;br&gt;槽 continuity_reviewer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="1000" y="392" width="400" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ed1" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-cont" target="t-merger">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ed2" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-content" target="t-merger">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ed3" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-style" target="t-merger">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-merger" value="&lt;b&gt;Finding Merger&lt;/b&gt;　确定性应用组件，不调用模型&lt;br&gt;规范化 / 精确去重 / 稳定排序 / 关联证据 / 标注同证据冲突　·　不得补写问题或降低严重度&lt;br&gt;agentdomain.MergeFindings　·　工作流 quality.chapter.split-review 三审阅节点并行输入修订" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=center;fontStyle=0;" vertex="1" parent="t-kernel">
+          <mxGeometry x="280" y="540" width="880" height="88" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-ee" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-merger" target="t-rev">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-lint" value="&lt;b&gt;Deterministic Lint + Quality Gate&lt;/b&gt;&lt;br&gt;quality.Engine　·　锚点 / 禁止项 / 字数 / 重复 / 机械句式 / 元话语&lt;br&gt;质量状态 passed / needs_review / blocked　≠ AgentRun 终态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="540" width="220" height="88" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-d-label" value="阶段 D · 有界修订　　公开阶段 bounded_revision / revision_verify" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+          <mxGeometry x="24" y="650" width="800" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-rev" value="&lt;b&gt;Bounded Revision&lt;/b&gt;　能力 bounded_revision　·　正文默认槽 writer，方案用 planner&lt;br&gt;只接收规范化公开发现或作者指令（RevisionDirective），不接收其它模型隐藏推理&lt;br&gt;quality_findings 与 author_directed 分模式；自动修订最多一次；只改未定稿候选并保留上一 attempt&lt;br&gt;v2 追加 revision_verify（固定 continuity_reviewer，禁止修订槽兼任）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="682" width="1360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-wf" value="已发布工作流（internal/agentassets）&#xa;baseline.chapter.v1　|　quality.chapter.v1/v2　|　quality.blueprint.v1/v2　|　quality.chapter.director.v1/v2　|　quality.chapter.split-review.v1/v2　|　quality.chapter.slot-parallel.v1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfccb;strokeColor=#65a30d;fontSize=11;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="814" width="1360" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-slots" value="兼容模型槽（R2.1，不是 Agent 数量）　planner / writer / continuity_reviewer　·　CapabilityResolver 把能力映射到槽，再解析项目锁定的 CreativeProfileVersion" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfccb;strokeColor=#65a30d;fontSize=11;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="886" width="1360" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-provider" value="Provider Runtime　OpenAI 兼容 / Anthropic　·　internal/providers　·　密钥只在节点执行时按冻结凭据引用从 OS 凭据库读取" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfccb;strokeColor=#65a30d;fontSize=11;align=center;" vertex="1" parent="t-kernel">
+          <mxGeometry x="40" y="950" width="1360" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-e6" value="5. 校验 &amp; 流式返回（未确认候选）" style="endArrow=classic;html=1;rounded=0;strokeWidth=1.5;fontSize=11;fontColor=#57534e;" edge="1" parent="1" source="t-kernel" target="t-cand">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-cand" value="&lt;b&gt;Candidate Buffer 未确认候选区&lt;/b&gt;&lt;br&gt;DraftCandidate / Artifact / ChangeSet　·　确认后才原子写入 Canonical Head 与长期记忆&lt;br&gt;R3 只写 Harness 工件或未确认候选，不写 canonical 正文和正式资产　·　同批前序候选只能 provisional 进入后序上下文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="1810" width="1440" height="90" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="layers" name="02 Go 分层与包">
+    <mxGraphModel dx="1400" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="l-title" value="模块边界（architecture.md §6.2）" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="24" width="600" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-ui" value="&lt;b&gt;React UI&lt;/b&gt;　apps/desktop/frontend　·　prototype/ 为视觉权威&#xa;只消费公开阶段与权威投影，不实现工作流规则，不直连 SQLite / 文件系统 / Provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="70" width="1440" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-bind" value="&lt;b&gt;Wails Binding&lt;/b&gt;　apps/desktop/api.go · app.go · job_notifier.go　薄 DTO / 事件通知 / 目录选择" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0284c7;fontSize=13;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="170" width="1440" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-app" value="应用层 Use Cases" style="swimlane;fontStyle=1;startSize=32;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="256" width="1440" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-ws" value="&lt;b&gt;workspace&lt;/b&gt;&#xa;项目生命周期 / 锁 / 投影&#xa;正文、档案、候选确认&#xa;委托 Kernel 执行" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="l-app">
+          <mxGeometry x="20" y="48" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-ak" value="&lt;b&gt;agentkernel&lt;/b&gt;&#xa;编译冻结 / 节点执行&#xa;预算取消恢复&#xa;修订校验 / Finding 合并" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="l-app">
+          <mxGeometry x="256" y="48" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-set" value="&lt;b&gt;appsettings&lt;/b&gt;&#xa;连接元数据&#xa;不可变创作方案版本&#xa;项目默认方案" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="l-app">
+          <mxGeometry x="492" y="48" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-shell" value="&lt;b&gt;appshell&lt;/b&gt;&#xa;最近项目索引&#xa;标题 / 关闭协议&#xa;不含正文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="l-app">
+          <mxGeometry x="728" y="48" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-har" value="&lt;b&gt;creativeharness&lt;/b&gt;&#xa;固定种子对照&#xa;盲评 / 接受率&#xa;不进作品库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="l-app">
+          <mxGeometry x="964" y="48" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-ports" value="&lt;b&gt;ports&lt;/b&gt;&#xa;消费者定义的小接口&#xa;Store / Provider / Registry / Clock" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="l-app">
+          <mxGeometry x="1200" y="48" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-dom" value="领域层 Domain（不依赖 Wails / React / 具体 Provider）" style="swimlane;fontStyle=1;startSize=32;fillColor=#fce7f3;strokeColor=#c026d3;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="506" width="1440" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-da" value="&lt;b&gt;agent&lt;/b&gt;&#xa;任务协议 / 工作流 DAG&#xa;Finding / Manifest&#xa;JobEvent / Artifact" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="20" y="48" width="200" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-dp" value="&lt;b&gt;project&lt;/b&gt;&#xa;作品 / 章节&#xa;工作台阶段" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="236" y="48" width="160" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-dr" value="&lt;b&gt;revision&lt;/b&gt;&#xa;ChapterRevision&#xa;ChangeSet / 分支" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="412" y="48" width="160" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-dw" value="&lt;b&gt;world&lt;/b&gt;&#xa;人物 / 势力 / 地点&#xa;规则 / 物品 / 伏笔" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="588" y="48" width="160" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-ds" value="&lt;b&gt;story&lt;/b&gt;&#xa;大纲 / 故事线&#xa;场景卡" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="764" y="48" width="150" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-dt" value="&lt;b&gt;timeline / canon&lt;/b&gt;&#xa;事件 / 事实&#xa;Canonical Head" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="930" y="48" width="170" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-di" value="&lt;b&gt;importing / extraction&lt;/b&gt;&#xa;导入与抽取候选" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#c026d3;fontSize=12;" vertex="1" parent="l-dom">
+          <mxGeometry x="1116" y="48" width="200" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-adapt" value="适配器层 Persistence / Runtime / Provider / Platform" style="swimlane;fontStyle=1;startSize=32;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="736" width="1440" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-sql" value="&lt;b&gt;persistence/sqlite&lt;/b&gt;&#xa;项目库 WAL&#xa;agent_runs / job_events&#xa;正文 revision / 资产" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;" vertex="1" parent="l-adapt">
+          <mxGeometry x="20" y="48" width="220" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-appdb" value="&lt;b&gt;appsqlite / harnesssqlite&lt;/b&gt;&#xa;应用 settings.db&#xa;Harness 独立库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;" vertex="1" parent="l-adapt">
+          <mxGeometry x="256" y="48" width="220" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-aa" value="&lt;b&gt;agentassets&lt;/b&gt;&#xa;内嵌 Prompt / Schema&#xa;工作流定义与哈希" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;" vertex="1" parent="l-adapt">
+          <mxGeometry x="492" y="48" width="220" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-q" value="&lt;b&gt;quality&lt;/b&gt;&#xa;确定性 lint&#xa;门禁 / Harness 变体" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;" vertex="1" parent="l-adapt">
+          <mxGeometry x="728" y="48" width="200" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-pr" value="&lt;b&gt;providers&lt;/b&gt;&#xa;OpenAI / Anthropic&#xa;流式、用量、取消" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;" vertex="1" parent="l-adapt">
+          <mxGeometry x="944" y="48" width="200" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-plat" value="&lt;b&gt;platform&lt;/b&gt;&#xa;凭据库 / 项目锁&#xa;快照 / 分支 / 目录" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;" vertex="1" parent="l-adapt">
+          <mxGeometry x="1160" y="48" width="260" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-data" value="数据落点　应用目录：settings.db + 最近项目索引　|　OS 凭据库：API Key　|　作品包 .zjproject：项目库 / 附件 / 分支 / 快照　不得存 Key" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=center;" vertex="1" parent="1">
+          <mxGeometry x="80" y="968" width="1440" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="l-rule" value="依赖方向只允许向下。Agent、React、Wails 均不能直接写 SQLite、文件或模型 Provider；写入必须走应用用例。" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=12;fontColor=#57534e;" vertex="1" parent="1">
+          <mxGeometry x="80" y="1040" width="1200" height="28" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="kernel" name="03 章节生产工作流">
+    <mxGraphModel dx="1400" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="k-title" value="目标拓扑：quality.chapter.split-review（+ 可选专业分析 / v2 复核）" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1100" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-create" value="CreateRun&#xa;编译并冻结全部节点" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-asm" value="ContextAssembler&#xa;每节点独立 Manifest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="230" y="80" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-dir" value="director&#xa;chapter_planner&#xa;planner 槽" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="440" y="80" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-ana" value="专业分析&#xa;ConstraintNote&#xa;（可选节点）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#ea580c;fontSize=12;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="610" y="80" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-draft" value="draft&#xa;prose_writer&#xa;writer 槽" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="780" y="80" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-e1" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-create" target="k-asm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e2" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-asm" target="k-dir"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e3" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="k-dir" target="k-ana"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e4" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-ana" target="k-draft"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-cont" value="continuity&#xa;只读 draft+约束" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="560" y="230" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-cnt" value="content&#xa;只读 draft+约束" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="760" y="230" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-sty" value="style&#xa;只读 draft+约束" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="960" y="230" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-e5" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-draft" target="k-cont"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e6" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-draft" target="k-cnt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e7" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-draft" target="k-sty"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-merge" value="FindingMerger（确定性）+ Lint + Gate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="640" y="370" width="320" height="56" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-e8" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-cont" target="k-merge"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e9" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-cnt" target="k-merge"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e10" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-sty" target="k-merge"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-rev" value="revision&#xa;on_quality_issue&#xa;writer 槽" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="680" y="480" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-ver" value="verify（v2）&#xa;continuity_reviewer&#xa;剥离修订自述" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="880" y="480" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-cand" value="候选 Artifact + 谱系&#xa;不写 Canonical Head" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="480" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-e11" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-merge" target="k-rev"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e12" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="k-rev" target="k-ver"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-e13" style="endArrow=classic;html=1;" edge="1" parent="1" source="k-ver" target="k-cand"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="k-iso" value="隔离规则：规划 / 写作 / 审阅相互隔离。三个审阅节点只读同一正文、原始约束和冻结 Manifest。修订只接收规范化问题清单。复核输入剥离 status/note，默认方向是「证明后才通过」。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;fontSize=12;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="230" width="480" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-pub" value="公开阶段（产品界面只认这些）&#xa;context_preparing → chapter_directing → professional_analysis → prose_writing → independent_review → bounded_revision → revision_verify → candidate_ready" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eff6ff;strokeColor=#2563eb;fontSize=12;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="480" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-min" value="最小质量基线 quality.chapter.v1：plan → draft → review_bundle → lint/gate → 有问题则 bounded_revision 一次。综合审阅单节点输出三类 Finding，Schema 已分 category。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="700" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="k-slot" value="slot-parallel 写作段：director → skeleton → 五类槽位写手（对话/动作/内心/描写/过渡，互不可见）→ mechanical_join → integrate → review → revision。全部映射 prose_writing。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="580" width="700" height="80" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="cap" name="04 能力与模型槽">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="c-title" value="能力（节点为什么存在）与配置槽（从哪取模型）解耦" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-cap" value="Capabilities" style="swimlane;fontStyle=1;startSize=28;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="280" height="520" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c1" value="story_architect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="44" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c2" value="chapter_planner（章节导演）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="84" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c3" value="prose_writer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="124" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c4" value="continuity / content / style review" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="164" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c5" value="bounded_revision" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="204" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c6" value="revision_verify" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="244" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-c7" value="skeleton / slot / integration writer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#ea580c;dashed=1;" vertex="1" parent="c-cap">
+          <mxGeometry x="20" y="284" width="240" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-slot" value="Role Slots（R2.1 兼容）" style="swimlane;fontStyle=1;startSize=28;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="520" y="70" width="280" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-s1" value="planner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="c-slot">
+          <mxGeometry x="20" y="48" width="240" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-s2" value="writer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="c-slot">
+          <mxGeometry x="20" y="112" width="240" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-s3" value="continuity_reviewer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="c-slot">
+          <mxGeometry x="20" y="176" width="240" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-bind" value="节点冻结三元组&#xa;capability + role_slot + Provider/模型/参数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="900" y="120" width="280" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-prof" value="CreativeProfileVersion&#xa;应用级不可变方案&#xa;项目只存版本引用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="900" y="220" width="280" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-note" value="写作与审阅必须能使用不同连接或不同模型。revision_verify 固定审阅槽，不允许绑定到执行修订的角色。slot-* 能力全部解析到 writer，只服务实验变体，否决后可整体下线。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacing=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="520" y="380" width="660" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-e1" style="endArrow=classic;html=1;" edge="1" parent="1" source="c-c1" target="c-s1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c-e2" style="endArrow=classic;html=1;" edge="1" parent="1" source="c-c2" target="c-s1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c-e3" style="endArrow=classic;html=1;" edge="1" parent="1" source="c-c3" target="c-s2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c-e4" style="endArrow=classic;html=1;" edge="1" parent="1" source="c-c4" target="c-s3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c-e5" style="endArrow=classic;html=1;" edge="1" parent="1" source="c-c5" target="c-s2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c-e6" style="endArrow=classic;html=1;" edge="1" parent="1" source="c-c6" target="c-s3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c-e7" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="c-c7" target="c-s2"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="memory" name="05 长期记忆">
+    <mxGraphModel dx="1400" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="m-title" value="长期记忆：定稿后写入，下次生成经 Manifest 读回" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-canon" value="Canonical Head&#xa;已定稿 ChapterRevision&#xa;最高事实来源" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-obs" value="观察节点&#xa;只输出与现有记忆的差异&#xa;不做入库判断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="260" y="70" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-judge" value="裁决节点&#xa;采纳 / 待定 / 冲突&#xa;伏笔或叙事债务归类" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="500" y="70" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-chk" value="证据 + 有效区间校验&#xa;确定性应用层&#xa;不在 DB 事务中调模型" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="740" y="70" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-commit" value="幂等提交正式记忆&#xa;失败 → memory_pending_rebuild&#xa;不回滚正文定稿" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ccfbf1;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="980" y="70" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-e1" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-canon" target="m-obs"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="m-e2" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-obs" target="m-judge"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="m-e3" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-judge" target="m-chk"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="m-e4" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-chk" target="m-commit"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="m-layers" value="五层长期记忆（共享同一 .zjproject，不是外置向量库）" style="swimlane;fontStyle=1;startSize=32;fillColor=#ccfbf1;strokeColor=#0e8080;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="1160" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-l1" value="&lt;b&gt;宪法层&lt;/b&gt;&#xa;方案 / 世界规则&#xa;主线 / 禁写 / 锁定&#xa;不得截断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="m-layers">
+          <mxGeometry x="20" y="48" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-l2" value="&lt;b&gt;结构层&lt;/b&gt;&#xa;全书 → 卷 → 弧&#xa;近期 3–10 章&#xa;高层需批准才改" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="m-layers">
+          <mxGeometry x="246" y="48" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-l3" value="&lt;b&gt;状态层&lt;/b&gt;&#xa;人物 / 关系 / 物品&#xa;地点 / 知识边界&#xa;known ≠ misinformed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="m-layers">
+          <mxGeometry x="472" y="48" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-l4" value="&lt;b&gt;摘要层&lt;/b&gt;&#xa;章 / 卷 / 近场场景&#xa;远场只留骨架&#xa;不能替代原文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="m-layers">
+          <mxGeometry x="698" y="48" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-l5" value="&lt;b&gt;证据层&lt;/b&gt;&#xa;原文 / revision&#xa;Finding / 伏笔&#xa;无证据不得入库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="m-layers">
+          <mxGeometry x="924" y="48" width="210" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-asm" value="ContextAssembler&#xa;结构化关系 + 时间线 + 伏笔 + 近期窗口 + 本地检索&#xa;输出 ContextManifest（纳入/省略原因、版本、哈希、预算）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="440" width="560" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-kernel" value="Agent Kernel 节点&#xa;只能读 Manifest 已选择的局部上下文&#xa;不能自行搜索项目或把建议升为事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="640" y="440" width="560" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-e5" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-layers" target="m-asm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="m-e6" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-asm" target="m-kernel"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="m-no" value="不得写入正式记忆：初稿 / 自动修订 / 未确认候选 / 同批 provisional / 缺证据抽取 / 完整 Prompt 流事件（Invocation Artifact）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#ea580c;fontSize=12;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="700" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-chg" value="影响模式&#xa;future_only / in_story_change / retcon&#xa;历史定稿默认只报告冲突" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="760" y="560" width="440" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-status" value="现状：Fact / Event / CharacterKnowledge / ForeshadowingHook 与 Manifest 骨架已在领域层落地。完整检索、观察/裁决后验与 500 章连续性 Harness 属 R7；R5 只提供 memory_pending_rebuild 挂点。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacing=8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="660" width="1160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-e7" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="m-commit" target="m-layers">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

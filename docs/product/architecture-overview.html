@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>织境 Story Studio · 架构总图与模块设计</title>
+  <style>
+    :root {
+      --bg: #f6f3ec;
+      --paper: #fffcf7;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --line: #d6d3d1;
+      --accent: #1d4ed8;
+      --ui: #dbeafe;
+      --ui-stroke: #3b82f6;
+      --app: #fef3c7;
+      --app-stroke: #d97706;
+      --kernel: #dcfce7;
+      --kernel-stroke: #16a34a;
+      --store: #ede9fe;
+      --store-stroke: #7c3aed;
+      --cand: #fee2e2;
+      --cand-stroke: #dc2626;
+      --det: #f4f4f5;
+      --det-stroke: #52525b;
+      --warn: #ffedd5;
+      --warn-stroke: #ea580c;
+      --mem: #ccfbf1;
+      --mem-stroke: #0f766e;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 16px/1.65 "Iowan Old Style", "Palatino Linotype", "Source Han Serif SC", "Songti SC", serif;
+    }
+    .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+    nav {
+      position: sticky; top: 0; height: 100vh; overflow: auto;
+      padding: 28px 20px; border-right: 1px solid var(--line); background: #efebe3;
+    }
+    nav h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 16px; color: var(--muted); font-family: ui-sans-serif, system-ui, sans-serif; }
+    nav a { display: block; color: var(--ink); text-decoration: none; font-size: 13px; font-family: ui-sans-serif, system-ui, sans-serif; padding: 5px 0; }
+    nav a:hover { color: var(--accent); }
+    main { max-width: 1080px; width: 100%; margin-inline: auto; padding: 48px 56px 96px; }
+    header.hero { margin-bottom: 40px; }
+    header.hero p.kicker { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+    h1, h2, h3 { font-family: ui-sans-serif, system-ui, "PingFang SC", sans-serif; line-height: 1.3; }
+    h1 { font-size: 32px; margin: 0 0 12px; }
+    h2 { font-size: 22px; margin: 32px 0 16px; padding-top: 8px; border-top: 1px solid var(--line); }
+    h3 { font-size: 17px; margin: 28px 0 10px; }
+    p, li { color: #292524; }
+    .lead { font-size: 18px; color: var(--muted); max-width: 44em; }
+    .note {
+      background: var(--paper); border: 1px solid var(--line); padding: 12px 16px; font-size: 14px;
+      font-family: ui-sans-serif, system-ui, sans-serif; margin: 20px 0 32px;
+    }
+    .diagram {
+      background: var(--paper); border: 1px solid var(--line); padding: 20px 12px 8px; overflow-x: auto; margin: 24px 0 8px;
+    }
+    .diagram svg { display: block; min-width: 980px; width: 100%; height: auto; }
+    .caption { font-size: 12px; color: var(--muted); font-family: ui-sans-serif, system-ui, sans-serif; margin: 0 0 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; font-family: ui-sans-serif, system-ui, sans-serif; margin: 12px 0 28px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #efebe3; font-weight: 600; }
+    code, .path { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 0.88em; background: #efebe3; padding: 0 .25em; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { background: var(--paper); border: 1px solid var(--line); padding: 16px 18px; }
+    .card h3 { margin-top: 0; }
+    .card p:last-child { margin-bottom: 0; }
+    .full { grid-column: 1 / -1; }
+    ul.compact { margin: 8px 0; padding-left: 1.2em; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px 20px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+    .sw { display: inline-block; width: 12px; height: 12px; border: 1px solid; margin-right: 6px; vertical-align: -1px; }
+    @media (max-width: 960px) {
+      .shell { grid-template-columns: 1fr; }
+      nav { position: relative; height: auto; }
+      main { padding: 28px 20px 64px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media print {
+      nav { display: none; }
+      .shell { display: block; }
+      main { max-width: none; padding: 0; }
+      h2 { break-before: page; }
+      h2:first-of-type { break-before: auto; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+<nav>
+  <h1>织境架构</h1>
+  <a href="#topo">1. 系统拓扑</a>
+  <a href="#principles">2. 设计原则</a>
+  <a href="#layers">3. 分层与包</a>
+  <a href="#ui">4. UI 与绑定</a>
+  <a href="#app">5. 应用编排层</a>
+  <a href="#assembler">6. 上下文装配</a>
+  <a href="#kernel">7. 智能体内核</a>
+  <a href="#capabilities">8. 能力与槽位</a>
+  <a href="#workflows">9. 工作流版本</a>
+  <a href="#quality">10. 审阅、合并与门禁</a>
+  <a href="#store">11. 领域与持久化</a>
+  <a href="#candidate">12. 候选与定稿</a>
+  <a href="#memory">13. 长期记忆</a>
+  <a href="#status">14. 落地状态</a>
+</nav>
+<main>
+<header class="hero">
+  <p class="kicker">织境 Story Studio · 可视化配套</p>
+  <h1>项目架构总图与模块设计</h1>
+  <p class="lead">把你给的运行时拓扑落到当前仓库：Go 领域 / 应用 / 内核 / 持久化边界，R3 Agent Kernel 的能力节点，以及五层长期记忆如何写入、过期和被 Context Assembler 读回。产品事实仍以 <code>docs/product/architecture.md</code> 为准；本文只做对照图与模块说明。</p>
+</header>
+<p class="note">可编辑图：同目录 <code>architecture-overview.drawio</code>，用 <a href="https://app.diagrams.net">diagrams.net</a> 打开。当前开发阶段是 R3（内核与创作质量 Harness）；R4–R7 的批次、正式资产确认和五层长期记忆按同一 Kernel 扩展，不另起运行时。</p>
+
+<h2 id="topo">1. 系统拓扑</h2>
+<p>这条链路是产品主循环：界面发命令，应用层冻结任务并给出权威投影，再分三路做上下文装配、工作流编译调度、领域读写；真正的模型调用发生在内核四阶段之内；结果只进未确认候选区。作者确认后才写入 Canonical Head，并异步进入五层长期记忆；下次生成由 Assembler 按 Manifest 读回，模型不能自己翻整本书。</p>
+<div class="diagram">
+<svg viewBox="0 0 1100 1324" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="织境运行时拓扑">
+  <style>
+    .box { stroke-width: 1.25; }
+    .t { font-family: ui-sans-serif, system-ui, "PingFang SC", sans-serif; fill: #1c1917; }
+    .muted { fill: #57534e; }
+    .arr { stroke: #44403c; stroke-width: 1.2; fill: none; marker-end: url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#44403c"/></marker>
+  </defs>
+
+  <rect class="box" x="220" y="8" width="660" height="64" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+  <text class="t" x="550" y="32" text-anchor="middle" font-size="14" font-weight="700">React UI（创作驾驶舱 / 正文工作台）</text>
+  <text class="t muted" x="550" y="52" text-anchor="middle" font-size="11">apps/desktop/frontend · Cockpit · Chapters · Review · Lab</text>
+
+  <line class="arr" x1="550" y1="72" x2="550" y2="104"/>
+  <text class="t muted" x="568" y="96" font-size="11">1. 命令 / 状态查询（Wails DTO）</text>
+
+  <rect class="box" x="40" y="108" width="1020" height="78" rx="6" fill="#fef3c7" stroke="#d97706"/>
+  <text class="t" x="550" y="132" text-anchor="middle" font-size="14" font-weight="700">应用编排层 Application Service / Engine</text>
+  <text class="t muted" x="550" y="152" text-anchor="middle" font-size="11">权威投影 RunProjection · 状态机与幂等 JobLease / JobEvent / JobSnapshot</text>
+  <text class="t muted" x="550" y="170" text-anchor="middle" font-size="11">workspace · agentkernel · appshell · appsettings · creativeharness</text>
+
+  <line class="arr" x1="210" y1="186" x2="210" y2="228"/>
+  <line class="arr" x1="550" y1="186" x2="550" y2="228"/>
+  <line class="arr" x1="890" y1="186" x2="890" y2="228"/>
+  <text class="t muted" x="218" y="218" font-size="10">2. 上下文装配</text>
+  <text class="t muted" x="558" y="218" font-size="10">3. 编译与调度</text>
+  <text class="t muted" x="898" y="218" font-size="10">4. 读写校验</text>
+
+  <rect class="box" x="40" y="232" width="320" height="108" rx="6" fill="#ede9fe" stroke="#7c3aed"/>
+  <text class="t" x="200" y="258" text-anchor="middle" font-size="13" font-weight="700">Context Assembler</text>
+  <text class="t muted" x="200" y="278" text-anchor="middle" font-size="11">确定性规则筛选</text>
+  <text class="t muted" x="200" y="296" text-anchor="middle" font-size="11">预算 / Token 计算</text>
+  <text class="t muted" x="200" y="314" text-anchor="middle" font-size="11">Context Manifest</text>
+
+  <rect class="box" x="390" y="232" width="320" height="108" rx="6" fill="#ede9fe" stroke="#7c3aed"/>
+  <text class="t" x="550" y="258" text-anchor="middle" font-size="13" font-weight="700">Agent Kernel Router</text>
+  <text class="t muted" x="550" y="278" text-anchor="middle" font-size="11">版本化工作流加载</text>
+  <text class="t muted" x="550" y="296" text-anchor="middle" font-size="11">能力与模型槽解耦</text>
+  <text class="t muted" x="550" y="314" text-anchor="middle" font-size="11">确定性门禁 Lint</text>
+
+  <rect class="box" x="740" y="232" width="320" height="108" rx="6" fill="#ede9fe" stroke="#7c3aed"/>
+  <text class="t" x="900" y="258" text-anchor="middle" font-size="13" font-weight="700">Domain Model Store</text>
+  <text class="t muted" x="900" y="278" text-anchor="middle" font-size="11">SQLite WAL · Goose 迁移</text>
+  <text class="t muted" x="900" y="296" text-anchor="middle" font-size="11">.zjproject 项目包</text>
+  <text class="t muted" x="900" y="314" text-anchor="middle" font-size="11">候选与正式资产隔离</text>
+
+  <line class="arr" x1="550" y1="340" x2="550" y2="372"/>
+
+  <rect class="box" x="40" y="376" width="1020" height="690" rx="8" fill="#f0fdf4" stroke="#16a34a"/>
+  <text class="t" x="550" y="402" text-anchor="middle" font-size="14" font-weight="700">智能体能力执行内核 Agent Execution Kernel</text>
+  <text class="t muted" x="550" y="420" text-anchor="middle" font-size="11">internal/application/agentkernel · internal/domain/agent · internal/agentassets</text>
+
+  <text class="t" x="60" y="448" font-size="12" font-weight="700" fill="#166534">阶段 A · 导演与分析</text>
+  <rect class="box" x="60" y="458" width="470" height="86" rx="5" fill="#fff" stroke="#16a34a"/>
+  <text class="t" x="295" y="486" text-anchor="middle" font-size="13" font-weight="700">Chapter Director</text>
+  <text class="t muted" x="295" y="506" text-anchor="middle" font-size="11">chapter_planner · planner 槽 · 不写正文</text>
+  <text class="t muted" x="295" y="524" text-anchor="middle" font-size="11">目标 / 场景 / 锚点 / 禁提前揭示 / 即兴边界</text>
+  <line class="arr" x1="530" y1="501" x2="568" y2="501"/>
+  <rect class="box" x="570" y="458" width="470" height="86" rx="5" fill="#fff7ed" stroke="#ea580c" stroke-dasharray="5 4"/>
+  <text class="t" x="805" y="486" text-anchor="middle" font-size="13" font-weight="700">Specialized State Analysis</text>
+  <text class="t muted" x="805" y="506" text-anchor="middle" font-size="11">连续性 / 人物 / 世界观 ConstraintNote</text>
+  <text class="t muted" x="805" y="524" text-anchor="middle" font-size="11">协议已有 · 默认工作流尚未插入节点</text>
+
+  <text class="t" x="60" y="572" font-size="12" font-weight="700" fill="#166534">阶段 B · 正文生成</text>
+  <rect class="box" x="60" y="582" width="980" height="72" rx="5" fill="#fff" stroke="#16a34a"/>
+  <text class="t" x="550" y="610" text-anchor="middle" font-size="13" font-weight="700">Prose Writer　主写模型：统一叙事声音，拒绝多模型拼接成章</text>
+  <text class="t muted" x="550" y="630" text-anchor="middle" font-size="11">prose_writer · writer 槽 · 只读任务 / Manifest / 导演产物</text>
+
+  <text class="t" x="60" y="682" font-size="12" font-weight="700" fill="#166534">阶段 C · 隔离审阅 &amp; Finding Merger</text>
+  <rect class="box" x="60" y="694" width="300" height="78" rx="5" fill="#fff" stroke="#3b82f6"/>
+  <text class="t" x="210" y="722" text-anchor="middle" font-size="12" font-weight="700">Continuity Review</text>
+  <text class="t muted" x="210" y="742" text-anchor="middle" font-size="11">事实 / 状态 / 知识边界 / 伏笔</text>
+  <rect class="box" x="400" y="694" width="300" height="78" rx="5" fill="#fff" stroke="#3b82f6"/>
+  <text class="t" x="550" y="722" text-anchor="middle" font-size="12" font-weight="700">Content Review</text>
+  <text class="t muted" x="550" y="742" text-anchor="middle" font-size="11">节奏 / 因果 / 动机 / 钩子</text>
+  <rect class="box" x="740" y="694" width="300" height="78" rx="5" fill="#fff" stroke="#3b82f6"/>
+  <text class="t" x="890" y="722" text-anchor="middle" font-size="12" font-weight="700">Style Review</text>
+  <text class="t muted" x="890" y="742" text-anchor="middle" font-size="11">重复 / 套话 / 机械句式</text>
+  <line class="arr" x1="210" y1="772" x2="210" y2="798"/>
+  <line class="arr" x1="550" y1="772" x2="550" y2="798"/>
+  <line class="arr" x1="890" y1="772" x2="890" y2="798"/>
+  <line class="arr" x1="210" y1="798" x2="890" y2="798"/>
+  <rect class="box" x="300" y="808" width="500" height="62" rx="5" fill="#f4f4f5" stroke="#52525b"/>
+  <text class="t" x="550" y="832" text-anchor="middle" font-size="12" font-weight="700">Finding Merger（确定性，不调用模型）</text>
+  <text class="t muted" x="550" y="850" text-anchor="middle" font-size="11">去重 / 关联证据 / 标注冲突 · MergeFindings</text>
+
+  <text class="t" x="60" y="900" font-size="12" font-weight="700" fill="#166534">阶段 D · 有界修订</text>
+  <rect class="box" x="60" y="910" width="980" height="72" rx="5" fill="#fff" stroke="#16a34a"/>
+  <text class="t" x="550" y="938" text-anchor="middle" font-size="13" font-weight="700">Bounded Revision　依据 Merged Findings / 作者指令做定点修润</text>
+  <text class="t muted" x="550" y="958" text-anchor="middle" font-size="11">最多一次 · 只改未定稿候选 · v2 追加独立 revision_verify</text>
+
+  <rect class="box" x="60" y="1000" width="980" height="44" rx="5" fill="#ecfccb" stroke="#65a30d"/>
+  <text class="t muted" x="550" y="1027" text-anchor="middle" font-size="11">兼容槽 planner / writer / continuity_reviewer　·　Provider：OpenAI 兼容 / Anthropic　·　密钥仅执行时读取</text>
+
+  <line class="arr" x1="550" y1="1066" x2="550" y2="1090"/>
+  <text class="t muted" x="568" y="1084" font-size="10">5. 校验 &amp; 流式返回（未确认）</text>
+
+  <rect class="box" x="40" y="1092" width="1020" height="70" rx="6" fill="#fee2e2" stroke="#dc2626"/>
+  <text class="t" x="550" y="1118" text-anchor="middle" font-size="13" font-weight="700">Candidate Buffer　未确认候选区</text>
+  <text class="t muted" x="550" y="1138" text-anchor="middle" font-size="11">DraftCandidate / Artifact / ChangeSet　·　R3 不写正式资产　·　作者确认后才进入下一步</text>
+
+  <line class="arr" x1="550" y1="1162" x2="550" y2="1186"/>
+  <text class="t muted" x="568" y="1180" font-size="10">6. 确认后原子写入 Canonical Head，再异步后验</text>
+
+  <rect class="box" x="40" y="1188" width="1020" height="130" rx="6" fill="#ccfbf1" stroke="#0f766e"/>
+  <text class="t" x="550" y="1212" text-anchor="middle" font-size="13" font-weight="700">长期记忆 Long-term Memory　·　chapter.posthoc</text>
+  <rect class="box" x="56" y="1226" width="188" height="52" rx="4" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="150" y="1246" text-anchor="middle" font-size="11" font-weight="700">宪法层</text>
+  <text class="t muted" x="150" y="1264" text-anchor="middle" font-size="10">方案 / 世界规则 / 禁写</text>
+  <rect class="box" x="254" y="1226" width="188" height="52" rx="4" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="348" y="1246" text-anchor="middle" font-size="11" font-weight="700">结构层</text>
+  <text class="t muted" x="348" y="1264" text-anchor="middle" font-size="10">全书 / 卷 / 弧 / 近期路线</text>
+  <rect class="box" x="452" y="1226" width="188" height="52" rx="4" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="546" y="1246" text-anchor="middle" font-size="11" font-weight="700">状态层</text>
+  <text class="t muted" x="546" y="1264" text-anchor="middle" font-size="10">人物 / 关系 / 地点 / 物品</text>
+  <rect class="box" x="650" y="1226" width="188" height="52" rx="4" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="744" y="1246" text-anchor="middle" font-size="11" font-weight="700">摘要层</text>
+  <text class="t muted" x="744" y="1264" text-anchor="middle" font-size="10">章 / 卷 / 近场场景摘要</text>
+  <rect class="box" x="848" y="1226" width="188" height="52" rx="4" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="942" y="1246" text-anchor="middle" font-size="11" font-weight="700">证据层</text>
+  <text class="t muted" x="942" y="1264" text-anchor="middle" font-size="10">原文 / revision / 伏笔</text>
+  <text class="t muted" x="550" y="1300" text-anchor="middle" font-size="10">派生记忆必须指回章节 + revision + 正文证据　·　未确认 / provisional 不得写入</text>
+
+  <polyline fill="none" stroke="#0f766e" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#arrow)" points="40,1252 14,1252 14,286 40,286"/>
+  <text class="t" fill="#0f766e" x="18" y="760" font-size="10" transform="rotate(-90 18 760)">7. 下次生成由 Assembler 读回</text>
+</svg>
+</div>
+<p class="caption">橙色虚线框表示架构已定义、默认章节工作流尚未挂上的专业分析节点。灰色框是本地确定性组件。青色为长期记忆：只在定稿后写入，经 Manifest 再进入下一次调用。</p>
+<div class="legend">
+  <span><i class="sw" style="background:#dbeafe;border-color:#3b82f6"></i>界面</span>
+  <span><i class="sw" style="background:#fef3c7;border-color:#d97706"></i>应用编排</span>
+  <span><i class="sw" style="background:#ede9fe;border-color:#7c3aed"></i>装配 / 路由 / 存储</span>
+  <span><i class="sw" style="background:#dcfce7;border-color:#16a34a"></i>模型节点</span>
+  <span><i class="sw" style="background:#f4f4f5;border-color:#52525b"></i>确定性组件</span>
+  <span><i class="sw" style="background:#fee2e2;border-color:#dc2626"></i>候选隔离</span>
+  <span><i class="sw" style="background:#ccfbf1;border-color:#0f766e"></i>长期记忆</span>
+</div>
+
+<h2 id="principles">2. 设计原则（决定模块怎么切）</h2>
+<div class="grid">
+  <div class="card">
+    <h3>作者主权与候选隔离</h3>
+    <p>模型输出永远不是事实。任何 AI 结果先进入候选 / Artifact / ChangeSet。只有作者确认后，短事务才写入 canonical 正文或正式资产。R3 连确认写入都不做，只证明能规划、能写、能审、能改。</p>
+  </div>
+  <div class="card">
+    <h3>能力 ≠ 模型槽 ≠ 界面步骤</h3>
+    <p>节点用稳定 <code>capability</code> 说明为什么存在；用 R2.1 三个槽 <code>planner / writer / continuity_reviewer</code> 取模型；界面只看 <code>public_stage_id</code>。内部节点拆分不得迫使 React 改代码。</p>
+  </div>
+  <div class="card">
+    <h3>规划 / 写作 / 审阅隔离</h3>
+    <p>写手不读审阅标准答案或其他模型隐藏推理。独立审阅互不读取结论。修订只拿规范化问题清单。复核者不能由修订槽兼任。</p>
+  </div>
+  <div class="card">
+    <h3>冻结后只读</h3>
+    <p>创建运行时冻结工作流、Prompt、Schema、装配器、连接、模型、参数、预算、输入摘要和 Manifest。恢复与重试只读冻结值；重试产生新 attempt，旧记录保留。</p>
+  </div>
+</div>
+
+<h2 id="layers">3. 分层与包边界</h2>
+<p>依赖只允许向下。领域层不引用 Wails、React 或具体 Provider。Wails 保持薄绑定。React 不直连 SQLite、文件系统或模型。</p>
+<table>
+  <thead><tr><th>层</th><th>包</th><th>职责</th></tr></thead>
+  <tbody>
+    <tr><td>界面</td><td><code>apps/desktop/frontend</code>、<code>prototype/</code></td><td>驾驶舱、正文、审阅、档案、Lab。原型是视觉权威；未实现能力显示「尚未就绪」。</td></tr>
+    <tr><td>绑定</td><td><code>apps/desktop</code>（<code>api.go</code> / <code>app.go</code>）</td><td>DTO 转换、目录选择、JobEvent 唤醒。不实现领域规则。</td></tr>
+    <tr><td>应用</td><td><code>workspace</code>、<code>agentkernel</code>、<code>appsettings</code>、<code>appshell</code>、<code>creativeharness</code>、<code>ports</code></td><td>用例、投影、编译执行、设置、Harness。消费者定义小接口。</td></tr>
+    <tr><td>领域</td><td><code>agent</code>、<code>project</code>、<code>revision</code>、<code>world</code>、<code>story</code>、<code>timeline</code>、<code>canon</code>、<code>importing</code>、<code>extraction</code></td><td>不变量、状态机、工作流 DAG、Finding、ChangeSet。</td></tr>
+    <tr><td>适配</td><td><code>persistence/sqlite</code>、<code>agentassets</code>、<code>quality</code>、<code>providers</code>、<code>platform/*</code></td><td>项目库、内嵌资产、lint、模型协议、凭据与文件锁。</td></tr>
+  </tbody>
+</table>
+
+<h2 id="ui">4. UI 与绑定怎么设计</h2>
+<h3>生产前端</h3>
+<p>固定一级导航对应路由：创作驾驶舱 <code>Cockpit</code>、正文与章节 <code>Chapters</code>、审阅与候选 <code>Review</code>、导入 <code>Import</code>、作品档案 <code>archive/*</code>、版本与交付 <code>Versions</code>。R3 额外保留 <code>Lab</code> 作为运行观察、对照和人工评分入口，不把内部节点 ID 暴露成作者必须理解的步骤。</p>
+<p>Go 应用层提供权威投影（<code>RunProjection</code> / <code>JobPublicProjection</code> 等）。React 只把 <code>public_stage_id</code> 译成作者语言，例如上下文装配、章节导演、正文写作、独立审阅、有界修订、候选就绪。面板宽度、字号、专注模式属于本机视图状态，不进入作品事实，也不进入 Manifest。</p>
+<h3>Wails 边界</h3>
+<p><code>DesktopAPI</code> 把前端调用转给 <code>workspace.Service</code>、<code>appsettings.Service</code>、<code>appshell.Service</code>、<code>creativeharness.Service</code>。长任务异步返回：内核提交 <code>JobEvent</code> 后，<code>job_notifier.go</code> 发轻量通知，客户端按 cursor 补拉。漏推、重复、乱序和 Bridge 重挂载由事件协议处理，收起运行面板不得取消后台任务。</p>
+
+<h2 id="app">5. 应用编排层怎么设计</h2>
+<h3><code>workspace.Service</code> — 作品生命周期与写屏障</h3>
+<p>它持有活动项目、跨进程 OS 锁、<code>storeGeneration</code> 和 <code>JobLease</code>。切换或关闭项目时先阻止新作业、取消或等待现有 lease，避免后台任务向已关闭 store 回写。可编辑模式才允许写；只读打开走恢复副本或只读 store。</p>
+<p>具体智能体执行逐步委托给 <code>agentkernel.Service</code>，避免继续膨胀单个 <code>agent.go</code>。工作台投影、章节保存、ChangeSet 确认、导入抽取仍由 workspace 用例完成，因为它们是作品事实，不是模型编排。</p>
+<h3><code>agentkernel.Service</code> — 冻结、执行、恢复</h3>
+<ul class="compact">
+  <li><code>CreateRun</code>：<code>Compile</code> 解析工作流 / Prompt / Schema / 装配器，校验哈希，生成与注册顺序无关的 <code>CompiledWorkflow</code>，原子写入 <code>RunBundle</code>。</li>
+  <li><code>Execute</code>：按 DAG 拓扑执行；条件不满足（如 <code>on_quality_issue</code> 为假）不调用 Provider，记零用量完成并标 <code>condition_not_met</code>。</li>
+  <li>格式非法允许一次 <code>format_repair</code>，独立预算，禁止借修复改语义。</li>
+  <li>恢复创建新 attempt，已完成节点不重跑；canonical head 变化则拒绝。</li>
+</ul>
+<h3>其它应用服务</h3>
+<table>
+  <thead><tr><th>服务</th><th>设计要点</th></tr></thead>
+  <tbody>
+    <tr><td><code>appsettings</code></td><td>应用级 <code>settings.db</code>：连接元数据、不可变 <code>CreativeProfileVersion</code>。API Key 不进库，只进 OS 凭据库。项目锁定精确方案版本。</td></tr>
+    <tr><td><code>appshell</code></td><td>不含正文的最近项目索引、标题栏、关闭协议。路径失效只能提示重定位，不得在原路径建空项目。</td></tr>
+    <tr><td><code>creativeharness</code></td><td>独立 Harness 库。固定原创种子对照单次直出 / 智能体初稿 / 修订稿。CI 用 Fake/Recorded Provider。</td></tr>
+    <tr><td><code>ports</code></td><td>在消费方定义最小接口：<code>ProjectStore</code>、<code>ModelProvider</code>、<code>WorkflowRegistry</code>、<code>CredentialStore</code>、<code>Clock</code>。</td></tr>
+  </tbody>
+</table>
+
+<h2 id="assembler">6. 上下文装配怎么设计</h2>
+<p>选择权属于版本化 Assembler，模型不得自由遍历作品或把未确认建议升为事实。每个实际调用的节点生成独立 <code>ContextManifest</code>：来源类型、ID、版本、哈希、优先级、纳入/省略原因、是否 provisional、字符与估算 Token 预算。</p>
+<p>装配顺序固定：硬约束与禁止项 → 当前任务与作者指令 → 已确认结构化输入 → 当前章节或必要近期正文 → 上游节点结果 → 软目标。预算不足按优先级截断；硬约束截不断则创建失败。</p>
+<p>R3 来源限于 Harness 规格、作者指令、当前章节 revision、已明确选择的结构化资产、上游工件和锚点。每个纳入来源带 <code>source_id@source_version</code> 边界标记，计入哈希；节点输出里的引用只能复制这些公开标识。</p>
+<p>代码落点：作品侧清单在 <code>workspace/context_manifest.go</code>（<code>context-v2</code>）；内核节点用 <code>json.assembler</code> v1 把 <code>$task</code> / <code>$context</code> / <code>node:…</code> 选择器渲染进 Prompt。二者都是确定性的，不让模型决定「读什么」。R7 之后 Assembler 的候选集来自五层长期记忆（结构化关系、时间线、活跃伏笔、近期窗口和本地检索），而不是把整本小说塞进上下文。详见 <a href="#memory">第 13 节</a>。</p>
+
+<h2 id="kernel">7. 智能体内核怎么设计</h2>
+<p>内核不是「固定三个 Agent」，而是<strong>版本化 DAG 执行器</strong>。工作流定义含节点、边、入口、结果节点、预算策略、质量策略和定义哈希。一经用于运行不可改；任何 Prompt / Schema / 条件变化都发新版本。</p>
+<h3>统一任务信封</h3>
+<p>每个节点收到不可变 <code>TaskEnvelope</code>：任务类型、能力、工作流版本、canonical head、输入引用与 digest、Manifest ID、<code>execution_binding</code>（槽、连接、模型、参数）、<code>prompt_binding</code> / <code>schema_binding</code>（含 SHA-256）、预算与取消令牌。信封不含 API Key。</p>
+<p>输出必须解码到强类型 Go 结构并 <code>Validate()</code>。自由文本不能决定领域状态。JSON 传输允许忽略未知字段噪声，领域校验仍拒绝缺字段、空值和非法枚举。</p>
+<h3>四阶段（对应你画的内核）</h3>
+<div class="grid">
+  <div class="card">
+    <h3>A. 章节导演</h3>
+    <p><code>chapter_planner</code> 把路线图和冻结上下文变成可执行叙事任务：章节目标、场景（视角、欲望、阻力、信息释放、状态变化）、硬/软锚点、禁止提前揭示、结尾钩子、允许即兴范围。每项区分 canonical 来源与本章创作建议。导演不写正文。</p>
+  </div>
+  <div class="card">
+    <h3>A′. 专业状态分析</h3>
+    <p>需要时输出短小 <code>ConstraintNote</code>：连续性、人物动机与知识边界、伏笔与叙事债务、世界规则。不生成可拼接正文。领域类型已在 <code>output.go</code>；默认 <code>quality.chapter.director</code> 尚未插入这些节点，避免未经验证的成本。</p>
+  </div>
+  <div class="card">
+    <h3>B. 主写</h3>
+    <p>默认一个 <code>prose_writer</code> 完成整章，保证声音统一。只读任务、上下文和导演产物。实验变体 <code>slot-parallel</code> 把写作拆成骨架 + 五类槽位 + 确定性拼接 + 整合缝合；槽位写手互不可见，整合不得新增情节事实。产品界面仍只看到「正文写作」。</p>
+  </div>
+  <div class="card">
+    <h3>C / D. 审阅与修订</h3>
+    <p>最小工作流用综合 <code>review_bundle</code> 一次输出三类 Finding。拆分工作流变成 continuity / content / style 三节点，读同一正文后由 <code>MergeFindings</code> 合并。有 <code>major/blocker</code> 才触发一次有界修订；v2 再加独立复核。</p>
+  </div>
+</div>
+
+<h2 id="capabilities">8. 能力、槽位、任务类型</h2>
+<p>对外配置使用稳定能力标识；普通作者看到的是中文职责和实际模型，不是内部槽名。</p>
+<table>
+  <thead><tr><th>能力</th><th>做什么</th><th>默认槽</th><th>主要输出</th></tr></thead>
+  <tbody>
+    <tr><td><code>story_architect</code></td><td>题材、冲突、人物弧、结构</td><td>planner</td><td><code>StoryBlueprintOutput</code></td></tr>
+    <tr><td><code>chapter_planner</code></td><td>章节导演</td><td>planner</td><td><code>ChapterPlanOutput</code></td></tr>
+    <tr><td><code>prose_writer</code></td><td>整章叙事正文</td><td>writer</td><td><code>ChapterDraftOutput</code></td></tr>
+    <tr><td><code>continuity_review</code></td><td>事实、状态、知识边界、时间线、伏笔</td><td>continuity_reviewer</td><td><code>ReviewBundleOutput</code></td></tr>
+    <tr><td><code>content_review</code></td><td>因果、动机、节奏、钩子、信息密度</td><td>continuity_reviewer</td><td>同上，category 不同</td></tr>
+    <tr><td><code>style_review</code></td><td>重复、套话、机械句式、总结腔</td><td>continuity_reviewer</td><td>同上</td></tr>
+    <tr><td><code>bounded_revision</code></td><td>按公开问题或作者指令改候选</td><td>正文 writer / 方案 planner</td><td><code>ReviseDraftOutput</code> / <code>ReviseBlueprintOutput</code></td></tr>
+    <tr><td><code>revision_verify</code></td><td>独立裁定修订是否真解决、有无回归</td><td>固定 continuity_reviewer</td><td><code>RevisionVerdictOutput</code></td></tr>
+    <tr><td><code>skeleton_writer</code> 等</td><td>仅 slot-parallel 实验</td><td>writer</td><td>骨架 / 槽位 / 缝合成稿</td></tr>
+  </tbody>
+</table>
+<p>稳定任务类型：<code>story_blueprint</code>、<code>chapter_plan</code>、<code>chapter_draft</code>、<code>review_bundle</code>、<code>revise_draft</code>、<code>revise_blueprint</code>、<code>baseline_draft</code>、<code>verify_revision</code>、<code>chapter_skeleton</code>、<code>fill_slot</code>。任务类型是外部契约；内部可用多个能力节点完成一个任务。</p>
+<p>修订用 <code>RevisionDirective</code> 区分 <code>quality_findings</code> 与 <code>author_directed</code>：前者只处理规范化问题，后者只改作者指定目标并保持非目标段落。作者指令不能伪造成 Finding，自动修订也不能借作者指令扩大范围。</p>
+
+<h2 id="workflows">9. 已发布工作流</h2>
+<p>全部在 <code>internal/agentassets/builtin.go</code> 用 <code>go:embed</code> 发布。加载时校验拓扑、选择器、预算和哈希；非法定义启动即失败。</p>
+<table>
+  <thead><tr><th>工作流</th><th>节点链</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>baseline.chapter.v1</code></td><td>write</td><td>同输入单次直出对照，不读细纲/审阅。</td></tr>
+    <tr><td><code>quality.chapter.v1</code></td><td>plan → draft → review → revision?</td><td>最小质量基线。综合审阅。</td></tr>
+    <tr><td><code>quality.blueprint.v1</code></td><td>blueprint → review → revision?</td><td>作品策划验证。修订走 planner 槽。</td></tr>
+    <tr><td><code>quality.chapter.director.v1</code></td><td>director → draft → review → revision?</td><td>增强导演协议（plan prompt/schema v2）。</td></tr>
+    <tr><td><code>quality.chapter.split-review.v1</code></td><td>director → draft → 三审阅 → revision?</td><td>隔离审阅 + FindingMerger。对应拓扑阶段 C。</td></tr>
+    <tr><td>上述 *.v2</td><td>末尾追加 verify</td><td>单变量衡量复核收益；v1 哈希不变。</td></tr>
+    <tr><td><code>quality.chapter.slot-parallel.v1</code></td><td>director → skeleton → 五槽 → integrate → review → revision?</td><td>检验「单一主写」假设。默认不进入 R5。</td></tr>
+  </tbody>
+</table>
+<p>条件边只有预定义三种：<code>always</code>、<code>on_quality_issue</code>、<code>on_blocker</code>。模型不能临时发明步骤。自动修订默认最多一次。</p>
+
+<h2 id="quality">10. 审阅发现、Merger 与门禁</h2>
+<h3>ReviewFinding</h3>
+<p>统一结构：类别、严重度（blocker / major / minor / note）、状态、来源（模型审阅 / 确定性 lint / 作者）、Unicode rune 范围或约束引用、引文、建议动作。没有正文范围时必须引用约束，不能伪造引文。</p>
+<h3>Finding Merger</h3>
+<p><code>agentdomain.MergeFindings</code> 只做规范化、精确重复合并、稳定排序、证据关联和同证据冲突标记。不调用模型，不补写问题，不降低严重度，不把「多数审阅者同意」当成覆盖 canonical 的投票。拆分审阅工作流在修订前必须经过它；内核 <code>mergeReviewContents</code> 对输入顺序幂等。</p>
+<h3>确定性 lint 与质量状态</h3>
+<p><code>quality.Engine</code> 按冻结策略版本跑本地规则：空正文、字数偏离、代码围栏、提示词泄漏、硬锚点/禁止项、重复句段、机械排比、总结腔、测试集保留专名、修订丢失已满足硬约束、slot-parallel 的槽位覆盖与整合漂移。规则有 ID 和版本，阈值变化必须升质量策略版本。</p>
+<p>质量状态与运行终态分离：工作流可以 <code>completed</code> 同时质量 <code>blocked</code>。任一未解决 blocker → <code>blocked</code>；无 blocker 但有 major 或审阅不完整 → <code>needs_review</code>；blocker/major 已解决且门禁通过 → <code>passed</code>。模型打分不能覆盖确定性 blocker。</p>
+<h3>修订复核</h3>
+<p>确定性对账只能证明改动能精确应用到原文，不能证明语义问题被解决。v2 的 <code>revision_verify</code> 读原问题、修订前后正文和改动明细，但剥离修订自述的 status/note。只有修订与复核都判 resolved 才退出未解决计数；复核登记的回归进入独立 ID 空间。</p>
+
+<h2 id="store">11. 领域模型与持久化怎么设计</h2>
+<div class="grid">
+  <div class="card">
+    <h3>作品与正文</h3>
+    <p><code>Project</code> / <code>Chapter</code> 是身份与顺序。<code>ChapterRevision</code> 不可变。<code>CanonicalHead</code> 指向作者当前确认版本。作者编辑、AI 改写、导入替换都产生新 revision，不覆盖历史。</p>
+  </div>
+  <div class="card">
+    <h3>资产</h3>
+    <p>人物、势力、地点、规则、关系、时间线、事实、物品、知识边界、伏笔、大纲与场景卡分属 <code>world</code> / <code>story</code> / <code>timeline</code>。路线图目标形态是「全书 → 卷 → 故事弧 → 近期章节」；R4 才把策划候选映射为正式资产。</p>
+  </div>
+  <div class="card">
+    <h3>候选与变更</h3>
+    <p><code>ChangeSet</code> 承载未确认补丁（替换正文、更新/创建资产），带证据和指纹。应用或拒绝走短事务。Agent Artifact 另有谱系：基线、工作流、Manifest、digest，供差异、撤销和恢复引用。</p>
+  </div>
+  <div class="card">
+    <h3>运行痕迹</h3>
+    <p><code>AgentRun</code> + Steps + Artifacts + Findings + Manifest。<code>JobEvent</code> 是单调事件源，<code>JobSnapshot</code> 是可恢复投影。模型调用不在数据库事务中运行；落库是调用结束后的短事务。</p>
+  </div>
+</div>
+<p>项目包 <code>.zjproject</code> 含项目数据库（WAL、外键、Goose 迁移，禁止 GORM 自动迁移）、附件、导入原文、分支、快照。应用数据目录另存 settings 与最近项目。同步盘 / 网络盘有持续健康检查，不能只靠启动探针。</p>
+
+<h2 id="candidate">12. 候选区之后发生什么</h2>
+<p>拓扑最底层的 Candidate Buffer 是整条链路的安全阀：</p>
+<ul>
+  <li>R3：结果进入 Harness 工件或未确认候选。失败、取消、重试都不改 canonical。</li>
+  <li>R4：作品方案候选经作者确认后写入正式档案；对话修改先变成待确认 Action。</li>
+  <li>R5：单章作者审阅、编辑、定稿；定稿事务原子提交 revision、审阅摘要与版本信息。定稿成功不依赖后验模型。</li>
+  <li>R6：批次由多个独立 ChapterRun 组成；同批前序候选仅 provisional；检查点熔断进 <code>needs_confirmation</code>。</li>
+  <li>R7：后验工作流从 canonical revision 抽事实/状态/摘要/伏笔候选，校验后幂等写入五层长期记忆。未确认候选不能启动正式记忆写入。</li>
+</ul>
+<p>五类产品工作流族共享同一 Kernel：<code>story.foundation</code>、<code>story.roadmap</code>、<code>chapter.production</code>、<code>batch.production</code>、<code>chapter.posthoc</code>。工作流族是用途标识，不是固定节点图。</p>
+
+<h2 id="memory">13. 长期记忆怎么设计</h2>
+<p>人物、世界观、事实和伏笔首先是 AI 的可审阅长期记忆，其次才是作者控制面板。它不是把整本书反复塞进 Prompt，也不是作者必须先填满的资料库。最高事实来源永远是作者定稿的 <code>ChapterRevision</code>；摘要、状态和抽取结果都是可重建的派生物，必须能指回章节、revision 与正文证据。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 1100 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="长期记忆读写回路">
+  <style>
+    .box { stroke-width: 1.25; }
+    .t { font-family: ui-sans-serif, system-ui, "PingFang SC", sans-serif; fill: #1c1917; }
+    .muted { fill: #57534e; }
+    .arr { stroke: #44403c; stroke-width: 1.2; fill: none; marker-end: url(#m2); }
+  </style>
+  <defs>
+    <marker id="m2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#44403c"/></marker>
+  </defs>
+  <text class="t" x="40" y="28" font-size="13" font-weight="700">写入路径（只在定稿之后）</text>
+  <rect class="box" x="40" y="44" width="160" height="64" rx="5" fill="#fff" stroke="#16a34a"/>
+  <text class="t" x="120" y="70" text-anchor="middle" font-size="12" font-weight="700">Canonical Head</text>
+  <text class="t muted" x="120" y="90" text-anchor="middle" font-size="10">已定稿 ChapterRevision</text>
+  <line class="arr" x1="200" y1="76" x2="228" y2="76"/>
+  <rect class="box" x="230" y="44" width="170" height="64" rx="5" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="315" y="70" text-anchor="middle" font-size="12" font-weight="700">观察节点</text>
+  <text class="t muted" x="315" y="90" text-anchor="middle" font-size="10">只报差异，不做判断</text>
+  <line class="arr" x1="400" y1="76" x2="428" y2="76"/>
+  <rect class="box" x="430" y="44" width="170" height="64" rx="5" fill="#fff" stroke="#0f766e"/>
+  <text class="t" x="515" y="70" text-anchor="middle" font-size="12" font-weight="700">裁决节点</text>
+  <text class="t muted" x="515" y="90" text-anchor="middle" font-size="10">采纳 / 待定 / 冲突</text>
+  <line class="arr" x1="600" y1="76" x2="628" y2="76"/>
+  <rect class="box" x="630" y="44" width="180" height="64" rx="5" fill="#f4f4f5" stroke="#52525b"/>
+  <text class="t" x="720" y="70" text-anchor="middle" font-size="12" font-weight="700">证据与区间校验</text>
+  <text class="t muted" x="720" y="90" text-anchor="middle" font-size="10">引文定位 / 有效区间</text>
+  <line class="arr" x1="810" y1="76" x2="838" y2="76"/>
+  <rect class="box" x="840" y="44" width="220" height="64" rx="5" fill="#ccfbf1" stroke="#0f766e"/>
+  <text class="t" x="950" y="70" text-anchor="middle" font-size="12" font-weight="700">幂等提交正式记忆</text>
+  <text class="t muted" x="950" y="90" text-anchor="middle" font-size="10">失败不回滚正文定稿</text>
+
+  <text class="t" x="40" y="148" font-size="13" font-weight="700">读取路径（每次模型调用之前）</text>
+  <rect class="box" x="40" y="164" width="1020" height="86" rx="5" fill="#ccfbf1" stroke="#0f766e"/>
+  <text class="t" x="550" y="192" text-anchor="middle" font-size="12" font-weight="700">五层记忆：宪法 → 结构 → 状态 → 摘要 → 证据</text>
+  <text class="t muted" x="550" y="214" text-anchor="middle" font-size="11">用关系、时间、近期窗口、路线图、活跃伏笔和知识边界建候选集；近场叙事 + 远场骨架，不装整本原文</text>
+  <line class="arr" x1="550" y1="250" x2="550" y2="276"/>
+  <rect class="box" x="230" y="278" width="640" height="70" rx="5" fill="#ede9fe" stroke="#7c3aed"/>
+  <text class="t" x="550" y="306" text-anchor="middle" font-size="12" font-weight="700">ContextAssembler → ContextManifest</text>
+  <text class="t muted" x="550" y="326" text-anchor="middle" font-size="11">记录纳入/省略原因、版本、哈希、预算和 provisional 标记　·　模型只能读已选局部</text>
+  <line class="arr" x1="550" y1="348" x2="550" y2="374"/>
+  <rect class="box" x="230" y="376" width="640" height="56" rx="5" fill="#dcfce7" stroke="#16a34a"/>
+  <text class="t" x="550" y="410" text-anchor="middle" font-size="12" font-weight="700">Agent Kernel 节点（导演 / 主写 / 审阅 / 修订）</text>
+
+  <rect class="box" x="40" y="456" width="490" height="140" rx="5" fill="#fff7ed" stroke="#ea580c"/>
+  <text class="t" x="60" y="482" font-size="12" font-weight="700">不得写入正式记忆</text>
+  <text class="t muted" x="60" y="506" font-size="11">初稿、自动修订稿、未确认候选</text>
+  <text class="t muted" x="60" y="524" font-size="11">同批前序候选（仅 provisional 进后序上下文）</text>
+  <text class="t muted" x="60" y="542" font-size="11">定稿前事实预检候选（R5 挂点）</text>
+  <text class="t muted" x="60" y="560" font-size="11">验证失败或缺少证据的抽取</text>
+  <text class="t muted" x="60" y="578" font-size="11">Invocation Artifact（完整 Prompt / 流事件）</text>
+
+  <rect class="box" x="550" y="456" width="510" height="140" rx="5" fill="#fefce8" stroke="#ca8a04"/>
+  <text class="t" x="570" y="482" font-size="12" font-weight="700">过期、重建与影响</text>
+  <text class="t muted" x="570" y="506" font-size="11">后续 revision 改变事实 → 旧后验立即过期并重建</text>
+  <text class="t muted" x="570" y="524" font-size="11">后验失败标 memory_pending_rebuild，不阻断编辑</text>
+  <text class="t muted" x="570" y="542" font-size="11">下次 AI 生成前必须预检并恢复记忆</text>
+  <text class="t muted" x="570" y="560" font-size="11">高层变更：future_only / in_story_change / retcon</text>
+  <text class="t muted" x="570" y="578" font-size="11">重建不能改变正文和作者决策</text>
+</svg>
+</div>
+<p class="caption">工作流族 <code>chapter.posthoc</code> 与 <code>chapter.production</code> 共用 Agent Kernel，不另起运行时。观察与裁决拆成两个职责，避免抽取模型既找差异又给自己放行。</p>
+
+<h3>五层各装什么</h3>
+<table>
+  <thead><tr><th>层</th><th>内容</th><th>当前领域落点</th><th>装配优先级</th></tr></thead>
+  <tbody>
+    <tr><td>宪法层</td><td>已确认作品方案、世界规则、主线、不可违背设定、禁写项、作者锁定</td><td><code>world.WorldRule</code>、方案资产、锚点中的硬约束</td><td>最高；预算不足也不得截断。装不下则任务创建失败。</td></tr>
+    <tr><td>结构层</td><td>全书 → 卷 → 故事弧 → 近期 3–10 章路线图</td><td><code>story.OutlineNode</code> / 路线图资产。默认只滚动近期层，高层变化要作者批准或 <code>retcon</code></td><td>硬结构稳定，近期层随批次刷新。</td></tr>
+    <tr><td>状态层</td><td>人物、关系、物品、地点、能力、知识边界、未解问题</td><td><code>world.*</code>、<code>canon.CharacterKnowledge</code>（<code>known</code> 与 <code>misinformed</code> 分离）</td><td>按本章出场、关系图和时间窗口筛选。</td></tr>
+    <tr><td>摘要层</td><td>章节、卷、近期场景摘要</td><td>R7 后验产物。近场用较细摘要，远场只保留骨架</td><td>原文始终可回溯；摘要不能替代定稿正文。</td></tr>
+    <tr><td>证据层</td><td>原文片段、revision、审阅发现、伏笔登记</td><td><code>canon.Fact</code> + Evidence、<code>timeline.StoryEvent</code>、<code>world.ForeshadowingHook</code>、<code>ReviewFinding</code></td><td>必须带章节 / revision / 引文范围。无证据不能自动变正式事实。</td></tr>
+  </tbody>
+</table>
+
+<h3>事实、状态与有效区间</h3>
+<p><code>canon.Fact</code> 区分来源（作者 / 正文 / 模型 / 规则）和状态（作者确认 / 正文证据 / AI 推断 / 冲突 / 拒绝）。模型推断不得直接变成 <code>author_confirmed</code> 或 <code>text_evidenced</code>。事实可挂 <code>validFrom</code> / <code>validUntil</code> 事件，所以「曾经为真、现在已变」不会被当成连续性错误。人物知识边界单独建模：角色知道什么、被误导相信什么，不能把全书事实等同于角色所知。</p>
+<p>伏笔是状态层与证据层的交叉：<code>ForeshadowingHook</code> 记录埋设章、到期章、已解决/已放弃。未回收钩子进入后续 Manifest；已解决或放弃的不得再当硬约束。叙事债务（承诺未兑现）由后验裁决节点从「未登记事件」归类，不能由写作模型自行注销。</p>
+
+<h3><code>chapter.posthoc</code> 工作流</h3>
+<p>这是独立工作流族，不是写作流水线的尾巴。R5 只留定稿后异步挂点和 <code>memory_pending_rebuild</code>；完整节点在 R7 落地。</p>
+<ul>
+  <li>唯一合法来源：作者定稿的 <code>ChapterRevision</code>。初稿、自动修订、未确认候选只能形成 provisional 状态，不能启动正式写入。</li>
+  <li>观察节点：逐条比对定稿正文与现有记忆，只输出差异，不做「该不该入库」的判断。</li>
+  <li>裁决节点：只读差异报告，不重读正文；把事实候选裁为采纳、待定或冲突；把未登记事件归为伏笔或叙事债务。</li>
+  <li>应用层做证据、有效区间和一致性校验后，才幂等提交。模型调用不在数据库事务里跑；记忆失败不能阻止正文已经完成的定稿。</li>
+  <li>定稿事务本身只提交 canonical revision、已有确定性校验、审阅摘要和版本信息，不夹带未完成的后验结果。</li>
+</ul>
+
+<h3>Manifest 与 Invocation Artifact</h3>
+<p>每次调用保存一份可解释的 <code>ContextManifest</code>：来源 ID/版本、范围、顺序、权重、选择原因、装配器版本、作者指令引用、预算、省略原因、用量和装配内容哈希。它<strong>不</strong>重复保存所引用的完整正文。完整 Prompt、请求体和流式事件是可选的 Invocation Artifact，可压缩、内容寻址和按保留策略清理；清理后仍必须能凭不可变来源、范围、模板版本和哈希解释当时上下文。项目瘦身不得删除 canonical 正文、候选、作者指令、必要证据或 Manifest 长期索引。</p>
+<p>R3 已落地 Manifest 骨架和来源种类：<code>harness_spec</code>、<code>author_instruction</code>、<code>chapter_revision</code>、<code>story_asset</code>、<code>upstream_artifact</code>、<code>anchor</code>。完整检索（SQLite FTS5、结构化索引、可选本地向量，不依赖外部向量库）属于 R7。</p>
+
+<h3>批次中的 provisional</h3>
+<p>R6 的 <code>GenerationBatch</code> 由独立 <code>ChapterRun</code> 组成，每章自己的 Manifest。同批前序候选可以 provisional 身份进入后序上下文，让批次读起来连贯，但它们不是正式事实，检查点熔断或回退后不得写入长期记忆。回退只把后续候选标 <code>superseded</code>，不删证据、不改 canonical。</p>
+
+<h3>高层设定变更</h3>
+<p>影响分析先给范围、证据、风险和费用，作者确认后才能动未定稿内容；历史定稿默认只报告冲突。</p>
+<table>
+  <thead><tr><th>模式</th><th>含义</th></tr></thead>
+  <tbody>
+    <tr><td><code>future_only</code></td><td>只影响指定边界之后的内容，不改已发生事实。</td></tr>
+    <tr><td><code>in_story_change</code></td><td>故事内事件导致状态变化，旧事实保留有效区间。</td></tr>
+    <tr><td><code>retcon</code></td><td>追溯修改既有事实，必须显式批准，模型不得以「适配新正文」为由静默重写高层结构。</td></tr>
+  </tbody>
+</table>
+
+<h3>作者能看见什么</h3>
+<p>正文侧栏解释本章实际用到的规则、人物状态、时间地点、知识边界、锚点、活跃伏笔、叙事债务和被省略上下文，来源必须回到 Manifest 或 canonical 证据。作品档案页（大纲、人物、世界、时间线、伏笔）是同一套记忆的可编辑投影，不是第二份资料库。导入整书档案（R8）走独立抽取任务，产出跨章证据的候选包，确认后才并入这五层，不能把章节切片直接当成全书记忆。</p>
+
+<h2 id="status">14. 已经落地功能</h2>
+<table>
+  <thead><tr><th>拓扑块</th><th>当前代码</th><th>备注</th></tr></thead>
+  <tbody>
+    <tr><td>React UI + Wails DTO</td><td>已有壳与 Lab / 审阅薄界面</td><td>完整驾驶舱与定稿工作台等 R4/R5 质量过关后再接。</td></tr>
+    <tr><td>RunProjection / JobEvent / Lease</td><td>已落地</td><td>公开阶段与内部 node_id 解耦。</td></tr>
+    <tr><td>Context Assembler / Manifest</td><td>骨架已落地</td><td>完整长期记忆检索属 R7。</td></tr>
+    <tr><td>Kernel Router + 版本化工作流</td><td>已落地</td><td>见 builtin 注册表。</td></tr>
+    <tr><td>Chapter Director</td><td>已落地（v1 细纲 + v2 导演协议）</td><td></td></tr>
+    <tr><td>专业状态分析</td><td>类型与校验已有</td><td>默认 DAG 未挂节点（图中虚线）。</td></tr>
+    <tr><td>单一 Prose Writer</td><td>默认路径已落地</td><td>slot-parallel 仅为实验。</td></tr>
+    <tr><td>三审阅 + Finding Merger</td><td>split-review 已落地</td><td>最小工作流仍用综合审阅。</td></tr>
+    <tr><td>Bounded Revision + Verify</td><td>v1 修订 / v2 复核已落地</td><td>自动修订最多一次。</td></tr>
+    <tr><td>Candidate Buffer</td><td>Artifact / ChangeSet 已有</td><td>R3 不写入 Canonical Head。</td></tr>
+    <tr><td>Domain Store / .zjproject</td><td>已落地</td><td>WAL + 锁 + 恢复副本。</td></tr>
+    <tr><td>记忆领域对象</td><td>Fact / Event / Knowledge / ForeshadowingHook 已有</td><td>作者可手工维护；不是完整后验流水线。</td></tr>
+    <tr><td>Context Manifest 骨架</td><td>已落地</td><td>完整五层检索与装配解释属 R7。</td></tr>
+    <tr><td><code>chapter.posthoc</code></td><td>未落地</td><td>R5 只留 <code>memory_pending_rebuild</code> 挂点。</td></tr>
+    <tr><td>五层记忆读写回路</td><td>设计已定，R7 实现</td><td>与 Kernel 同运行时，不另建记忆引擎。</td></tr>
+  </tbody>
+</table>
+<p>若要改图：打开 <code>docs/product/architecture-overview.drawio</code>。五页分别是系统拓扑、Go 分层、章节生产 DAG、能力与槽位映射、长期记忆。</p>
+</main>
+</div>
+</body>
+</html>
