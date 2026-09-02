@@ -92,24 +92,25 @@ const (
 
 	// R2.1 模型基础设施稳定错误码。Provider 适配器负责把 HTTP 状态、响应错误
 	// 类型与网络错误转换为领域错误，桌面层只转换为安全中文提示。
-	errorProviderNotFound        desktopErrorCode = "PROVIDER_NOT_FOUND"
-	errorProviderCredentialMiss  desktopErrorCode = "PROVIDER_CREDENTIAL_MISSING"
-	errorProviderInUse           desktopErrorCode = "PROVIDER_IN_USE"
-	errorProviderUnauthorized    desktopErrorCode = "PROVIDER_UNAUTHORIZED"
-	errorProviderModelNotFound   desktopErrorCode = "PROVIDER_MODEL_NOT_FOUND"
-	errorProviderQuotaExceeded   desktopErrorCode = "PROVIDER_QUOTA_EXCEEDED"
-	errorProviderRateLimited     desktopErrorCode = "PROVIDER_RATE_LIMITED"
-	errorProviderNetworkFailed   desktopErrorCode = "PROVIDER_NETWORK_FAILED"
-	errorProviderContentRejected desktopErrorCode = "PROVIDER_CONTENT_REJECTED"
-	errorProviderIncompatible    desktopErrorCode = "PROVIDER_INCOMPATIBLE"
-	errorProviderIncomplete      desktopErrorCode = "PROVIDER_RESPONSE_INCOMPLETE"
-	errorProviderResponseFailed  desktopErrorCode = "PROVIDER_RESPONSE_FAILED"
-	errorProviderEmptyResponse   desktopErrorCode = "PROVIDER_EMPTY_RESPONSE"
-	errorCredentialRollback      desktopErrorCode = "CREDENTIAL_ROLLBACK_FAILED"
-	errorCreativeProfileInvalid  desktopErrorCode = "CREATIVE_PROFILE_INVALID"
-	errorCreativeProfileMissing  desktopErrorCode = "CREATIVE_PROFILE_NOT_FOUND"
-	errorHarnessConfirmation     desktopErrorCode = "HARNESS_CONFIRMATION_REQUIRED"
-	errorHarnessRatingExists     desktopErrorCode = "HARNESS_RATING_EXISTS"
+	errorProviderNotFound               desktopErrorCode = "PROVIDER_NOT_FOUND"
+	errorProviderCredentialMiss         desktopErrorCode = "PROVIDER_CREDENTIAL_MISSING"
+	errorProviderInUse                  desktopErrorCode = "PROVIDER_IN_USE"
+	errorProviderUnauthorized           desktopErrorCode = "PROVIDER_UNAUTHORIZED"
+	errorProviderModelNotFound          desktopErrorCode = "PROVIDER_MODEL_NOT_FOUND"
+	errorProviderQuotaExceeded          desktopErrorCode = "PROVIDER_QUOTA_EXCEEDED"
+	errorProviderRateLimited            desktopErrorCode = "PROVIDER_RATE_LIMITED"
+	errorProviderNetworkFailed          desktopErrorCode = "PROVIDER_NETWORK_FAILED"
+	errorProviderContentRejected        desktopErrorCode = "PROVIDER_CONTENT_REJECTED"
+	errorProviderIncompatible           desktopErrorCode = "PROVIDER_INCOMPATIBLE"
+	errorProviderIncomplete             desktopErrorCode = "PROVIDER_RESPONSE_INCOMPLETE"
+	errorProviderResponseFailed         desktopErrorCode = "PROVIDER_RESPONSE_FAILED"
+	errorProviderEmptyResponse          desktopErrorCode = "PROVIDER_EMPTY_RESPONSE"
+	errorProviderReasoningWithoutOutput desktopErrorCode = "PROVIDER_REASONING_WITHOUT_OUTPUT"
+	errorCredentialRollback             desktopErrorCode = "CREDENTIAL_ROLLBACK_FAILED"
+	errorCreativeProfileInvalid         desktopErrorCode = "CREATIVE_PROFILE_INVALID"
+	errorCreativeProfileMissing         desktopErrorCode = "CREATIVE_PROFILE_NOT_FOUND"
+	errorHarnessConfirmation            desktopErrorCode = "HARNESS_CONFIRMATION_REQUIRED"
+	errorHarnessRatingExists            desktopErrorCode = "HARNESS_RATING_EXISTS"
 )
 
 var (
@@ -168,6 +169,8 @@ func safeDesktopError(err error) error {
 		code, message = errorProviderResponseFailed, "模型服务未能完成生成，请稍后重试。"
 	case errors.Is(err, providers.ErrEmptyResponse):
 		code, message = errorProviderEmptyResponse, "模型返回了空内容，请检查模型能力或生成参数。"
+	case errors.Is(err, providers.ErrReasoningWithoutOutput):
+		code, message = errorProviderReasoningWithoutOutput, "模型只完成了内部推理、没有返回可用正文。请在创作方案中降低该角色的推理强度后重试。"
 	case errors.Is(err, appsettings.ErrProviderNotFound):
 		code, message = errorProviderNotFound, "模型连接已被删除或页面数据已过期。"
 	case errors.Is(err, appsettings.ErrCredentialMissing):

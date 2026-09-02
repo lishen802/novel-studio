@@ -78,6 +78,78 @@ func TestOpenAIResponsesBuffersWithoutDeltaConsumer(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesKeepsUsageWhenVisibleTextMissing(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{
+			"id":"resp_empty","status":"completed",
+			"output":[{"type":"message","content":[]}],
+			"usage":{"input_tokens":4,"output_tokens":6}
+		}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil)
+	if !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("Generate() error = %v, want ErrEmptyResponse", err)
+	}
+	if result.ProviderRequestID != "resp_empty" || result.InputTokens != 4 || result.OutputTokens != 6 {
+		t.Fatalf("empty result dropped usage: %#v", result)
+	}
+}
+
+func TestOpenAIResponsesClassifiesReasoningWithoutVisibleText(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{
+			"id":"resp_reason","status":"completed",
+			"output":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"内部推理"}]}],
+			"usage":{"input_tokens":11,"output_tokens":22734,"output_tokens_details":{"reasoning_tokens":22734}}
+		}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil)
+	if !errors.Is(err, ErrReasoningWithoutOutput) || errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("Generate() error = %v, want ErrReasoningWithoutOutput only", err)
+	}
+	if result.Text != "" || result.ProviderRequestID != "resp_reason" || result.InputTokens != 11 || result.OutputTokens != 22734 {
+		t.Fatalf("reasoning-only result = %#v", result)
+	}
+}
+
+func TestOpenAIResponsesExtractsVisibleTextOutsideMessageWrapper(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{
+			"id":"resp_bare","status":"completed",
+			"output":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"内部推理"}]},{"type":"output_text","text":"{\"ok\":true}"}],
+			"usage":{"input_tokens":3,"output_tokens":9}
+		}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, nil)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if result.Text != `{"ok":true}` || result.ProviderRequestID != "resp_bare" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestOpenAIResponsesExtractsMessageContentString(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{
+			"id":"resp_string","status":"completed",
+			"output":[{"type":"message","role":"assistant","content":"{\"ok\":true}"}],
+			"usage":{"input_tokens":2,"output_tokens":4}
+		}`), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-flash", Input: "input"}, nil)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if result.Text != `{"ok":true}` {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestOpenAIResponsesAcceptsSSEWhenBufferedEndpointIgnoresStreamFalse(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"兼容\"}\n\n" +
@@ -376,6 +448,22 @@ func TestOpenAIResponsesRequiresCompletedTerminalAndText(t *testing.T) {
 				t.Fatalf("Generate() error = %v, want %v", err, test.want)
 			}
 		})
+	}
+}
+
+func TestOpenAIStreamClassifiesReasoningWithoutVisibleTextAndKeepsUsage(t *testing.T) {
+	stream := "event: response.reasoning_text.delta\ndata: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"分析中\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_reason_stream\",\"output\":[{\"type\":\"reasoning\",\"content\":[{\"type\":\"reasoning_text\",\"text\":\"分析中\"}]}],\"usage\":{\"input_tokens\":8,\"output_tokens\":21,\"output_tokens_details\":{\"reasoning_tokens\":21}}}}\n\n"
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return sseResponse(stream), nil
+	})}
+	client := NewOpenAIClient(httpClient, "https://api.deepseek.com")
+	result, err := client.Generate(context.Background(), "secret", GenerateRequest{Model: "deepseek-v4-pro", Input: "input"}, discardDelta)
+	if !errors.Is(err, ErrReasoningWithoutOutput) {
+		t.Fatalf("Generate() error = %v, want ErrReasoningWithoutOutput", err)
+	}
+	if result.ProviderRequestID != "resp_reason_stream" || result.InputTokens != 8 || result.OutputTokens != 21 {
+		t.Fatalf("stream reasoning-only result dropped usage: %#v", result)
 	}
 }
 

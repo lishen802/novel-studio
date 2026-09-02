@@ -275,6 +275,21 @@ func TestServicePersistsUsageFromProviderFailureTerminal(t *testing.T) {
 	}
 }
 
+func TestServicePersistsUsageFromEmptyVisibleOutput(t *testing.T) {
+	service, store, _ := newRunnerHarness(t, []providerReply{{
+		inputTokens: 11, outputTokens: 22734, err: providers.ErrReasoningWithoutOutput,
+	}})
+	run := createBaselineRun(t, service)
+	failed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if !errors.Is(err, providers.ErrReasoningWithoutOutput) || failed.ErrorCode != "provider_reasoning_without_output" {
+		t.Fatalf("ExecuteRun = %#v, %v", failed, err)
+	}
+	loaded := store.runs[run.ID]
+	if len(loaded.Steps) != 1 || loaded.Steps[0].InputTokens != 11 || loaded.Steps[0].OutputTokens != 22734 || loaded.Steps[0].ProviderRequestID == "" {
+		t.Fatalf("reasoning-only usage = %#v", loaded.Steps)
+	}
+}
+
 func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 	tests := []struct {
 		err     error
@@ -284,6 +299,7 @@ func TestProviderTerminalFailuresHaveStablePublicMessages(t *testing.T) {
 		{providers.ErrResponseIncomplete, "provider_response_incomplete", "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"},
 		{providers.ErrResponseFailed, "provider_response_failed", "模型服务未能完成生成，请稍后重试。"},
 		{providers.ErrEmptyResponse, "provider_empty_response", "模型返回了空内容，请检查模型能力或生成参数。"},
+		{providers.ErrReasoningWithoutOutput, "provider_reasoning_without_output", "模型只完成了内部推理、没有返回可用正文。请在创作方案中降低该角色的推理强度后重试。"},
 		{providers.ErrInvalidStream, "provider_invalid_stream", "模型流式响应提前中断或格式不兼容。"},
 		{providers.ErrSchemaRejected, "provider_schema_rejected", "模型服务拒绝了结构化输出格式，请更新应用或切换兼容模型。"},
 		{providers.ErrInvalidRequest, "provider_invalid_request", "模型服务拒绝了本次请求参数；这不是连接或余额问题，请检查模型兼容性。"},

@@ -2158,6 +2158,8 @@ func errorCode(err error) string {
 		return "provider_response_failed"
 	case errors.Is(err, providers.ErrEmptyResponse):
 		return "provider_empty_response"
+	case errors.Is(err, providers.ErrReasoningWithoutOutput):
+		return "provider_reasoning_without_output"
 	case errors.Is(err, providers.ErrInvalidStream):
 		return "provider_invalid_stream"
 	case errors.Is(err, agentdomain.ErrInvalidTaskOutput), errors.Is(err, quality.ErrInvalidReconciliation):
@@ -2211,6 +2213,8 @@ func safeErrorMessage(code string) string {
 		return "模型服务未能完成生成，请稍后重试。"
 	case "provider_empty_response":
 		return "模型返回了空内容，请检查模型能力或生成参数。"
+	case "provider_reasoning_without_output":
+		return "模型只完成了内部推理、没有返回可用正文。请在创作方案中降低该角色的推理强度后重试。"
 	case "provider_invalid_stream":
 		return "模型流式响应提前中断或格式不兼容。"
 	case "credential_unavailable":

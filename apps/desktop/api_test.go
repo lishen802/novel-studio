@@ -989,6 +989,7 @@ func TestSafeDesktopErrorExplainsProviderTerminalFailures(t *testing.T) {
 		{providers.ErrResponseIncomplete, errorProviderIncomplete, "模型输出达到上限而未完成，请提高最大输出 Token 后重试。"},
 		{providers.ErrResponseFailed, errorProviderResponseFailed, "模型服务未能完成生成，请稍后重试。"},
 		{providers.ErrEmptyResponse, errorProviderEmptyResponse, "模型返回了空内容，请检查模型能力或生成参数。"},
+		{providers.ErrReasoningWithoutOutput, errorProviderReasoningWithoutOutput, "模型只完成了内部推理、没有返回可用正文。请在创作方案中降低该角色的推理强度后重试。"},
 	}
 	for _, test := range tests {
 		var safe *desktopError

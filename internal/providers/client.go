@@ -47,6 +47,8 @@ var (
 	ErrResponseFailed = errors.New("provider response failed")
 	// ErrEmptyResponse 表示 Provider 声称完成但没有返回可用正文。
 	ErrEmptyResponse = errors.New("provider response empty")
+	// ErrReasoningWithoutOutput 表示完成态只有内部推理、没有可见正文。
+	ErrReasoningWithoutOutput = errors.New("provider reasoning without visible output")
 )
 
 type GenerateRequest = ports.ModelGenerateRequest
@@ -132,6 +134,8 @@ func (client *OpenAIClient) generateOnce(
 func readOpenAIStream(body io.Reader, onDelta func(string), generationStarted *bool) (GenerateResult, error) {
 	var result GenerateResult
 	completed := false
+	hadReasoning := false
+	reasoningTokens := 0
 	err := readSSE(body, func(event string, data []byte) error {
 		var envelope responseEvent
 		if err := json.Unmarshal(data, &envelope); err != nil {
@@ -143,6 +147,9 @@ func readOpenAIStream(body io.Reader, onDelta func(string), generationStarted *b
 		}
 		switch eventType {
 		case "response.reasoning_text.delta":
+			if envelope.Delta != "" {
+				hadReasoning = true
+			}
 			if generationStarted != nil && envelope.Delta != "" {
 				*generationStarted = true
 			}
@@ -156,18 +163,18 @@ func readOpenAIStream(body io.Reader, onDelta func(string), generationStarted *b
 			}
 		case "response.completed":
 			completed = true
-			result.ProviderRequestID = envelope.Response.ID
-			result.InputTokens = envelope.Response.Usage.InputTokens
-			result.OutputTokens = envelope.Response.Usage.OutputTokens
+			applyResponseState(&result, envelope.Response)
+			text, outputHadReasoning := extractVisibleOutput(envelope.Response.Output)
+			hadReasoning = hadReasoning || outputHadReasoning
+			reasoningTokens = envelope.Response.Usage.reasoningTokens()
+			if strings.TrimSpace(result.Text) == "" {
+				result.Text = text
+			}
 		case "response.incomplete":
-			result.ProviderRequestID = envelope.Response.ID
-			result.InputTokens = envelope.Response.Usage.InputTokens
-			result.OutputTokens = envelope.Response.Usage.OutputTokens
+			applyResponseState(&result, envelope.Response)
 			return classifyIncompleteReason(envelope.Response.IncompleteDetails.Reason)
 		case "response.failed":
-			result.ProviderRequestID = envelope.Response.ID
-			result.InputTokens = envelope.Response.Usage.InputTokens
-			result.OutputTokens = envelope.Response.Usage.OutputTokens
+			applyResponseState(&result, envelope.Response)
 			return classifyResponseFailure(envelope.Response.Error.Code)
 		case "error":
 			return classifyResponseFailure(envelope.Error.Code)
@@ -184,7 +191,7 @@ func readOpenAIStream(body io.Reader, onDelta func(string), generationStarted *b
 		return GenerateResult{}, ErrInvalidStream
 	}
 	if strings.TrimSpace(result.Text) == "" {
-		return GenerateResult{}, ErrEmptyResponse
+		return result, classifyMissingVisibleText(hadReasoning, reasoningTokens)
 	}
 	return result, nil
 }
@@ -194,8 +201,21 @@ type responseError struct {
 }
 
 type responseUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	OutputTokensDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"output_tokens_details"`
+}
+
+func (usage responseUsage) reasoningTokens() int {
+	return usage.OutputTokensDetails.ReasoningTokens
+}
+
+type responseOutputItem struct {
+	Type    string          `json:"type"`
+	Text    string          `json:"text"`
+	Content json.RawMessage `json:"content"`
 }
 
 type responseState struct {
@@ -205,14 +225,8 @@ type responseState struct {
 	IncompleteDetails struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
-	Usage  responseUsage `json:"usage"`
-	Output []struct {
-		Type    string `json:"type"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	} `json:"output"`
+	Usage  responseUsage        `json:"usage"`
+	Output []responseOutputItem `json:"output"`
 }
 
 type responseEvent struct {
@@ -250,11 +264,8 @@ func (client *OpenAIClient) generateBuffered(ctx context.Context, apiKey string,
 	if len(trimmed) == 0 || json.Unmarshal(trimmed, &envelope) != nil {
 		return GenerateResult{}, fmt.Errorf("%w: decode buffered response", ErrInvalidResponse)
 	}
-	result := GenerateResult{
-		ProviderRequestID: envelope.ID,
-		InputTokens:       envelope.Usage.InputTokens,
-		OutputTokens:      envelope.Usage.OutputTokens,
-	}
+	result := GenerateResult{}
+	applyResponseState(&result, envelope)
 	switch strings.ToLower(strings.TrimSpace(envelope.Status)) {
 	case "completed":
 	case "incomplete":
@@ -264,22 +275,75 @@ func (client *OpenAIClient) generateBuffered(ctx context.Context, apiKey string,
 	default:
 		return result, ErrResponseFailed
 	}
-	var text strings.Builder
-	for _, item := range envelope.Output {
-		if item.Type != "message" {
-			continue
-		}
-		for _, content := range item.Content {
-			if content.Type == "output_text" {
-				text.WriteString(content.Text)
-			}
-		}
-	}
-	result.Text = text.String()
+	text, hadReasoning := extractVisibleOutput(envelope.Output)
+	result.Text = text
 	if strings.TrimSpace(result.Text) == "" {
-		return GenerateResult{}, ErrEmptyResponse
+		return result, classifyMissingVisibleText(hadReasoning, envelope.Usage.reasoningTokens())
 	}
 	return result, nil
+}
+
+// applyResponseState 把终态响应的请求 ID 和用量写入结果，失败路径也必须保留。
+func applyResponseState(result *GenerateResult, state responseState) {
+	if strings.TrimSpace(state.ID) != "" {
+		result.ProviderRequestID = state.ID
+	}
+	result.InputTokens = state.Usage.InputTokens
+	result.OutputTokens = state.Usage.OutputTokens
+}
+
+// extractVisibleOutput 只收集可交给领域契约的正文，不把 reasoning 当作任务输出。
+func extractVisibleOutput(items []responseOutputItem) (string, bool) {
+	var text strings.Builder
+	hadReasoning := false
+	for _, item := range items {
+		switch strings.ToLower(strings.TrimSpace(item.Type)) {
+		case "reasoning":
+			hadReasoning = true
+		case "message":
+			text.WriteString(visibleContentText(item))
+		case "output_text":
+			if strings.TrimSpace(item.Text) != "" {
+				text.WriteString(item.Text)
+				continue
+			}
+			text.WriteString(visibleContentText(item))
+		}
+	}
+	return text.String(), hadReasoning
+}
+
+func visibleContentText(item responseOutputItem) string {
+	if len(bytes.TrimSpace(item.Content)) == 0 {
+		return item.Text
+	}
+	var asString string
+	if json.Unmarshal(item.Content, &asString) == nil {
+		return asString
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(item.Content, &parts) != nil {
+		return item.Text
+	}
+	var text strings.Builder
+	for _, part := range parts {
+		switch strings.ToLower(strings.TrimSpace(part.Type)) {
+		case "output_text", "text":
+			text.WriteString(part.Text)
+		}
+	}
+	return text.String()
+}
+
+// classifyMissingVisibleText 区分“真的没有正文”和“推理占满了可见输出”。
+func classifyMissingVisibleText(hadReasoning bool, reasoningTokens int) error {
+	if hadReasoning || reasoningTokens > 0 {
+		return ErrReasoningWithoutOutput
+	}
+	return ErrEmptyResponse
 }
 
 func classifyIncompleteReason(reason string) error {
@@ -357,7 +421,7 @@ func isStableProviderError(err error) bool {
 		errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrIncompatible) ||
 		errors.Is(err, ErrSchemaRejected) || errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrInvalidResponse) ||
 		errors.Is(err, ErrProvider) || errors.Is(err, ErrResponseIncomplete) || errors.Is(err, ErrResponseFailed) ||
-		errors.Is(err, ErrEmptyResponse)
+		errors.Is(err, ErrEmptyResponse) || errors.Is(err, ErrReasoningWithoutOutput)
 }
 
 // strictJSONSchemaCompatible 判断 Schema 是否满足 OpenAI 兼容严格模式。
