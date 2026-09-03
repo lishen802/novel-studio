@@ -283,6 +283,29 @@ func TestAgentKernelSchemaRejectsInvalidHashesAndFindingReferences(t *testing.T)
 	}
 }
 
+func TestAgentRunsAcceptProductTaskKindsAndCapabilities(t *testing.T) {
+	ctx := context.Background()
+	store, project, chapter := createStoreWithChapter(t)
+	defer store.Close()
+	now := time.Unix(7_000, 0).UTC()
+	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
+	run.TaskKind = agentdomain.TaskStoryDirections
+	run.WorkflowBinding.ID = "story.directions"
+	run.Steps[0].Capability = agentdomain.CapabilityStoryArchitect
+	run.Steps[1].Capability = agentdomain.CapabilitySkeletonWriter
+	run.Steps[2].Capability = agentdomain.CapabilityRevisionVerify
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err != nil {
+		t.Fatalf("CreateAgentRunBundle: %v", err)
+	}
+	loaded, err := store.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.TaskKind != agentdomain.TaskStoryDirections || loaded.Steps[2].Capability != agentdomain.CapabilityRevisionVerify {
+		t.Fatalf("persisted product run = %#v", loaded)
+	}
+}
+
 func newR3PersistenceRun(t *testing.T, projectID, chapterID string, revision int64, now time.Time) agentdomain.Run {
 	t.Helper()
 	run, err := agentdomain.NewChapterDraftRun(

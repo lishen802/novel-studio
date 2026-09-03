@@ -1149,10 +1149,16 @@ func outputDetails(
 	return content, quality, findings
 }
 
+// taskKindForNode 把节点能力投影到任务契约；产品工作流的架构节点沿用该工作流任务类型。
 func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.Capability) agentdomain.TaskKind {
 	switch capability {
 	case agentdomain.CapabilityStoryArchitect:
-		return agentdomain.TaskStoryBlueprint
+		switch workflowKind {
+		case agentdomain.TaskStoryDirections, agentdomain.TaskStoryCast, agentdomain.TaskStoryRoadmap:
+			return workflowKind
+		default:
+			return agentdomain.TaskStoryBlueprint
+		}
 	case agentdomain.CapabilityChapterPlanner:
 		return agentdomain.TaskChapterPlan
 	case agentdomain.CapabilityProseWriter:
@@ -1204,7 +1210,20 @@ func decodeNodeOutput(
 	if node.Capability != agentdomain.CapabilityContinuityReview &&
 		node.Capability != agentdomain.CapabilityContentReview &&
 		node.Capability != agentdomain.CapabilityStyleReview {
-		return agentdomain.DecodeTaskOutput(kind, []byte(content))
+		decoded, err := agentdomain.DecodeTaskOutput(kind, []byte(content))
+		if err != nil {
+			return nil, err
+		}
+		if kind == agentdomain.TaskStoryBlueprint && node.Schema.Version >= 2 {
+			blueprint, ok := decoded.(*agentdomain.StoryBlueprintOutput)
+			if !ok {
+				return nil, agentdomain.ErrInvalidTaskOutput
+			}
+			if err := blueprint.ValidateProduct(); err != nil {
+				return nil, err
+			}
+		}
+		return decoded, nil
 	}
 	if kind != agentdomain.TaskReviewBundle {
 		return nil, agentdomain.ErrInvalidTaskOutput

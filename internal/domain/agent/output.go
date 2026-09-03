@@ -20,12 +20,20 @@ const (
 type TaskOutput interface{ Validate() error }
 
 type StoryBlueprintOutput struct {
-	Title           string   `json:"title"`
-	Positioning     string   `json:"positioning"`
-	CoreConflict    string   `json:"core_conflict"`
-	ProtagonistArc  string   `json:"protagonist_arc"`
-	WorldRules      []string `json:"world_rules"`
-	MajorMilestones []string `json:"major_milestones"`
+	Title           string            `json:"title"`
+	Positioning     string            `json:"positioning"`
+	CoreConflict    string            `json:"core_conflict"`
+	ProtagonistArc  string            `json:"protagonist_arc"`
+	WorldRules      []string          `json:"world_rules"`
+	MajorMilestones []string          `json:"major_milestones"`
+	SellPoint       string            `json:"sell_point,omitempty"`
+	Genre           string            `json:"genre,omitempty"`
+	GrowthCost      string            `json:"growth_cost,omitempty"`
+	Pacing          string            `json:"pacing,omitempty"`
+	Ending          string            `json:"ending,omitempty"`
+	Subplots        []string          `json:"subplots,omitempty"`
+	Forbidden       []string          `json:"forbidden,omitempty"`
+	Anchors         []BlueprintAnchor `json:"anchors,omitempty"`
 }
 
 func (output StoryBlueprintOutput) Validate() error {
@@ -319,6 +327,12 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 		output = &ChapterSkeletonOutput{}
 	case TaskFillSlot:
 		output = &FillSlotOutput{}
+	case TaskStoryDirections:
+		output = &StoryDirectionsOutput{}
+	case TaskStoryCast:
+		output = &StoryCastOutput{}
+	case TaskStoryRoadmap:
+		output = &StoryRoadmapOutput{}
 	default:
 		return nil, ErrInvalidTaskOutput
 	}

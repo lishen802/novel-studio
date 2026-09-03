@@ -58,6 +58,10 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{EnhancedChapterWorkflowID, VerifiedEnhancedWorkflowVersion, []string{"director", "draft", "review", "revision", "verify"}},
 		{SplitReviewWorkflowID, VerifiedSplitReviewWorkflowVersion, []string{"director", "draft", "content", "continuity", "style", "revision", "verify"}},
 		{SlotParallelWorkflowID, SlotParallelWorkflowVersion, []string{"director", "skeleton", "slots_dialogue", "slots_action", "slots_interiority", "slots_description", "slots_transition", "integrate", "review", "revision"}},
+		{StoryDirectionsWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
+		{StoryProposalWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review", "revision"}},
+		{StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
+		{StoryRoadmapWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
 	}
 	for _, test := range cases {
 		compiled, compileErr := agentkernel.Compile(context.Background(), agentkernel.Registries{
