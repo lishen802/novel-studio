@@ -16,6 +16,8 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	"github.com/lishen802/novel-studio/internal/quality"
 )
 
@@ -292,6 +294,125 @@ func (service *Service) Recover(ctx context.Context, projectID string) (creation
 		return creationdomain.Session{}, err
 	}
 	return session, nil
+}
+
+// PreviewConfirmArchive 冻结档案确认摘要，不写正式资产。
+func (service *Service) PreviewConfirmArchive(ctx context.Context, projectID string) (ArchivePreview, error) {
+	session, candidates, err := service.loadArchiveInputs(ctx, projectID)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	digest, err := archiveDigest(session, candidates)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	blueprint, err := decodeBlueprint(proposal.PayloadJSON)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	cast, err := decodeCast(people.PayloadJSON)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	road, err := decodeRoadmap(roadmap.PayloadJSON)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	return ArchivePreview{
+		ConfirmationDigest: digest, Title: blueprint.Title,
+		CharacterCount: len(cast.Characters),
+		OutlineCount:   1 + len(road.Volumes) + len(road.Arcs) + len(road.NearTermChapters),
+	}, nil
+}
+
+// ConfirmArchive 把已阶段确认的候选映射为 ChangeSet 并一次性写入正式资产。
+func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveRequest) (ArchiveResult, error) {
+	session, candidates, err := service.loadArchiveInputs(ctx, request.ProjectID)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, request.ProjectID)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	if strings.TrimSpace(request.ConfirmationDigest) == "" || request.ConfirmationDigest != preview.ConfirmationDigest {
+		return ArchiveResult{}, ErrConfirmationRequired
+	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ArchiveResult{}, creationdomain.ErrBlankValue
+	}
+	if strings.TrimSpace(session.ArchiveChangeSetID) != "" {
+		if session.ArchiveDigest != preview.ConfirmationDigest {
+			return ArchiveResult{}, ErrConfirmationRequired
+		}
+		return ArchiveResult{Session: session, ChangeSetID: session.ArchiveChangeSetID}, nil
+	}
+	project, err := service.store.Project(ctx)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	workbench, err := service.store.WorkbenchState(ctx)
+	if err != nil {
+		workbench = projectdomain.WorkbenchState{}
+	}
+	now := service.clock.Now()
+	if session.Stage == creationdomain.StageRoadmap {
+		session, err = session.Advance(now)
+		if err != nil {
+			return ArchiveResult{}, err
+		}
+	}
+	if session.Stage != creationdomain.StageArchiveConfirm {
+		return ArchiveResult{}, ErrInvalidStage
+	}
+	plan, err := buildArchivePlan(session, candidates, project, service.ids)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	changeSet, err := revisiondomain.NewChangeSet(
+		service.ids.NewID(), session.ProjectID, "确认作品档案", plan.Title, "author",
+		plan.Specs, now,
+	)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	confirmed := make([]creationdomain.Candidate, 0, len(plan.Confirmed))
+	for _, candidate := range plan.Confirmed {
+		next, confirmErr := candidate.Confirm(now)
+		if confirmErr != nil {
+			return ArchiveResult{}, confirmErr
+		}
+		confirmed = append(confirmed, next)
+	}
+	session, err = session.RecordArchive(preview.ConfirmationDigest, request.IdempotencyKey, changeSet.ID, now)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	workbench.Stage = projectdomain.StageWriting
+	workbench.ArchiveStatus = "confirmed"
+	workbench.UpdatedAt = now
+	if err := service.store.ApplyArchive(ctx, ArchiveApply{
+		ChangeSet: changeSet, Session: session, Candidates: confirmed, Workbench: workbench,
+	}); err != nil {
+		return ArchiveResult{}, err
+	}
+	return ArchiveResult{Session: session, ChangeSetID: changeSet.ID}, nil
+}
+
+func (service *Service) loadArchiveInputs(ctx context.Context, projectID string) (creationdomain.Session, []creationdomain.Candidate, error) {
+	session, err := service.store.Session(ctx, projectID)
+	if err != nil {
+		return creationdomain.Session{}, nil, err
+	}
+	candidates, err := service.store.ListCandidates(ctx, session.ID)
+	if err != nil {
+		return creationdomain.Session{}, nil, err
+	}
+	return session, candidates, nil
 }
 
 func (service *Service) preview(ctx context.Context, session creationdomain.Session, profile agentdomain.ResolvedCreativeProfile, stage creationdomain.Stage) (CostPreview, error) {

@@ -116,6 +116,25 @@ func TestSetAdvanceModeAndAttachRun(t *testing.T) {
 	}
 }
 
+func TestRecordArchiveRequiresArchiveConfirmAndSelectedDirection(t *testing.T) {
+	session := mustSession(t)
+	if _, err := session.RecordArchive("digest", "idem-1", "cs-1", time.Unix(120, 0)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("record at intent error = %v", err)
+	}
+	session.Stage = StageArchiveConfirm
+	if _, err := session.RecordArchive("digest", "idem-1", "cs-1", time.Unix(120, 0)); !errors.Is(err, ErrStageIncomplete) {
+		t.Fatalf("record without direction error = %v", err)
+	}
+	session.SelectedDirectionCandidateID = "dir-1"
+	recorded, err := session.RecordArchive("digest", "idem-1", "cs-1", time.Unix(120, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorded.ArchiveChangeSetID != "cs-1" || recorded.ArchiveDigest != "digest" {
+		t.Fatalf("recorded = %#v", recorded)
+	}
+}
+
 func mustSession(t *testing.T) Session {
 	t.Helper()
 	session, err := NewSession("session-1", "project-1", "branch-1", time.Unix(100, 0))

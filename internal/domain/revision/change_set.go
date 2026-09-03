@@ -50,6 +50,11 @@ const (
 	OperationCreateStoryEvent        OperationKind = "create_story_event"
 	OperationCreateFact              OperationKind = "create_fact"
 	OperationCreateForeshadowingHook OperationKind = "create_foreshadowing_hook"
+	OperationCreateFaction           OperationKind = "create_faction"
+	OperationCreateLocation          OperationKind = "create_location"
+	OperationCreateAnchor            OperationKind = "create_anchor"
+	OperationCreateStoryAsset        OperationKind = "create_story_asset"
+	OperationUpdateProject           OperationKind = "update_project"
 )
 
 // Evidence ties a candidate operation back to the manuscript line range that
@@ -68,7 +73,8 @@ func IsCreateOperation(kind OperationKind) bool {
 	switch kind {
 	case OperationCreateOutlineNode, OperationCreateCharacter, OperationCreateRelationship,
 		OperationCreateWorldRule, OperationCreateStoryEvent, OperationCreateFact,
-		OperationCreateForeshadowingHook:
+		OperationCreateForeshadowingHook, OperationCreateFaction, OperationCreateLocation,
+		OperationCreateAnchor, OperationCreateStoryAsset:
 		return true
 	}
 	return false
@@ -427,7 +433,12 @@ func validOperationKind(kind OperationKind) bool {
 		OperationCreateWorldRule,
 		OperationCreateStoryEvent,
 		OperationCreateFact,
-		OperationCreateForeshadowingHook:
+		OperationCreateForeshadowingHook,
+		OperationCreateFaction,
+		OperationCreateLocation,
+		OperationCreateAnchor,
+		OperationCreateStoryAsset,
+		OperationUpdateProject:
 		return true
 	default:
 		return false

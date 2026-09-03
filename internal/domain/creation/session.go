@@ -15,6 +15,9 @@ type Session struct {
 	SelectedDirectionCandidateID string
 	ActiveRunID                  string
 	BlockingReason               BlockingReason
+	ArchiveDigest                string
+	ArchiveIdempotencyKey        string
+	ArchiveChangeSetID           string
 	CreatedAt                    time.Time
 	UpdatedAt                    time.Time
 }
@@ -77,6 +80,26 @@ func (session Session) ClearActiveRun(now time.Time) Session {
 	session.ActiveRunID = ""
 	session.UpdatedAt = now.UTC()
 	return session
+}
+
+// RecordArchive 记录一次成功的档案确认，供幂等重放，不改变阶段。
+func (session Session) RecordArchive(digest, idempotencyKey, changeSetID string, now time.Time) (Session, error) {
+	digest, idempotencyKey, changeSetID = strings.TrimSpace(digest), strings.TrimSpace(idempotencyKey), strings.TrimSpace(changeSetID)
+	if session.ID == "" || digest == "" || idempotencyKey == "" || changeSetID == "" {
+		return Session{}, ErrBlankValue
+	}
+	if session.Stage != StageArchiveConfirm {
+		return Session{}, ErrInvalidTransition
+	}
+	if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
+		return Session{}, ErrStageIncomplete
+	}
+	session.ArchiveDigest = digest
+	session.ArchiveIdempotencyKey = idempotencyKey
+	session.ArchiveChangeSetID = changeSetID
+	session.BlockingReason = BlockNone
+	session.UpdatedAt = now.UTC()
+	return session, nil
 }
 
 func (session Session) SelectDirection(candidateID string, now time.Time) (Session, error) {

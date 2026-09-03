@@ -54,8 +54,17 @@ func (s *Store) CreateChangeSet(ctx context.Context, changeSet revisiondomain.Ch
 		return databaseOperationError("begin change set transaction", err)
 	}
 	defer tx.Rollback()
+	if err := insertChangeSet(ctx, tx, changeSet); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return databaseOperationError("commit change set transaction", err)
+	}
+	return nil
+}
 
-	_, err = tx.ExecContext(ctx, `
+func insertChangeSet(ctx context.Context, tx *sql.Tx, changeSet revisiondomain.ChangeSet) error {
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO change_sets(id, project_id, title, summary, created_by, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, changeSet.ID, changeSet.ProjectID, changeSet.Title, changeSet.Summary, changeSet.CreatedBy, changeSet.Status, formatTime(changeSet.CreatedAt), formatTime(changeSet.UpdatedAt))
@@ -79,9 +88,6 @@ func (s *Store) CreateChangeSet(ctx context.Context, changeSet revisiondomain.Ch
 		if err != nil {
 			return databaseOperationError("create change operation", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return databaseOperationError("commit change set transaction", err)
 	}
 	return nil
 }
@@ -341,6 +347,16 @@ func prepareOperation(
 		return prepareCreateFactOperation(ctx, tx, changeSet, operation, appliedAt)
 	case revisiondomain.OperationCreateForeshadowingHook:
 		return prepareCreateForeshadowingHookOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateFaction:
+		return prepareCreateFactionOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateLocation:
+		return prepareCreateLocationOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateAnchor:
+		return prepareCreateAnchorOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationCreateStoryAsset:
+		return prepareCreateStoryAssetOperation(ctx, tx, changeSet, operation, appliedAt)
+	case revisiondomain.OperationUpdateProject:
+		return prepareUpdateProjectOperation(ctx, tx, changeSet, operation, appliedAt)
 	default:
 		return preparedOperation{}, revisiondomain.ErrInvalidOperation
 	}

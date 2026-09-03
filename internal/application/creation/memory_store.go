@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 )
 
 type memoryStore struct {
@@ -81,4 +82,16 @@ func (store *memoryStore) PendingActionCount(_ context.Context, _ string) (int, 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return store.pending, nil
+}
+
+func (store *memoryStore) Project(context.Context) (projectdomain.Project, error) {
+	return projectdomain.Project{ID: "project-1", Title: "长夜织境", Genre: "东方奇幻", Summary: "简介"}, nil
+}
+
+func (store *memoryStore) WorkbenchState(context.Context) (projectdomain.WorkbenchState, error) {
+	return projectdomain.WorkbenchState{Stage: projectdomain.StageIdea, ArchiveStatus: "not_generated"}, nil
+}
+
+func (store *memoryStore) ApplyArchive(context.Context, ArchiveApply) error {
+	return ErrUnavailable
 }

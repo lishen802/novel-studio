@@ -580,7 +580,8 @@ func TestExtractionRuntimeMigrationPreservesVersionThirteenDataAndDownIsClean(t 
 	for _, accepted := range []string{
 		"create_outline_node", "create_character", "create_relationship",
 		"create_world_rule", "create_story_event", "create_fact",
-		"create_foreshadowing_hook",
+		"create_foreshadowing_hook", "create_faction", "create_location",
+		"create_anchor", "create_story_asset",
 	} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO change_operations(
@@ -641,7 +642,8 @@ func TestExtractionRuntimeMigrationPreservesVersionThirteenDataAndDownIsClean(t 
 		WHERE kind IN (
 			'create_outline_node', 'create_character', 'create_relationship',
 			'create_world_rule', 'create_story_event', 'create_fact',
-			'create_foreshadowing_hook'
+			'create_foreshadowing_hook', 'create_faction', 'create_location',
+			'create_anchor', 'create_story_asset', 'update_project'
 		)
 	`); err != nil {
 		t.Fatalf("delete create_* operations before downgrade: %v", err)

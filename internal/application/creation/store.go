@@ -6,6 +6,8 @@ import (
 	"errors"
 
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 )
 
 var (
@@ -21,6 +23,16 @@ type Store interface {
 	Candidate(ctx context.Context, id string) (creationdomain.Candidate, error)
 	ListCandidates(ctx context.Context, sessionID string) ([]creationdomain.Candidate, error)
 	PendingActionCount(ctx context.Context, projectID string) (int, error)
+	Project(ctx context.Context) (projectdomain.Project, error)
+	WorkbenchState(ctx context.Context) (projectdomain.WorkbenchState, error)
+	ApplyArchive(ctx context.Context, apply ArchiveApply) error
+}
+
+type ArchiveApply struct {
+	ChangeSet  revisiondomain.ChangeSet
+	Session    creationdomain.Session
+	Candidates []creationdomain.Candidate
+	Workbench  projectdomain.WorkbenchState
 }
 
 func isMissingSession(err error) bool {

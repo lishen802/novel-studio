@@ -17,8 +17,9 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO creation_sessions (
 			id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, active_run_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
+			selected_direction_candidate_id, blocking_reason, active_run_id,
+			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			id = excluded.id,
 			branch_id = excluded.branch_id,
@@ -28,10 +29,14 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 			selected_direction_candidate_id = excluded.selected_direction_candidate_id,
 			blocking_reason = excluded.blocking_reason,
 			active_run_id = excluded.active_run_id,
+			archive_digest = excluded.archive_digest,
+			archive_idempotency_key = excluded.archive_idempotency_key,
+			archive_change_set_id = excluded.archive_change_set_id,
 			updated_at = excluded.updated_at
 	`,
 		session.ID, session.ProjectID, session.BranchID, string(session.Stage), string(session.AdvanceMode),
 		session.IntentText, session.SelectedDirectionCandidateID, string(session.BlockingReason), session.ActiveRunID,
+		session.ArchiveDigest, session.ArchiveIdempotencyKey, session.ArchiveChangeSetID,
 		formatTime(session.CreatedAt), formatTime(session.UpdatedAt),
 	)
 	if err != nil {
@@ -46,12 +51,14 @@ func (s *Store) CreationSession(ctx context.Context, projectID string) (creation
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, active_run_id, created_at, updated_at
+			selected_direction_candidate_id, blocking_reason, active_run_id,
+			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
 		FROM creation_sessions
 		WHERE project_id = ?
 	`, strings.TrimSpace(projectID)).Scan(
 		&session.ID, &session.ProjectID, &session.BranchID, &session.Stage, &session.AdvanceMode,
-		&session.IntentText, &selected, &session.BlockingReason, &session.ActiveRunID, &createdAt, &updatedAt,
+		&session.IntentText, &selected, &session.BlockingReason, &session.ActiveRunID,
+		&session.ArchiveDigest, &session.ArchiveIdempotencyKey, &session.ArchiveChangeSetID, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return creationdomain.Session{}, fmt.Errorf("read creation session: %w", err)

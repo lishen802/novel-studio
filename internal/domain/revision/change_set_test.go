@@ -318,6 +318,10 @@ func TestCreateOperationDistinguishesFromUpdateKinds(t *testing.T) {
 		OperationCreateStoryEvent,
 		OperationCreateFact,
 		OperationCreateForeshadowingHook,
+		OperationCreateFaction,
+		OperationCreateLocation,
+		OperationCreateAnchor,
+		OperationCreateStoryAsset,
 	}
 	for _, kind := range createKinds {
 		if !IsCreateOperation(kind) {
@@ -329,6 +333,7 @@ func TestCreateOperationDistinguishesFromUpdateKinds(t *testing.T) {
 		OperationUpdateOutlineNode,
 		OperationUpdateCharacter,
 		OperationUpdateFact,
+		OperationUpdateProject,
 	} {
 		if IsCreateOperation(kind) {
 			t.Fatalf("IsCreateOperation(%q) = true, want false", kind)

@@ -1,0 +1,429 @@
+package creation
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/lishen802/novel-studio/internal/application/ports"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
+)
+
+type ArchivePreview struct {
+	ConfirmationDigest string
+	Title              string
+	CharacterCount     int
+	OutlineCount       int
+}
+
+type ArchiveRequest struct {
+	ProjectID          string
+	ConfirmationDigest string
+	IdempotencyKey     string
+}
+
+type ArchiveResult struct {
+	Session     creationdomain.Session
+	ChangeSetID string
+}
+
+type archivePlan struct {
+	Digest     string
+	Title      string
+	Specs      []revisiondomain.PatchOperationSpec
+	Confirmed  []creationdomain.Candidate
+	Characters int
+	Outlines   int
+}
+
+func archiveDigest(session creationdomain.Session, candidates []creationdomain.Candidate) (string, error) {
+	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(struct {
+		Selected, Proposal, People, Roadmap string
+	}{
+		Selected: session.SelectedDirectionCandidateID,
+		Proposal: proposal.ContentSHA256, People: people.ContentSHA256, Roadmap: roadmap.ContentSHA256,
+	})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func requiredArchiveCandidates(
+	session creationdomain.Session,
+	candidates []creationdomain.Candidate,
+) (creationdomain.Candidate, creationdomain.Candidate, creationdomain.Candidate, error) {
+	if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
+		return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	if _, ok := candidateByID(candidates, session.SelectedDirectionCandidateID); !ok {
+		if _, found := currentCandidate(candidates, creationdomain.StageDirections); !found {
+			return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+		}
+	}
+	proposal, ok := currentCandidate(candidates, creationdomain.StageProposal)
+	if !ok {
+		return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	people, ok := currentCandidate(candidates, creationdomain.StagePeopleWorld)
+	if !ok {
+		return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	roadmap, ok := currentCandidate(candidates, creationdomain.StageRoadmap)
+	if !ok {
+		return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	return proposal, people, roadmap, nil
+}
+
+func buildArchivePlan(
+	session creationdomain.Session,
+	candidates []creationdomain.Candidate,
+	project projectdomain.Project,
+	ids ports.IDGenerator,
+) (archivePlan, error) {
+	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
+	if err != nil {
+		return archivePlan{}, err
+	}
+	digest, err := archiveDigest(session, candidates)
+	if err != nil {
+		return archivePlan{}, err
+	}
+	blueprint, err := decodeBlueprint(proposal.PayloadJSON)
+	if err != nil {
+		return archivePlan{}, err
+	}
+	cast, err := decodeCast(people.PayloadJSON)
+	if err != nil {
+		return archivePlan{}, err
+	}
+	road, err := decodeRoadmap(roadmap.PayloadJSON)
+	if err != nil {
+		return archivePlan{}, err
+	}
+	mapper := archiveMapper{ids: ids}
+	if err := mapper.addProject(project, blueprint); err != nil {
+		return archivePlan{}, err
+	}
+	if err := mapper.addProposal(proposal, blueprint); err != nil {
+		return archivePlan{}, err
+	}
+	if err := mapper.addCast(people, cast); err != nil {
+		return archivePlan{}, err
+	}
+	if err := mapper.addRoadmap(roadmap, road); err != nil {
+		return archivePlan{}, err
+	}
+	nowConfirmed := make([]creationdomain.Candidate, 0, 3)
+	for _, candidate := range []creationdomain.Candidate{proposal, people, roadmap} {
+		nowConfirmed = append(nowConfirmed, candidate)
+	}
+	return archivePlan{
+		Digest: digest, Title: blueprint.Title, Specs: mapper.specs, Confirmed: nowConfirmed,
+		Characters: len(cast.Characters), Outlines: mapper.outlines,
+	}, nil
+}
+
+type archiveMapper struct {
+	ids      ports.IDGenerator
+	specs    []revisiondomain.PatchOperationSpec
+	outlines int
+	chars    map[string]string
+}
+
+func (mapper *archiveMapper) add(kind revisiondomain.OperationKind, target, after, reason string) {
+	mapper.specs = append(mapper.specs, revisiondomain.PatchOperationSpec{
+		ID: mapper.ids.NewID(), Kind: kind, TargetID: target, AfterValue: after, Reason: reason,
+	})
+}
+
+func (mapper *archiveMapper) addUpdate(kind revisiondomain.OperationKind, target, before, after, reason string) {
+	mapper.specs = append(mapper.specs, revisiondomain.PatchOperationSpec{
+		ID: mapper.ids.NewID(), Kind: kind, TargetID: target, BeforeValue: before, AfterValue: after, Reason: reason,
+	})
+}
+
+func (mapper *archiveMapper) addProject(project projectdomain.Project, blueprint agentdomain.StoryBlueprintOutput) error {
+	before, err := encodeJSON(map[string]string{"title": project.Title, "genre": project.Genre, "summary": project.Summary})
+	if err != nil {
+		return err
+	}
+	after, err := encodeJSON(map[string]string{
+		"title": blueprint.Title, "genre": blueprint.Genre, "summary": blueprint.SellPoint,
+	})
+	if err != nil {
+		return err
+	}
+	if before == after {
+		return nil
+	}
+	mapper.addUpdate(revisiondomain.OperationUpdateProject, project.ID, before, after, "回写作品标题与定位")
+	return nil
+}
+
+func (mapper *archiveMapper) addProposal(candidate creationdomain.Candidate, blueprint agentdomain.StoryBlueprintOutput) error {
+	after, err := encodeJSON(map[string]string{
+		"kind": string(storyassetdomain.KindProposal), "origin": string(storyassetdomain.OriginModel),
+		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,
+		"payloadJson": candidate.PayloadJSON,
+	})
+	if err != nil {
+		return err
+	}
+	assetID := mapper.ids.NewID()
+	mapper.add(revisiondomain.OperationCreateStoryAsset, assetID, after, "确认作品方案信封")
+	for _, statement := range blueprint.Forbidden {
+		if err := mapper.addAnchor(candidate, "forbidden", "proposal", statement); err != nil {
+			return err
+		}
+	}
+	for _, anchor := range blueprint.Anchors {
+		if err := mapper.addAnchor(candidate, anchor.Strength, "proposal", anchor.Statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (mapper *archiveMapper) addAnchor(candidate creationdomain.Candidate, strength, scope, statement string) error {
+	after, err := encodeJSON(map[string]string{
+		"strength": strength, "scopeKind": scope, "statement": statement,
+		"origin":            string(storyassetdomain.OriginModel),
+		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,
+	})
+	if err != nil {
+		return err
+	}
+	mapper.add(revisiondomain.OperationCreateAnchor, mapper.ids.NewID(), after, "确认方案锚点")
+	return nil
+}
+
+func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast agentdomain.StoryCastOutput) error {
+	mapper.chars = map[string]string{}
+	for _, character := range cast.Characters {
+		id := mapper.ids.NewID()
+		mapper.chars[character.Name] = id
+		after, err := encodeJSON(map[string]any{
+			"name": character.Name, "aliases": character.Aliases, "role": character.Role,
+			"summary": character.Summary, "motivation": character.Motivation, "fear": character.Fear,
+			"secret": character.Secret, "arc": character.Arc,
+		})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateCharacter, id, after, "确认人物")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindCharacter, "characters", id, character.Name); err != nil {
+			return err
+		}
+	}
+	for _, faction := range cast.Factions {
+		id := mapper.ids.NewID()
+		after, err := encodeJSON(map[string]string{"name": faction.Name, "summary": faction.Summary, "goal": faction.Goal})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateFaction, id, after, "确认势力")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindFaction, "factions", id, faction.Name); err != nil {
+			return err
+		}
+	}
+	for _, location := range cast.Locations {
+		id := mapper.ids.NewID()
+		after, err := encodeJSON(map[string]string{"name": location.Name, "kind": location.Kind, "summary": location.Summary})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateLocation, id, after, "确认地点")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindLocation, "locations", id, location.Name); err != nil {
+			return err
+		}
+	}
+	for _, relation := range cast.Relationships {
+		sourceID, sok := mapper.chars[relation.SourceName]
+		targetID, tok := mapper.chars[relation.TargetName]
+		if !sok || !tok {
+			return creationdomain.ErrStageIncomplete
+		}
+		id := mapper.ids.NewID()
+		after, err := encodeJSON(map[string]any{
+			"sourceCharacterId": sourceID, "targetCharacterId": targetID,
+			"kind": relation.Kind, "label": relation.Label, "strength": relation.Strength,
+		})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateRelationship, id, after, "确认人物关系")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindRelationship, "character_relationships", id, relation.Label); err != nil {
+			return err
+		}
+	}
+	for _, rule := range cast.WorldRules {
+		id := mapper.ids.NewID()
+		after, err := encodeJSON(map[string]string{
+			"name": rule.Name, "description": rule.Description, "scopeType": rule.ScopeType,
+		})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateWorldRule, id, after, "确认世界规则")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindWorldRule, "world_rules", id, rule.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (mapper *archiveMapper) addTypedAsset(
+	candidate creationdomain.Candidate, kind storyassetdomain.Kind, table, typedID, label string,
+) error {
+	after, err := encodeJSON(map[string]string{
+		"kind": string(kind), "origin": string(storyassetdomain.OriginModel),
+		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,
+		"typedTable": table, "typedId": typedID, "payloadJson": `{"name":` + jsonString(label) + `}`,
+	})
+	if err != nil {
+		return err
+	}
+	mapper.add(revisiondomain.OperationCreateStoryAsset, mapper.ids.NewID(), after, "确认资产信封")
+	return nil
+}
+
+func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road agentdomain.StoryRoadmapOutput) error {
+	bookID := mapper.ids.NewID()
+	bookAfter, err := encodeJSON(map[string]any{
+		"level": storydomain.LevelBook, "title": road.Book.Title, "summary": road.Book.Proposition,
+		"goal": road.Book.ProtagonistArc, "conflict": strings.Join(road.Book.Inviolable, "；"),
+		"outcome": road.Book.Ending, "position": 1,
+	})
+	if err != nil {
+		return err
+	}
+	mapper.add(revisiondomain.OperationCreateOutlineNode, bookID, bookAfter, "确认全书层")
+	if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", bookID, road.Book.Title); err != nil {
+		return err
+	}
+	mapper.outlines++
+	volumeIDs := map[string]string{}
+	firstVolume := ""
+	for _, volume := range road.Volumes {
+		id := mapper.ids.NewID()
+		volumeIDs[volume.Title] = id
+		if firstVolume == "" {
+			firstVolume = id
+		}
+		after, err := encodeJSON(map[string]any{
+			"parentId": bookID, "level": storydomain.LevelVolume, "title": volume.Title,
+			"summary": volume.Goal, "goal": volume.Goal, "conflict": volume.Conflict,
+			"outcome": volume.Payoff, "position": volume.Position,
+		})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateOutlineNode, id, after, "确认卷层")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, volume.Title); err != nil {
+			return err
+		}
+		mapper.outlines++
+	}
+	firstArc := ""
+	for _, arc := range road.Arcs {
+		parent := volumeIDs[strings.TrimSpace(arc.VolumeRef)]
+		if parent == "" {
+			parent = firstVolume
+		}
+		id := mapper.ids.NewID()
+		if firstArc == "" {
+			firstArc = id
+		}
+		after, err := encodeJSON(map[string]any{
+			"parentId": parent, "level": storydomain.LevelArc, "title": arc.Title,
+			"summary": arc.CausalChain, "goal": arc.CausalChain, "conflict": arc.CharacterChange,
+			"outcome": strings.Join(arc.Foreshadowing, "；"), "position": arc.Position,
+		})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateOutlineNode, id, after, "确认故事弧")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, arc.Title); err != nil {
+			return err
+		}
+		mapper.outlines++
+	}
+	if firstVolume == "" || firstArc == "" {
+		return creationdomain.ErrStageIncomplete
+	}
+	for _, chapter := range road.NearTermChapters {
+		id := mapper.ids.NewID()
+		after, err := encodeJSON(map[string]any{
+			"parentId": firstArc, "level": storydomain.LevelChapter, "title": chapter.Title,
+			"summary": chapter.Goal, "goal": chapter.Goal, "conflict": chapter.Conflict,
+			"outcome": chapter.Outcome, "position": chapter.Position,
+		})
+		if err != nil {
+			return err
+		}
+		mapper.add(revisiondomain.OperationCreateOutlineNode, id, after, "确认近期章节范围")
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, chapter.Title); err != nil {
+			return err
+		}
+		mapper.outlines++
+	}
+	return nil
+}
+
+func decodeBlueprint(payload string) (agentdomain.StoryBlueprintOutput, error) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryBlueprint, []byte(payload))
+	if err != nil {
+		return agentdomain.StoryBlueprintOutput{}, err
+	}
+	output := *decoded.(*agentdomain.StoryBlueprintOutput)
+	if err := output.ValidateProduct(); err != nil {
+		return agentdomain.StoryBlueprintOutput{}, err
+	}
+	return output, nil
+}
+
+func decodeCast(payload string) (agentdomain.StoryCastOutput, error) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryCast, []byte(payload))
+	if err != nil {
+		return agentdomain.StoryCastOutput{}, err
+	}
+	return *decoded.(*agentdomain.StoryCastOutput), nil
+}
+
+func decodeRoadmap(payload string) (agentdomain.StoryRoadmapOutput, error) {
+	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryRoadmap, []byte(payload))
+	if err != nil {
+		return agentdomain.StoryRoadmapOutput{}, err
+	}
+	return *decoded.(*agentdomain.StoryRoadmapOutput), nil
+}
+
+func encodeJSON(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func jsonString(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%q", value)
+	}
+	return string(encoded)
+}
