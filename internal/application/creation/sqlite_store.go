@@ -3,6 +3,7 @@ package creation
 import (
 	"context"
 
+	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
@@ -54,4 +55,28 @@ func (store sqliteStore) WorkbenchState(ctx context.Context) (projectdomain.Work
 
 func (store sqliteStore) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
 	return store.inner.ApplyCreationArchive(ctx, apply.ChangeSet, apply.Session, apply.Candidates, apply.Workbench)
+}
+
+func (store sqliteStore) SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error {
+	return store.inner.SaveAssistantSessionRecord(ctx, session)
+}
+
+func (store sqliteStore) AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error) {
+	return store.inner.AssistantSession(ctx, projectID, branchID)
+}
+
+func (store sqliteStore) SaveAction(ctx context.Context, action assistantdomain.Action) error {
+	return store.inner.SaveAssistantAction(ctx, action)
+}
+
+func (store sqliteStore) Action(ctx context.Context, id string) (assistantdomain.Action, error) {
+	return store.inner.AssistantAction(ctx, id)
+}
+
+func (store sqliteStore) ActionByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Action, error) {
+	return store.inner.AssistantActionByIdempotency(ctx, sessionID, key)
+}
+
+func (store sqliteStore) ListActions(ctx context.Context, sessionID string) ([]assistantdomain.Action, error) {
+	return store.inner.ListAssistantActions(ctx, sessionID)
 }

@@ -300,20 +300,28 @@ func (s *Store) SaveAssistantAction(ctx context.Context, action assistantdomain.
 	if err != nil {
 		return fmt.Errorf("encode assistant action base versions: %w", err)
 	}
+	results, err := json.Marshal(action.ResultRefs)
+	if err != nil {
+		return fmt.Errorf("encode assistant action result refs: %w", err)
+	}
+	if string(results) == "null" {
+		results = []byte("[]")
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO assistant_actions (
 			id, session_id, project_id, branch_id, operation, risk, target_refs_json,
 			base_versions_json, arguments, arguments_hash, idempotency_key, estimated_cost,
-			state, error_code, expires_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			state, error_code, result_refs_json, expires_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			state = excluded.state,
 			error_code = excluded.error_code,
+			result_refs_json = excluded.result_refs_json,
 			updated_at = excluded.updated_at
 	`,
 		action.ID, action.SessionID, action.ProjectID, action.BranchID, string(action.Operation),
 		string(action.Risk), string(targets), string(versions), action.Arguments, action.ArgumentsHash,
-		action.IdempotencyKey, action.EstimatedCost, string(action.State), action.ErrorCode,
+		action.IdempotencyKey, action.EstimatedCost, string(action.State), action.ErrorCode, string(results),
 		formatTime(action.ExpiresAt), formatTime(action.CreatedAt), formatTime(action.UpdatedAt),
 	)
 	if err != nil {
@@ -323,28 +331,108 @@ func (s *Store) SaveAssistantAction(ctx context.Context, action assistantdomain.
 }
 
 func (s *Store) AssistantAction(ctx context.Context, id string) (assistantdomain.Action, error) {
-	var action assistantdomain.Action
-	var targets, versions, expiresAt, createdAt, updatedAt string
+	return s.scanAssistantAction(s.db.QueryRowContext(ctx, assistantActionSelect+` WHERE id = ?`, strings.TrimSpace(id)))
+}
+
+func (s *Store) AssistantActionByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Action, error) {
+	return s.scanAssistantAction(s.db.QueryRowContext(ctx, assistantActionSelect+`
+		WHERE session_id = ? AND idempotency_key = ?
+	`, strings.TrimSpace(sessionID), strings.TrimSpace(key)))
+}
+
+func (s *Store) ListAssistantActions(ctx context.Context, sessionID string) ([]assistantdomain.Action, error) {
+	rows, err := s.db.QueryContext(ctx, assistantActionSelect+`
+		WHERE session_id = ?
+		ORDER BY created_at, id
+	`, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, databaseOperationError("list assistant actions", err)
+	}
+	defer rows.Close()
+	actions := make([]assistantdomain.Action, 0)
+	for rows.Next() {
+		action, err := scanAssistantActionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseOperationError("iterate assistant actions", err)
+	}
+	return actions, nil
+}
+
+func (s *Store) AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error) {
+	var session assistantdomain.Session
+	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
+		SELECT id, project_id, branch_id, kind, created_at, updated_at
+		FROM assistant_sessions
+		WHERE project_id = ? AND branch_id = ? AND kind = 'creation'
+	`, strings.TrimSpace(projectID), strings.TrimSpace(branchID)).Scan(
+		&session.ID, &session.ProjectID, &session.BranchID, &session.Kind, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		return assistantdomain.Session{}, fmt.Errorf("read assistant session: %w", err)
+	}
+	session.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return assistantdomain.Session{}, fmt.Errorf("parse assistant session created_at: %w", err)
+	}
+	session.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return assistantdomain.Session{}, fmt.Errorf("parse assistant session updated_at: %w", err)
+	}
+	return session, nil
+}
+
+func (s *Store) SaveAssistantSessionRecord(ctx context.Context, session assistantdomain.Session) error {
+	return s.SaveAssistantSession(ctx, session.ID, session.ProjectID, session.BranchID, formatTime(session.UpdatedAt))
+}
+
+const assistantActionSelect = `
 		SELECT id, session_id, project_id, branch_id, operation, risk, target_refs_json,
 			base_versions_json, arguments, arguments_hash, idempotency_key, estimated_cost,
-			state, error_code, expires_at, created_at, updated_at
+			state, error_code, result_refs_json, expires_at, created_at, updated_at
 		FROM assistant_actions
-		WHERE id = ?
-	`, strings.TrimSpace(id)).Scan(
+`
+
+type assistantActionRow interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) scanAssistantAction(row assistantActionRow) (assistantdomain.Action, error) {
+	action, err := scanAssistantActionRow(row)
+	if err != nil {
+		return assistantdomain.Action{}, fmt.Errorf("read assistant action: %w", err)
+	}
+	return action, nil
+}
+
+func scanAssistantActionRow(row assistantActionRow) (assistantdomain.Action, error) {
+	var action assistantdomain.Action
+	var targets, versions, results, expiresAt, createdAt, updatedAt string
+	err := row.Scan(
 		&action.ID, &action.SessionID, &action.ProjectID, &action.BranchID, &action.Operation,
 		&action.Risk, &targets, &versions, &action.Arguments, &action.ArgumentsHash,
-		&action.IdempotencyKey, &action.EstimatedCost, &action.State, &action.ErrorCode,
+		&action.IdempotencyKey, &action.EstimatedCost, &action.State, &action.ErrorCode, &results,
 		&expiresAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
-		return assistantdomain.Action{}, fmt.Errorf("read assistant action: %w", err)
+		return assistantdomain.Action{}, err
 	}
 	if err := json.Unmarshal([]byte(targets), &action.TargetRefs); err != nil {
 		return assistantdomain.Action{}, fmt.Errorf("decode assistant action targets: %w", err)
 	}
 	if err := json.Unmarshal([]byte(versions), &action.BaseVersions); err != nil {
 		return assistantdomain.Action{}, fmt.Errorf("decode assistant action base versions: %w", err)
+	}
+	if strings.TrimSpace(results) == "" {
+		results = "[]"
+	}
+	if err := json.Unmarshal([]byte(results), &action.ResultRefs); err != nil {
+		return assistantdomain.Action{}, fmt.Errorf("decode assistant action result refs: %w", err)
 	}
 	action.ExpiresAt, err = parseTime(expiresAt)
 	if err != nil {

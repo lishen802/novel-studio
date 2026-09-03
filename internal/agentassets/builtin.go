@@ -24,6 +24,7 @@ const (
 	StoryProposalWorkflowID         = "story.proposal"
 	StoryPeopleWorldWorkflowID      = "story.people_world"
 	StoryRoadmapWorkflowID          = "story.roadmap"
+	StoryAuthorReviseWorkflowID     = "story.author_revise"
 	StoryProductWorkflowVersion     = 1
 )
 
@@ -341,10 +342,22 @@ func Builtin() (*Registry, error) {
 		StoryRoadmapWorkflowID, agentdomain.TaskStoryRoadmap,
 		roadmapPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
 	)
+	authorRevise := agentdomain.WorkflowDefinition{
+		ID: StoryAuthorReviseWorkflowID, Version: StoryProductWorkflowVersion, TaskKind: agentdomain.TaskReviseBlueprint,
+		EntryNodeID: "revise", ResultNodeID: "revise", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
+		MaxRevisionAttempts: 0, MaxRunTokens: 4500, RepairReserve: 0, RevisionReserve: 0,
+		Nodes: []agentdomain.WorkflowNode{{
+			ID: "revise", PublicStageID: agentdomain.PublicStageBoundedRevision,
+			Capability: agentdomain.CapabilityBoundedRevision, RoleSlot: agentdomain.RolePlanner,
+			Prompt: authorBlueprintPromptBinding, Schema: authorBlueprintSchemaBinding, Assembler: assembler,
+			InputSelectors: []string{"$task", "$context"}, OutputKind: agentdomain.OutputStructured,
+			MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun,
+		}},
+	}
 	workflows := []ports.WorkflowAsset{
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
-		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(roadmap),
+		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(roadmap), workflowAsset(authorRevise),
 	}
 	return New(
 		workflows,

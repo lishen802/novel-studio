@@ -101,6 +101,19 @@ func (candidate Candidate) LockField(path string, now time.Time) (Candidate, err
 	return candidate, nil
 }
 
+// UnlockField 解除字段锁，之后作者草稿或定向修订才能改该路径。
+func (candidate Candidate) UnlockField(path string, now time.Time) (Candidate, error) {
+	path = normalizePointer(path)
+	if candidate.ID == "" || path == "" {
+		return Candidate{}, ErrBlankValue
+	}
+	locks := cloneLocks(candidate.LockMap)
+	delete(locks, path)
+	candidate.LockMap = locks
+	candidate.UpdatedAt = now.UTC()
+	return candidate, nil
+}
+
 // Confirm 把当前候选标为阶段确认，仍不写入正式资产。
 func (candidate Candidate) Confirm(now time.Time) (Candidate, error) {
 	if candidate.ID == "" {

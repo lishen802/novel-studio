@@ -89,6 +89,52 @@ func TestOutcomeUnknownForbidsReplay(t *testing.T) {
 	if unknown.CanReplay() {
 		t.Fatal("outcome_unknown must not replay")
 	}
+	if _, err := unknown.Confirm("hash-1", "idem-1", time.Unix(303, 0)); !errors.Is(err, ErrReplayForbidden) {
+		t.Fatalf("replay error = %v", err)
+	}
+}
+
+func TestSucceedAndFailRequireExecuting(t *testing.T) {
+	if _, err := mustAction(t).Succeed([]string{"cand-2"}, time.Unix(301, 0)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("pending action must not succeed")
+	}
+	executing, err := mustAction(t).Confirm("hash-1", "idem-1", time.Unix(301, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	succeeded, err := executing.Succeed([]string{"cand-2"}, time.Unix(302, 0))
+	if err != nil || succeeded.State != StateSucceeded || len(succeeded.ResultRefs) != 1 {
+		t.Fatalf("succeed = %#v, err=%v", succeeded, err)
+	}
+}
+
+func TestAllowedFieldPathRejectsUnknownPointers(t *testing.T) {
+	if !AllowedFieldPath("proposal", "/title") || AllowedFieldPath("proposal", "/internal_node") {
+		t.Fatal("proposal allowlist mismatch")
+	}
+	if AllowedFieldPath("proposal", "/prompt") {
+		t.Fatal("arbitrary paths must be rejected")
+	}
+}
+
+func TestConfirmExpiredAction(t *testing.T) {
+	action := mustAction(t)
+	if _, err := action.Confirm("hash-1", "idem-1", action.ExpiresAt); !errors.Is(err, ErrExpired) {
+		t.Fatalf("expired confirm error = %v", err)
+	}
+}
+
+func TestNewSessionBindsProjectAndBranch(t *testing.T) {
+	session, err := NewSession("asst-1", "project-1", "branch-1", time.Unix(300, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Kind != KindCreation || session.ProjectID != "project-1" {
+		t.Fatalf("session = %#v", session)
+	}
+	if _, err := NewSession("asst-1", "", "branch-1", time.Unix(300, 0)); !errors.Is(err, ErrBlankValue) {
+		t.Fatalf("blank project error = %v", err)
+	}
 }
 
 func mustAction(t *testing.T) Action {

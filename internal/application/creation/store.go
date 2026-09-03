@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -26,6 +27,12 @@ type Store interface {
 	Project(ctx context.Context) (projectdomain.Project, error)
 	WorkbenchState(ctx context.Context) (projectdomain.WorkbenchState, error)
 	ApplyArchive(ctx context.Context, apply ArchiveApply) error
+	SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error
+	AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error)
+	SaveAction(ctx context.Context, action assistantdomain.Action) error
+	Action(ctx context.Context, id string) (assistantdomain.Action, error)
+	ActionByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Action, error)
+	ListActions(ctx context.Context, sessionID string) ([]assistantdomain.Action, error)
 }
 
 type ArchiveApply struct {

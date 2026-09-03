@@ -269,24 +269,27 @@ func newTestService(t *testing.T, kernel *fakeKernel, generation func() uint64) 
 }
 
 type fakeKernel struct {
-	mu        sync.Mutex
-	createN   int
-	executeN  int
-	payloads  map[string]string
-	runs      map[string]agentdomain.Run
-	artifacts map[string][]agentdomain.Artifact
-	block     chan struct{}
-	started   chan struct{}
-	onExecute func()
+	mu          sync.Mutex
+	createN     int
+	executeN    int
+	failExecute bool
+	lastCreate  agentkernel.CreateRequest
+	payloads    map[string]string
+	runs        map[string]agentdomain.Run
+	artifacts   map[string][]agentdomain.Artifact
+	block       chan struct{}
+	started     chan struct{}
+	onExecute   func()
 }
 
 func newFakeKernel() *fakeKernel {
 	return &fakeKernel{
 		payloads: map[string]string{
-			agentassets.StoryDirectionsWorkflowID:  directionPayload,
-			agentassets.StoryProposalWorkflowID:    proposalPayload,
-			agentassets.StoryPeopleWorldWorkflowID: peopleWorldPayload,
-			agentassets.StoryRoadmapWorkflowID:     roadmapPayload,
+			agentassets.StoryDirectionsWorkflowID:   directionPayload,
+			agentassets.StoryProposalWorkflowID:     proposalPayload,
+			agentassets.StoryPeopleWorldWorkflowID:  peopleWorldPayload,
+			agentassets.StoryRoadmapWorkflowID:      roadmapPayload,
+			agentassets.StoryAuthorReviseWorkflowID: proposalPayload,
 		},
 		runs:      map[string]agentdomain.Run{},
 		artifacts: map[string][]agentdomain.Artifact{},
@@ -297,6 +300,7 @@ func (kernel *fakeKernel) CreateRun(_ context.Context, request agentkernel.Creat
 	kernel.mu.Lock()
 	defer kernel.mu.Unlock()
 	kernel.createN++
+	kernel.lastCreate = request
 	artifactID := request.RunID + "-art"
 	run := agentdomain.Run{
 		ID: request.RunID, ProjectID: request.ProjectID, Status: agentdomain.RunCompleted,
@@ -320,6 +324,10 @@ func (kernel *fakeKernel) CreateRun(_ context.Context, request agentkernel.Creat
 func (kernel *fakeKernel) ExecuteRun(ctx context.Context, runID, _ string) (agentdomain.Run, error) {
 	kernel.mu.Lock()
 	kernel.executeN++
+	if kernel.failExecute {
+		kernel.mu.Unlock()
+		return agentdomain.Run{}, fmt.Errorf("execute failed")
+	}
 	started := kernel.started
 	block := kernel.block
 	onExecute := kernel.onExecute
