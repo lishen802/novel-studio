@@ -101,6 +101,16 @@ func (candidate Candidate) LockField(path string, now time.Time) (Candidate, err
 	return candidate, nil
 }
 
+// MarkSuperseded 把被新版本替代的候选标为 superseded，不改 payload。
+func (candidate Candidate) MarkSuperseded(now time.Time) (Candidate, error) {
+	if candidate.ID == "" {
+		return Candidate{}, ErrBlankValue
+	}
+	candidate.Status = StatusSuperseded
+	candidate.UpdatedAt = now.UTC()
+	return candidate, nil
+}
+
 func (candidate Candidate) Locked(path string) bool {
 	return candidate.LockMap[normalizePointer(path)]
 }

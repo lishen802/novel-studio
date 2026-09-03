@@ -17,8 +17,8 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO creation_sessions (
 			id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)
+			selected_direction_candidate_id, blocking_reason, active_run_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			id = excluded.id,
 			branch_id = excluded.branch_id,
@@ -27,10 +27,11 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 			intent_text = excluded.intent_text,
 			selected_direction_candidate_id = excluded.selected_direction_candidate_id,
 			blocking_reason = excluded.blocking_reason,
+			active_run_id = excluded.active_run_id,
 			updated_at = excluded.updated_at
 	`,
 		session.ID, session.ProjectID, session.BranchID, string(session.Stage), string(session.AdvanceMode),
-		session.IntentText, session.SelectedDirectionCandidateID, string(session.BlockingReason),
+		session.IntentText, session.SelectedDirectionCandidateID, string(session.BlockingReason), session.ActiveRunID,
 		formatTime(session.CreatedAt), formatTime(session.UpdatedAt),
 	)
 	if err != nil {
@@ -45,12 +46,12 @@ func (s *Store) CreationSession(ctx context.Context, projectID string) (creation
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, created_at, updated_at
+			selected_direction_candidate_id, blocking_reason, active_run_id, created_at, updated_at
 		FROM creation_sessions
 		WHERE project_id = ?
 	`, strings.TrimSpace(projectID)).Scan(
 		&session.ID, &session.ProjectID, &session.BranchID, &session.Stage, &session.AdvanceMode,
-		&session.IntentText, &selected, &session.BlockingReason, &createdAt, &updatedAt,
+		&session.IntentText, &selected, &session.BlockingReason, &session.ActiveRunID, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return creationdomain.Session{}, fmt.Errorf("read creation session: %w", err)
@@ -135,6 +136,77 @@ func (s *Store) CreationCandidate(ctx context.Context, id string) (creationdomai
 		return creationdomain.Candidate{}, fmt.Errorf("parse creation candidate updated_at: %w", err)
 	}
 	return candidate, nil
+}
+
+// ListCreationCandidates 按版本倒序列出会话内全部候选。
+func (s *Store) ListCreationCandidates(ctx context.Context, sessionID string) ([]creationdomain.Candidate, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM creation_candidates
+		WHERE session_id = ?
+		ORDER BY version DESC, id
+	`, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, databaseOperationError("list creation candidates", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]creationdomain.Candidate, 0, len(ids))
+	for _, id := range ids {
+		candidate, err := s.CreationCandidate(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, candidate)
+	}
+	return result, nil
+}
+
+// UpdateCreationCandidate 保存状态、锁和谱系，不改 payload。
+func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationdomain.Candidate) error {
+	locks, err := json.Marshal(candidate.LockMap)
+	if err != nil {
+		return fmt.Errorf("encode creation candidate locks: %w", err)
+	}
+	if string(locks) == "null" {
+		locks = []byte("{}")
+	}
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE creation_candidates SET
+			parent_candidate_id = NULLIF(?, ''),
+			supersedes_candidate_id = NULLIF(?, ''),
+			lock_map_json = ?,
+			status = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, candidate.ParentCandidateID, candidate.SupersedesCandidateID, string(locks),
+		string(candidate.Status), formatTime(candidate.UpdatedAt), candidate.ID)
+	if err != nil {
+		return databaseOperationError("update creation candidate", err)
+	}
+	return nil
+}
+
+func (s *Store) PendingAssistantActionCount(ctx context.Context, projectID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM assistant_actions
+		WHERE project_id = ? AND state = 'pending_confirmation'
+	`, strings.TrimSpace(projectID)).Scan(&count)
+	if err != nil {
+		return 0, databaseOperationError("count pending assistant actions", err)
+	}
+	return count, nil
 }
 
 // SaveStoryAsset 写入确认后的资产信封。

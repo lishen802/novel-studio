@@ -24,6 +24,10 @@ func TestCreationStoreRoundTripsSessionCandidateAndAsset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	session, err = session.AttachRun("run-active", now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SaveCreationSession(ctx, session); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +35,7 @@ func TestCreationStoreRoundTripsSessionCandidateAndAsset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedSession.IntentText != "江心岛灯塔" || loadedSession.Stage != creationdomain.StageIntent {
+	if loadedSession.IntentText != "江心岛灯塔" || loadedSession.Stage != creationdomain.StageIntent || loadedSession.ActiveRunID != "run-active" {
 		t.Fatalf("session = %#v", loadedSession)
 	}
 
@@ -51,6 +55,21 @@ func TestCreationStoreRoundTripsSessionCandidateAndAsset(t *testing.T) {
 	}
 	if loadedCandidate.ContentSHA256 != candidate.ContentSHA256 || loadedCandidate.RunID != "run-1" {
 		t.Fatalf("candidate = %#v", loadedCandidate)
+	}
+	listed, err := store.ListCreationCandidates(ctx, session.ID)
+	if err != nil || len(listed) != 1 || listed[0].ID != candidate.ID {
+		t.Fatalf("list candidates = %#v, error %v", listed, err)
+	}
+	superseded, err := candidate.MarkSuperseded(now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateCreationCandidate(ctx, superseded); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := store.CreationCandidate(ctx, candidate.ID)
+	if err != nil || reloaded.Status != creationdomain.StatusSuperseded {
+		t.Fatalf("updated candidate = %#v, error %v", reloaded, err)
 	}
 
 	asset, err := storyassetdomain.New(

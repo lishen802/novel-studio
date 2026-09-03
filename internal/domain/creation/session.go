@@ -13,6 +13,7 @@ type Session struct {
 	AdvanceMode                  AdvanceMode
 	IntentText                   string
 	SelectedDirectionCandidateID string
+	ActiveRunID                  string
 	BlockingReason               BlockingReason
 	CreatedAt                    time.Time
 	UpdatedAt                    time.Time
@@ -40,6 +41,42 @@ func (session Session) SaveIntent(text string, now time.Time) (Session, error) {
 	session.IntentText = text
 	session.UpdatedAt = now.UTC()
 	return session, nil
+}
+
+func (session Session) SetAdvanceMode(mode AdvanceMode, now time.Time) (Session, error) {
+	if session.ID == "" || (mode != ModeStepReview && mode != ModeAutoAdvance) {
+		return Session{}, ErrBlankValue
+	}
+	session.AdvanceMode = mode
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
+// Pause 在自动推进必须停下时记录阻断原因，避免恢复后继续付费调用。
+func (session Session) Pause(reason BlockingReason, now time.Time) (Session, error) {
+	if session.ID == "" || reason == BlockNone {
+		return Session{}, ErrBlankValue
+	}
+	session.BlockingReason = reason
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
+func (session Session) AttachRun(runID string, now time.Time) (Session, error) {
+	runID = strings.TrimSpace(runID)
+	if session.ID == "" || runID == "" {
+		return Session{}, ErrBlankValue
+	}
+	session.ActiveRunID = runID
+	session.BlockingReason = BlockNone
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
+func (session Session) ClearActiveRun(now time.Time) Session {
+	session.ActiveRunID = ""
+	session.UpdatedAt = now.UTC()
+	return session
 }
 
 func (session Session) SelectDirection(candidateID string, now time.Time) (Session, error) {

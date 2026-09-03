@@ -90,6 +90,32 @@ func TestResumeDoesNotClearBlockingReason(t *testing.T) {
 	}
 }
 
+func TestSetAdvanceModeAndAttachRun(t *testing.T) {
+	session := mustSession(t)
+	updated, err := session.SetAdvanceMode(ModeAutoAdvance, time.Unix(110, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err = updated.AttachRun("run-1", time.Unix(111, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AdvanceMode != ModeAutoAdvance || updated.ActiveRunID != "run-1" || updated.BlockingReason != BlockNone {
+		t.Fatalf("session = %#v", updated)
+	}
+	paused, err := updated.Pause(BlockFormalWrite, time.Unix(112, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused.ShouldAutoContinue() {
+		t.Fatal("paused session must not auto continue")
+	}
+	cleared := paused.ClearActiveRun(time.Unix(113, 0))
+	if cleared.ActiveRunID != "" {
+		t.Fatalf("active run = %q", cleared.ActiveRunID)
+	}
+}
+
 func mustSession(t *testing.T) Session {
 	t.Helper()
 	session, err := NewSession("session-1", "project-1", "branch-1", time.Unix(100, 0))
