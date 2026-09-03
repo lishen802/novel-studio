@@ -1,0 +1,265 @@
+package creation
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+	"time"
+)
+
+type CandidateKind string
+
+const (
+	KindDirectionSet CandidateKind = "direction_set"
+	KindDirection    CandidateKind = "direction"
+	KindProposal     CandidateKind = "proposal"
+	KindPeopleWorld  CandidateKind = "people_world"
+	KindRoadmap      CandidateKind = "roadmap"
+)
+
+type CandidateStatus string
+
+const (
+	StatusDraft      CandidateStatus = "draft"
+	StatusSelected   CandidateStatus = "selected"
+	StatusConfirmed  CandidateStatus = "confirmed"
+	StatusSuperseded CandidateStatus = "superseded"
+	StatusStale      CandidateStatus = "stale"
+	StatusDiscarded  CandidateStatus = "discarded"
+)
+
+type CandidateOrigin string
+
+const (
+	OriginModel  CandidateOrigin = "model"
+	OriginAuthor CandidateOrigin = "author"
+)
+
+type Candidate struct {
+	ID                    string
+	SessionID             string
+	Stage                 Stage
+	Kind                  CandidateKind
+	Version               int
+	ParentCandidateID     string
+	SupersedesCandidateID string
+	RunID                 string
+	ArtifactID            string
+	PayloadJSON           string
+	PayloadSchemaID       string
+	PayloadSchemaVersion  int
+	ContentSHA256         string
+	LockMap               map[string]bool
+	Status                CandidateStatus
+	Origin                CandidateOrigin
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
+// NewCandidate 保存一次生成或导入的结构化候选，并计算内容摘要。
+func NewCandidate(
+	id, sessionID string, stage Stage, kind CandidateKind, version int,
+	parentCandidateID, runID, artifactID, payloadJSON, schemaID string, schemaVersion int, now time.Time,
+) (Candidate, error) {
+	id, sessionID = strings.TrimSpace(id), strings.TrimSpace(sessionID)
+	schemaID = strings.TrimSpace(schemaID)
+	if id == "" || sessionID == "" || !stage.Valid() || !validKind(kind) || version < 1 ||
+		strings.TrimSpace(payloadJSON) == "" || schemaID == "" || schemaVersion < 1 {
+		return Candidate{}, ErrBlankValue
+	}
+	if !json.Valid([]byte(payloadJSON)) {
+		return Candidate{}, ErrInvalidJSON
+	}
+	now = now.UTC()
+	origin := OriginModel
+	if strings.TrimSpace(runID) == "" {
+		origin = OriginAuthor
+	}
+	return Candidate{
+		ID: id, SessionID: sessionID, Stage: stage, Kind: kind, Version: version,
+		ParentCandidateID: strings.TrimSpace(parentCandidateID),
+		RunID:             strings.TrimSpace(runID), ArtifactID: strings.TrimSpace(artifactID),
+		PayloadJSON: payloadJSON, PayloadSchemaID: schemaID, PayloadSchemaVersion: schemaVersion,
+		ContentSHA256: digestJSON(payloadJSON), LockMap: map[string]bool{},
+		Status: StatusDraft, Origin: origin, CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (candidate Candidate) LockField(path string, now time.Time) (Candidate, error) {
+	path = normalizePointer(path)
+	if candidate.ID == "" || path == "" {
+		return Candidate{}, ErrBlankValue
+	}
+	if _, err := candidate.FieldString(path); err != nil {
+		return Candidate{}, err
+	}
+	locks := cloneLocks(candidate.LockMap)
+	locks[path] = true
+	candidate.LockMap = locks
+	candidate.UpdatedAt = now.UTC()
+	return candidate, nil
+}
+
+func (candidate Candidate) Locked(path string) bool {
+	return candidate.LockMap[normalizePointer(path)]
+}
+
+func (candidate Candidate) FieldString(path string) (string, error) {
+	value, err := readPointer(candidate.PayloadJSON, path)
+	if err != nil {
+		return "", err
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", ErrFieldMissing
+	}
+	return text, nil
+}
+
+// SaveDraft 把作者直接编辑存为新候选版本，不覆盖正在审阅的版本。
+func (candidate Candidate) SaveDraft(newID, payloadJSON string, now time.Time) (Candidate, error) {
+	if err := candidate.rejectLockedChanges(payloadJSON); err != nil {
+		return Candidate{}, err
+	}
+	draft, err := NewCandidate(
+		newID, candidate.SessionID, candidate.Stage, candidate.Kind, candidate.Version+1,
+		candidate.ID, "", "", payloadJSON, candidate.PayloadSchemaID, candidate.PayloadSchemaVersion, now,
+	)
+	if err != nil {
+		return Candidate{}, err
+	}
+	draft.LockMap = cloneLocks(candidate.LockMap)
+	draft.Origin = OriginAuthor
+	draft.ParentCandidateID = candidate.ID
+	draft.SupersedesCandidateID = candidate.ID
+	return draft, nil
+}
+
+// Regenerate 从模型新产出创建下一版本，并强制保留锁定字段。
+func (candidate Candidate) Regenerate(newID, runID, artifactID, payloadJSON string, now time.Time) (Candidate, error) {
+	merged, err := mergeLockedFields(candidate.PayloadJSON, payloadJSON, candidate.LockMap)
+	if err != nil {
+		return Candidate{}, err
+	}
+	next, err := NewCandidate(
+		newID, candidate.SessionID, candidate.Stage, candidate.Kind, candidate.Version+1,
+		candidate.ID, runID, artifactID, merged, candidate.PayloadSchemaID, candidate.PayloadSchemaVersion, now,
+	)
+	if err != nil {
+		return Candidate{}, err
+	}
+	next.LockMap = cloneLocks(candidate.LockMap)
+	next.ParentCandidateID = candidate.ID
+	next.SupersedesCandidateID = candidate.ID
+	return next, nil
+}
+
+func (candidate Candidate) rejectLockedChanges(payloadJSON string) error {
+	for path, locked := range candidate.LockMap {
+		if !locked {
+			continue
+		}
+		before, err := candidate.FieldString(path)
+		if err != nil {
+			return err
+		}
+		afterValue, err := readPointer(payloadJSON, path)
+		if err != nil {
+			return err
+		}
+		after, _ := afterValue.(string)
+		if after != before {
+			return ErrFieldLocked
+		}
+	}
+	return nil
+}
+
+func mergeLockedFields(baseline, incoming string, locks map[string]bool) (string, error) {
+	baseMap, err := decodeObject(baseline)
+	if err != nil {
+		return "", err
+	}
+	nextMap, err := decodeObject(incoming)
+	if err != nil {
+		return "", err
+	}
+	for path, locked := range locks {
+		if !locked {
+			continue
+		}
+		key, ok := objectKey(path)
+		if !ok {
+			return "", ErrFieldMissing
+		}
+		nextMap[key] = baseMap[key]
+	}
+	encoded, err := json.Marshal(nextMap)
+	if err != nil {
+		return "", ErrInvalidJSON
+	}
+	return string(encoded), nil
+}
+
+func decodeObject(payload string) (map[string]any, error) {
+	var object map[string]any
+	if err := json.Unmarshal([]byte(payload), &object); err != nil {
+		return nil, ErrInvalidJSON
+	}
+	return object, nil
+}
+
+func readPointer(payload, path string) (any, error) {
+	object, err := decodeObject(payload)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := objectKey(path)
+	if !ok {
+		return nil, ErrFieldMissing
+	}
+	value, exists := object[key]
+	if !exists {
+		return nil, ErrFieldMissing
+	}
+	return value, nil
+}
+
+func objectKey(path string) (string, bool) {
+	path = normalizePointer(path)
+	if !strings.HasPrefix(path, "/") {
+		return "", false
+	}
+	key := strings.TrimPrefix(path, "/")
+	if key == "" || strings.Contains(key, "/") {
+		return "", false
+	}
+	return key, true
+}
+
+func normalizePointer(path string) string {
+	return strings.TrimSpace(path)
+}
+
+func cloneLocks(locks map[string]bool) map[string]bool {
+	cloned := make(map[string]bool, len(locks))
+	for path, locked := range locks {
+		cloned[path] = locked
+	}
+	return cloned
+}
+
+func digestJSON(payload string) string {
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
+}
+
+func validKind(kind CandidateKind) bool {
+	switch kind {
+	case KindDirectionSet, KindDirection, KindProposal, KindPeopleWorld, KindRoadmap:
+		return true
+	default:
+		return false
+	}
+}
