@@ -267,6 +267,80 @@ export interface HarnessCaseView {
   rating?: Record<string, unknown>; revealed?: Record<string, string>; binding?: Record<string, unknown>;
 }
 
+export interface CreationWorkbenchView {
+  sessionId: string;
+  projectId: string;
+  branchId: string;
+  stage: string;
+  advanceMode: string;
+  blockingReason: string;
+  recoverable: boolean;
+  archiveConfirmed: boolean;
+  intentText: string;
+  stageRail: Array<{ id: string; label: string; status: string }>;
+  directionSet: {
+    candidateId: string;
+    version: number;
+    selectedId: string;
+    status: string;
+    cards: Array<{
+      id: string;
+      hook: string;
+      genre: string;
+      protagonist: string;
+      coreConflict: string;
+      growthCost: string;
+      pacing: string;
+      ending: string;
+      selected: boolean;
+    }>;
+  };
+  proposal: {
+    candidateId: string;
+    version: number;
+    status: string;
+    title: string;
+    sections: Array<{ id: string; title: string; content: string; lockPath: string; locked: boolean }>;
+  };
+  peopleWorld: {
+    candidateId: string;
+    version: number;
+    status: string;
+    entities: Array<{ id: string; kind: string; title: string; summary: string; complete: boolean }>;
+  };
+  roadmap: {
+    candidateId: string;
+    version: number;
+    status: string;
+    book: { id: string; title: string; summary: string; position: number };
+    volumes: Array<{ id: string; title: string; summary: string; position: number }>;
+    arcs: Array<{ id: string; title: string; summary: string; position: number }>;
+    chapters: Array<{ id: string; title: string; summary: string; position: number }>;
+  };
+  currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string };
+  assistant: { pendingActionCount: number };
+  impact: {
+    items: Array<{ candidateId: string; stage: string; severity: string; reason: string; locked: boolean; confirmed: boolean; excepted: boolean }>;
+    touchesLocked: boolean;
+    touchesConfirmed: boolean;
+    canAdvance: boolean;
+    regenerateStages: string[];
+    estimatedCalls: number;
+    evidence: string;
+  };
+  capabilities: string[];
+}
+
+export interface CreationCostPreview {
+  stage: string;
+  workflowId: string;
+  estimatedCalls: number;
+  maxRunTokens: number;
+  runBudgetUnlimited: boolean;
+  remainingStages: string[];
+  confirmationDigest: string;
+}
+
 type NativeMethod = (...args: unknown[]) => Promise<unknown>;
 type NativeDesktopAPI = Record<string, NativeMethod>;
 
@@ -404,4 +478,24 @@ export const studio = {
   saveCreativeHarnessRating: (input: Record<string, unknown>) => call<HarnessCaseView>('SaveCreativeHarnessRating', input),
   compareCreativeHarnessRuns: (baseId: string, candidateId: string) => call<Record<string, unknown>>('CompareCreativeHarnessRuns', baseId, candidateId),
   exportCreativeHarnessReport: (id: string) => call<string>('ExportCreativeHarnessReport', id),
+
+  creationWorkbench: () => call<CreationWorkbenchView>('CreationWorkbench'),
+  saveCreationIntent: (text: string) => call<CreationWorkbenchView>('SaveCreationIntent', text),
+  setCreationAdvanceMode: (mode: string) => call<CreationWorkbenchView>('SetCreationAdvanceMode', mode),
+  selectCreationDirection: (candidateId: string) => call<CreationWorkbenchView>('SelectCreationDirection', candidateId),
+  advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
+  lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
+  saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>
+    call<CreationWorkbenchView>('SaveCreationCandidateDraft', candidateId, payloadJson),
+  lockCreationField: (candidateId: string, path: string) => call<CreationWorkbenchView>('LockCreationField', candidateId, path),
+  unlockCreationField: (candidateId: string, path: string) => call<CreationWorkbenchView>('UnlockCreationField', candidateId, path),
+  previewCreationGenerate: (stage: string) => call<CreationCostPreview>('PreviewCreationGenerate', stage),
+  confirmCreationGenerate: (input: { stage: string; confirmationDigest: string; idempotencyKey: string }) =>
+    call<{ runId: string }>('ConfirmCreationGenerate', input),
+  cancelCreationRun: () => call<void>('CancelCreationRun'),
+  recoverCreation: () => call<CreationWorkbenchView>('RecoverCreation'),
+  previewCreationArchive: () => call<{ confirmationDigest: string; title: string; characterCount: number; outlineCount: number }>('PreviewCreationArchive'),
+  confirmCreationArchive: (input: { confirmationDigest: string; idempotencyKey: string }) =>
+    call<{ changeSetId: string }>('ConfirmCreationArchive', input),
+  resolveCreationImpact: (choice: string) => call<{ projection: CreationWorkbenchView['impact'] }>('ResolveCreationImpact', choice),
 };

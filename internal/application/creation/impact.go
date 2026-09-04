@@ -12,34 +12,34 @@ import (
 )
 
 type ImpactItem struct {
-	CandidateID string
-	Stage       creationdomain.Stage
-	Severity    creationdomain.ImpactSeverity
-	Reason      string
-	Locked      bool
-	Confirmed   bool
-	Excepted    bool
+	CandidateID string                        `json:"candidateId"`
+	Stage       creationdomain.Stage          `json:"stage"`
+	Severity    creationdomain.ImpactSeverity `json:"severity"`
+	Reason      string                        `json:"reason"`
+	Locked      bool                          `json:"locked"`
+	Confirmed   bool                          `json:"confirmed"`
+	Excepted    bool                          `json:"excepted"`
 }
 
 type ImpactProjection struct {
-	Items            []ImpactItem
-	TouchesLocked    bool
-	TouchesConfirmed bool
-	CanAdvance       bool
-	RegenerateStages []creationdomain.Stage
-	EstimatedCalls   int
-	Evidence         string
+	Items            []ImpactItem           `json:"items"`
+	TouchesLocked    bool                   `json:"touchesLocked"`
+	TouchesConfirmed bool                   `json:"touchesConfirmed"`
+	CanAdvance       bool                   `json:"canAdvance"`
+	RegenerateStages []creationdomain.Stage `json:"regenerateStages"`
+	EstimatedCalls   int                    `json:"estimatedCalls"`
+	Evidence         string                 `json:"evidence"`
 }
 
 type ResolveImpactRequest struct {
-	ProjectID string
-	Choice    creationdomain.ImpactChoice
+	ProjectID string                      `json:"projectId"`
+	Choice    creationdomain.ImpactChoice `json:"choice"`
 }
 
 type ResolveImpactResult struct {
-	Session          creationdomain.Session
-	Projection       ImpactProjection
-	RegenerateStages []creationdomain.Stage
+	Session          creationdomain.Session `json:"session"`
+	Projection       ImpactProjection       `json:"projection"`
+	RegenerateStages []creationdomain.Stage `json:"regenerateStages"`
 }
 
 // SaveCandidateDraft 把作者直接编辑存为新候选版本，并重算下游 stale，不调用模型。

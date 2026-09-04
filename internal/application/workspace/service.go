@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	creationapp "github.com/lishen802/novel-studio/internal/application/creation"
 	"github.com/lishen802/novel-studio/internal/application/license"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
@@ -71,6 +72,7 @@ type activeWorkspace struct {
 	projectLease     ports.ProjectLease
 	filesystemHealth ports.ProjectFilesystemHealth
 	generation       uint64
+	creation         *creationapp.Service
 }
 
 // requireEditableLocked is the application-level write barrier. Callers must

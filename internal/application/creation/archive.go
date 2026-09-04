@@ -17,21 +17,21 @@ import (
 )
 
 type ArchivePreview struct {
-	ConfirmationDigest string
-	Title              string
-	CharacterCount     int
-	OutlineCount       int
+	ConfirmationDigest string `json:"confirmationDigest"`
+	Title              string `json:"title"`
+	CharacterCount     int    `json:"characterCount"`
+	OutlineCount       int    `json:"outlineCount"`
 }
 
 type ArchiveRequest struct {
-	ProjectID          string
-	ConfirmationDigest string
-	IdempotencyKey     string
+	ProjectID          string `json:"projectId"`
+	ConfirmationDigest string `json:"confirmationDigest"`
+	IdempotencyKey     string `json:"idempotencyKey"`
 }
 
 type ArchiveResult struct {
-	Session     creationdomain.Session
-	ChangeSetID string
+	Session     creationdomain.Session `json:"session"`
+	ChangeSetID string                 `json:"changeSetId"`
 }
 
 type archivePlan struct {

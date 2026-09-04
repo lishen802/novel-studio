@@ -6,14 +6,34 @@ import (
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
-	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
+	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 )
 
-type sqliteStore struct {
-	inner *sqlite.Store
+// SQLBackend 是 SQLite 创作表的最小持久化端口，供工作区把活动项目 store 适配进来。
+type SQLBackend interface {
+	SaveCreationSession(context.Context, creationdomain.Session) error
+	CreationSession(context.Context, string) (creationdomain.Session, error)
+	SaveCreationCandidate(context.Context, creationdomain.Candidate) error
+	UpdateCreationCandidate(context.Context, creationdomain.Candidate) error
+	CreationCandidate(context.Context, string) (creationdomain.Candidate, error)
+	ListCreationCandidates(context.Context, string) ([]creationdomain.Candidate, error)
+	PendingAssistantActionCount(context.Context, string) (int, error)
+	Project(context.Context) (projectdomain.Project, error)
+	WorkbenchState(context.Context) (projectdomain.WorkbenchState, error)
+	ApplyCreationArchive(context.Context, revisiondomain.ChangeSet, creationdomain.Session, []creationdomain.Candidate, projectdomain.WorkbenchState) error
+	SaveAssistantSessionRecord(context.Context, assistantdomain.Session) error
+	AssistantSession(context.Context, string, string) (assistantdomain.Session, error)
+	SaveAssistantAction(context.Context, assistantdomain.Action) error
+	AssistantAction(context.Context, string) (assistantdomain.Action, error)
+	AssistantActionByIdempotency(context.Context, string, string) (assistantdomain.Action, error)
+	ListAssistantActions(context.Context, string) ([]assistantdomain.Action, error)
 }
 
-func NewSQLiteStore(store *sqlite.Store) Store {
+type sqliteStore struct {
+	inner SQLBackend
+}
+
+func NewSQLiteStore(store SQLBackend) Store {
 	return sqliteStore{inner: store}
 }
 

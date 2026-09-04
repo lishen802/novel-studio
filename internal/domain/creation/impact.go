@@ -16,10 +16,10 @@ const (
 type ImpactChoice string
 
 const (
-	ChoiceRegenerateLocal  ImpactChoice = "regenerate_local"
-	ChoiceKeepException    ImpactChoice = "keep_exception"
-	ChoiceContinueTalk     ImpactChoice = "continue_discussion"
-	ChoiceAbandonUpstream  ImpactChoice = "abandon_upstream"
+	ChoiceRegenerateLocal ImpactChoice = "regenerate_local"
+	ChoiceKeepException   ImpactChoice = "keep_exception"
+	ChoiceContinueTalk    ImpactChoice = "continue_discussion"
+	ChoiceAbandonUpstream ImpactChoice = "abandon_upstream"
 )
 
 func (choice ImpactChoice) Valid() bool {

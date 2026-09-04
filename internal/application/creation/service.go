@@ -46,20 +46,20 @@ type GenerateRequest struct {
 }
 
 type CostPreview struct {
-	Stage              creationdomain.Stage
-	WorkflowID         string
-	WorkflowVersion    int
-	EstimatedCalls     int
-	MaxRunTokens       int
-	RunBudgetUnlimited bool
-	RemainingStages    []creationdomain.Stage
-	ConfirmationDigest string
+	Stage              creationdomain.Stage   `json:"stage"`
+	WorkflowID         string                 `json:"workflowId"`
+	WorkflowVersion    int                    `json:"workflowVersion"`
+	EstimatedCalls     int                    `json:"estimatedCalls"`
+	MaxRunTokens       int                    `json:"maxRunTokens"`
+	RunBudgetUnlimited bool                   `json:"runBudgetUnlimited"`
+	RemainingStages    []creationdomain.Stage `json:"remainingStages"`
+	ConfirmationDigest string                 `json:"confirmationDigest"`
 }
 
 type GenerateResult struct {
-	Session   creationdomain.Session
-	Candidate creationdomain.Candidate
-	RunID     string
+	Session   creationdomain.Session   `json:"session"`
+	Candidate creationdomain.Candidate `json:"candidate"`
+	RunID     string                   `json:"runId"`
 }
 
 type Config struct {
@@ -199,6 +199,74 @@ func (service *Service) AdvanceStage(ctx context.Context, projectID string) (cre
 	return session, nil
 }
 
+// LookBackStage 回到更早阶段，不删除候选、不写正式资产。
+func (service *Service) LookBackStage(ctx context.Context, projectID string, target creationdomain.Stage) (creationdomain.Session, error) {
+	session, err := service.store.Session(ctx, projectID)
+	if err != nil {
+		return creationdomain.Session{}, err
+	}
+	session, err = session.LookBack(target, service.clock.Now())
+	if err != nil {
+		return creationdomain.Session{}, err
+	}
+	if err := service.store.SaveSession(ctx, session); err != nil {
+		return creationdomain.Session{}, err
+	}
+	return session, nil
+}
+
+// LockCandidateField 锁定候选字段，重新生成时必须保持。
+func (service *Service) LockCandidateField(ctx context.Context, projectID, candidateID, path string) (creationdomain.Candidate, error) {
+	return service.updateCandidateLock(ctx, projectID, candidateID, path, true)
+}
+
+// UnlockCandidateField 解除字段锁，之后作者草稿才能改该路径。
+func (service *Service) UnlockCandidateField(ctx context.Context, projectID, candidateID, path string) (creationdomain.Candidate, error) {
+	return service.updateCandidateLock(ctx, projectID, candidateID, path, false)
+}
+
+func (service *Service) updateCandidateLock(ctx context.Context, projectID, candidateID, path string, lock bool) (creationdomain.Candidate, error) {
+	session, err := service.store.Session(ctx, projectID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	candidate, err := service.store.Candidate(ctx, candidateID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if candidate.SessionID != session.ID {
+		return creationdomain.Candidate{}, ErrSessionNotFound
+	}
+	if lock {
+		candidate, err = candidate.LockField(path, service.clock.Now())
+	} else {
+		candidate, err = candidate.UnlockField(path, service.clock.Now())
+	}
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if err := service.store.UpdateCandidate(ctx, candidate); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	return candidate, nil
+}
+
+// CandidatePayload 有界读取单个候选的完整 payload，供中央区编辑。
+func (service *Service) CandidatePayload(ctx context.Context, projectID, candidateID string) (creationdomain.Candidate, error) {
+	session, err := service.store.Session(ctx, projectID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	candidate, err := service.store.Candidate(ctx, candidateID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if candidate.SessionID != session.ID {
+		return creationdomain.Candidate{}, ErrSessionNotFound
+	}
+	return candidate, nil
+}
+
 // PreviewGenerate 冻结费用预览摘要，不创建运行、不写候选。
 func (service *Service) PreviewGenerate(ctx context.Context, request GenerateRequest) (CostPreview, error) {
 	session, err := service.store.Session(ctx, request.ProjectID)
@@ -287,6 +355,12 @@ func (service *Service) Recover(ctx context.Context, projectID string) (creation
 	}
 	service.forgetGrant(projectID)
 	if strings.TrimSpace(session.ActiveRunID) == "" {
+		return session, nil
+	}
+	service.mu.Lock()
+	_, live := service.cancels[session.ActiveRunID]
+	service.mu.Unlock()
+	if live {
 		return session, nil
 	}
 	session, err = session.Pause(creationdomain.BlockCostAuthorization, service.clock.Now())

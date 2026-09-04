@@ -37,29 +37,29 @@ const (
 )
 
 type Candidate struct {
-	ID                    string
-	SessionID             string
-	Stage                 Stage
-	Kind                  CandidateKind
-	Version               int
-	ParentCandidateID     string
-	SupersedesCandidateID string
-	RunID                 string
-	ArtifactID            string
-	PayloadJSON           string
-	PayloadSchemaID       string
-	PayloadSchemaVersion  int
-	ContentSHA256         string
-	LockMap               map[string]bool
-	Status                CandidateStatus
-	Origin                CandidateOrigin
-	UpstreamDigest        string
-	StaleReason           string
-	ImpactRefs            []string
-	ImpactSeverity        ImpactSeverity
+	ID                     string
+	SessionID              string
+	Stage                  Stage
+	Kind                   CandidateKind
+	Version                int
+	ParentCandidateID      string
+	SupersedesCandidateID  string
+	RunID                  string
+	ArtifactID             string
+	PayloadJSON            string
+	PayloadSchemaID        string
+	PayloadSchemaVersion   int
+	ContentSHA256          string
+	LockMap                map[string]bool
+	Status                 CandidateStatus
+	Origin                 CandidateOrigin
+	UpstreamDigest         string
+	StaleReason            string
+	ImpactRefs             []string
+	ImpactSeverity         ImpactSeverity
 	ExceptedUpstreamDigest string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 // NewCandidate 保存一次生成或导入的结构化候选，并计算内容摘要。

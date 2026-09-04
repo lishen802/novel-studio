@@ -1,8 +1,10 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
   FileText, Layers, Users, Globe, History, GitBranch,
 } from 'lucide-react';
+import { Button } from '../../components/ui/Button';
+import { useApp } from '../../store/useApp';
 
 const tabs = [
   { label: '作品方案', path: 'outline', icon: FileText },
@@ -14,6 +16,20 @@ const tabs = [
 ];
 
 export default function ArchiveLayout() {
+  const navigate = useNavigate();
+  const { state } = useApp();
+  const confirmed = state.backendProject?.workbench.archiveStatus === 'confirmed';
+
+  if (!confirmed) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center space-y-4 animate-fade-up" data-testid="archive-unconfirmed">
+        <h1 className="text-2xl font-display text-text">作品档案尚未确认</h1>
+        <p className="text-sm text-text-sub max-w-md">确认作品档案后，人物、世界规则和大纲才会出现在这里。未确认候选不会进入正式资产。</p>
+        <Button variant="primary" onClick={() => navigate('/cockpit')}>返回驾驶舱</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col animate-fade-up">
       <div className="mb-6">

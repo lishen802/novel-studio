@@ -3,8 +3,8 @@ package workspace
 import (
 	"context"
 
-	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	"github.com/lishen802/novel-studio/internal/application/ports"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 )
 
 // noopJobEventNotifier is the default notifier used when no UI bridge is

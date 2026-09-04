@@ -70,6 +70,36 @@ func TestAdvanceFromDirectionsRequiresSelectedDirection(t *testing.T) {
 	}
 }
 
+func TestLookBackReturnsToReachedStage(t *testing.T) {
+	session := mustSession(t)
+	session, err := session.SaveIntent("灯塔失踪", time.Unix(101, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err = session.Advance(time.Unix(102, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err = session.SelectDirection("dir-1", time.Unix(103, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err = session.Advance(time.Unix(104, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := session.LookBack(StageDirections, time.Unix(105, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Stage != StageDirections {
+		t.Fatalf("look back stage = %q", back.Stage)
+	}
+	if _, err := session.LookBack(StagePeopleWorld, time.Unix(106, 0)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("forward look back error = %v", err)
+	}
+}
+
 func TestAutoAdvancePausesBeforeArchiveWrite(t *testing.T) {
 	session := mustSession(t)
 	session.AdvanceMode = ModeAutoAdvance

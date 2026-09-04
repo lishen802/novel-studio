@@ -9,12 +9,14 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/appsettings"
 	"github.com/lishen802/novel-studio/internal/application/appshell"
+	"github.com/lishen802/novel-studio/internal/application/creation"
 	"github.com/lishen802/novel-studio/internal/application/creativeharness"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
+	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -111,6 +113,8 @@ const (
 	errorCreativeProfileMissing         desktopErrorCode = "CREATIVE_PROFILE_NOT_FOUND"
 	errorHarnessConfirmation            desktopErrorCode = "HARNESS_CONFIRMATION_REQUIRED"
 	errorHarnessRatingExists            desktopErrorCode = "HARNESS_RATING_EXISTS"
+	errorCreationConfirmation           desktopErrorCode = "CREATION_CONFIRMATION_REQUIRED"
+	errorCreationImpact                 desktopErrorCode = "CREATION_IMPACT_UNRESOLVED"
 )
 
 var (
@@ -141,6 +145,16 @@ func safeDesktopError(err error) error {
 	switch {
 	case errors.Is(err, creativeharness.ErrConfirmationRequired):
 		code, message = errorHarnessConfirmation, "运行配置或费用确认已变化，请重新预览并确认。"
+	case errors.Is(err, creation.ErrConfirmationRequired):
+		code, message = errorCreationConfirmation, "创作费用确认已变化，请重新预览并确认。"
+	case errors.Is(err, creationdomain.ErrImpactUnresolved):
+		code, message = errorCreationImpact, "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"
+	case errors.Is(err, workspace.ErrCreationUnavailable):
+		code, message = errorFeatureNotAvailable, "当前项目无法打开创作工作台。"
+	case errors.Is(err, creation.ErrRunActive):
+		code, message = errorAgentRunActive, "已有创作运行正在进行，请等待完成或取消后再试。"
+	case errors.Is(err, creation.ErrUnavailable):
+		code, message = errorFeatureNotAvailable, "创作编排服务尚未就绪。"
 	case errors.Is(err, creativeharness.ErrRunActive):
 		code, message = errorOperationFailed, "运行中的实验不能删除，请先取消并等待任务结束。"
 	case errors.Is(err, quality.ErrHarnessRatingExists):

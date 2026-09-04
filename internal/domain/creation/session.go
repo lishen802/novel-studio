@@ -132,6 +132,16 @@ func (session Session) Advance(now time.Time) (Session, error) {
 	return session, nil
 }
 
+// LookBack 回到已经到达过的更早阶段，不删除已有候选。
+func (session Session) LookBack(target Stage, now time.Time) (Session, error) {
+	if err := CanLookBack(session.Stage, target); err != nil {
+		return Session{}, err
+	}
+	session.Stage = target
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
 func (session Session) ensureComplete() error {
 	switch session.Stage {
 	case StageIntent:

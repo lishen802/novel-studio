@@ -1,36 +1,497 @@
-import { Compass, FileText, Settings } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { clsx } from 'clsx';
+import {
+  AlertCircle,
+  Ban,
+  Bookmark,
+  ChevronRight,
+  Compass,
+  GitBranch,
+  Globe,
+  Layers,
+  Lightbulb,
+  Lock,
+  Map,
+  RefreshCw,
+  Send,
+  Sparkles,
+  Target,
+  User,
+} from 'lucide-react';
+import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView } from '../api/studio';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Textarea } from '../components/ui/Input';
+import { Modal } from '../components/ui/Modal';
+import { StatusBadge } from '../components/ui/StatusBadge';
 import { useApp } from '../store/useApp';
 
-/** 创意驾驶舱属于后续里程碑；当前只提供真实可用功能的入口。 */
+const emptyWorkbench = (): CreationWorkbenchView => ({
+  sessionId: '',
+  projectId: '',
+  branchId: '',
+  stage: 'intent',
+  advanceMode: 'step_review',
+  blockingReason: '',
+  recoverable: false,
+  archiveConfirmed: false,
+  intentText: '',
+  stageRail: [],
+  directionSet: { candidateId: '', version: 0, selectedId: '', status: '', cards: [] },
+  proposal: { candidateId: '', version: 0, status: '', title: '', sections: [] },
+  peopleWorld: { candidateId: '', version: 0, status: '', entities: [] },
+  roadmap: {
+    candidateId: '', version: 0, status: '',
+    book: { id: '', title: '', summary: '', position: 0 },
+    volumes: [], arcs: [], chapters: [],
+  },
+  currentRun: { runId: '', status: '', cancellable: false, publicStage: '' },
+  assistant: { pendingActionCount: 0 },
+  impact: {
+    items: [], touchesLocked: false, touchesConfirmed: false, canAdvance: true,
+    regenerateStages: [], estimatedCalls: 0, evidence: '',
+  },
+  capabilities: [],
+});
+
+const sectionIcons = {
+  position: Target,
+  character: User,
+  world: Globe,
+  mainplot: Map,
+  subplot: GitBranch,
+  ending: Layers,
+  forbidden: Ban,
+};
+
+function generateStage(stage: string): string {
+  if (stage === 'intent' || stage === 'directions') return 'directions';
+  return stage;
+}
+
+function previousStage(stage: string): string | null {
+  const rail = ['intent', 'directions', 'proposal', 'people_world', 'roadmap', 'archive_confirm'];
+  const index = rail.indexOf(stage);
+  return index > 0 ? rail[index - 1] : null;
+}
+
 export default function Cockpit() {
   const navigate = useNavigate();
   const { state } = useApp();
+  const [workbench, setWorkbench] = useState<CreationWorkbenchView>(emptyWorkbench);
+  const [intent, setIntent] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [preview, setPreview] = useState<CreationCostPreview | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [keptIds, setKeptIds] = useState<string[]>([]);
+  const [entityId, setEntityId] = useState<string | null>(null);
+
+  const modelReady = (state.bootstrap?.providers ?? []).some((provider) => provider.hasCredential);
+  const projectTitle = state.backendProject?.title || state.currentProject?.title || '未命名作品';
+
+  const load = useCallback(async (recover = false) => {
+    const view = recover ? await studio.recoverCreation() : await studio.creationWorkbench();
+    setWorkbench(view);
+    setIntent(view.intentText);
+    return view;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const view = await load(true);
+        if (!active) return;
+        setError(null);
+        if (view.currentRun.status === 'running') setGenerating(true);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : '无法加载创作工作台');
+      }
+    })();
+    return () => { active = false; };
+  }, [load]);
+
+  const run = async (action: () => Promise<CreationWorkbenchView>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const view = await action();
+      setWorkbench(view);
+      setIntent(view.intentText);
+      return view;
+    } catch (err) {
+      const message = err instanceof StudioClientError ? err.message : err instanceof Error ? err.message : '操作失败';
+      setError(message);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startGenerate = async () => {
+    if (!modelReady) {
+      setError('尚未配置 AI 模型，无法生成方向候选。请先完成模型连接。');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await studio.previewCreationGenerate(generateStage(workbench.stage));
+      setPreview(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '费用预览失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmGenerate = async () => {
+    if (!preview) return;
+    setPreview(null);
+    setGenerating(true);
+    setError(null);
+    try {
+      await studio.confirmCreationGenerate({
+        stage: preview.stage,
+        confirmationDigest: preview.confirmationDigest,
+        idempotencyKey: `creation-${Date.now()}`,
+      });
+      await load(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const cancelRun = async () => {
+    await studio.cancelCreationRun();
+    setGenerating(false);
+    await load(false);
+  };
+
+  const confirmNext = async () => {
+    if (workbench.stage === 'archive_confirm') {
+      const archive = await studio.previewCreationArchive();
+      await studio.confirmCreationArchive({
+        confirmationDigest: archive.confirmationDigest,
+        idempotencyKey: `archive-${Date.now()}`,
+      });
+      navigate('/archive/outline');
+      return;
+    }
+    if (workbench.stage === 'directions' && workbench.directionSet.candidateId) {
+      await run(() => studio.selectCreationDirection(workbench.directionSet.candidateId));
+    }
+    await run(() => studio.advanceCreationStage());
+  };
+
+  const hint = useMemo(() => {
+    if (generating) return '正在生成候选，完成后不会自动跳转正文。';
+    if (workbench.recoverable) return '检测到未完成的付费运行，已暂停，不会自动续跑。';
+    if (workbench.impact.items.length > 0) return workbench.impact.evidence || '上游修改影响了下游候选。';
+    if (workbench.stage === 'intent') return '输入你的想法，确认费用后生成三套故事方向。';
+    if (workbench.stage === 'directions') return '比较、保留或选择一套方向，再进入作品方案。';
+    return '直接编辑、锁定后确认进入下一步；确认档案前不会写入正式资产。';
+  }, [generating, workbench]);
+
+  const cards = workbench.directionSet.cards;
+  const selectedEntity = workbench.peopleWorld.entities.find((item) => item.id === entityId) ?? workbench.peopleWorld.entities[0];
 
   return (
-    <div className="h-full flex items-center justify-center animate-fade-up">
-      <Card className="max-w-2xl text-center space-y-5 p-10">
-        <div className="mx-auto w-12 h-12 rounded-xl bg-primary-subtle flex items-center justify-center">
-          <Compass className="w-6 h-6 text-primary" />
+    <div className="h-full flex flex-col animate-fade-up -m-6">
+      <header className="px-8 py-5 border-b border-border bg-surface flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-primary-subtle border border-primary/10 flex items-center justify-center">
+            <Compass className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-lg font-medium text-text">{projectTitle}</h1>
+            <p className="text-sm text-text-sub">作品构建工作台</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-display text-text">{state.currentProject?.title || '创意驾驶舱'}</h1>
-          <p className="mt-2 text-sm leading-6 text-text-sub">
-            多智能体创意方向生成尚未进入当前后端里程碑，因此这里不再展示或提交模拟候选。
-            你可以先使用已经接通的章节编辑、审阅和项目档案功能。
-          </p>
+        <div className="flex items-center gap-3">
+          <StatusBadge variant={workbench.blockingReason ? 'warning' : 'info'}>
+            {workbench.blockingReason ? `已暂停：${workbench.blockingReason}` : '创意构建中'}
+          </StatusBadge>
+          <div className="flex items-center gap-2 text-sm text-text-sub bg-surface-hover px-3 py-1.5 rounded-md max-w-xl">
+            <Lightbulb className="w-4 h-4 text-warning shrink-0" />
+            {hint}
+          </div>
         </div>
-        <div className="flex justify-center gap-3">
-          <Button variant="primary" onClick={() => navigate('/chapters')}>
-            <FileText className="w-4 h-4" />进入正文编辑
+      </header>
+
+      <nav className="px-8 py-3 border-b border-border bg-surface flex gap-2 overflow-x-auto" aria-label="创作阶段轨">
+        {workbench.stageRail.map((stop) => (
+          <div
+            key={stop.id}
+            data-testid={`rail-${stop.id}`}
+            className={clsx(
+              'px-3 py-1.5 rounded-full text-xs border whitespace-nowrap',
+              stop.status === 'current' && 'bg-primary text-white border-primary',
+              stop.status === 'confirmed' && 'bg-success/10 text-success border-success/20',
+              stop.status === 'blocked' && 'bg-warning/10 text-warning border-warning/20',
+              stop.status === 'upcoming' && 'text-text-muted border-border',
+            )}
+          >
+            {stop.label}
+          </div>
+        ))}
+      </nav>
+
+      {!modelReady && (
+        <div data-testid="model-missing-notice" className="px-8 py-3 bg-warning/5 border-b border-warning/15 flex items-center gap-3 shrink-0">
+          <AlertCircle className="w-4 h-4 text-warning" />
+          <p className="text-sm text-text-sub flex-1">尚未配置 AI 模型，不会展示示例方向。请先完成模型连接后再生成。</p>
+          <Button size="sm" onClick={() => navigate('/settings')}>前往配置</Button>
+        </div>
+      )}
+
+      {workbench.recoverable && (
+        <div data-testid="recovery-notice" className="px-8 py-3 bg-info/5 border-b border-info/15 text-sm text-text-sub">
+          恢复后不会自动继续未确认的付费调用。需要时请重新预览费用并确认生成。
+        </div>
+      )}
+
+      {error && (
+        <div role="alert" className="px-8 py-3 bg-danger/5 border-b border-danger/15 text-sm text-danger">{error}</div>
+      )}
+
+      {workbench.impact.items.filter((item) => !item.excepted).length > 0 && (
+        <div className="px-8 py-3 border-b border-border flex items-center gap-2 flex-wrap">
+          <p className="text-sm text-text-sub flex-1">{workbench.impact.evidence || '下游候选已过期。'}</p>
+          <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('keep_exception').then(() => studio.creationWorkbench()))}>保留为例外</Button>
+          <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('abandon_upstream').then(() => studio.creationWorkbench()))}>放弃上游修改</Button>
+          <Button size="sm" variant="ghost" disabled>局部重算（尚未自动开跑）</Button>
+        </div>
+      )}
+
+      <div className="flex-1 flex overflow-hidden">
+        {(workbench.stage === 'people_world' || workbench.stage === 'roadmap') && (
+          <aside className="w-[220px] shrink-0 border-r border-border bg-surface p-4 overflow-auto">
+            <h3 className="text-xs font-medium text-text-sub uppercase tracking-wider mb-3">
+              {workbench.stage === 'people_world' ? '人物与世界' : '路线图'}
+            </h3>
+            {workbench.stage === 'people_world' && workbench.peopleWorld.entities.map((entity) => (
+              <button
+                key={entity.id}
+                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1', selectedEntity?.id === entity.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
+                onClick={() => setEntityId(entity.id)}
+              >
+                {entity.title}
+              </button>
+            ))}
+            {workbench.stage === 'roadmap' && (
+              <div className="space-y-2 text-sm">
+                <p className="font-medium text-text">{workbench.roadmap.book.title || '全书'}</p>
+                {workbench.roadmap.volumes.map((node) => <p key={node.id} className="text-text-sub">{node.title}</p>)}
+                {workbench.roadmap.chapters.map((node) => <p key={node.id} className="text-text-muted pl-2">{node.title}</p>)}
+              </div>
+            )}
+          </aside>
+        )}
+
+        <main className="flex-1 overflow-auto p-8">
+          {(workbench.stage === 'intent' || workbench.stage === 'directions') && (
+            <div className="max-w-5xl mx-auto space-y-8">
+              <section className="space-y-4">
+                <label className="text-sm font-medium text-text" htmlFor="creation-intent">创作输入</label>
+                <div className="bg-surface border border-border rounded-xl p-4 shadow-sm">
+                  <Textarea
+                    id="creation-intent"
+                    value={intent}
+                    onChange={(event) => setIntent(event.target.value)}
+                    placeholder="输入一句想法、题材、氛围或人物灵感…"
+                    className="min-h-[120px] bg-transparent border-0 shadow-none focus:ring-0 text-base leading-relaxed"
+                    disabled={generating}
+                  />
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+                    <p className="text-xs text-text-muted">AI 不会直接写入作品档案，所有输出均为候选。</p>
+                    <Button
+                      variant="primary"
+                      onClick={() => void (async () => {
+                        if (intent.trim()) await run(() => studio.saveCreationIntent(intent.trim()));
+                        await startGenerate();
+                      })()}
+                      disabled={generating || busy}
+                      className="gap-2"
+                    >
+                      <Send className="w-4 h-4" />
+                      发送给 AI 团队
+                    </Button>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-medium text-text">故事方向候选</h2>
+                  <div className="flex items-center gap-2">
+                    {keptIds.length >= 2 && (
+                      <Button size="sm" disabled title="组合方向尚未就绪">组合 {keptIds.length} 个保留方向</Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => setCompareOpen(true)} disabled={cards.length === 0}>比较</Button>
+                  </div>
+                </div>
+                {cards.length === 0 ? (
+                  <p className="text-sm text-text-sub">还没有方向候选。确认费用后才会向已配置的模型请求生成。</p>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {cards.map((card, index) => (
+                      <Card key={card.id} padding="none" className={clsx(keptIds.includes(card.id) && 'ring-1 ring-warning')}>
+                        <div className="p-5 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-text-sub">方向 {String.fromCharCode(65 + index)}</span>
+                            <button
+                              className="p-1.5 rounded-md text-text-muted hover:bg-surface-hover"
+                              onClick={() => setKeptIds((current) => current.includes(card.id) ? current.filter((id) => id !== card.id) : [...current, card.id])}
+                            >
+                              <Bookmark className={clsx('w-4 h-4', keptIds.includes(card.id) && 'fill-current text-warning')} />
+                            </button>
+                          </div>
+                          {[
+                            ['卖点', card.hook], ['类型', card.genre], ['主角', card.protagonist],
+                            ['核心冲突', card.coreConflict], ['成长代价', card.growthCost], ['节奏', card.pacing], ['结局方向', card.ending],
+                          ].map(([label, value]) => (
+                            <div key={label}>
+                              <p className="text-xs text-text-sub">{label}</p>
+                              <p className="text-sm text-text leading-relaxed">{value}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="px-5 py-3 bg-surface-hover border-t border-border">
+                          <Button variant="primary" size="sm" className="w-full" disabled={generating} onClick={() => void confirmNext()}>
+                            选择此方向
+                          </Button>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {workbench.stage === 'proposal' && (
+            <div className="max-w-4xl mx-auto space-y-4">
+              <div className="p-4 bg-primary-subtle border border-primary/10 rounded-xl">
+                <p className="text-sm font-medium text-text">作品方案{workbench.proposal.title ? `：${workbench.proposal.title}` : ''}</p>
+                <p className="text-sm text-text-sub mt-1">确认档案前这些内容不会进入正式资产。</p>
+              </div>
+              {workbench.proposal.sections.map((section) => {
+                const Icon = sectionIcons[section.id as keyof typeof sectionIcons] ?? Sparkles;
+                return (
+                  <Card key={section.id} padding="none">
+                    <div className="px-5 py-3 border-b border-border bg-surface-hover flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Icon className="w-4 h-4 text-text-sub" />
+                        <h3 className="text-sm font-medium text-text">{section.title}</h3>
+                        {section.locked && <Lock className="w-3.5 h-3.5 text-text-muted" />}
+                      </div>
+                      {section.lockPath && (
+                        <Button size="sm" variant="ghost" onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath))}>
+                          {section.locked ? '解锁' : '锁定'}
+                        </Button>
+                      )}
+                    </div>
+                    <p className="p-5 text-sm text-text leading-relaxed whitespace-pre-wrap">{section.content}</p>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {workbench.stage === 'people_world' && selectedEntity && (
+            <Card className="max-w-3xl">
+              <h2 className="text-base font-medium text-text mb-2">{selectedEntity.title}</h2>
+              <p className="text-sm text-text-sub">{selectedEntity.summary}</p>
+            </Card>
+          )}
+
+          {workbench.stage === 'roadmap' && (
+            <div className="max-w-3xl space-y-3">
+              <Card>
+                <h2 className="text-base font-medium text-text">{workbench.roadmap.book.title || '全书'}</h2>
+                <p className="text-sm text-text-sub mt-1">{workbench.roadmap.book.summary}</p>
+              </Card>
+              {workbench.roadmap.volumes.map((node) => (
+                <Card key={node.id}><p className="text-sm font-medium text-text">{node.title}</p><p className="text-sm text-text-sub">{node.summary}</p></Card>
+              ))}
+              {workbench.roadmap.chapters.map((node) => (
+                <Card key={node.id}><p className="text-sm font-medium text-text">近章 {node.position} · {node.title}</p><p className="text-sm text-text-sub">{node.summary}</p></Card>
+              ))}
+            </div>
+          )}
+
+          {workbench.stage === 'archive_confirm' && (
+            <Card className="max-w-xl mx-auto text-center space-y-3">
+              <h2 className="text-lg font-medium text-text">确认作品档案</h2>
+              <p className="text-sm text-text-sub">确认后才会写入人物、世界规则和大纲等正式资产，并进入可写状态。</p>
+              <Button variant="primary" onClick={() => void confirmNext()}>确认作品档案</Button>
+            </Card>
+          )}
+        </main>
+
+        <aside className="w-[280px] shrink-0 border-l border-border bg-surface p-5 overflow-auto">
+          <h3 className="text-sm font-medium text-text mb-3">创作上下文</h3>
+          <p className="text-xs text-text-sub leading-relaxed mb-4">绑定当前阶段的 AI 对话会先形成待确认 Action。锁定字段在重生成时保持。</p>
+          {generating && (
+            <div data-testid="run-panel" className="p-3 border border-border rounded-lg space-y-2">
+              <p className="text-sm text-text">公开阶段：{workbench.currentRun.publicStage || 'story_planning'}</p>
+              <Button variant="danger" size="sm" className="w-full" onClick={() => void cancelRun()}>取消运行</Button>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <footer className="px-8 py-3 border-t border-border bg-surface flex items-center justify-between shrink-0">
+        <Button
+          variant="ghost"
+          disabled={!previousStage(workbench.stage) || generating}
+          onClick={() => {
+            const target = previousStage(workbench.stage);
+            if (target) void run(() => studio.lookBackCreationStage(target));
+          }}
+        >
+          上一步
+        </Button>
+        <div className="flex gap-2">
+          <Button disabled={generating || busy} onClick={() => void startGenerate()} className="gap-1">
+            <RefreshCw className="w-4 h-4" />重新生成
           </Button>
-          <Button onClick={() => navigate('/settings')}>
-            <Settings className="w-4 h-4" />配置模型
+          <Button disabled={generating || busy} onClick={() => void run(() => studio.saveCreationIntent(intent.trim() || workbench.intentText))}>保存草稿</Button>
+          <Button variant="primary" disabled={generating || busy} onClick={() => void confirmNext()} className="gap-1">
+            确认进入下一步 <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
-      </Card>
+      </footer>
+
+      <Modal open={Boolean(preview)} onClose={() => setPreview(null)} title="确认生成费用">
+        {preview && (
+          <div className="space-y-4 p-1">
+            <p className="text-sm text-text-sub">预计调用 {preview.estimatedCalls} 次。确认后才会创建运行，取消不会扣费。</p>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setPreview(null)}>取消</Button>
+              <Button variant="primary" onClick={() => void confirmGenerate()}>确认生成</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={compareOpen} onClose={() => setCompareOpen(false)} title="比较故事方向">
+        <div className="space-y-4 max-h-[70vh] overflow-auto">
+          {cards.map((card, index) => (
+            <div key={card.id} className="p-4 border border-border rounded-lg">
+              <p className="text-sm font-medium text-text mb-2">方向 {String.fromCharCode(65 + index)}</p>
+              <p className="text-sm text-text-sub">{card.hook}</p>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }
