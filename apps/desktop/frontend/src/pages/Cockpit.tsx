@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
@@ -78,7 +78,7 @@ function previousStage(stage: string): string | null {
 
 export default function Cockpit() {
   const navigate = useNavigate();
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const [workbench, setWorkbench] = useState<CreationWorkbenchView>(emptyWorkbench);
   const [intent, setIntent] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -86,27 +86,35 @@ export default function Cockpit() {
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState<CreationCostPreview | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
-  const [keptIds, setKeptIds] = useState<string[]>([]);
+  const keptIds = workbench.directionSet.keptIds ?? [];
   const [entityId, setEntityId] = useState<string | null>(null);
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
+  const savedIntent = useRef('');
+  const projectId = state.backendProject?.id ?? '';
+  const currentProjectId = useRef(projectId);
+  currentProjectId.current = projectId;
 
   const modelReady = (state.bootstrap?.providers ?? []).some((provider) => provider.hasCredential);
   const projectTitle = state.backendProject?.title || state.currentProject?.title || '未命名作品';
 
   const load = useCallback(async (recover = false) => {
     const view = recover ? await studio.recoverCreation() : await studio.creationWorkbench();
+    if (currentProjectId.current !== projectId) return view;
     setWorkbench(view);
-    setIntent(view.intentText);
+    if (recover || intentRef.current === savedIntent.current) setIntent(view.intentText);
+    savedIntent.current = view.intentText;
+    setGenerating(['queued', 'pending', 'running', 'cancelling'].includes(view.currentRun.status) && !view.recoverable);
     return view;
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const view = await load(true);
+        await load(true);
         if (!active) return;
         setError(null);
-        if (view.currentRun.status === 'running') setGenerating(true);
       } catch (err) {
         if (!active) return;
         setError(err instanceof Error ? err.message : '无法加载创作工作台');
@@ -115,6 +123,19 @@ export default function Cockpit() {
     return () => { active = false; };
   }, [load]);
 
+  useEffect(() => {
+    if (!generating) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { await load(false); }
+      catch (err) { if (!stopped) setError(err instanceof Error ? err.message : '运行状态读取失败'); }
+      if (!stopped) timer = setTimeout(() => void poll(), 750);
+    };
+    timer = setTimeout(() => void poll(), 750);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [generating, load]);
+
   const run = async (action: () => Promise<CreationWorkbenchView>) => {
     setBusy(true);
     setError(null);
@@ -122,6 +143,7 @@ export default function Cockpit() {
       const view = await action();
       setWorkbench(view);
       setIntent(view.intentText);
+      savedIntent.current = view.intentText;
       return view;
     } catch (err) {
       const message = err instanceof StudioClientError ? err.message : err instanceof Error ? err.message : '操作失败';
@@ -163,29 +185,31 @@ export default function Cockpit() {
       await load(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
-    } finally {
       setGenerating(false);
     }
   };
 
   const cancelRun = async () => {
     await studio.cancelCreationRun();
-    setGenerating(false);
     await load(false);
   };
 
-  const confirmNext = async () => {
+  const confirmNext = async (cardId?: string) => {
     if (workbench.stage === 'archive_confirm') {
       const archive = await studio.previewCreationArchive();
       await studio.confirmCreationArchive({
         confirmationDigest: archive.confirmationDigest,
         idempotencyKey: `archive-${Date.now()}`,
       });
+      const workbenchState = await studio.projectWorkbench();
+      if (state.backendProject) dispatch({ type: 'SET_BACKEND_PROJECT', payload: { ...state.backendProject, workbench: workbenchState } });
       navigate('/archive/outline');
       return;
     }
     if (workbench.stage === 'directions' && workbench.directionSet.candidateId) {
-      await run(() => studio.selectCreationDirection(workbench.directionSet.candidateId));
+      const selectedId = cardId ?? workbench.directionSet.selectedId;
+      if (!selectedId) { setError('请先选择一张故事方向卡。'); return; }
+      await run(() => studio.selectCreationDirection(workbench.directionSet.candidateId, selectedId));
     }
     await run(() => studio.advanceCreationStage());
   };
@@ -348,7 +372,9 @@ export default function Cockpit() {
                             <span className="text-xs font-medium text-text-sub">方向 {String.fromCharCode(65 + index)}</span>
                             <button
                               className="p-1.5 rounded-md text-text-muted hover:bg-surface-hover"
-                              onClick={() => setKeptIds((current) => current.includes(card.id) ? current.filter((id) => id !== card.id) : [...current, card.id])}
+                              aria-label={`${keptIds.includes(card.id) ? '取消保留' : '保留'}方向 ${String.fromCharCode(65 + index)}`}
+                              disabled={busy || generating || workbench.readOnly}
+                              onClick={() => void run(() => (keptIds.includes(card.id) ? studio.unkeepCreationDirection : studio.keepCreationDirection)(card.id)).catch(() => undefined)}
                             >
                               <Bookmark className={clsx('w-4 h-4', keptIds.includes(card.id) && 'fill-current text-warning')} />
                             </button>
@@ -364,7 +390,7 @@ export default function Cockpit() {
                           ))}
                         </div>
                         <div className="px-5 py-3 bg-surface-hover border-t border-border">
-                          <Button variant="primary" size="sm" className="w-full" disabled={generating} onClick={() => void confirmNext()}>
+                          <Button variant="primary" size="sm" className="w-full" disabled={generating || busy || workbench.readOnly} onClick={() => void confirmNext(card.id).catch((err) => setError(err.message))}>
                             选择此方向
                           </Button>
                         </div>
@@ -473,7 +499,9 @@ export default function Cockpit() {
       <Modal open={Boolean(preview)} onClose={() => setPreview(null)} title="确认生成费用">
         {preview && (
           <div className="space-y-4 p-1">
-            <p className="text-sm text-text-sub">预计调用 {preview.estimatedCalls} 次。确认后才会创建运行，取消不会扣费。</p>
+            <p className="text-sm text-text-sub">预计调用 {preview.estimatedCalls} 次。确认后才会创建运行；运行开始后取消仍可能产生已发生的费用。</p>
+            <p className="text-sm text-text-sub">Token 上限：{preview.runBudgetUnlimited ? '未设置' : preview.maxRunTokens}；金额估算未知，请核对模型价格。</p>
+            {(preview.roleModels ?? []).map((model) => <p key={model.role} className="text-xs text-text-sub">{model.role}：{model.provider} / {model.model}</p>)}
             <div className="flex justify-end gap-2">
               <Button onClick={() => setPreview(null)}>取消</Button>
               <Button variant="primary" onClick={() => void confirmGenerate()}>确认生成</Button>

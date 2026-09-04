@@ -228,6 +228,16 @@ func (service *Service) gateRevision(
 	primaryContent string,
 	existing []agentdomain.ReviewFindingRecord,
 ) (string, agentdomain.QualityStatus, []agentdomain.ReviewFindingRecord, []agentdomain.Artifact, error) {
+	// 作者定向修订没有待核实的评审问题：边界已由 validateBoundedRevision 冻结，
+	// 门禁只记录本次修订的确定性通过状态。
+	if input.RevisionDirective != nil && input.RevisionDirective.Mode == agentdomain.RevisionAuthorDirected {
+		gate := quality.Decide(quality.StageFinal, nil, true, true)
+		gateArtifact, err := service.gateArtifact(run.ID, step.ID, gate)
+		if err != nil {
+			return "", "", nil, nil, err
+		}
+		return primaryContent, gate.Status, existing, []agentdomain.Artifact{gateArtifact}, nil
+	}
 	_, reviewJSON, err := revisionInputs(node, latest, artifacts)
 	if err != nil {
 		return "", "", nil, nil, err

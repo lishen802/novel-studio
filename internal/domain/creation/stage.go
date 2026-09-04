@@ -10,7 +10,12 @@ var (
 	ErrInvalidJSON       = err("creation payload is not valid json")
 	ErrFieldMissing      = err("creation field path is missing")
 	ErrImpactUnresolved  = err("creation impact must be resolved")
+	ErrDirectionCard     = err("creation direction card not found in candidate")
+	ErrQualityBlocked    = err("creation candidate quality is blocked")
 )
+
+// MaxKeptDirections 限制作者保留的方向卡数量，与初始三卡规模一致。
+const MaxKeptDirections = 3
 
 type errorString string
 
@@ -45,6 +50,7 @@ const (
 	BlockConflict          BlockingReason = "conflict"
 	BlockFormalWrite       BlockingReason = "formal_write"
 	BlockPendingAction     BlockingReason = "pending_action"
+	BlockQualityReview     BlockingReason = "quality_review"
 )
 
 // Rail 返回作者可见的原创构建阶段顺序。

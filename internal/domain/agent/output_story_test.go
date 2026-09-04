@@ -107,13 +107,13 @@ func TestStoryCastRequiresProtagonistRuleAndOmission(t *testing.T) {
 
 func TestStoryRoadmapRequiresConsecutivePositionsAndNearTermBounds(t *testing.T) {
 	valid := StoryRoadmapOutput{
-		Book:    RoadmapBook{Title: "潮汐关", Proposition: "守关抉择", Ending: "开城", ProtagonistArc: "承担"},
-		Volumes: []RoadmapVolume{{Title: "第一卷", Goal: "建立危机", Conflict: "敌船压境", Payoff: "作出选择", Position: 1}},
-		Arcs:    []RoadmapArc{{VolumeRef: "第一卷", Title: "开关", CausalChain: "敌船靠岸", CharacterChange: "接受代价", Position: 1}},
+		Book:    RoadmapBook{ID: "book-1", Title: "潮汐关", Proposition: "守关抉择", Ending: "开城", ProtagonistArc: "承担"},
+		Volumes: []RoadmapVolume{{ID: "vol-1", Title: "第一卷", Goal: "建立危机", Conflict: "敌船压境", Payoff: "作出选择", Position: 1}},
+		Arcs:    []RoadmapArc{{ID: "arc-1", VolumeRef: "vol-1", Title: "开关", CausalChain: "敌船靠岸", CharacterChange: "接受代价", Position: 1}},
 		NearTermChapters: []RoadmapChapter{
-			{Title: "空船", Goal: "发现异常", Conflict: "无人登岸", Outcome: "独自登船", Position: 1},
-			{Title: "旧识", Goal: "认出仇敌", Conflict: "军令与私情", Outcome: "暂时藏匿", Position: 2},
-			{Title: "开关", Goal: "作出选择", Conflict: "守城与救人", Outcome: "开城", Position: 3},
+			{ID: "ch-1", ArcRef: "arc-1", Title: "空船", Goal: "发现异常", Conflict: "无人登岸", Outcome: "独自登船", Anchors: []RoadmapAnchor{{Strength: "hard", Statement: "钟楼三响"}}, Position: 1},
+			{ID: "ch-2", ArcRef: "arc-1", Title: "旧识", Goal: "认出仇敌", Conflict: "军令与私情", Outcome: "暂时藏匿", Position: 2},
+			{ID: "ch-3", ArcRef: "arc-1", Title: "开关", Goal: "作出选择", Conflict: "守城与救人", Outcome: "开城", Position: 3},
 		},
 	}
 	if err := valid.Validate(); err != nil {
@@ -127,5 +127,39 @@ func TestStoryRoadmapRequiresConsecutivePositionsAndNearTermBounds(t *testing.T)
 	valid.NearTermChapters = valid.NearTermChapters[:2]
 	if !errors.Is(valid.Validate(), ErrInvalidTaskOutput) {
 		t.Fatal("expected fewer than three near-term chapters to fail")
+	}
+	valid.NearTermChapters = append(valid.NearTermChapters, RoadmapChapter{ID: "ch-3", ArcRef: "arc-missing", Title: "开关", Goal: "作出选择", Conflict: "守城与救人", Outcome: "开城", Position: 3})
+	if !errors.Is(valid.Validate(), ErrInvalidTaskOutput) {
+		t.Fatal("expected chapter with missing arc reference to fail")
+	}
+	valid.NearTermChapters[2].ArcRef = "arc-1"
+	valid.NearTermChapters[2].Anchors = []RoadmapAnchor{{Strength: "always", Statement: "不合法强度"}}
+	if !errors.Is(valid.Validate(), ErrInvalidTaskOutput) {
+		t.Fatal("expected invalid anchor strength to fail")
+	}
+}
+
+// 旧版字符串锚点载荷应可解码为强度为空的锚点，保持可读但校验不通过。
+func TestRoadmapChapterUnmarshalAcceptsLegacyStringAnchors(t *testing.T) {
+	legacy := []byte(`{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"独自登船","anchors":["钟楼三响"],"position":1}`)
+	var chapter RoadmapChapter
+	if err := json.Unmarshal(legacy, &chapter); err != nil {
+		t.Fatalf("legacy anchors decode: %v", err)
+	}
+	if len(chapter.Anchors) != 1 || chapter.Anchors[0].Statement != "钟楼三响" || chapter.Anchors[0].Strength != "" {
+		t.Fatalf("legacy anchor mapped wrong: %+v", chapter.Anchors)
+	}
+	output := StoryRoadmapOutput{
+		Book:    RoadmapBook{ID: "book-1", Title: "潮汐关", Proposition: "守关抉择", Ending: "开城", ProtagonistArc: "承担"},
+		Volumes: []RoadmapVolume{{ID: "vol-1", Title: "第一卷", Goal: "建立危机", Conflict: "敌船压境", Payoff: "作出选择", Position: 1}},
+		Arcs:    []RoadmapArc{{ID: "arc-1", VolumeRef: "vol-1", Title: "开关", CausalChain: "敌船靠岸", CharacterChange: "接受代价", Position: 1}},
+		NearTermChapters: []RoadmapChapter{
+			chapter,
+			{ID: "ch-2", ArcRef: "arc-1", Title: "旧识", Goal: "认出仇敌", Conflict: "军令与私情", Outcome: "暂时藏匿", Position: 2},
+			{ID: "ch-3", ArcRef: "arc-1", Title: "开关", Goal: "作出选择", Conflict: "守城与救人", Outcome: "开城", Position: 3},
+		},
+	}
+	if !errors.Is(output.Validate(), ErrInvalidTaskOutput) {
+		t.Fatal("expected legacy string anchors to fail validation until regenerated")
 	}
 }

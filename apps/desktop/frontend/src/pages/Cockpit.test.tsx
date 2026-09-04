@@ -140,6 +140,40 @@ describe('创作驾驶舱', () => {
     expect(screen.getByRole('button', { name: '前往配置' })).toBeTruthy();
   });
 
+  it('选择第二张卡时把候选 ID 和卡 ID 一起传给后端', async () => {
+    const user = userEvent.setup();
+    const view = workbench({ stage: 'directions', directionSet: {
+      candidateId: 'set-1', version: 1, selectedId: '', status: 'draft',
+      cards: ['d1', 'd2', 'd3'].map((id) => ({ id, hook: id, genre: '悬疑', protagonist: '主角',
+        coreConflict: '冲突', growthCost: '代价', pacing: '节奏', ending: '结局', selected: false })),
+    } });
+    recoverCreation.mockResolvedValue(view);
+    const select = vi.fn().mockResolvedValue(view);
+    const advance = vi.fn().mockResolvedValue(workbench({ stage: 'proposal' }));
+    Object.assign(window.go!.main!.DesktopAPI!, { SelectCreationDirection: select, AdvanceCreationStage: advance });
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    const buttons = await screen.findAllByRole('button', { name: '选择此方向' });
+    await user.click(buttons[1]);
+    expect(select).toHaveBeenCalledWith('set-1', 'd2');
+    expect(advance).toHaveBeenCalledTimes(1);
+  });
+
+  it('异步运行启动后继续刷新直到后端结束，不把请求返回当完成', async () => {
+    const user = userEvent.setup();
+    const running = workbench({ currentRun: { runId: 'run-1', status: 'queued', cancellable: true, publicStage: 'context_preparing' } });
+    creationWorkbench.mockResolvedValue(running);
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await screen.findByLabelText('创作输入');
+    await user.type(screen.getByLabelText('创作输入'), '海上灯塔');
+    await user.click(screen.getByRole('button', { name: /发送给 AI 团队/ }));
+    await user.click(await screen.findByRole('button', { name: '确认生成' }));
+    await screen.findByText(/context_preparing/);
+    expect((screen.getByRole('button', { name: /发送给 AI 团队/ }) as HTMLButtonElement).disabled).toBe(true);
+    creationWorkbench.mockResolvedValue(workbench({ currentRun: { runId: 'run-1', status: 'completed', cancellable: false, publicStage: 'candidate_ready' } }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '取消运行' })).toBeNull(), { timeout: 3000 });
+    expect(confirmCreationGenerate).toHaveBeenCalledTimes(1);
+  });
+
   it('生成中禁用重复提交，并允许取消运行', async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;
@@ -235,7 +269,7 @@ describe('档案页确认入口', () => {
 
     expect(screen.getByTestId('archive-unconfirmed')).toBeTruthy();
     expect(screen.getByText('作品档案尚未确认')).toBeTruthy();
-    expect(screen.queryByText('正式大纲')).toBeNull();
+    expect(screen.getByText('正式大纲')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '返回驾驶舱' }));
     expect(screen.getByText('驾驶舱')).toBeTruthy();
   });

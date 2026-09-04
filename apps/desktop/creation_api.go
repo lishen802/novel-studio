@@ -11,7 +11,9 @@ type CreationUseCases interface {
 	CreationWorkbench(ctx context.Context) (creationapp.WorkbenchView, error)
 	SaveCreationIntent(ctx context.Context, text string) (creationapp.WorkbenchView, error)
 	SetCreationAdvanceMode(ctx context.Context, mode string) (creationapp.WorkbenchView, error)
-	SelectCreationDirection(ctx context.Context, candidateID string) (creationapp.WorkbenchView, error)
+	SelectCreationDirection(ctx context.Context, candidateID, cardID string) (creationapp.WorkbenchView, error)
+	KeepCreationDirection(ctx context.Context, cardID string) (creationapp.WorkbenchView, error)
+	UnkeepCreationDirection(ctx context.Context, cardID string) (creationapp.WorkbenchView, error)
 	AdvanceCreationStage(ctx context.Context) (creationapp.WorkbenchView, error)
 	LookBackCreationStage(ctx context.Context, stage string) (creationapp.WorkbenchView, error)
 	SaveCreationCandidateDraft(ctx context.Context, candidateID, payloadJSON string) (creationapp.WorkbenchView, error)
@@ -69,12 +71,30 @@ func (a *DesktopAPI) SetCreationAdvanceMode(mode string) (creationapp.WorkbenchV
 	return safeResult(svc.SetCreationAdvanceMode(a.ctx, mode))
 }
 
-func (a *DesktopAPI) SelectCreationDirection(candidateID string) (creationapp.WorkbenchView, error) {
+func (a *DesktopAPI) SelectCreationDirection(candidateID, cardID string) (creationapp.WorkbenchView, error) {
 	svc, err := a.creationUseCases()
 	if err != nil {
 		return creationapp.WorkbenchView{}, safeDesktopError(err)
 	}
-	return safeResult(svc.SelectCreationDirection(a.ctx, candidateID))
+	return safeResult(svc.SelectCreationDirection(a.ctx, candidateID, cardID))
+}
+
+// KeepCreationDirection 持久化作者保留的方向卡。
+func (a *DesktopAPI) KeepCreationDirection(cardID string) (creationapp.WorkbenchView, error) {
+	svc, err := a.creationUseCases()
+	if err != nil {
+		return creationapp.WorkbenchView{}, safeDesktopError(err)
+	}
+	return safeResult(svc.KeepCreationDirection(a.ctx, cardID))
+}
+
+// UnkeepCreationDirection 取消保留方向卡。
+func (a *DesktopAPI) UnkeepCreationDirection(cardID string) (creationapp.WorkbenchView, error) {
+	svc, err := a.creationUseCases()
+	if err != nil {
+		return creationapp.WorkbenchView{}, safeDesktopError(err)
+	}
+	return safeResult(svc.UnkeepCreationDirection(a.ctx, cardID))
 }
 
 func (a *DesktopAPI) AdvanceCreationStage() (creationapp.WorkbenchView, error) {

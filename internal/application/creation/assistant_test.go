@@ -123,7 +123,7 @@ func TestOutcomeUnknownDoesNotReplay(t *testing.T) {
 
 func seedProposalCandidate(t *testing.T, service *Service, store *memoryStore) creationdomain.Candidate {
 	t.Helper()
-	session := seedProposalSession(t, service, store)
+	session := seedDirectionsSelection(t, service, store, "d1")
 	candidate, err := creationdomain.NewCandidate(
 		"proposal-1", session.ID, creationdomain.StageProposal, creationdomain.KindProposal,
 		1, "", "run-prop", "art-prop", proposalPayload, "story_blueprint.schema", 2, testClock{}.Now(),

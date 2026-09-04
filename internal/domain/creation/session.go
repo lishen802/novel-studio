@@ -13,6 +13,9 @@ type Session struct {
 	AdvanceMode                  AdvanceMode
 	IntentText                   string
 	SelectedDirectionCandidateID string
+	SelectedDirectionCardID      string
+	KeptDirectionIDs             []string
+	ActiveOperationID            string
 	ActiveRunID                  string
 	BlockingReason               BlockingReason
 	ArchiveDigest                string
@@ -65,18 +68,22 @@ func (session Session) Pause(reason BlockingReason, now time.Time) (Session, err
 	return session, nil
 }
 
-func (session Session) AttachRun(runID string, now time.Time) (Session, error) {
-	runID = strings.TrimSpace(runID)
-	if session.ID == "" || runID == "" {
+// AttachRun 记录运行槽与所属操作回执，并清除暂停原因。
+func (session Session) AttachRun(operationID, runID string, now time.Time) (Session, error) {
+	operationID, runID = strings.TrimSpace(operationID), strings.TrimSpace(runID)
+	if session.ID == "" || operationID == "" || runID == "" {
 		return Session{}, ErrBlankValue
 	}
+	session.ActiveOperationID = operationID
 	session.ActiveRunID = runID
 	session.BlockingReason = BlockNone
 	session.UpdatedAt = now.UTC()
 	return session, nil
 }
 
+// ClearActiveRun 清空运行槽与操作回执，不动其他字段。
 func (session Session) ClearActiveRun(now time.Time) Session {
+	session.ActiveOperationID = ""
 	session.ActiveRunID = ""
 	session.UpdatedAt = now.UTC()
 	return session
@@ -102,15 +109,53 @@ func (session Session) RecordArchive(digest, idempotencyKey, changeSetID string,
 	return session, nil
 }
 
-func (session Session) SelectDirection(candidateID string, now time.Time) (Session, error) {
-	candidateID = strings.TrimSpace(candidateID)
-	if session.ID == "" || candidateID == "" {
+// SelectDirection 记录作者选中的方向候选与其中具体一张卡；只传整套候选 ID 不足以选择方向。
+func (session Session) SelectDirection(candidateID, cardID string, now time.Time) (Session, error) {
+	candidateID, cardID = strings.TrimSpace(candidateID), strings.TrimSpace(cardID)
+	if session.ID == "" || candidateID == "" || cardID == "" {
 		return Session{}, ErrBlankValue
 	}
 	if session.Stage != StageDirections {
 		return Session{}, ErrInvalidTransition
 	}
 	session.SelectedDirectionCandidateID = candidateID
+	session.SelectedDirectionCardID = cardID
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
+// KeepDirection 把一张方向卡加入保留列表，重启后可恢复；重复保留幂等。
+func (session Session) KeepDirection(cardID string, now time.Time) (Session, error) {
+	cardID = strings.TrimSpace(cardID)
+	if session.ID == "" || cardID == "" {
+		return Session{}, ErrBlankValue
+	}
+	for _, kept := range session.KeptDirectionIDs {
+		if kept == cardID {
+			return session, nil
+		}
+	}
+	if len(session.KeptDirectionIDs) >= MaxKeptDirections {
+		return Session{}, ErrInvalidTransition
+	}
+	session.KeptDirectionIDs = append(append([]string(nil), session.KeptDirectionIDs...), cardID)
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
+// UnkeepDirection 把一张方向卡移出保留列表；未保留时幂等。
+func (session Session) UnkeepDirection(cardID string, now time.Time) (Session, error) {
+	cardID = strings.TrimSpace(cardID)
+	if session.ID == "" || cardID == "" {
+		return Session{}, ErrBlankValue
+	}
+	kept := make([]string, 0, len(session.KeptDirectionIDs))
+	for _, item := range session.KeptDirectionIDs {
+		if item != cardID {
+			kept = append(kept, item)
+		}
+	}
+	session.KeptDirectionIDs = kept
 	session.UpdatedAt = now.UTC()
 	return session, nil
 }
@@ -149,7 +194,8 @@ func (session Session) ensureComplete() error {
 			return ErrStageIncomplete
 		}
 	case StageDirections:
-		if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
+		if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" ||
+			strings.TrimSpace(session.SelectedDirectionCardID) == "" {
 			return ErrStageIncomplete
 		}
 	}

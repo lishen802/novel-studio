@@ -13,6 +13,7 @@ type memoryStore struct {
 	mu         sync.Mutex
 	sessions   map[string]creationdomain.Session
 	candidates map[string]creationdomain.Candidate
+	operations map[string]creationdomain.Operation
 	assistants map[string]assistantdomain.Session
 	actions    map[string]assistantdomain.Action
 	pending    int
@@ -22,9 +23,46 @@ func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		sessions:   map[string]creationdomain.Session{},
 		candidates: map[string]creationdomain.Candidate{},
+		operations: map[string]creationdomain.Operation{},
 		assistants: map[string]assistantdomain.Session{},
 		actions:    map[string]assistantdomain.Action{},
 	}
+}
+
+func operationKey(projectID, branchID, command, key string) string {
+	return projectID + "\x00" + branchID + "\x00" + command + "\x00" + key
+}
+
+func (store *memoryStore) ReserveOperation(_ context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	key := operationKey(operation.ProjectID, operation.BranchID, operation.Command, operation.IdempotencyKey)
+	if existing, ok := store.operations[key]; ok {
+		return existing, false, nil
+	}
+	store.operations[key] = operation
+	return operation, true, nil
+}
+
+func (store *memoryStore) OperationByIdempotency(_ context.Context, projectID, branchID, command, key string) (creationdomain.Operation, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	operation, ok := store.operations[operationKey(projectID, branchID, command, key)]
+	if !ok {
+		return creationdomain.Operation{}, ErrOperationNotFound
+	}
+	return operation, nil
+}
+
+func (store *memoryStore) UpdateOperation(_ context.Context, operation creationdomain.Operation) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	key := operationKey(operation.ProjectID, operation.BranchID, operation.Command, operation.IdempotencyKey)
+	if _, ok := store.operations[key]; !ok {
+		return ErrOperationNotFound
+	}
+	store.operations[key] = operation
+	return nil
 }
 
 func (store *memoryStore) SaveSession(_ context.Context, session creationdomain.Session) error {

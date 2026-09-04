@@ -24,7 +24,7 @@ func TestCreationStoreRoundTripsSessionCandidateAndAsset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err = session.AttachRun("run-active", now)
+	session, err = session.AttachRun("operation-active", "run-active", now)
 	if err != nil {
 		t.Fatal(err)
 	}

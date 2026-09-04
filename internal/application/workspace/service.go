@@ -43,6 +43,8 @@ type Service struct {
 	agentJobs        map[string]context.CancelFunc
 	extractionJobsMu sync.Mutex
 	extractionJobs   map[string]context.CancelFunc
+	creationJobsMu   sync.Mutex
+	creationJobs     map[string]context.CancelFunc
 	versionOperation bool
 	importOperation  bool
 
@@ -116,6 +118,7 @@ func NewService(
 		branchMergePreviews: make(map[string]branchMergePreview),
 		agentJobs:           make(map[string]context.CancelFunc),
 		extractionJobs:      make(map[string]context.CancelFunc),
+		creationJobs:        make(map[string]context.CancelFunc),
 		storeGeneration:     0,
 		leases:              newLeaseRegistry(),
 		drainTimeout:        drainTimeoutDefault,
@@ -870,6 +873,7 @@ func (s *Service) Close() error {
 	s.leases.beginDraining()
 	s.cancelAllAgentJobs()
 	s.cancelAllExtractionJobs()
+	s.cancelAllCreationJobs()
 	_ = s.leases.drainAndBlock(context.Background(), s.drainTimeout)
 	s.mu.Lock()
 	active := s.active
@@ -905,6 +909,7 @@ func (s *Service) replaceActive(next activeWorkspace) error {
 	s.leases.beginDraining()
 	s.cancelAllAgentJobs()
 	s.cancelAllExtractionJobs()
+	s.cancelAllCreationJobs()
 	// Wait for cancelled jobs to release their leases (bounded by drainTimeout).
 	// If the timeout fires, remaining leases are marked stale and their next
 	// persistence attempt will transition to Recoverable instead of writing.

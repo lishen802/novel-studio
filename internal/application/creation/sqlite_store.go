@@ -2,6 +2,8 @@ package creation
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
@@ -21,6 +23,9 @@ type SQLBackend interface {
 	Project(context.Context) (projectdomain.Project, error)
 	WorkbenchState(context.Context) (projectdomain.WorkbenchState, error)
 	ApplyCreationArchive(context.Context, revisiondomain.ChangeSet, creationdomain.Session, []creationdomain.Candidate, projectdomain.WorkbenchState) error
+	ReserveCreationOperation(context.Context, creationdomain.Operation) (creationdomain.Operation, bool, error)
+	CreationOperationByIdempotency(context.Context, string, string, string, string) (creationdomain.Operation, error)
+	UpdateCreationOperation(context.Context, creationdomain.Operation) error
 	SaveAssistantSessionRecord(context.Context, assistantdomain.Session) error
 	AssistantSession(context.Context, string, string) (assistantdomain.Session, error)
 	SaveAssistantAction(context.Context, assistantdomain.Action) error
@@ -75,6 +80,22 @@ func (store sqliteStore) WorkbenchState(ctx context.Context) (projectdomain.Work
 
 func (store sqliteStore) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
 	return store.inner.ApplyCreationArchive(ctx, apply.ChangeSet, apply.Session, apply.Candidates, apply.Workbench)
+}
+
+func (store sqliteStore) ReserveOperation(ctx context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error) {
+	return store.inner.ReserveCreationOperation(ctx, operation)
+}
+
+func (store sqliteStore) OperationByIdempotency(ctx context.Context, projectID, branchID, command, idempotencyKey string) (creationdomain.Operation, error) {
+	operation, err := store.inner.CreationOperationByIdempotency(ctx, projectID, branchID, command, idempotencyKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return creationdomain.Operation{}, ErrOperationNotFound
+	}
+	return operation, err
+}
+
+func (store sqliteStore) UpdateOperation(ctx context.Context, operation creationdomain.Operation) error {
+	return store.inner.UpdateCreationOperation(ctx, operation)
 }
 
 func (store sqliteStore) SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error {

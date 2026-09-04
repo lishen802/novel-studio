@@ -12,8 +12,10 @@ import (
 )
 
 var (
-	ErrSessionNotFound = errors.New("creation session not found")
-	ErrStaleStore      = errors.New("creation store generation changed")
+	ErrSessionNotFound   = errors.New("creation session not found")
+	ErrStaleStore        = errors.New("creation store generation changed")
+	ErrOperationNotFound = errors.New("creation operation not found")
+	ErrOperationConflict = errors.New("creation operation idempotency conflict")
 )
 
 type Store interface {
@@ -27,6 +29,11 @@ type Store interface {
 	Project(ctx context.Context) (projectdomain.Project, error)
 	WorkbenchState(ctx context.Context) (projectdomain.WorkbenchState, error)
 	ApplyArchive(ctx context.Context, apply ArchiveApply) error
+	// ReserveOperation 以 (project, branch, command, key) 唯一键预留操作回执；
+	// 键已存在时返回既有回执与 created=false，不依赖内存缓存即可跨重启去重。
+	ReserveOperation(ctx context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error)
+	OperationByIdempotency(ctx context.Context, projectID, branchID, command, idempotencyKey string) (creationdomain.Operation, error)
+	UpdateOperation(ctx context.Context, operation creationdomain.Operation) error
 	SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error
 	AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error)
 	SaveAction(ctx context.Context, action assistantdomain.Action) error

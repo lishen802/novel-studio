@@ -27,3 +27,14 @@ func TestRevisionDirectiveRejectsOverlappingTargetsAndPreserves(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
+
+func TestBaseCandidateRejectsContentDigestMismatch(t *testing.T) {
+	base := BaseCandidate{ArtifactID: "base", Content: "作者确认的内容", Digest: SHA256Hex([]byte("作者确认的内容"))}
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	base.Content = "被替换的内容"
+	if err := base.Validate(); !errors.Is(err, ErrInvalidRevisionDirective) {
+		t.Fatalf("mismatched frozen content accepted: %v", err)
+	}
+}

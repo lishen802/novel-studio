@@ -14,12 +14,17 @@ import (
 
 // SaveCreationSession 以项目为唯一键保存或更新原创构建会话。
 func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.Session) error {
-	_, err := s.db.ExecContext(ctx, `
+	kept, err := encodeKeptDirections(session.KeptDirectionIDs)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO creation_sessions (
 			id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, active_run_id,
+			selected_direction_candidate_id, selected_direction_card_id, kept_direction_ids_json,
+			blocking_reason, active_operation_id, active_run_id,
 			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			id = excluded.id,
 			branch_id = excluded.branch_id,
@@ -27,7 +32,10 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 			advance_mode = excluded.advance_mode,
 			intent_text = excluded.intent_text,
 			selected_direction_candidate_id = excluded.selected_direction_candidate_id,
+			selected_direction_card_id = excluded.selected_direction_card_id,
+			kept_direction_ids_json = excluded.kept_direction_ids_json,
 			blocking_reason = excluded.blocking_reason,
+			active_operation_id = excluded.active_operation_id,
 			active_run_id = excluded.active_run_id,
 			archive_digest = excluded.archive_digest,
 			archive_idempotency_key = excluded.archive_idempotency_key,
@@ -35,7 +43,8 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 			updated_at = excluded.updated_at
 	`,
 		session.ID, session.ProjectID, session.BranchID, string(session.Stage), string(session.AdvanceMode),
-		session.IntentText, session.SelectedDirectionCandidateID, string(session.BlockingReason), session.ActiveRunID,
+		session.IntentText, session.SelectedDirectionCandidateID, session.SelectedDirectionCardID, string(kept),
+		string(session.BlockingReason), session.ActiveOperationID, session.ActiveRunID,
 		session.ArchiveDigest, session.ArchiveIdempotencyKey, session.ArchiveChangeSetID,
 		formatTime(session.CreatedAt), formatTime(session.UpdatedAt),
 	)
@@ -47,17 +56,19 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 
 func (s *Store) CreationSession(ctx context.Context, projectID string) (creationdomain.Session, error) {
 	var session creationdomain.Session
-	var selected sql.NullString
-	var createdAt, updatedAt string
+	var selected, selectedCard, activeOperation sql.NullString
+	var keptJSON, createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, active_run_id,
+			selected_direction_candidate_id, selected_direction_card_id, kept_direction_ids_json,
+			blocking_reason, active_operation_id, active_run_id,
 			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
 		FROM creation_sessions
 		WHERE project_id = ?
 	`, strings.TrimSpace(projectID)).Scan(
 		&session.ID, &session.ProjectID, &session.BranchID, &session.Stage, &session.AdvanceMode,
-		&session.IntentText, &selected, &session.BlockingReason, &session.ActiveRunID,
+		&session.IntentText, &selected, &selectedCard, &keptJSON,
+		&session.BlockingReason, &activeOperation, &session.ActiveRunID,
 		&session.ArchiveDigest, &session.ArchiveIdempotencyKey, &session.ArchiveChangeSetID, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -65,6 +76,15 @@ func (s *Store) CreationSession(ctx context.Context, projectID string) (creation
 	}
 	if selected.Valid {
 		session.SelectedDirectionCandidateID = selected.String
+	}
+	if selectedCard.Valid {
+		session.SelectedDirectionCardID = selectedCard.String
+	}
+	if activeOperation.Valid {
+		session.ActiveOperationID = activeOperation.String
+	}
+	if err := decodeKeptDirections(keptJSON, &session.KeptDirectionIDs); err != nil {
+		return creationdomain.Session{}, err
 	}
 	session.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
@@ -94,14 +114,15 @@ func (s *Store) SaveCreationCandidate(ctx context.Context, candidate creationdom
 		INSERT INTO creation_candidates (
 			id, session_id, stage, kind, version, parent_candidate_id, supersedes_candidate_id,
 			run_id, artifact_id, payload_json, payload_schema_id, payload_schema_version,
-			content_sha256, lock_map_json, status, origin, stale_reason, impact_refs_json,
+			content_sha256, lock_map_json, status, quality_status, origin, stale_reason, impact_refs_json,
 			upstream_digest, excepted_upstream_digest, impact_severity, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		candidate.ID, candidate.SessionID, string(candidate.Stage), string(candidate.Kind), candidate.Version,
 		candidate.ParentCandidateID, candidate.SupersedesCandidateID, candidate.RunID, candidate.ArtifactID,
 		candidate.PayloadJSON, candidate.PayloadSchemaID, candidate.PayloadSchemaVersion, candidate.ContentSHA256,
-		string(locks), string(candidate.Status), string(candidate.Origin), candidate.StaleReason, string(refs),
+		string(locks), string(candidate.Status), string(candidate.QualityStatus), string(candidate.Origin),
+		candidate.StaleReason, string(refs),
 		candidate.UpstreamDigest, candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
 		formatTime(candidate.CreatedAt), formatTime(candidate.UpdatedAt),
 	)
@@ -118,7 +139,7 @@ func (s *Store) CreationCandidate(ctx context.Context, id string) (creationdomai
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, session_id, stage, kind, version, parent_candidate_id, supersedes_candidate_id,
 			run_id, artifact_id, payload_json, payload_schema_id, payload_schema_version,
-			content_sha256, lock_map_json, status, origin, stale_reason, impact_refs_json,
+			content_sha256, lock_map_json, status, quality_status, origin, stale_reason, impact_refs_json,
 			upstream_digest, excepted_upstream_digest, impact_severity, created_at, updated_at
 		FROM creation_candidates
 		WHERE id = ?
@@ -126,7 +147,7 @@ func (s *Store) CreationCandidate(ctx context.Context, id string) (creationdomai
 		&candidate.ID, &candidate.SessionID, &candidate.Stage, &candidate.Kind, &candidate.Version,
 		&parent, &supersedes, &runID, &artifactID, &candidate.PayloadJSON, &candidate.PayloadSchemaID,
 		&candidate.PayloadSchemaVersion, &candidate.ContentSHA256, &lockJSON, &candidate.Status,
-		&candidate.Origin, &candidate.StaleReason, &refsJSON, &candidate.UpstreamDigest,
+		&candidate.QualityStatus, &candidate.Origin, &candidate.StaleReason, &refsJSON, &candidate.UpstreamDigest,
 		&candidate.ExceptedUpstreamDigest, &candidate.ImpactSeverity, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -214,6 +235,7 @@ func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationd
 			supersedes_candidate_id = NULLIF(?, ''),
 			lock_map_json = ?,
 			status = ?,
+			quality_status = ?,
 			stale_reason = ?,
 			impact_refs_json = ?,
 			upstream_digest = ?,
@@ -222,11 +244,134 @@ func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationd
 			updated_at = ?
 		WHERE id = ?
 	`, candidate.ParentCandidateID, candidate.SupersedesCandidateID, string(locks),
-		string(candidate.Status), candidate.StaleReason, string(refs), candidate.UpstreamDigest,
+		string(candidate.Status), string(candidate.QualityStatus), candidate.StaleReason, string(refs), candidate.UpstreamDigest,
 		candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
 		formatTime(candidate.UpdatedAt), candidate.ID)
 	if err != nil {
 		return databaseOperationError("update creation candidate", err)
+	}
+	return nil
+}
+
+// ReserveCreationOperation 以唯一键原子预留创作操作回执；键已存在时返回既有回执与 false。
+func (s *Store) ReserveCreationOperation(ctx context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error) {
+	trimmed := normalizeOperation(operation)
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO creation_operations (
+			id, project_id, branch_id, command, idempotency_key, arguments_hash,
+			status, run_id, candidate_id, error_code, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_id, branch_id, command, idempotency_key) DO NOTHING
+	`,
+		trimmed.ID, trimmed.ProjectID, trimmed.BranchID, trimmed.Command, trimmed.IdempotencyKey,
+		trimmed.ArgumentsHash, string(trimmed.Status), trimmed.RunID, trimmed.CandidateID,
+		trimmed.ErrorCode, formatTime(trimmed.CreatedAt), formatTime(trimmed.UpdatedAt),
+	)
+	if err != nil {
+		return creationdomain.Operation{}, false, databaseOperationError("reserve creation operation", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return creationdomain.Operation{}, false, databaseOperationError("reserve creation operation rows", err)
+	}
+	if affected == 0 {
+		existing, loadErr := s.CreationOperationByIdempotency(ctx, trimmed.ProjectID, trimmed.BranchID, trimmed.Command, trimmed.IdempotencyKey)
+		if loadErr != nil {
+			return creationdomain.Operation{}, false, loadErr
+		}
+		return existing, false, nil
+	}
+	return trimmed, true, nil
+}
+
+func (s *Store) CreationOperationByIdempotency(
+	ctx context.Context, projectID, branchID, command, idempotencyKey string,
+) (creationdomain.Operation, error) {
+	operation, err := scanCreationOperation(s.db.QueryRowContext(ctx, creationOperationSelect+`
+		WHERE project_id = ? AND branch_id = ? AND command = ? AND idempotency_key = ?
+	`, strings.TrimSpace(projectID), strings.TrimSpace(branchID), strings.TrimSpace(command), strings.TrimSpace(idempotencyKey)))
+	if err != nil {
+		return creationdomain.Operation{}, fmt.Errorf("read creation operation: %w", err)
+	}
+	return operation, nil
+}
+
+// UpdateCreationOperation 只更新状态与结果引用，不改身份与参数摘要。
+func (s *Store) UpdateCreationOperation(ctx context.Context, operation creationdomain.Operation) error {
+	trimmed := normalizeOperation(operation)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE creation_operations SET
+			status = ?, run_id = ?, candidate_id = ?, error_code = ?, updated_at = ?
+		WHERE id = ?
+	`, string(trimmed.Status), trimmed.RunID, trimmed.CandidateID, trimmed.ErrorCode,
+		formatTime(trimmed.UpdatedAt), trimmed.ID)
+	if err != nil {
+		return databaseOperationError("update creation operation", err)
+	}
+	return requireOneRow(result, "creation operation", trimmed.ID)
+}
+
+const creationOperationSelect = `
+	SELECT id, project_id, branch_id, command, idempotency_key, arguments_hash,
+		status, run_id, candidate_id, error_code, created_at, updated_at
+	FROM creation_operations
+`
+
+func scanCreationOperation(row *sql.Row) (creationdomain.Operation, error) {
+	var operation creationdomain.Operation
+	var createdAt, updatedAt string
+	err := row.Scan(
+		&operation.ID, &operation.ProjectID, &operation.BranchID, &operation.Command,
+		&operation.IdempotencyKey, &operation.ArgumentsHash, &operation.Status,
+		&operation.RunID, &operation.CandidateID, &operation.ErrorCode, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		return creationdomain.Operation{}, err
+	}
+	if operation.CreatedAt, err = parseTime(createdAt); err != nil {
+		return creationdomain.Operation{}, fmt.Errorf("parse creation operation created_at: %w", err)
+	}
+	if operation.UpdatedAt, err = parseTime(updatedAt); err != nil {
+		return creationdomain.Operation{}, fmt.Errorf("parse creation operation updated_at: %w", err)
+	}
+	return operation, nil
+}
+
+func normalizeOperation(operation creationdomain.Operation) creationdomain.Operation {
+	operation.ID = strings.TrimSpace(operation.ID)
+	operation.ProjectID = strings.TrimSpace(operation.ProjectID)
+	operation.BranchID = strings.TrimSpace(operation.BranchID)
+	operation.Command = strings.TrimSpace(operation.Command)
+	operation.IdempotencyKey = strings.TrimSpace(operation.IdempotencyKey)
+	operation.RunID = strings.TrimSpace(operation.RunID)
+	operation.CandidateID = strings.TrimSpace(operation.CandidateID)
+	return operation
+}
+
+func encodeKeptDirections(values []string) ([]byte, error) {
+	if values == nil {
+		return []byte("[]"), nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("encode kept direction ids: %w", err)
+	}
+	if string(encoded) == "null" {
+		return []byte("[]"), nil
+	}
+	return encoded, nil
+}
+
+func decodeKeptDirections(encoded string, target *[]string) error {
+	if strings.TrimSpace(encoded) == "" {
+		*target = []string{}
+		return nil
+	}
+	if err := json.Unmarshal([]byte(encoded), target); err != nil {
+		return fmt.Errorf("decode kept direction ids: %w", err)
+	}
+	if *target == nil {
+		*target = []string{}
 	}
 	return nil
 }

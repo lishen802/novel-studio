@@ -20,18 +20,13 @@ export default function ArchiveLayout() {
   const { state } = useApp();
   const confirmed = state.backendProject?.workbench.archiveStatus === 'confirmed';
 
-  if (!confirmed) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-center space-y-4 animate-fade-up" data-testid="archive-unconfirmed">
-        <h1 className="text-2xl font-display text-text">作品档案尚未确认</h1>
-        <p className="text-sm text-text-sub max-w-md">确认作品档案后，人物、世界规则和大纲才会出现在这里。未确认候选不会进入正式资产。</p>
-        <Button variant="primary" onClick={() => navigate('/cockpit')}>返回驾驶舱</Button>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col animate-fade-up">
+      {!confirmed && <div className="mb-4 rounded-lg border border-border p-4 space-y-2" data-testid="archive-unconfirmed">
+        <p className="text-sm font-medium text-text">作品档案尚未确认</p>
+        <p className="text-sm text-text-sub">未确认的 AI 候选不会出现在正式列表中；已有的手工与导入资产仍可查看和编辑。</p>
+        <Button onClick={() => navigate('/cockpit')}>返回驾驶舱</Button>
+      </div>}
       <div className="mb-6">
         <h1 className="text-2xl font-display text-text mb-1">作品档案</h1>
         <p className="text-sm text-text-sub">管理作品的设定、人物、故事结构与伏笔线索。</p>

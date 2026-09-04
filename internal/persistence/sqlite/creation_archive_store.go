@@ -86,12 +86,17 @@ func (s *Store) ApplyCreationArchive(
 }
 
 func persistCreationSessionTx(ctx context.Context, tx *sql.Tx, session creationdomain.Session) error {
-	_, err := tx.ExecContext(ctx, `
+	kept, err := encodeKeptDirections(session.KeptDirectionIDs)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO creation_sessions (
 			id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, blocking_reason, active_run_id,
+			selected_direction_candidate_id, selected_direction_card_id, kept_direction_ids_json,
+			blocking_reason, active_operation_id, active_run_id,
 			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			id = excluded.id,
 			branch_id = excluded.branch_id,
@@ -99,7 +104,10 @@ func persistCreationSessionTx(ctx context.Context, tx *sql.Tx, session creationd
 			advance_mode = excluded.advance_mode,
 			intent_text = excluded.intent_text,
 			selected_direction_candidate_id = excluded.selected_direction_candidate_id,
+			selected_direction_card_id = excluded.selected_direction_card_id,
+			kept_direction_ids_json = excluded.kept_direction_ids_json,
 			blocking_reason = excluded.blocking_reason,
+			active_operation_id = excluded.active_operation_id,
 			active_run_id = excluded.active_run_id,
 			archive_digest = excluded.archive_digest,
 			archive_idempotency_key = excluded.archive_idempotency_key,
@@ -107,7 +115,8 @@ func persistCreationSessionTx(ctx context.Context, tx *sql.Tx, session creationd
 			updated_at = excluded.updated_at
 	`,
 		session.ID, session.ProjectID, session.BranchID, string(session.Stage), string(session.AdvanceMode),
-		session.IntentText, session.SelectedDirectionCandidateID, string(session.BlockingReason), session.ActiveRunID,
+		session.IntentText, session.SelectedDirectionCandidateID, session.SelectedDirectionCardID, string(kept),
+		string(session.BlockingReason), session.ActiveOperationID, session.ActiveRunID,
 		session.ArchiveDigest, session.ArchiveIdempotencyKey, session.ArchiveChangeSetID,
 		formatTime(session.CreatedAt), formatTime(session.UpdatedAt),
 	)
@@ -135,6 +144,7 @@ func persistCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidate creat
 			supersedes_candidate_id = NULLIF(?, ''),
 			lock_map_json = ?,
 			status = ?,
+			quality_status = ?,
 			stale_reason = ?,
 			impact_refs_json = ?,
 			upstream_digest = ?,
@@ -143,7 +153,7 @@ func persistCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidate creat
 			updated_at = ?
 		WHERE id = ?
 	`, candidate.ParentCandidateID, candidate.SupersedesCandidateID, string(locks),
-		string(candidate.Status), candidate.StaleReason, string(refs), candidate.UpstreamDigest,
+		string(candidate.Status), string(candidate.QualityStatus), candidate.StaleReason, string(refs), candidate.UpstreamDigest,
 		candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
 		formatTime(candidate.UpdatedAt), candidate.ID)
 	if err != nil {

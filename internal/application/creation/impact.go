@@ -2,12 +2,12 @@ package creation
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/lishen802/novel-studio/internal/application/agentkernel"
+	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 )
 
@@ -338,26 +338,47 @@ func (service *Service) estimateRegenerateCalls(ctx context.Context, stages []cr
 	return total
 }
 
+// liveUpstreamDigest 计算某阶段当前实际输入的级联摘要：任一上游输入变化都会改变下游摘要。
 func liveUpstreamDigest(session creationdomain.Session, candidates []creationdomain.Candidate, stage creationdomain.Stage) string {
 	switch stage {
 	case creationdomain.StageDirections:
 		if strings.TrimSpace(session.IntentText) == "" {
 			return ""
 		}
-		sum := sha256.Sum256([]byte(strings.TrimSpace(session.IntentText)))
-		return hex.EncodeToString(sum[:])
+		return hashParts("intent", strings.TrimSpace(session.IntentText))
 	case creationdomain.StageProposal:
-		if current, ok := currentCandidate(candidates, creationdomain.StageDirections); ok {
-			return current.ContentSHA256
+		if strings.TrimSpace(session.IntentText) == "" {
+			return ""
 		}
+		card, _, err := selectedDirectionCard(session, candidates)
+		if err != nil {
+			return ""
+		}
+		encoded, err := json.Marshal(card)
+		if err != nil {
+			return ""
+		}
+		return hashParts("intent", strings.TrimSpace(session.IntentText), "direction", string(encoded))
 	case creationdomain.StagePeopleWorld:
-		if current, ok := currentCandidate(candidates, creationdomain.StageProposal); ok {
-			return current.ContentSHA256
+		base := liveUpstreamDigest(session, candidates, creationdomain.StageProposal)
+		if base == "" {
+			return ""
 		}
+		current, ok := currentCandidate(candidates, creationdomain.StageProposal)
+		if !ok {
+			return ""
+		}
+		return hashParts(base, "payload", current.ContentSHA256)
 	case creationdomain.StageRoadmap:
-		if current, ok := currentCandidate(candidates, creationdomain.StagePeopleWorld); ok {
-			return current.ContentSHA256
+		base := liveUpstreamDigest(session, candidates, creationdomain.StagePeopleWorld)
+		if base == "" {
+			return ""
 		}
+		current, ok := currentCandidate(candidates, creationdomain.StagePeopleWorld)
+		if !ok {
+			return ""
+		}
+		return hashParts(base, "payload", current.ContentSHA256)
 	}
 	return ""
 }
@@ -421,4 +442,82 @@ func sameStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+// currentCandidate 返回某阶段最新且未被替代/放弃的候选。
+func currentCandidate(candidates []creationdomain.Candidate, stage creationdomain.Stage) (creationdomain.Candidate, bool) {
+	var current creationdomain.Candidate
+	found := false
+	for _, candidate := range candidates {
+		if candidate.Stage != stage || candidate.Status == creationdomain.StatusSuperseded || candidate.Status == creationdomain.StatusDiscarded {
+			continue
+		}
+		if !found || candidate.Version > current.Version {
+			current = candidate
+			found = true
+		}
+	}
+	return current, found
+}
+
+func candidateByID(candidates []creationdomain.Candidate, id string) (creationdomain.Candidate, bool) {
+	for _, candidate := range candidates {
+		if candidate.ID == id {
+			return candidate, true
+		}
+	}
+	return creationdomain.Candidate{}, false
+}
+
+// stageReady 判断当前阶段是否满足推进条件：候选完整、质量未阻断、无未解决 stale。
+func stageReady(session creationdomain.Session, candidates []creationdomain.Candidate) error {
+	switch session.Stage {
+	case creationdomain.StageIntent:
+		if strings.TrimSpace(session.IntentText) == "" {
+			return creationdomain.ErrStageIncomplete
+		}
+	case creationdomain.StageDirections:
+		if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" ||
+			strings.TrimSpace(session.SelectedDirectionCardID) == "" {
+			return creationdomain.ErrStageIncomplete
+		}
+	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
+		current, ok := currentCandidate(candidates, session.Stage)
+		if !ok {
+			return creationdomain.ErrStageIncomplete
+		}
+		if current.Blocked() {
+			return creationdomain.ErrQualityBlocked
+		}
+		if err := validateCandidatePayload(session.Stage, current.PayloadJSON); err != nil {
+			return err
+		}
+	}
+	if current, ok := currentCandidate(candidates, session.Stage); ok {
+		live := liveUpstreamDigest(session, candidates, session.Stage)
+		if current.Status == creationdomain.StatusStale && !current.ExceptionMatches(live) {
+			return creationdomain.ErrImpactUnresolved
+		}
+	}
+	return nil
+}
+
+func validateCandidatePayload(stage creationdomain.Stage, payload string) error {
+	kind := agentdomain.TaskStoryBlueprint
+	switch stage {
+	case creationdomain.StageDirections:
+		kind = agentdomain.TaskStoryDirections
+	case creationdomain.StagePeopleWorld:
+		kind = agentdomain.TaskStoryCast
+	case creationdomain.StageRoadmap:
+		kind = agentdomain.TaskStoryRoadmap
+	}
+	decoded, err := agentdomain.DecodeTaskOutput(kind, []byte(payload))
+	if err != nil {
+		return err
+	}
+	if stage == creationdomain.StageProposal {
+		return decoded.(*agentdomain.StoryBlueprintOutput).ValidateProduct()
+	}
+	return nil
 }

@@ -373,30 +373,49 @@ func (service *Service) executeReviseFields(
 	if err != nil {
 		return ActionResult{}, err
 	}
+	// 物化不可变基线：模型产物的候选引用原始 Artifact，人工版本使用内容摘要作为基线身份。
+	baseDigest := candidate.ContentSHA256
+	if !agentdomain.ValidSHA256(baseDigest) {
+		sum := sha256.Sum256([]byte(candidate.PayloadJSON))
+		baseDigest = hex.EncodeToString(sum[:])
+	}
+	baseArtifactID := candidate.ArtifactID
+	if strings.TrimSpace(baseArtifactID) == "" {
+		baseArtifactID = "base:" + baseDigest
+	}
+	base := &agentdomain.BaseCandidate{
+		ArtifactID: baseArtifactID, Digest: baseDigest, Content: candidate.PayloadJSON, Blueprint: true,
+	}
 	captured := service.generation()
 	runID := service.ids.NewID()
-	created, err := service.kernel.CreateRun(ctx, agentkernel.CreateRequest{
+	lease, release, err := service.coordinator.BeginRun(ctx, runID)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	defer release()
+	created, err := service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{
 		RunID: runID, ProjectID: action.ProjectID, BranchID: args.BranchID, ChapterID: args.ChapterID,
 		ChapterBaseRevision: 1, CanonicalHead: args.CanonicalHead, AuthorInstruction: args.Instruction,
-		WorkflowID: agentassets.StoryAuthorReviseWorkflowID, WorkflowVersion: agentassets.StoryProductWorkflowVersion,
+		WorkflowID: agentassets.StoryAuthorReviseWorkflowID, WorkflowVersion: agentassets.StoryAuthorReviseWorkflowVersion,
 		Profile: args.Profile, Sources: []agentkernel.Source{}, QualitySpec: quality.Spec{},
-		RevisionDirective: &directive, Deadline: service.clock.Now().Add(defaultRunTimeout),
+		RevisionDirective: &directive, BaseCandidate: base, Deadline: service.clock.Now().Add(defaultRunTimeout),
 	})
 	if err != nil {
 		return ActionResult{}, err
 	}
-	completed, err := service.kernel.ExecuteRun(ctx, created.ID, args.CanonicalHead)
+	completed, err := service.kernel.ExecuteRun(lease.Context(), created.ID, args.CanonicalHead)
 	if err != nil {
 		return ActionResult{}, err
 	}
-	if service.generation() != captured {
+	storeCtx := context.WithoutCancel(lease.Context())
+	if service.generation() != captured || lease.Stale() {
 		return ActionResult{}, ErrStaleStore
 	}
-	artifacts, err := service.kernel.Artifacts(ctx, completed.ID)
+	artifacts, err := service.kernel.Artifacts(storeCtx, completed.ID)
 	if err != nil {
 		return ActionResult{}, err
 	}
-	payload, artifactID, err := revisedCandidatePayload(artifacts)
+	payload, artifactID, err := service.resultPayload(storeCtx, completed, artifacts, authorReviseBinding())
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -430,6 +449,13 @@ func (service *Service) executeRegenerate(
 	candidate creationdomain.Candidate,
 	args actionArguments,
 ) (ActionResult, error) {
+	runID := service.ids.NewID()
+	captured := service.generation()
+	lease, release, err := service.coordinator.BeginRun(ctx, runID)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	defer release()
 	session, err := service.store.Session(ctx, action.ProjectID)
 	if err != nil {
 		return ActionResult{}, err
@@ -438,10 +464,44 @@ func (service *Service) executeRegenerate(
 		ProjectID: action.ProjectID, BranchID: args.BranchID, ChapterID: args.ChapterID,
 		CanonicalHead: args.CanonicalHead, Stage: candidate.Stage, Profile: args.Profile,
 	}
-	result, err := service.runStage(ctx, session, request, candidate.Stage, service.generation())
+	// 短锁内检查并占用运行槽；模型执行在锁外进行，不阻塞其他命令。
+	var frozen string
+	latest := session
+	run, err := func() (agentdomain.Run, error) {
+		unlock := service.lockProject(action.ProjectID)
+		unlock.Lock()
+		defer unlock.Unlock()
+		loaded, err := service.store.Session(ctx, action.ProjectID)
+		if err != nil {
+			return agentdomain.Run{}, err
+		}
+		if strings.TrimSpace(loaded.ActiveRunID) != "" {
+			return agentdomain.Run{}, ErrRunActive
+		}
+		candidates, err := service.store.ListCandidates(ctx, session.ID)
+		if err != nil {
+			return agentdomain.Run{}, err
+		}
+		sources, err := generateSources(loaded, candidates, candidate.Stage)
+		if err != nil {
+			return agentdomain.Run{}, err
+		}
+		latest = loaded
+		frozen = liveUpstreamDigest(loaded, candidates, candidate.Stage)
+		return service.startStageRun(lease.Context(), runID, action.ID, loaded, request, candidate.Stage, sources)
+	}()
 	if err != nil {
 		return ActionResult{}, err
 	}
+	result, err := service.executeStageRun(lease, latest, request, candidate.Stage, run.ID, frozen, captured)
+	if service.generation() != captured || lease.Stale() {
+		return ActionResult{}, ErrStaleStore
+	}
+	if err != nil {
+		service.clearRunSlot(context.WithoutCancel(lease.Context()), action.ProjectID, run.ID)
+		return ActionResult{}, err
+	}
+	service.clearRunSlot(context.WithoutCancel(lease.Context()), action.ProjectID, run.ID)
 	succeeded, err := action.Succeed([]string{result.Candidate.ID}, service.clock.Now())
 	if err != nil {
 		return ActionResult{}, err
@@ -492,24 +552,6 @@ func buildAuthorDirective(candidate creationdomain.Candidate, args actionArgumen
 		return agentdomain.RevisionDirective{}, err
 	}
 	return directive, nil
-}
-
-func revisedCandidatePayload(artifacts []agentdomain.Artifact) (string, string, error) {
-	if len(artifacts) == 0 {
-		return "", "", creationdomain.ErrBlankValue
-	}
-	artifact := artifacts[0]
-	payload := strings.TrimSpace(artifact.Content)
-	var wrapped struct {
-		Blueprint json.RawMessage `json:"blueprint"`
-	}
-	if json.Unmarshal([]byte(payload), &wrapped) == nil && len(wrapped.Blueprint) > 0 {
-		return string(wrapped.Blueprint), artifact.ID, nil
-	}
-	if !json.Valid([]byte(payload)) {
-		return "", "", creationdomain.ErrInvalidJSON
-	}
-	return payload, artifact.ID, nil
 }
 
 func baseVersionMatches(baseVersions []string, candidate creationdomain.Candidate) bool {

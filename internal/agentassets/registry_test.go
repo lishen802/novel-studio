@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lishen802/novel-studio/internal/application/agentkernel"
@@ -42,6 +43,8 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		BaselineWorkflowID + "@1":         "d3b99323219a347153d613743dad46e50f5dfe7f060c8b531464b61c845f2b5b",
 		QualityChapterWorkflowID + "@1":   "8cd791a01ce61989c61f4c4f057cb040cd0f6d1e28f06ef116e5022285582a68",
 		QualityBlueprintWorkflowID + "@1": "2ae580fe57ef8ad6960717925b098c545359a419c8b0406d8533d25410fadeba",
+		// roadmap v1 哈希在引入 v2 前采集：定义哈希涵盖 Prompt/Schema 绑定哈希，不变即证明 v1 资产未被改动。
+		StoryRoadmapWorkflowID + "@1": "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1",
 	}
 	cases := []struct {
 		id      string
@@ -62,7 +65,9 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{StoryProposalWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review", "revision"}},
 		{StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
 		{StoryRoadmapWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
+		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
 		{StoryAuthorReviseWorkflowID, StoryProductWorkflowVersion, []string{"revise"}},
+		{StoryAuthorReviseWorkflowID, StoryAuthorReviseWorkflowVersion, []string{"revise"}},
 	}
 	for _, test := range cases {
 		compiled, compileErr := agentkernel.Compile(context.Background(), agentkernel.Registries{
@@ -141,5 +146,79 @@ func TestSlotParallelKeepsEnhancedDirectorAndDownstreamContract(t *testing.T) {
 	if slot.Definition.Nodes[len(slot.Definition.Nodes)-2].Capability != director.Definition.Nodes[len(director.Definition.Nodes)-2].Capability ||
 		slot.Definition.Nodes[len(slot.Definition.Nodes)-1].Capability != director.Definition.Nodes[len(director.Definition.Nodes)-1].Capability {
 		t.Fatal("review or revision contract changed in slot experiment")
+	}
+}
+
+// TestBuiltinRegistersRoadmapV2AlongsideImmutableV1 验证 roadmap v2 与 v1 并存注册：
+// v2 生成节点绑定 v2 Prompt/Schema，v1 定义哈希保持引入 v2 之前的原值。
+func TestBuiltinRegistersRoadmapV2AlongsideImmutableV1(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryProductWorkflowVersion)
+	if err != nil {
+		t.Fatalf("roadmap v1: %v", err)
+	}
+	if v1.Definition.DefinitionHash != "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1" {
+		t.Fatalf("roadmap v1 hash = %s, want immutable pre-v2 hash", v1.Definition.DefinitionHash)
+	}
+	v2, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2)
+	if err != nil {
+		t.Fatalf("roadmap v2: %v", err)
+	}
+	if v2.Definition.DefinitionHash == v1.Definition.DefinitionHash {
+		t.Fatal("roadmap v2 must not reuse v1 definition hash")
+	}
+	v2Blueprint := v2.Definition.Nodes[0]
+	if v2Blueprint.ID != "blueprint" || v2Blueprint.Prompt.Version != 2 || v2Blueprint.Schema.Version != 2 {
+		t.Fatalf("roadmap v2 blueprint node must bind v2 prompt/schema: %+v", v2Blueprint)
+	}
+	v1Blueprint := v1.Definition.Nodes[0]
+	if v1Blueprint.Prompt.Version != 1 || v1Blueprint.Schema.Version != 1 {
+		t.Fatalf("roadmap v1 blueprint node must keep v1 bindings: %+v", v1Blueprint)
+	}
+	v2Prompt, err := registry.Prompt(context.Background(), "story_roadmap.prompt", 2)
+	if err != nil || !reflect.DeepEqual(v2Prompt.Variables, []string{"Task", "Context"}) {
+		t.Fatalf("roadmap v2 prompt: %+v, %v", v2Prompt, err)
+	}
+	v2Schema, err := registry.Schema(context.Background(), "story_roadmap.schema", 2)
+	if err != nil || len(v2Schema.JSON) == 0 {
+		t.Fatalf("roadmap v2 schema: %v", err)
+	}
+	for _, marker := range []string{`"id"`, `"arc_ref"`, `"strength"`} {
+		if !strings.Contains(string(v2Schema.JSON), marker) {
+			t.Fatalf("roadmap v2 schema missing contract marker %s", marker)
+		}
+	}
+}
+
+// TestAuthorReviseDeclaresBaseAndDirectiveSelectors 断言作者修订节点精确声明四个输入选择器，Prompt 变量保持不变。
+func TestAuthorReviseDeclaresBaseAndDirectiveSelectors(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := registry.Workflow(context.Background(), StoryAuthorReviseWorkflowID, StoryAuthorReviseWorkflowVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"$task", "$context", "$base", "$directive"}
+	legacy, err := registry.Workflow(context.Background(), StoryAuthorReviseWorkflowID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(legacy.Definition.Nodes[0].InputSelectors, []string{"$task", "$context"}) || legacy.Binding.Hash == asset.Binding.Hash {
+		t.Fatal("new revision binding mutated the legacy workflow")
+	}
+	if !reflect.DeepEqual(asset.Definition.Nodes[0].InputSelectors, want) {
+		t.Fatalf("author revise selectors = %#v, want %#v", asset.Definition.Nodes[0].InputSelectors, want)
+	}
+	prompt, err := registry.Prompt(context.Background(), "author_revise_blueprint.prompt", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(prompt.Variables, []string{"Task", "Context", "Directive", "Blueprint"}) {
+		t.Fatalf("author revise prompt variables = %#v", prompt.Variables)
 	}
 }

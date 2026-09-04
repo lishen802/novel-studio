@@ -9,6 +9,8 @@ import (
 )
 
 type WorkbenchView struct {
+	ReadOnly         bool                          `json:"readOnly"`
+	Applicability    string                        `json:"applicability"`
 	SessionID        string                        `json:"sessionId"`
 	ProjectID        string                        `json:"projectId"`
 	BranchID         string                        `json:"branchId"`
@@ -39,6 +41,7 @@ type DirectionSetView struct {
 	CandidateID string              `json:"candidateId"`
 	Version     int                 `json:"version"`
 	SelectedID  string              `json:"selectedId"`
+	KeptIDs     []string            `json:"keptIds"`
 	Status      string              `json:"status"`
 	Cards       []DirectionCardView `json:"cards"`
 }
@@ -126,15 +129,16 @@ type CandidateView struct {
 
 // Workbench 组装驾驶舱权威投影，不含 Prompt、密钥或隐藏推理。
 func (service *Service) Workbench(ctx context.Context, projectID, branchID string) (WorkbenchView, error) {
-	session, err := service.EnsureSession(ctx, projectID, branchID)
-	if err != nil {
-		return WorkbenchView{}, err
+	session, err := service.store.Session(ctx, projectID)
+	if isMissingSession(err) {
+		view := assembleWorkbench(creationdomain.Session{ProjectID: projectID, BranchID: branchID,
+			Stage: creationdomain.StageIntent, AdvanceMode: creationdomain.ModeStepReview}, nil,
+			ImpactProjection{Items: []ImpactItem{}, RegenerateStages: []creationdomain.Stage{}}, 0)
+		view.Applicability = "not_started"
+		view.Capabilities = []string{}
+		return view, nil
 	}
-	session, err = service.Recover(ctx, projectID)
 	if err != nil {
-		return WorkbenchView{}, err
-	}
-	if err := service.refreshImpact(ctx, session); err != nil {
 		return WorkbenchView{}, err
 	}
 	candidates, err := service.store.ListCandidates(ctx, session.ID)
@@ -149,7 +153,47 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 	if err != nil {
 		return WorkbenchView{}, err
 	}
-	return assembleWorkbench(session, candidates, impact, pending), nil
+	view := assembleWorkbench(session, candidates, impact, pending)
+	runID := session.ActiveRunID
+	if runID == "" {
+		// 已物化候选仍保留运行入口，不能因槽位清空而丢失完成结果。
+		var latest creationdomain.Candidate
+		for _, candidate := range candidates {
+			if candidate.RunID != "" && (latest.ID == "" || candidate.CreatedAt.After(latest.CreatedAt) ||
+				(candidate.CreatedAt.Equal(latest.CreatedAt) && candidate.Version > latest.Version)) {
+				latest = candidate
+			}
+		}
+		runID = latest.RunID
+	}
+	if runID != "" {
+		run, readErr := service.kernel.Run(ctx, runID)
+		if readErr != nil {
+			view.CurrentRun = RunView{RunID: runID, Status: "outcome_unknown"}
+			view.Recoverable = session.ActiveRunID != ""
+		} else {
+			view.CurrentRun = projectCreationRun(run, service.coordinator.Live(runID))
+		}
+	}
+	return view, nil
+}
+
+// projectCreationRun 从持久化步骤投影公开阶段，不使用工作流内部节点名猜测状态。
+func projectCreationRun(run agentdomain.Run, live bool) RunView {
+	view := RunView{RunID: run.ID, Status: string(run.Status), Cancellable: live,
+		PublicStage: string(agentdomain.PublicStageContextPreparing)}
+	for _, step := range run.Steps {
+		if step.PublicStageID != "" && (step.Status == agentdomain.StepRunning || step.Status == agentdomain.StepCompleted || step.Status == agentdomain.StepFailed) {
+			view.PublicStage = string(step.PublicStageID)
+		}
+		if step.Status == agentdomain.StepRunning {
+			break
+		}
+	}
+	if run.Status == agentdomain.RunCompleted {
+		view.PublicStage = string(agentdomain.PublicStageCandidateReady)
+	}
+	return view
 }
 
 func assembleWorkbench(
@@ -159,6 +203,7 @@ func assembleWorkbench(
 	pending int,
 ) WorkbenchView {
 	view := WorkbenchView{
+		Applicability:    "active",
 		SessionID:        session.ID,
 		ProjectID:        session.ProjectID,
 		BranchID:         session.BranchID,
@@ -171,13 +216,18 @@ func assembleWorkbench(
 		StageRail:        buildStageRail(session),
 		Impact:           impact,
 		Assistant:        AssistantSummaryView{PendingActionCount: pending},
-		CurrentRun:       RunView{RunID: session.ActiveRunID, Cancellable: strings.TrimSpace(session.ActiveRunID) != "", PublicStage: "story_planning"},
-	}
-	if strings.TrimSpace(session.ActiveRunID) != "" {
-		view.CurrentRun.Status = "running"
+		DirectionSet:     DirectionSetView{Cards: []DirectionCardView{}, KeptIDs: append([]string{}, session.KeptDirectionIDs...)},
+		Proposal:         ProposalView{Sections: []ProposalSectionView{}},
+		PeopleWorld:      PeopleWorldView{Entities: []PeopleWorldNodeView{}},
+		Roadmap:          RoadmapView{Volumes: []RoadmapNodeView{}, Arcs: []RoadmapNodeView{}, Chapters: []RoadmapNodeView{}},
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StageDirections); ok {
-		view.DirectionSet = projectDirectionSet(current, session.SelectedDirectionCandidateID)
+		selected := ""
+		if current.ID == session.SelectedDirectionCandidateID {
+			selected = session.SelectedDirectionCardID
+		}
+		view.DirectionSet = projectDirectionSet(current, selected)
+		view.DirectionSet.KeptIDs = append([]string{}, session.KeptDirectionIDs...)
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StageProposal); ok {
 		view.Proposal = projectProposal(current)
@@ -234,7 +284,7 @@ func projectDirectionSet(candidate creationdomain.Candidate, selectedID string) 
 		view.Cards = append(view.Cards, DirectionCardView{
 			ID: card.ID, Hook: card.Hook, Genre: card.Genre, Protagonist: card.Protagonist,
 			CoreConflict: card.CoreConflict, GrowthCost: card.GrowthCost, Pacing: card.Pacing, Ending: card.Ending,
-			Selected: selectedID == candidate.ID || selectedID == card.ID,
+			Selected: selectedID == card.ID,
 		})
 	}
 	return view

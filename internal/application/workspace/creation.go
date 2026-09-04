@@ -30,12 +30,164 @@ func (kernel creationKernel) Artifacts(ctx context.Context, runID string) ([]age
 	return kernel.store.ListAgentArtifacts(ctx, runID)
 }
 
+// Run 读取持久化运行，供创作恢复对账使用。
+func (kernel creationKernel) Run(ctx context.Context, runID string) (agentdomain.Run, error) {
+	return kernel.store.AgentRun(ctx, runID)
+}
+
+// creationRunLease 把工作区作业租约适配为创作运行租约。
+type creationRunLease struct {
+	ctx   context.Context
+	lease *jobLease
+}
+
+type creationLeaseKey struct{}
+
+// creationCoordinator 固定项目代次，旧页面不能在切换后的新项目取得运行租约。
+type creationCoordinator struct {
+	workspace  *Service
+	generation uint64
+}
+
+func (coordinator creationCoordinator) BeginRun(ctx context.Context, runID string) (creationapp.RunLease, func(), error) {
+	return coordinator.workspace.beginCreationRun(ctx, runID, coordinator.generation)
+}
+
+func (coordinator creationCoordinator) Cancel(runID string) { coordinator.workspace.Cancel(runID) }
+func (coordinator creationCoordinator) Live(runID string) bool {
+	return coordinator.workspace.Live(runID)
+}
+
+func (lease creationRunLease) Context() context.Context { return lease.ctx }
+
+// Stale 表示排水超时已把租约标记为过期，创作运行不得再向捕获的 store 写入。
+func (lease creationRunLease) Stale() bool { return lease.lease.IsStale() }
+
+// BeginRun 实现 creation.RunCoordinator：创作运行与 Agent、抽取作业共用
+// 项目作业租约注册表；项目关闭/切换进入排水时会取消并等待创作运行释放。
+func (s *Service) BeginRun(parent context.Context, runID string) (creationapp.RunLease, func(), error) {
+	return s.beginCreationRun(parent, runID, s.currentGeneration())
+}
+
+// beginCreationRun 在短工作区锁内检查代次并注册租约，不持锁执行模型调用。
+func (s *Service) beginCreationRun(parent context.Context, runID string, generation uint64) (creationapp.RunLease, func(), error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireEditableLocked(); err != nil {
+		return nil, nil, err
+	}
+	if s.active.generation != generation {
+		return nil, nil, creationapp.ErrStaleStore
+	}
+	s.creationJobsMu.Lock()
+	if _, exists := s.creationJobs[runID]; exists {
+		s.creationJobsMu.Unlock()
+		return nil, nil, fmt.Errorf("%w: %s", creationapp.ErrRunActive, runID)
+	}
+	jobCtx, cancel := context.WithCancel(parent)
+	s.creationJobs[runID] = cancel
+	s.creationJobsMu.Unlock()
+	lease, err := s.leases.acquire(runID, generation)
+	if err != nil {
+		s.endCreationRun(runID)
+		return nil, nil, err
+	}
+	jobCtx = context.WithValue(jobCtx, creationLeaseKey{}, lease)
+	return creationRunLease{ctx: jobCtx, lease: lease}, func() { s.endCreationRun(runID) }, nil
+}
+
+// endCreationRun 注销取消函数并释放作业租约；租约在终态持久化完成后才释放。
+func (s *Service) endCreationRun(runID string) {
+	s.creationJobsMu.Lock()
+	cancel := s.creationJobs[runID]
+	delete(s.creationJobs, runID)
+	s.creationJobsMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.leases.release(runID)
+}
+
+// Cancel 取消一个进行中的创作运行。
+func (s *Service) Cancel(runID string) {
+	s.creationJobsMu.Lock()
+	cancel := s.creationJobs[runID]
+	s.creationJobsMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// Live 表示运行是否仍在本进程内活跃执行。
+func (s *Service) Live(runID string) bool {
+	s.creationJobsMu.Lock()
+	defer s.creationJobsMu.Unlock()
+	_, ok := s.creationJobs[runID]
+	return ok
+}
+
+// cancelAllCreationJobs 在项目关闭/切换时取消全部进行中的创作运行。
+func (s *Service) cancelAllCreationJobs() {
+	s.creationJobsMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.creationJobs))
+	for _, cancel := range s.creationJobs {
+		cancels = append(cancels, cancel)
+	}
+	s.creationJobsMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
 func (s *Service) CreationWorkbench(ctx context.Context) (creationapp.WorkbenchView, error) {
+	return s.creationWorkbench(ctx, false)
+}
+
+// creationWorkbench 仅在可写原创入口初始化；只读与轮询不执行恢复写入。
+func (s *Service) creationWorkbench(ctx context.Context, recoverRun bool) (creationapp.WorkbenchView, error) {
 	runtime, err := s.creationRuntime(ctx, false)
 	if err != nil {
 		return creationapp.WorkbenchView{}, err
 	}
-	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+	view, err := runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	readOnly := s.requireEditable() != nil
+	if view.SessionID == "" && !readOnly {
+		s.mu.RLock()
+		if s.active == nil {
+			s.mu.RUnlock()
+			return creationapp.WorkbenchView{}, ErrNoActiveProject
+		}
+		chapters, readErr := s.active.store.ListChapters(ctx)
+		s.mu.RUnlock()
+		if readErr != nil {
+			return creationapp.WorkbenchView{}, readErr
+		}
+		if len(chapters) == 0 {
+			if _, err := runtime.service.EnsureSession(ctx, runtime.projectID, runtime.branchID); err != nil {
+				return creationapp.WorkbenchView{}, err
+			}
+			view, err = runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+		} else {
+			view.Applicability = "not_applicable"
+		}
+	}
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if recoverRun && !readOnly && view.SessionID != "" {
+		if _, err := runtime.service.Recover(ctx, runtime.projectID); err != nil {
+			return creationapp.WorkbenchView{}, err
+		}
+		view, err = runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+	}
+	view.ReadOnly = readOnly
+	if readOnly {
+		view.Capabilities = []string{}
+	}
+	return view, err
 }
 
 func (s *Service) SaveCreationIntent(ctx context.Context, text string) (creationapp.WorkbenchView, error) {
@@ -60,12 +212,37 @@ func (s *Service) SetCreationAdvanceMode(ctx context.Context, mode string) (crea
 	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
 }
 
-func (s *Service) SelectCreationDirection(ctx context.Context, candidateID string) (creationapp.WorkbenchView, error) {
+// SelectCreationDirection 记录作者选中的整套方向候选与其中一张卡。
+func (s *Service) SelectCreationDirection(ctx context.Context, candidateID, cardID string) (creationapp.WorkbenchView, error) {
 	runtime, err := s.creationRuntime(ctx, true)
 	if err != nil {
 		return creationapp.WorkbenchView{}, err
 	}
-	if _, err := runtime.service.SelectDirection(ctx, runtime.projectID, candidateID); err != nil {
+	if _, err := runtime.service.SelectDirection(ctx, runtime.projectID, candidateID, cardID); err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+}
+
+// KeepCreationDirection 持久化保留一张方向卡。
+func (s *Service) KeepCreationDirection(ctx context.Context, cardID string) (creationapp.WorkbenchView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if _, err := runtime.service.KeepDirection(ctx, runtime.projectID, cardID); err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+}
+
+// UnkeepCreationDirection 取消保留一张方向卡。
+func (s *Service) UnkeepCreationDirection(ctx context.Context, cardID string) (creationapp.WorkbenchView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if _, err := runtime.service.UnkeepDirection(ctx, runtime.projectID, cardID); err != nil {
 		return creationapp.WorkbenchView{}, err
 	}
 	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
@@ -188,15 +365,10 @@ func (s *Service) CancelCreationRun(ctx context.Context) error {
 	return runtime.service.CancelRun(ctx, runtime.projectID)
 }
 
+// RecoverCreation 恢复创作工作台：新项目首次进入先确保会话存在再恢复，
+// 不以 no rows 当业务失败（P1-1）；只读项目不隐式创建会话，直接读取既有工作台。
 func (s *Service) RecoverCreation(ctx context.Context) (creationapp.WorkbenchView, error) {
-	runtime, err := s.creationRuntime(ctx, false)
-	if err != nil {
-		return creationapp.WorkbenchView{}, err
-	}
-	if _, err := runtime.service.Recover(ctx, runtime.projectID); err != nil {
-		return creationapp.WorkbenchView{}, err
-	}
-	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+	return s.creationWorkbench(ctx, true)
 }
 
 func (s *Service) PreviewCreationArchive(ctx context.Context) (creationapp.ArchivePreview, error) {
@@ -270,12 +442,15 @@ func (s *Service) creationRuntime(ctx context.Context, write bool) (creationRunt
 				s.notifyJobUpdated(callback, events, runID, agentdomain.JobKindAgent)
 			}
 		}
-		kernel := agentkernel.NewService(kernelStore, s.credentials, s.providers, agentkernel.Registries{
+		guardedKernelStore := creationKernelStore{Store: kernelStore, workspace: s, generation: s.active.generation}
+		kernel := agentkernel.NewService(guardedKernelStore, s.credentials, s.providers, agentkernel.Registries{
 			Workflows: registry, Prompts: registry, Schemas: registry, Assemblers: registry,
 		}, s.clock, s.ids, onUpdated)
 		svc, svcErr := creationapp.New(creationapp.Config{
-			Store: creationapp.NewSQLiteStore(backend), Kernel: creationKernel{inner: kernel, store: kernelStore},
-			Clock: s.clock, IDs: s.ids,
+			Store:  creationStore{inner: creationapp.NewSQLiteStore(backend), guard: guardedKernelStore},
+			Kernel: creationKernel{inner: kernel, store: guardedKernelStore},
+			Clock:  s.clock, IDs: s.ids,
+			Coordinator: creationCoordinator{workspace: s, generation: s.active.generation},
 			Generation: func() uint64 {
 				s.mu.RLock()
 				defer s.mu.RUnlock()

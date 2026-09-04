@@ -268,6 +268,8 @@ export interface HarnessCaseView {
 }
 
 export interface CreationWorkbenchView {
+	readOnly?: boolean;
+	applicability?: string;
   sessionId: string;
   projectId: string;
   branchId: string;
@@ -279,6 +281,7 @@ export interface CreationWorkbenchView {
   intentText: string;
   stageRail: Array<{ id: string; label: string; status: string }>;
   directionSet: {
+	keptIds?: string[];
     candidateId: string;
     version: number;
     selectedId: string;
@@ -332,6 +335,8 @@ export interface CreationWorkbenchView {
 }
 
 export interface CreationCostPreview {
+	workflowVersion?: number;
+	roleModels?: Array<{ role: string; provider: string; model: string }>;
   stage: string;
   workflowId: string;
   estimatedCalls: number;
@@ -482,7 +487,9 @@ export const studio = {
   creationWorkbench: () => call<CreationWorkbenchView>('CreationWorkbench'),
   saveCreationIntent: (text: string) => call<CreationWorkbenchView>('SaveCreationIntent', text),
   setCreationAdvanceMode: (mode: string) => call<CreationWorkbenchView>('SetCreationAdvanceMode', mode),
-  selectCreationDirection: (candidateId: string) => call<CreationWorkbenchView>('SelectCreationDirection', candidateId),
+  selectCreationDirection: (candidateId: string, cardId: string) => call<CreationWorkbenchView>('SelectCreationDirection', candidateId, cardId),
+  keepCreationDirection: (cardId: string) => call<CreationWorkbenchView>('KeepCreationDirection', cardId),
+  unkeepCreationDirection: (cardId: string) => call<CreationWorkbenchView>('UnkeepCreationDirection', cardId),
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
   saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>

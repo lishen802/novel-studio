@@ -76,8 +76,10 @@ type CreateRequest struct {
 	Sources             []Source
 	QualitySpec         quality.Spec
 	RevisionDirective   *agentdomain.RevisionDirective
-	Deadline            time.Time
-	RetryOf             string
+	// BaseCandidate 是作者定向修订的冻结基线，必须与指令中的身份与摘要一致。
+	BaseCandidate *agentdomain.BaseCandidate
+	Deadline      time.Time
+	RetryOf       string
 }
 
 type persistedInput struct {
@@ -87,6 +89,7 @@ type persistedInput struct {
 	Sources           []Source                       `json:"sources"`
 	QualitySpec       quality.Spec                   `json:"quality_spec"`
 	RevisionDirective *agentdomain.RevisionDirective `json:"revision_directive,omitempty"`
+	BaseCandidate     *agentdomain.BaseCandidate     `json:"base_candidate,omitempty"`
 	Deadline          time.Time                      `json:"deadline"`
 }
 
@@ -152,7 +155,8 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 	payload := persistedInput{
 		BranchID: strings.TrimSpace(request.BranchID), CanonicalHead: strings.TrimSpace(request.CanonicalHead),
 		AuthorInstruction: strings.TrimSpace(request.AuthorInstruction), Sources: cloneSources(request.Sources),
-		QualitySpec: qualitySpec, RevisionDirective: request.RevisionDirective, Deadline: deadline,
+		QualitySpec: qualitySpec, RevisionDirective: request.RevisionDirective,
+		BaseCandidate: request.BaseCandidate, Deadline: deadline,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -462,6 +466,12 @@ func (service *Service) executeNode(
 	}
 	outputKind := taskKindForNode(compiled.TaskKind, node.Capability)
 	decodeOutput := func(content string) (agentdomain.TaskOutput, error) {
+		// 作者定向修订没有运行内上游评审，直接按任务契约解码；
+		// 修订边界由 validateBoundedRevision 的作者定向分支统一校验。
+		if node.Capability == agentdomain.CapabilityBoundedRevision &&
+			input.RevisionDirective != nil && input.RevisionDirective.Mode == agentdomain.RevisionAuthorDirected {
+			return agentdomain.DecodeTaskOutput(outputKind, []byte(content))
+		}
 		return decodeNodeOutput(outputKind, node, latest, artifacts, content)
 	}
 	decoded, decodeErr := decodeOutput(generated.Text)
@@ -517,7 +527,7 @@ func (service *Service) executeNode(
 	primary := newArtifact(service.ids.NewID(), run.ID, step.ID, primaryKind, primaryContent, service.clock.Now())
 	relations := make([]agentdomain.ArtifactRelationRecord, 0, 1)
 	if node.Capability == agentdomain.CapabilityBoundedRevision {
-		base, baseErr := revisionBaseArtifact(node, latest, artifacts)
+		base, baseErr := revisionBaseArtifact(input, node, latest, artifacts)
 		if baseErr != nil {
 			return service.failStep(ctx, run, step, "revision_base_missing", baseErr, produced)
 		}
@@ -549,7 +559,14 @@ func (service *Service) executeNode(
 	return step, produced, nil
 }
 
-func revisionBaseArtifact(node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.Artifact, error) {
+// revisionBaseArtifact 返回修订基线：作者定向运行直接使用冻结的 BaseCandidate
+// （不落库，仅供边界校验与谱系记录），其余工作流沿用 node: 上游产物查找。
+func revisionBaseArtifact(input persistedInput, node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.Artifact, error) {
+	if input.BaseCandidate != nil {
+		return agentdomain.Artifact{
+			ID: input.BaseCandidate.ArtifactID, SHA256: input.BaseCandidate.Digest, Content: input.BaseCandidate.Content,
+		}, nil
+	}
 	for _, selector := range node.InputSelectors {
 		if !strings.HasPrefix(selector, "node:") {
 			continue
@@ -654,6 +671,28 @@ func (service *Service) assemble(
 			for _, source := range input.Sources {
 				parts = append(parts, part{source: source, content: source.Content})
 			}
+		case selector == "$directive":
+			// 作者定向修订指令以版本化 JSON 进入上下文，供修订节点与指令边界校验共用。
+			if input.RevisionDirective == nil {
+				return "", agentdomain.ContextManifest{}, nil, errors.New("missing revision directive")
+			}
+			directiveJSON, marshalErr := json.Marshal(input.RevisionDirective)
+			if marshalErr != nil {
+				return "", agentdomain.ContextManifest{}, nil, marshalErr
+			}
+			parts = append(parts, part{source: Source{
+				Kind: agentdomain.ManifestAuthorInstruction, ID: "revision-directive", Version: input.RevisionDirective.Digest(),
+				Priority: 900, SelectionReason: "作者定向修订指令", Required: true,
+			}, content: string(directiveJSON)})
+		case selector == "$base":
+			// 作者定向修订基线随运行冻结，不依赖运行内上游节点。
+			if input.BaseCandidate == nil {
+				return "", agentdomain.ContextManifest{}, nil, errors.New("missing revision base candidate")
+			}
+			parts = append(parts, part{source: Source{
+				Kind: agentdomain.ManifestUpstreamArtifact, ID: input.BaseCandidate.ArtifactID, Version: input.BaseCandidate.Digest,
+				Priority: 850, SelectionReason: "作者定向修订基线", Required: true,
+			}, content: input.BaseCandidate.Content})
 		case selector == "$slot_join":
 			artifact, ok := slotJoinArtifact(step.ID, artifacts)
 			if !ok {
@@ -899,6 +938,12 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 			(compiled.TaskKind != agentdomain.TaskReviseDraft && compiled.TaskKind != agentdomain.TaskReviseBlueprint) {
 			return agentdomain.ErrInvalidRevisionDirective
 		}
+		// 作者定向修订必须冻结与指令身份、摘要完全一致的基线候选，杜绝基线漂移。
+		if request.BaseCandidate == nil || request.BaseCandidate.Validate() != nil ||
+			request.BaseCandidate.ArtifactID != request.RevisionDirective.BaseArtifactID ||
+			request.BaseCandidate.Digest != request.RevisionDirective.BaseDigest {
+			return agentdomain.ErrInvalidRevisionDirective
+		}
 	} else if compiled.TaskKind == agentdomain.TaskReviseDraft || compiled.TaskKind == agentdomain.TaskReviseBlueprint {
 		return agentdomain.ErrInvalidRevisionDirective
 	}
@@ -1021,6 +1066,27 @@ func renderPrompt(
 			values[variable] = input.AuthorInstruction
 		case "Context":
 			values[variable] = assembled
+		case "Directive":
+			// 只有声明 $directive 选择器的节点才允许把指令渲染进 Prompt。
+			if !slices.Contains(node.InputSelectors, "$directive") || input.RevisionDirective == nil {
+				return "", fmt.Errorf("prompt variable %s has no input", variable)
+			}
+			directiveJSON, marshalErr := json.Marshal(input.RevisionDirective)
+			if marshalErr != nil {
+				return "", marshalErr
+			}
+			values[variable] = string(directiveJSON)
+		case "Blueprint", "Draft":
+			// 声明 $base 的作者定向修订节点优先渲染冻结基线，其余工作流保持产物推断不变。
+			if slices.Contains(node.InputSelectors, "$base") && input.BaseCandidate != nil {
+				values[variable] = input.BaseCandidate.Content
+			}
+			if values[variable] == "" {
+				values[variable] = promptVariableFromArtifacts(variable, node, latest, artifacts)
+			}
+			if values[variable] == "" && len(upstream) == 1 {
+				values[variable] = upstream[0]
+			}
 		case "Changes":
 			if node.Capability != agentdomain.CapabilityRevisionVerify {
 				return "", fmt.Errorf("prompt variable %s has no input", variable)
@@ -1169,7 +1235,7 @@ func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.C
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
 		return agentdomain.TaskReviewBundle
 	case agentdomain.CapabilityBoundedRevision:
-		if workflowKind == agentdomain.TaskStoryBlueprint {
+		if workflowKind == agentdomain.TaskStoryBlueprint || workflowKind == agentdomain.TaskReviseBlueprint {
 			return agentdomain.TaskReviseBlueprint
 		}
 		return agentdomain.TaskReviseDraft
@@ -1733,7 +1799,7 @@ func validateBoundedRevision(
 	artifacts []agentdomain.Artifact,
 ) error {
 	if input.RevisionDirective != nil && input.RevisionDirective.Mode == agentdomain.RevisionAuthorDirected {
-		base, err := revisionBaseArtifact(node, latest, artifacts)
+		base, err := revisionBaseArtifact(input, node, latest, artifacts)
 		if err != nil {
 			return err
 		}

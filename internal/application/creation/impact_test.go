@@ -95,7 +95,7 @@ func TestAbandonUpstreamRestoresDirectionHash(t *testing.T) {
 
 func seedTrackedProposal(t *testing.T, service *Service, store *memoryStore) (creationdomain.Session, creationdomain.Candidate, creationdomain.Candidate) {
 	t.Helper()
-	session := seedProposalSession(t, service, store)
+	session := seedDirectionsSelection(t, service, store, "d1")
 	listed, err := store.ListCandidates(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +111,8 @@ func seedTrackedProposal(t *testing.T, service *Service, store *memoryStore) (cr
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal = proposal.WithUpstream(direction.ContentSHA256)
+	// 上游摘要必须用实际输入公式（意图+选中卡），而不是方向候选整包哈希。
+	proposal = proposal.WithUpstream(liveUpstreamDigest(session, listed, creationdomain.StageProposal))
 	if err := store.SaveCandidate(context.Background(), proposal); err != nil {
 		t.Fatal(err)
 	}

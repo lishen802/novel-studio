@@ -34,8 +34,8 @@ func TestStoryProductWorkflowsRunWithFakeProvider(t *testing.T) {
 			want:     `"role":"protagonist"`,
 		},
 		{
-			id: agentassets.StoryRoadmapWorkflowID, version: agentassets.StoryProductWorkflowVersion, budget: 7500,
-			generate: `{"book":{"title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"volume_ref":"第一卷","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":["钟楼三响"],"position":1},{"title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":["潮汐律"],"position":3}]}`,
+			id: agentassets.StoryRoadmapWorkflowID, version: agentassets.StoryRoadmapWorkflowVersionV2, budget: 7500,
+			generate: `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`,
 			want:     `"near_term_chapters"`,
 		},
 	}

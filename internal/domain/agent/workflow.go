@@ -288,6 +288,10 @@ func validateSelectors(node WorkflowNode, nodes map[string]WorkflowNode, adjacen
 		if selector == "$task" || selector == "$context" || selector == "$slot_join" && node.Capability == CapabilityIntegrationWriter {
 			continue
 		}
+		// 作者定向修订节点通过专用选择器绑定修订指令与冻结基线。
+		if (selector == "$directive" || selector == "$base") && node.Capability == CapabilityBoundedRevision {
+			continue
+		}
 		if !strings.HasPrefix(selector, "node:") {
 			return fmt.Errorf("%w: invalid input selector", ErrInvalidWorkflow)
 		}

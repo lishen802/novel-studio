@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 )
@@ -205,6 +206,7 @@ func (output StoryCastOutput) Validate() error {
 }
 
 type RoadmapBook struct {
+	ID             string   `json:"id"`
 	Title          string   `json:"title"`
 	Proposition    string   `json:"proposition"`
 	Ending         string   `json:"ending"`
@@ -213,6 +215,7 @@ type RoadmapBook struct {
 }
 
 type RoadmapVolume struct {
+	ID       string `json:"id"`
 	Title    string `json:"title"`
 	Goal     string `json:"goal"`
 	Conflict string `json:"conflict"`
@@ -221,6 +224,7 @@ type RoadmapVolume struct {
 }
 
 type RoadmapArc struct {
+	ID              string   `json:"id"`
 	VolumeRef       string   `json:"volume_ref"`
 	Title           string   `json:"title"`
 	CausalChain     string   `json:"causal_chain"`
@@ -229,13 +233,54 @@ type RoadmapArc struct {
 	Position        int      `json:"position"`
 }
 
+// RoadmapAnchor 是带强度与语句的结构化锚点；字符串锚点属于旧载荷，强度为空。
+type RoadmapAnchor struct {
+	Strength  string `json:"strength"`
+	Statement string `json:"statement"`
+}
+
 type RoadmapChapter struct {
-	Title    string   `json:"title"`
-	Goal     string   `json:"goal"`
-	Conflict string   `json:"conflict"`
-	Outcome  string   `json:"outcome"`
-	Anchors  []string `json:"anchors"`
-	Position int      `json:"position"`
+	ID       string          `json:"id"`
+	ArcRef   string          `json:"arc_ref"`
+	Title    string          `json:"title"`
+	Goal     string          `json:"goal"`
+	Conflict string          `json:"conflict"`
+	Outcome  string          `json:"outcome"`
+	Anchors  []RoadmapAnchor `json:"anchors"`
+	Position int             `json:"position"`
+}
+
+// UnmarshalJSON 兼容旧版字符串锚点：旧载荷解析为强度为空的锚点，保持可读但不可入档。
+func (chapter *RoadmapChapter) UnmarshalJSON(data []byte) error {
+	type plain RoadmapChapter
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err == nil {
+		*chapter = RoadmapChapter(decoded)
+		return nil
+	}
+	// 旧载荷 anchors 为字符串数组；逐一映射为强度为空的锚点。
+	var legacy struct {
+		ID       string   `json:"id"`
+		ArcRef   string   `json:"arc_ref"`
+		Title    string   `json:"title"`
+		Goal     string   `json:"goal"`
+		Conflict string   `json:"conflict"`
+		Outcome  string   `json:"outcome"`
+		Anchors  []string `json:"anchors"`
+		Position int      `json:"position"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	anchors := make([]RoadmapAnchor, 0, len(legacy.Anchors))
+	for _, statement := range legacy.Anchors {
+		anchors = append(anchors, RoadmapAnchor{Statement: statement})
+	}
+	*chapter = RoadmapChapter{
+		ID: legacy.ID, ArcRef: legacy.ArcRef, Title: legacy.Title, Goal: legacy.Goal,
+		Conflict: legacy.Conflict, Outcome: legacy.Outcome, Anchors: anchors, Position: legacy.Position,
+	}
+	return nil
 }
 
 type StoryRoadmapOutput struct {
@@ -245,34 +290,38 @@ type StoryRoadmapOutput struct {
 	NearTermChapters []RoadmapChapter `json:"near_term_chapters"`
 }
 
-// Validate 要求全书层完整、卷/弧齐全，且各层 position 从 1 连续，近期章 3–10 个。
+// Validate 要求全书层完整、卷/弧齐全，各层 position 从 1 连续，近期章 3–10 个；
+// 卷/弧/章必须有稳定 ID，弧按卷 ID、近期章按弧 ID 引用，锚点必须带合法强度。
 func (output StoryRoadmapOutput) Validate() error {
-	if blank(output.Book.Title) || blank(output.Book.Proposition) || blank(output.Book.Ending) ||
+	if blank(output.Book.ID) || blank(output.Book.Title) || blank(output.Book.Proposition) || blank(output.Book.Ending) ||
 		blank(output.Book.ProtagonistArc) || hasBlank(output.Book.Inviolable) ||
 		len(output.Volumes) == 0 || len(output.Volumes) > MaxBlueprintItems ||
 		len(output.Arcs) == 0 || len(output.Arcs) > MaxBlueprintItems ||
 		len(output.NearTermChapters) < MinRoadmapNearTerm || len(output.NearTermChapters) > MaxRoadmapNearTerm {
 		return ErrInvalidTaskOutput
 	}
-	volumeTitles := map[string]bool{}
+	volumeIDs := map[string]bool{}
 	volumePositions := make([]int, 0, len(output.Volumes))
 	for _, volume := range output.Volumes {
-		title := strings.TrimSpace(volume.Title)
-		if title == "" || volumeTitles[title] || blank(volume.Goal) || blank(volume.Conflict) || blank(volume.Payoff) {
+		id := strings.TrimSpace(volume.ID)
+		if id == "" || volumeIDs[id] || blank(volume.Title) || blank(volume.Goal) || blank(volume.Conflict) || blank(volume.Payoff) {
 			return ErrInvalidTaskOutput
 		}
-		volumeTitles[title] = true
+		volumeIDs[id] = true
 		volumePositions = append(volumePositions, volume.Position)
 	}
 	if !consecutivePositions(volumePositions) {
 		return ErrInvalidTaskOutput
 	}
+	arcIDs := map[string]bool{}
 	arcsByVolume := map[string][]int{}
 	for _, arc := range output.Arcs {
-		if !volumeTitles[strings.TrimSpace(arc.VolumeRef)] || blank(arc.Title) || blank(arc.CausalChain) ||
-			blank(arc.CharacterChange) || hasBlank(arc.Foreshadowing) {
+		id := strings.TrimSpace(arc.ID)
+		if id == "" || arcIDs[id] || !volumeIDs[strings.TrimSpace(arc.VolumeRef)] || blank(arc.Title) ||
+			blank(arc.CausalChain) || blank(arc.CharacterChange) || hasBlank(arc.Foreshadowing) {
 			return ErrInvalidTaskOutput
 		}
+		arcIDs[id] = true
 		arcsByVolume[strings.TrimSpace(arc.VolumeRef)] = append(arcsByVolume[strings.TrimSpace(arc.VolumeRef)], arc.Position)
 	}
 	for _, positions := range arcsByVolume {
@@ -280,11 +329,19 @@ func (output StoryRoadmapOutput) Validate() error {
 			return ErrInvalidTaskOutput
 		}
 	}
+	chapterIDs := map[string]bool{}
 	chapterPositions := make([]int, 0, len(output.NearTermChapters))
 	for _, chapter := range output.NearTermChapters {
-		if blank(chapter.Title) || blank(chapter.Goal) || blank(chapter.Conflict) || blank(chapter.Outcome) ||
-			hasBlank(chapter.Anchors) {
+		id := strings.TrimSpace(chapter.ID)
+		if id == "" || chapterIDs[id] || !arcIDs[strings.TrimSpace(chapter.ArcRef)] || blank(chapter.Title) ||
+			blank(chapter.Goal) || blank(chapter.Conflict) || blank(chapter.Outcome) {
 			return ErrInvalidTaskOutput
+		}
+		chapterIDs[id] = true
+		for _, anchor := range chapter.Anchors {
+			if !validAnchorStrength(anchor.Strength) || blank(anchor.Statement) {
+				return ErrInvalidTaskOutput
+			}
 		}
 		chapterPositions = append(chapterPositions, chapter.Position)
 	}

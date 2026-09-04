@@ -36,6 +36,21 @@ const (
 	OriginAuthor CandidateOrigin = "author"
 )
 
+// CandidateQuality 记录生成运行对该候选的最终质量结论；空值表示尚未评估。
+type CandidateQuality string
+
+const (
+	QualityNone        CandidateQuality = ""
+	QualityPassed      CandidateQuality = "passed"
+	QualityNeedsReview CandidateQuality = "needs_review"
+	QualityBlocked     CandidateQuality = "blocked"
+)
+
+// Blocked 表示该候选被质量门禁阻断，只能审阅，不能推进或入档。
+func (candidate Candidate) Blocked() bool {
+	return candidate.QualityStatus == QualityBlocked
+}
+
 type Candidate struct {
 	ID                     string
 	SessionID              string
@@ -52,6 +67,7 @@ type Candidate struct {
 	ContentSHA256          string
 	LockMap                map[string]bool
 	Status                 CandidateStatus
+	QualityStatus          CandidateQuality
 	Origin                 CandidateOrigin
 	UpstreamDigest         string
 	StaleReason            string
@@ -119,13 +135,17 @@ func (candidate Candidate) UnlockField(path string, now time.Time) (Candidate, e
 	return candidate, nil
 }
 
-// Confirm 把当前候选标为阶段确认，仍不写入正式资产。
+// Confirm 把当前候选标为阶段确认，仍不写入正式资产；stale、被替代或已放弃的候选不能确认。
 func (candidate Candidate) Confirm(now time.Time) (Candidate, error) {
 	if candidate.ID == "" {
 		return Candidate{}, ErrBlankValue
 	}
-	if candidate.Status == StatusSuperseded || candidate.Status == StatusDiscarded {
+	switch candidate.Status {
+	case StatusSuperseded, StatusDiscarded, StatusStale:
 		return Candidate{}, ErrInvalidTransition
+	}
+	if candidate.Blocked() {
+		return Candidate{}, ErrQualityBlocked
 	}
 	candidate.Status = StatusConfirmed
 	candidate.UpdatedAt = now.UTC()
@@ -196,6 +216,12 @@ func (candidate Candidate) Regenerate(newID, runID, artifactID, payloadJSON stri
 	next.SupersedesCandidateID = candidate.ID
 	next.UpstreamDigest = candidate.UpstreamDigest
 	return next, nil
+}
+
+// WithQuality 记录生成运行对该候选的最终质量结论。
+func (candidate Candidate) WithQuality(quality CandidateQuality) Candidate {
+	candidate.QualityStatus = quality
+	return candidate
 }
 
 func (candidate Candidate) rejectLockedChanges(payloadJSON string) error {

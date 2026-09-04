@@ -88,6 +88,29 @@ func requiredArchiveCandidates(
 	return proposal, people, roadmap, nil
 }
 
+// validateArchiveReadiness 校验确认前置条件：全链路候选质量未阻断、无未解决 stale、载荷有效。
+func validateArchiveReadiness(session creationdomain.Session, candidates []creationdomain.Candidate) error {
+	for _, stage := range []creationdomain.Stage{
+		creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap,
+	} {
+		current, ok := currentCandidate(candidates, stage)
+		if !ok {
+			return creationdomain.ErrStageIncomplete
+		}
+		if current.Blocked() {
+			return creationdomain.ErrQualityBlocked
+		}
+		if current.Status == creationdomain.StatusStale &&
+			!current.ExceptionMatches(liveUpstreamDigest(session, candidates, stage)) {
+			return creationdomain.ErrImpactUnresolved
+		}
+		if err := validateCandidatePayload(stage, current.PayloadJSON); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func buildArchivePlan(
 	session creationdomain.Session,
 	candidates []creationdomain.Candidate,
@@ -191,13 +214,21 @@ func (mapper *archiveMapper) addProposal(candidate creationdomain.Candidate, blu
 		}
 	}
 	for _, anchor := range blueprint.Anchors {
-		if err := mapper.addAnchor(candidate, anchor.Strength, "proposal", anchor.Statement); err != nil {
+		// scope_hint 映射到既有锚点作用域枚举：chapter → chapter_range，其余归入 proposal。
+		scope := strings.TrimSpace(anchor.ScopeHint)
+		if scope != "chapter" {
+			scope = "proposal"
+		} else {
+			scope = "chapter_range"
+		}
+		if err := mapper.addAnchor(candidate, anchor.Strength, scope, anchor.Statement); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// addAnchor 生成锚点操作：强度、作用域、语句与候选来源完整进入正式约束资产。
 func (mapper *archiveMapper) addAnchor(candidate creationdomain.Candidate, strength, scope, statement string) error {
 	after, err := encodeJSON(map[string]string{
 		"strength": strength, "scopeKind": scope, "statement": statement,
@@ -207,7 +238,7 @@ func (mapper *archiveMapper) addAnchor(candidate creationdomain.Candidate, stren
 	if err != nil {
 		return err
 	}
-	mapper.add(revisiondomain.OperationCreateAnchor, mapper.ids.NewID(), after, "确认方案锚点")
+	mapper.add(revisiondomain.OperationCreateAnchor, mapper.ids.NewID(), after, "确认锚点与禁写项")
 	return nil
 }
 
@@ -283,6 +314,12 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return err
 		}
 	}
+	// 人物世界禁写项必须完整映射为禁止锚点，不能留在候选 JSON 中丢失（P1-11）。
+	for _, statement := range cast.Forbidden {
+		if err := mapper.addAnchor(candidate, "forbidden", "proposal", statement); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -301,6 +338,8 @@ func (mapper *archiveMapper) addTypedAsset(
 	return nil
 }
 
+// addRoadmap 按 ID 映射四层路线图：卷/弧/章用稳定 ID 挂接父子引用，
+// 近期章必须指向实际弧（arc_ref），章节锚点全部落为锚点操作（P1-11）。
 func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road agentdomain.StoryRoadmapOutput) error {
 	bookID := mapper.ids.NewID()
 	bookAfter, err := encodeJSON(map[string]any{
@@ -317,13 +356,9 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 	}
 	mapper.outlines++
 	volumeIDs := map[string]string{}
-	firstVolume := ""
 	for _, volume := range road.Volumes {
 		id := mapper.ids.NewID()
-		volumeIDs[volume.Title] = id
-		if firstVolume == "" {
-			firstVolume = id
-		}
+		volumeIDs[strings.TrimSpace(volume.ID)] = id
 		after, err := encodeJSON(map[string]any{
 			"parentId": bookID, "level": storydomain.LevelVolume, "title": volume.Title,
 			"summary": volume.Goal, "goal": volume.Goal, "conflict": volume.Conflict,
@@ -338,16 +373,14 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		}
 		mapper.outlines++
 	}
-	firstArc := ""
+	arcIDs := map[string]string{}
 	for _, arc := range road.Arcs {
 		parent := volumeIDs[strings.TrimSpace(arc.VolumeRef)]
 		if parent == "" {
-			parent = firstVolume
+			return creationdomain.ErrStageIncomplete
 		}
 		id := mapper.ids.NewID()
-		if firstArc == "" {
-			firstArc = id
-		}
+		arcIDs[strings.TrimSpace(arc.ID)] = id
 		after, err := encodeJSON(map[string]any{
 			"parentId": parent, "level": storydomain.LevelArc, "title": arc.Title,
 			"summary": arc.CausalChain, "goal": arc.CausalChain, "conflict": arc.CharacterChange,
@@ -362,13 +395,14 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		}
 		mapper.outlines++
 	}
-	if firstVolume == "" || firstArc == "" {
-		return creationdomain.ErrStageIncomplete
-	}
 	for _, chapter := range road.NearTermChapters {
+		parent := arcIDs[strings.TrimSpace(chapter.ArcRef)]
+		if parent == "" {
+			return creationdomain.ErrStageIncomplete
+		}
 		id := mapper.ids.NewID()
 		after, err := encodeJSON(map[string]any{
-			"parentId": firstArc, "level": storydomain.LevelChapter, "title": chapter.Title,
+			"parentId": parent, "level": storydomain.LevelChapter, "title": chapter.Title,
 			"summary": chapter.Goal, "goal": chapter.Goal, "conflict": chapter.Conflict,
 			"outcome": chapter.Outcome, "position": chapter.Position,
 		})
@@ -380,6 +414,11 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 			return err
 		}
 		mapper.outlines++
+		for _, anchor := range chapter.Anchors {
+			if err := mapper.addAnchor(candidate, anchor.Strength, "roadmap_node", anchor.Statement); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

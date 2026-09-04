@@ -60,3 +60,21 @@ func (directive RevisionDirective) Digest() string {
 	payload, _ := json.Marshal(directive)
 	return SHA256Hex(payload)
 }
+
+// BaseCandidate 是作者定向修订的不可变基线：指向生成运行中的原始 Artifact，
+// 或应用层为人工版本物化的基线。内容与摘要随运行创建冻结，供修订节点渲染与校验。
+type BaseCandidate struct {
+	ArtifactID string `json:"artifact_id"`
+	Digest     string `json:"digest"`
+	Content    string `json:"content"`
+	// Blueprint 为 true 时基线渲染为 Prompt 的 Blueprint 变量，否则渲染为 Draft。
+	Blueprint bool `json:"blueprint"`
+}
+
+// Validate 要求基线身份、摘要与内容齐备，且摘要实际绑定冻结内容。
+func (base BaseCandidate) Validate() error {
+	if blank(base.ArtifactID) || !ValidSHA256(base.Digest) || blank(base.Content) || SHA256Hex([]byte(base.Content)) != base.Digest {
+		return ErrInvalidRevisionDirective
+	}
+	return nil
+}

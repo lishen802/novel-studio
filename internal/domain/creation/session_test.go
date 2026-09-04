@@ -57,7 +57,7 @@ func TestAdvanceFromDirectionsRequiresSelectedDirection(t *testing.T) {
 	if _, err := session.Advance(time.Unix(103, 0)); !errors.Is(err, ErrStageIncomplete) {
 		t.Fatalf("advance without selection error = %v", err)
 	}
-	session, err = session.SelectDirection("dir-1", time.Unix(104, 0))
+	session, err = session.SelectDirection("dir-1", "card-b", time.Unix(104, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestLookBackReturnsToReachedStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err = session.SelectDirection("dir-1", time.Unix(103, 0))
+	session, err = session.SelectDirection("dir-1", "card-a", time.Unix(103, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,11 +126,11 @@ func TestSetAdvanceModeAndAttachRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err = updated.AttachRun("run-1", time.Unix(111, 0))
+	updated, err = updated.AttachRun("op-1", "run-1", time.Unix(111, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.AdvanceMode != ModeAutoAdvance || updated.ActiveRunID != "run-1" || updated.BlockingReason != BlockNone {
+	if updated.AdvanceMode != ModeAutoAdvance || updated.ActiveRunID != "run-1" || updated.ActiveOperationID != "op-1" || updated.BlockingReason != BlockNone {
 		t.Fatalf("session = %#v", updated)
 	}
 	paused, err := updated.Pause(BlockFormalWrite, time.Unix(112, 0))
