@@ -56,6 +56,36 @@ const expected = [
     "export class RecoveryCopyResultView",
   ],
   ["ProjectView accessMode", models, "accessMode: string;"],
+  [
+    "CreationWorkbench declaration",
+    apiDeclaration,
+    "CreationWorkbench():Promise<creation.WorkbenchView>",
+  ],
+  [
+    "RecoverCreation declaration",
+    apiDeclaration,
+    "RecoverCreation():Promise<creation.WorkbenchView>",
+  ],
+  [
+    "ConfirmCreationGenerate declaration",
+    apiDeclaration,
+    "ConfirmCreationGenerate(arg1:main.CreationGenerateInput):Promise<creation.GenerateResult>",
+  ],
+  [
+    "ConfirmCreationArchive declaration",
+    apiDeclaration,
+    "ConfirmCreationArchive(arg1:main.CreationArchiveInput):Promise<creation.ArchiveResult>",
+  ],
+  ["CreationWorkbench runtime binding", apiRuntime, "export function CreationWorkbench()"],
+  ["RecoverCreation runtime binding", apiRuntime, "export function RecoverCreation()"],
+  [
+    "ConfirmCreationGenerate runtime binding",
+    apiRuntime,
+    "export function ConfirmCreationGenerate(arg1)",
+  ],
+  ["CreationGenerateInput model", models, "export class CreationGenerateInput"],
+  ["CreationArchiveInput model", models, "export class CreationArchiveInput"],
+  ["Creation WorkbenchView model", models, "export class WorkbenchView"],
 ];
 
 for (const [name, source, value] of expected) {
@@ -64,4 +94,4 @@ for (const [name, source, value] of expected) {
   }
 }
 
-console.log("Verified generated Wails project lifecycle bindings.");
+console.log("Verified generated Wails project lifecycle and creation bindings.");

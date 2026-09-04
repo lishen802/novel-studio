@@ -16,11 +16,13 @@ import (
 
 	"github.com/lishen802/novel-studio/internal/application/appsettings"
 	"github.com/lishen802/novel-studio/internal/application/appshell"
+	"github.com/lishen802/novel-studio/internal/application/creation"
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
+	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
@@ -811,6 +813,36 @@ func TestSafeDesktopErrorClassifiesManuscriptImportFailures(t *testing.T) {
 			}
 			if containsAny(err.Error(), "SELECT /Users", "/Users/author") {
 				t.Fatalf("unsafe detail leaked: %q", err)
+			}
+		})
+	}
+}
+
+func TestSafeDesktopErrorClassifiesCreationFailuresWithoutLeakingBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		code    desktopErrorCode
+		message string
+	}{
+		{name: "digest", err: creation.ErrConfirmationRequired, code: errorCreationConfirmation, message: "创作费用确认已变化，请重新预览并确认。"},
+		{name: "impact", err: creationdomain.ErrImpactUnresolved, code: errorCreationImpact, message: "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"},
+		{name: "unavailable workspace", err: workspace.ErrCreationUnavailable, code: errorFeatureNotAvailable, message: "当前项目无法打开创作工作台。"},
+		{name: "run active", err: creation.ErrRunActive, code: errorAgentRunActive, message: "已有创作运行正在进行，请等待完成或取消后再试。"},
+		{name: "unavailable service", err: creation.ErrUnavailable, code: errorFeatureNotAvailable, message: "创作编排服务尚未就绪。"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var safe *desktopError
+			err := safeDesktopError(errors.Join(test.err, errors.New("守关人必须放走仇敌 SELECT /Users/author/private.md")))
+			if !errors.As(err, &safe) {
+				t.Fatalf("safeDesktopError(%v) = %#v", test.err, err)
+			}
+			if safe.Code != test.code || safe.Message != test.message {
+				t.Fatalf("safe error = %#v", safe)
+			}
+			if containsAny(safe.Error(), "守关人", "SELECT /Users", "/Users/author") {
+				t.Fatalf("unsafe detail leaked: %q", safe.Error())
 			}
 		})
 	}
