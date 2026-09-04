@@ -12,35 +12,25 @@ import (
 	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 )
 
-// SaveCreationSession 以项目为唯一键保存或更新原创构建会话。
-func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.Session) error {
+// CreateCreationSession 原子创建或返回已有会话，重复初始化不替换会话身份及作者内容。
+func (s *Store) CreateCreationSession(ctx context.Context, session creationdomain.Session) (creationdomain.Session, error) {
 	kept, err := encodeKeptDirections(session.KeptDirectionIDs)
 	if err != nil {
-		return err
+		return creationdomain.Session{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return creationdomain.Session{}, databaseOperationError("begin creation session", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO creation_sessions (
 			id, project_id, branch_id, stage, advance_mode, intent_text,
 			selected_direction_candidate_id, selected_direction_card_id, kept_direction_ids_json,
 			blocking_reason, active_operation_id, active_run_id,
 			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(project_id) DO UPDATE SET
-			id = excluded.id,
-			branch_id = excluded.branch_id,
-			stage = excluded.stage,
-			advance_mode = excluded.advance_mode,
-			intent_text = excluded.intent_text,
-			selected_direction_candidate_id = excluded.selected_direction_candidate_id,
-			selected_direction_card_id = excluded.selected_direction_card_id,
-			kept_direction_ids_json = excluded.kept_direction_ids_json,
-			blocking_reason = excluded.blocking_reason,
-			active_operation_id = excluded.active_operation_id,
-			active_run_id = excluded.active_run_id,
-			archive_digest = excluded.archive_digest,
-			archive_idempotency_key = excluded.archive_idempotency_key,
-			archive_change_set_id = excluded.archive_change_set_id,
-			updated_at = excluded.updated_at
+		ON CONFLICT(project_id) DO NOTHING
 	`,
 		session.ID, session.ProjectID, session.BranchID, string(session.Stage), string(session.AdvanceMode),
 		session.IntentText, session.SelectedDirectionCandidateID, session.SelectedDirectionCardID, string(kept),
@@ -49,20 +39,39 @@ func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.
 		formatTime(session.CreatedAt), formatTime(session.UpdatedAt),
 	)
 	if err != nil {
-		return databaseOperationError("save creation session", err)
+		return creationdomain.Session{}, databaseOperationError("create creation session", err)
 	}
-	return nil
+	existing, err := readCreationSession(ctx, tx, session.ProjectID)
+	if err != nil {
+		return creationdomain.Session{}, err
+	}
+	if existing.BranchID != session.BranchID {
+		return creationdomain.Session{}, creationdomain.ErrSessionVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return creationdomain.Session{}, databaseOperationError("commit creation session", err)
+	}
+	return existing, nil
 }
 
 func (s *Store) CreationSession(ctx context.Context, projectID string) (creationdomain.Session, error) {
+	return readCreationSession(ctx, s.db, projectID)
+}
+
+type creationSessionReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func readCreationSession(ctx context.Context, reader creationSessionReader, projectID string) (creationdomain.Session, error) {
 	var session creationdomain.Session
 	var selected, selectedCard, activeOperation sql.NullString
 	var keptJSON, createdAt, updatedAt string
-	err := s.db.QueryRowContext(ctx, `
+	err := reader.QueryRowContext(ctx, `
 		SELECT id, project_id, branch_id, stage, advance_mode, intent_text,
 			selected_direction_candidate_id, selected_direction_card_id, kept_direction_ids_json,
 			blocking_reason, active_operation_id, active_run_id,
-			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
+			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at,
+			content_version, run_slot_version
 		FROM creation_sessions
 		WHERE project_id = ?
 	`, strings.TrimSpace(projectID)).Scan(
@@ -70,6 +79,7 @@ func (s *Store) CreationSession(ctx context.Context, projectID string) (creation
 		&session.IntentText, &selected, &selectedCard, &keptJSON,
 		&session.BlockingReason, &activeOperation, &session.ActiveRunID,
 		&session.ArchiveDigest, &session.ArchiveIdempotencyKey, &session.ArchiveChangeSetID, &createdAt, &updatedAt,
+		&session.ContentVersion, &session.RunSlotVersion,
 	)
 	if err != nil {
 		return creationdomain.Session{}, fmt.Errorf("read creation session: %w", err)
@@ -95,6 +105,66 @@ func (s *Store) CreationSession(ctx context.Context, projectID string) (creation
 		return creationdomain.Session{}, fmt.Errorf("parse creation session updated_at: %w", err)
 	}
 	return session, nil
+}
+
+type creationSessionWriter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// SaveCreationSession 仅按内容版本更新作者字段，不带回旧快照里的运行槽和暂停原因。
+func (s *Store) SaveCreationSession(ctx context.Context, session creationdomain.Session) error {
+	return updateCreationSession(ctx, s.db, session)
+}
+
+// updateCreationSession 供普通保存与入档事务共用，避免事务路径绕过内容 CAS。
+func updateCreationSession(ctx context.Context, writer creationSessionWriter, session creationdomain.Session) error {
+	kept, err := encodeKeptDirections(session.KeptDirectionIDs)
+	if err != nil {
+		return err
+	}
+	result, err := writer.ExecContext(ctx, `
+		UPDATE creation_sessions SET stage = ?, advance_mode = ?, intent_text = ?,
+			selected_direction_candidate_id = ?, selected_direction_card_id = ?, kept_direction_ids_json = ?,
+			archive_digest = ?, archive_idempotency_key = ?, archive_change_set_id = ?,
+			content_version = content_version + 1,
+			updated_at = CASE WHEN RTRIM(updated_at, 'Z') < RTRIM(?, 'Z') THEN ? ELSE updated_at END
+		WHERE id = ? AND project_id = ? AND branch_id = ? AND content_version = ?
+	`, string(session.Stage), string(session.AdvanceMode), session.IntentText,
+		session.SelectedDirectionCandidateID, session.SelectedDirectionCardID, string(kept),
+		session.ArchiveDigest, session.ArchiveIdempotencyKey, session.ArchiveChangeSetID,
+		formatTime(session.UpdatedAt), formatTime(session.UpdatedAt), session.ID, session.ProjectID, session.BranchID, session.ContentVersion)
+	return creationSessionCASResult(result, err)
+}
+
+// SaveCreationRunSlot 独立比较运行槽版本；旧完成回调无法恢复已清空的槽或清除较新的运行。
+func (s *Store) SaveCreationRunSlot(ctx context.Context, session creationdomain.Session) error {
+	return updateCreationRunSlot(ctx, s.db, session)
+}
+
+// updateCreationRunSlot 允许入档事务同时校验并清除原暂停原因，不覆盖更新后的运行状态。
+func updateCreationRunSlot(ctx context.Context, writer creationSessionWriter, session creationdomain.Session) error {
+	result, err := writer.ExecContext(ctx, `
+		UPDATE creation_sessions SET active_operation_id = ?, active_run_id = ?, blocking_reason = ?,
+			run_slot_version = run_slot_version + 1,
+			updated_at = CASE WHEN RTRIM(updated_at, 'Z') < RTRIM(?, 'Z') THEN ? ELSE updated_at END
+		WHERE id = ? AND project_id = ? AND branch_id = ? AND run_slot_version = ?
+	`, session.ActiveOperationID, session.ActiveRunID, string(session.BlockingReason),
+		formatTime(session.UpdatedAt), formatTime(session.UpdatedAt), session.ID, session.ProjectID, session.BranchID, session.RunSlotVersion)
+	return creationSessionCASResult(result, err)
+}
+
+func creationSessionCASResult(result sql.Result, err error) error {
+	if err != nil {
+		return databaseOperationError("update creation session", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return databaseOperationError("read creation session update result", err)
+	}
+	if count != 1 {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	return nil
 }
 
 // SaveCreationCandidate 写入新的候选版本，不覆盖已有行。

@@ -19,7 +19,11 @@ var (
 )
 
 type Store interface {
+	CreateSession(ctx context.Context, session creationdomain.Session) (creationdomain.Session, error)
+	// SaveSession 以 ContentVersion 为前置条件，仅写作者内容；成功后内容版本加一。
 	SaveSession(ctx context.Context, session creationdomain.Session) error
+	// SaveRunSlot 以 RunSlotVersion 为前置条件，仅写运行引用与暂停原因；成功后槽版本加一。
+	SaveRunSlot(ctx context.Context, session creationdomain.Session) error
 	Session(ctx context.Context, projectID string) (creationdomain.Session, error)
 	SaveCandidate(ctx context.Context, candidate creationdomain.Candidate) error
 	UpdateCandidate(ctx context.Context, candidate creationdomain.Candidate) error

@@ -198,6 +198,9 @@ func (service *Service) lockProject(projectID string) *sync.Mutex {
 func (service *Service) EnsureSession(ctx context.Context, projectID, branchID string) (creationdomain.Session, error) {
 	session, err := service.store.Session(ctx, projectID)
 	if err == nil {
+		if session.BranchID != branchID {
+			return creationdomain.Session{}, creationdomain.ErrSessionVersionConflict
+		}
 		return session, nil
 	}
 	if !isMissingSession(err) {
@@ -207,10 +210,16 @@ func (service *Service) EnsureSession(ctx context.Context, projectID, branchID s
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
-		return creationdomain.Session{}, err
+	return service.store.CreateSession(ctx, session)
+}
+
+// saveSession 按读取时内容版本写入；冲突交还调用方，不自动重放旧作者命令。
+func (service *Service) saveSession(ctx context.Context, session *creationdomain.Session) error {
+	if err := service.store.SaveSession(ctx, *session); err != nil {
+		return err
 	}
-	return session, nil
+	session.ContentVersion++
+	return nil
 }
 
 // SaveIntent 保存作者创意文本，不创建运行。
@@ -223,7 +232,7 @@ func (service *Service) SaveIntent(ctx context.Context, projectID, text string) 
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
+	if err := service.saveSession(ctx, &session); err != nil {
 		return creationdomain.Session{}, err
 	}
 	if err := service.refreshImpact(ctx, session); err != nil {
@@ -242,7 +251,7 @@ func (service *Service) SetAdvanceMode(ctx context.Context, projectID string, mo
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
+	if err := service.saveSession(ctx, &session); err != nil {
 		return creationdomain.Session{}, err
 	}
 	return session, nil
@@ -268,7 +277,7 @@ func (service *Service) SelectDirection(ctx context.Context, projectID, candidat
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
+	if err := service.saveSession(ctx, &session); err != nil {
 		return creationdomain.Session{}, err
 	}
 	if err := service.refreshImpact(ctx, session); err != nil {
@@ -300,7 +309,7 @@ func (service *Service) updateKeptDirection(ctx context.Context, projectID, card
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
+	if err := service.saveSession(ctx, &session); err != nil {
 		return creationdomain.Session{}, err
 	}
 	return session, nil
@@ -323,7 +332,7 @@ func (service *Service) AdvanceStage(ctx context.Context, projectID string) (cre
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
+	if err := service.saveSession(ctx, &session); err != nil {
 		return creationdomain.Session{}, err
 	}
 	return session, nil
@@ -339,7 +348,7 @@ func (service *Service) LookBackStage(ctx context.Context, projectID string, tar
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, session); err != nil {
+	if err := service.saveSession(ctx, &session); err != nil {
 		return creationdomain.Session{}, err
 	}
 	return session, nil
@@ -482,7 +491,7 @@ func (service *Service) ConfirmGenerate(ctx context.Context, request GenerateReq
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		if err := service.store.SaveSession(ctx, latest); err != nil {
+		if err := service.saveSession(ctx, &latest); err != nil {
 			return GenerateResult{}, err
 		}
 	}
@@ -630,7 +639,7 @@ func (service *Service) startStageRun(
 	if err != nil {
 		return agentdomain.Run{}, err
 	}
-	// 附加运行槽前重读最新会话，避免覆盖作者期间的修改（P1-7）。
+	// 重读后用独立槽版本 CAS；读取与写入之间的作者修改不参与回写。
 	latest, err := service.store.Session(ctx, session.ProjectID)
 	if err != nil {
 		return agentdomain.Run{}, err
@@ -642,7 +651,7 @@ func (service *Service) startStageRun(
 	if err != nil {
 		return agentdomain.Run{}, err
 	}
-	if err := service.store.SaveSession(ctx, latest); err != nil {
+	if err := service.store.SaveRunSlot(ctx, latest); err != nil {
 		return agentdomain.Run{}, err
 	}
 	return created, nil
@@ -829,7 +838,7 @@ func (service *Service) autoAdvance(lease RunLease, result GenerateResult, reque
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		if latest.AdvanceMode != creationdomain.ModeAutoAdvance || latest.Stage != session.Stage {
+		if latest.ContentVersion != session.ContentVersion || latest.AdvanceMode != creationdomain.ModeAutoAdvance || latest.Stage != session.Stage {
 			result.Session = latest
 			return result, nil
 		}
@@ -849,7 +858,7 @@ func (service *Service) autoAdvance(lease RunLease, result GenerateResult, reque
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		if err := service.store.SaveSession(storeCtx, latest); err != nil {
+		if err := service.saveSession(storeCtx, &latest); err != nil {
 			return GenerateResult{}, err
 		}
 		session = latest
@@ -868,7 +877,11 @@ func (service *Service) autoAdvance(lease RunLease, result GenerateResult, reque
 			unlock.Unlock()
 			return result, leaseErr
 		}
-		service.clearRunSlot(storeCtx, session.ProjectID, result.RunID)
+		if err := service.clearRunSlot(storeCtx, session.ProjectID, result.RunID); err != nil {
+			childRelease()
+			unlock.Unlock()
+			return GenerateResult{}, err
+		}
 		run, startErr := service.startStageRun(childLease.Context(), runID, result.Session.ActiveOperationID, session, request, session.Stage, sources)
 		unlock.Unlock()
 		if startErr != nil {
@@ -891,26 +904,36 @@ func (service *Service) pauseSession(ctx context.Context, session creationdomain
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
+	if latest.ActiveRunID != session.ActiveRunID || latest.RunSlotVersion != session.RunSlotVersion {
+		return latest, creationdomain.ErrSessionVersionConflict
+	}
 	paused, err := latest.Pause(reason, service.clock.Now())
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
-	if err := service.store.SaveSession(ctx, paused); err != nil {
+	if err := service.store.SaveRunSlot(ctx, paused); err != nil {
 		return creationdomain.Session{}, err
 	}
-	return paused, nil
+	return service.store.Session(ctx, session.ProjectID)
 }
 
 // clearRunSlot 只在运行槽仍指向本次运行时清除，不覆盖作者期间的修改。
-func (service *Service) clearRunSlot(ctx context.Context, projectID, runID string) {
-	latest, err := service.store.Session(ctx, projectID)
-	if err != nil {
-		return
+func (service *Service) clearRunSlot(ctx context.Context, projectID, runID string) error {
+	// 仅对同一运行的幂等清理重试；每次都重新核对归属，绝不重放内容写入。
+	for range 3 {
+		latest, err := service.store.Session(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		if latest.ActiveRunID != runID {
+			return nil
+		}
+		err = service.store.SaveRunSlot(ctx, latest.ClearActiveRun(service.clock.Now()))
+		if !errors.Is(err, creationdomain.ErrSessionVersionConflict) {
+			return err
+		}
 	}
-	if latest.ActiveRunID != runID {
-		return
-	}
-	_ = service.store.SaveSession(ctx, latest.ClearActiveRun(service.clock.Now()))
+	return creationdomain.ErrSessionVersionConflict
 }
 
 // CancelRun 取消进行中的生成；进程内无对应运行时清理恢复后残留的运行槽。
@@ -926,8 +949,7 @@ func (service *Service) CancelRun(ctx context.Context, projectID string) error {
 		service.coordinator.Cancel(session.ActiveRunID)
 		return nil
 	}
-	service.clearRunSlot(ctx, projectID, session.ActiveRunID)
-	return nil
+	return service.clearRunSlot(ctx, projectID, session.ActiveRunID)
 }
 
 // Recover 恢复会话状态，但绝不自动继续未重新确认的付费运行。
@@ -956,21 +978,15 @@ func (service *Service) reconcileInterruptedRun(ctx context.Context, session cre
 		if materializeErr := service.materializeRunResult(ctx, session, run); materializeErr != nil {
 			return session, materializeErr
 		}
-		latest, loadErr := service.store.Session(ctx, session.ProjectID)
-		if loadErr != nil {
-			return session, loadErr
-		}
-		cleared := latest.ClearActiveRun(service.clock.Now())
-		if saveErr := service.store.SaveSession(ctx, cleared); saveErr != nil {
+		if saveErr := service.clearRunSlot(ctx, session.ProjectID, run.ID); saveErr != nil {
 			return session, saveErr
 		}
-		return cleared, nil
+		return service.store.Session(ctx, session.ProjectID)
 	case agentdomain.RunFailed, agentdomain.RunCancelled:
-		cleared := session.ClearActiveRun(service.clock.Now())
-		if saveErr := service.store.SaveSession(ctx, cleared); saveErr != nil {
+		if saveErr := service.clearRunSlot(ctx, session.ProjectID, session.ActiveRunID); saveErr != nil {
 			return session, saveErr
 		}
-		return cleared, nil
+		return service.store.Session(ctx, session.ProjectID)
 	default:
 		return service.markInterrupted(ctx, session)
 	}
@@ -983,10 +999,10 @@ func (service *Service) markInterrupted(ctx context.Context, session creationdom
 	if err != nil {
 		return session, err
 	}
-	if err := service.store.SaveSession(ctx, paused); err != nil {
+	if err := service.store.SaveRunSlot(ctx, paused); err != nil {
 		return session, err
 	}
-	return paused, nil
+	return service.store.Session(ctx, session.ProjectID)
 }
 
 // materializeRunResult 结果重放：运行完成但候选未落库时，按运行产物物化一次候选，不调用模型。
@@ -1192,6 +1208,8 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	}); err != nil {
 		return ArchiveResult{}, err
 	}
+	session.ContentVersion++
+	session.RunSlotVersion++
 	return ArchiveResult{Session: session, ChangeSetID: changeSet.ID}, nil
 }
 

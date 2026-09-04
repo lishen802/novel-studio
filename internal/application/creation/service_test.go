@@ -454,7 +454,7 @@ func TestRecoverDoesNotResumePaidRun(t *testing.T) {
 	service, store, _ := newTestService(t, kernel, nil)
 	session := seedIntentSession(t, service)
 	session.ActiveRunID = "run-stale"
-	if err := store.SaveSession(context.Background(), session); err != nil {
+	if err := store.SaveRunSlot(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := service.Recover(context.Background(), session.ProjectID)
@@ -520,7 +520,7 @@ func TestRecoverMaterializesCompletedRunOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	completed.ActiveRunID = result.RunID
-	if err := store.SaveSession(context.Background(), completed); err != nil {
+	if err := store.SaveRunSlot(context.Background(), completed); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := service.Recover(context.Background(), "project-1")

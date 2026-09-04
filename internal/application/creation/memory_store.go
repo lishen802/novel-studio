@@ -65,11 +65,61 @@ func (store *memoryStore) UpdateOperation(_ context.Context, operation creationd
 	return nil
 }
 
+// CreateSession 与持久化端口一致：重复初始化只返回原会话。
+func (store *memoryStore) CreateSession(_ context.Context, session creationdomain.Session) (creationdomain.Session, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if existing, ok := store.sessions[session.ProjectID]; ok {
+		if existing.BranchID != session.BranchID {
+			return creationdomain.Session{}, creationdomain.ErrSessionVersionConflict
+		}
+		return cloneSession(existing), nil
+	}
+	session.ContentVersion, session.RunSlotVersion = 1, 0
+	store.sessions[session.ProjectID] = cloneSession(session)
+	return cloneSession(session), nil
+}
+
+// SaveSession 仅更新内容域，保持与 SQLite 相同的版本冲突语义。
 func (store *memoryStore) SaveSession(_ context.Context, session creationdomain.Session) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	store.sessions[session.ProjectID] = session
+	current, ok := store.sessions[session.ProjectID]
+	if !ok || current.ID != session.ID || current.BranchID != session.BranchID || current.ContentVersion != session.ContentVersion {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	session.ContentVersion++
+	session.RunSlotVersion = current.RunSlotVersion
+	session.ActiveOperationID, session.ActiveRunID, session.BlockingReason = current.ActiveOperationID, current.ActiveRunID, current.BlockingReason
+	session.CreatedAt = current.CreatedAt
+	if session.UpdatedAt.Before(current.UpdatedAt) {
+		session.UpdatedAt = current.UpdatedAt
+	}
+	store.sessions[session.ProjectID] = cloneSession(session)
 	return nil
+}
+
+// SaveRunSlot 不让运行状态更新覆盖作者字段，也不接受较旧运行槽快照。
+func (store *memoryStore) SaveRunSlot(_ context.Context, session creationdomain.Session) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, ok := store.sessions[session.ProjectID]
+	if !ok || current.ID != session.ID || current.BranchID != session.BranchID || current.RunSlotVersion != session.RunSlotVersion {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	current.ActiveOperationID, current.ActiveRunID, current.BlockingReason = session.ActiveOperationID, session.ActiveRunID, session.BlockingReason
+	current.RunSlotVersion++
+	if current.UpdatedAt.Before(session.UpdatedAt) {
+		current.UpdatedAt = session.UpdatedAt
+	}
+	store.sessions[session.ProjectID] = current
+	return nil
+}
+
+// cloneSession 隔离保留卡切片，防止调用方绕过仓储版本检查修改内存状态。
+func cloneSession(session creationdomain.Session) creationdomain.Session {
+	session.KeptDirectionIDs = append([]string(nil), session.KeptDirectionIDs...)
+	return session
 }
 
 func (store *memoryStore) Session(_ context.Context, projectID string) (creationdomain.Session, error) {
@@ -79,7 +129,7 @@ func (store *memoryStore) Session(_ context.Context, projectID string) (creation
 	if !ok {
 		return creationdomain.Session{}, ErrSessionNotFound
 	}
-	return session, nil
+	return cloneSession(session), nil
 }
 
 func (store *memoryStore) SaveCandidate(_ context.Context, candidate creationdomain.Candidate) error {

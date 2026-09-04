@@ -51,7 +51,10 @@ func (s *Store) ApplyCreationArchive(
 	if err := persistChangeSetDecision(ctx, tx, changeSet); err != nil {
 		return err
 	}
-	if err := persistCreationSessionTx(ctx, tx, session); err != nil {
+	if err := updateCreationSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := updateCreationRunSlot(ctx, tx, session); err != nil {
 		return err
 	}
 	for _, candidate := range candidates {
@@ -81,47 +84,6 @@ func (s *Store) ApplyCreationArchive(
 	}
 	if err := tx.Commit(); err != nil {
 		return databaseOperationError("commit creation archive", err)
-	}
-	return nil
-}
-
-func persistCreationSessionTx(ctx context.Context, tx *sql.Tx, session creationdomain.Session) error {
-	kept, err := encodeKeptDirections(session.KeptDirectionIDs)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO creation_sessions (
-			id, project_id, branch_id, stage, advance_mode, intent_text,
-			selected_direction_candidate_id, selected_direction_card_id, kept_direction_ids_json,
-			blocking_reason, active_operation_id, active_run_id,
-			archive_digest, archive_idempotency_key, archive_change_set_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(project_id) DO UPDATE SET
-			id = excluded.id,
-			branch_id = excluded.branch_id,
-			stage = excluded.stage,
-			advance_mode = excluded.advance_mode,
-			intent_text = excluded.intent_text,
-			selected_direction_candidate_id = excluded.selected_direction_candidate_id,
-			selected_direction_card_id = excluded.selected_direction_card_id,
-			kept_direction_ids_json = excluded.kept_direction_ids_json,
-			blocking_reason = excluded.blocking_reason,
-			active_operation_id = excluded.active_operation_id,
-			active_run_id = excluded.active_run_id,
-			archive_digest = excluded.archive_digest,
-			archive_idempotency_key = excluded.archive_idempotency_key,
-			archive_change_set_id = excluded.archive_change_set_id,
-			updated_at = excluded.updated_at
-	`,
-		session.ID, session.ProjectID, session.BranchID, string(session.Stage), string(session.AdvanceMode),
-		session.IntentText, session.SelectedDirectionCandidateID, session.SelectedDirectionCardID, string(kept),
-		string(session.BlockingReason), session.ActiveOperationID, session.ActiveRunID,
-		session.ArchiveDigest, session.ArchiveIdempotencyKey, session.ArchiveChangeSetID,
-		formatTime(session.CreatedAt), formatTime(session.UpdatedAt),
-	)
-	if err != nil {
-		return databaseOperationError("save creation session after archive", err)
 	}
 	return nil
 }

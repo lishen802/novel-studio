@@ -48,6 +48,15 @@ func TestCreationKernelRejectsStaleLeaseEvenWithoutCancellation(t *testing.T) {
 		t.Fatalf("stale lease reached backend: %v", err)
 	}
 	creationStore := creationStore{guard: guarded}
+	if _, err := creationStore.CreateSession(context.WithoutCancel(lease.Context()), creationdomain.Session{}); !errors.Is(err, creationapp.ErrStaleStore) {
+		t.Fatalf("stale initialization reached backend: %v", err)
+	}
+	if err := creationStore.SaveSession(context.WithoutCancel(lease.Context()), creationdomain.Session{}); !errors.Is(err, creationapp.ErrStaleStore) {
+		t.Fatalf("stale content reached backend: %v", err)
+	}
+	if err := creationStore.SaveRunSlot(context.WithoutCancel(lease.Context()), creationdomain.Session{}); !errors.Is(err, creationapp.ErrStaleStore) {
+		t.Fatalf("stale run slot reached backend: %v", err)
+	}
 	if err := creationStore.SaveCandidate(context.WithoutCancel(lease.Context()), creationdomain.Candidate{}); !errors.Is(err, creationapp.ErrStaleStore) {
 		t.Fatalf("stale candidate reached backend: %v", err)
 	}

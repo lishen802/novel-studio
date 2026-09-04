@@ -26,6 +26,72 @@ func TestConfirmArchiveRejectsWithoutSelectedDirection(t *testing.T) {
 	}
 }
 
+// archiveSessionConflictStore 在入档事务前插入作者保存，验证事务不能用旧会话覆盖新内容。
+type archiveSessionConflictStore struct{ Store }
+
+func (store archiveSessionConflictStore) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
+	latest, err := store.Session(ctx, apply.Session.ProjectID)
+	if err != nil {
+		return err
+	}
+	latest.IntentText = "确认入档期间保存的新意图"
+	if err := store.SaveSession(ctx, latest); err != nil {
+		return err
+	}
+	return store.Store.ApplyArchive(ctx, apply)
+}
+
+func TestArchiveSessionCASRollsBackWholeTransaction(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: archiveSessionConflictStore{bridge}, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-conflict"}); !errors.Is(err, creationdomain.ErrSessionVersionConflict) {
+		t.Fatalf("旧会话入档未返回冲突: %v", err)
+	}
+	latest, err := bridge.Session(ctx, project.ID)
+	if err != nil || latest.IntentText != "确认入档期间保存的新意图" || latest.ArchiveChangeSetID != "" {
+		t.Fatalf("事务覆盖作者内容: %+v, %v", latest, err)
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil || len(characters) != 0 {
+		t.Fatalf("失败入档留下人物: %+v, %v", characters, err)
+	}
+	nodes, err := raw.ListOutlineNodes(ctx)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("失败入档留下路线图: %+v, %v", nodes, err)
+	}
+	currentProject, err := raw.Project(ctx)
+	if err != nil || currentProject.Title != project.Title {
+		t.Fatalf("失败入档改变项目: %+v, %v", currentProject, err)
+	}
+	workbench, err := raw.WorkbenchState(ctx)
+	if err != nil || workbench.Stage == projectdomain.StageWriting || workbench.ArchiveStatus == "confirmed" {
+		t.Fatalf("失败入档改变工作台: %+v, %v", workbench, err)
+	}
+	candidates, err := bridge.ListCandidates(ctx, latest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range candidates {
+		if candidate.Status == creationdomain.StatusConfirmed {
+			t.Fatalf("失败入档确认了候选: %s", candidate.ID)
+		}
+	}
+}
+
 func TestConfirmArchiveWritesAssetsIdempotently(t *testing.T) {
 	ctx := context.Background()
 	raw, project := sqliteCreateStore(t)
@@ -35,7 +101,14 @@ func TestConfirmArchiveWritesAssetsIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedArchiveSession(t, bridge, project.ID)
+	session := seedArchiveSession(t, bridge, project.ID)
+	session, err = session.Pause(creationdomain.BlockFormalWrite, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.SaveRunSlot(ctx, session); err != nil {
+		t.Fatal(err)
+	}
 	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
 		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
 	}); err != nil {
@@ -53,6 +126,10 @@ func TestConfirmArchiveWritesAssetsIdempotently(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	storedSession, err := bridge.Session(ctx, project.ID)
+	if err != nil || storedSession.ContentVersion != first.Session.ContentVersion || storedSession.RunSlotVersion != first.Session.RunSlotVersion || storedSession.BlockingReason != creationdomain.BlockNone {
+		t.Fatalf("入档版本或暂停原因未对齐: %+v, %v", storedSession, err)
 	}
 	characters, err := raw.ListCharacters(ctx)
 	if err != nil || len(characters) != 1 || characters[0].Name != "阿绫" {
@@ -209,7 +286,7 @@ func seedArchiveSession(t *testing.T, store Store, projectID string) creationdom
 	}
 	session.Stage = creationdomain.StageArchiveConfirm
 	session.SelectedDirectionCandidateID = dir.ID
-	if err := store.SaveSession(context.Background(), session); err != nil {
+	if session, err = store.CreateSession(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
 	for _, candidate := range []creationdomain.Candidate{dir, proposal, people, roadmap} {

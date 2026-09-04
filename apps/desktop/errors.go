@@ -114,6 +114,7 @@ const (
 	errorHarnessConfirmation            desktopErrorCode = "HARNESS_CONFIRMATION_REQUIRED"
 	errorHarnessRatingExists            desktopErrorCode = "HARNESS_RATING_EXISTS"
 	errorCreationConfirmation           desktopErrorCode = "CREATION_CONFIRMATION_REQUIRED"
+	errorCreationVersionConflict        desktopErrorCode = "CREATION_VERSION_CONFLICT"
 	errorCreationImpact                 desktopErrorCode = "CREATION_IMPACT_UNRESOLVED"
 )
 
@@ -147,6 +148,8 @@ func safeDesktopError(err error) error {
 		code, message = errorHarnessConfirmation, "运行配置或费用确认已变化，请重新预览并确认。"
 	case errors.Is(err, creation.ErrConfirmationRequired):
 		code, message = errorCreationConfirmation, "创作费用确认已变化，请重新预览并确认。"
+	case errors.Is(err, creationdomain.ErrSessionVersionConflict):
+		code, message = errorCreationVersionConflict, "创作会话已更新，本次修改未覆盖已有内容。请保留当前输入，重新读取并比较后再保存。"
 	case errors.Is(err, creationdomain.ErrImpactUnresolved):
 		code, message = errorCreationImpact, "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"
 	case errors.Is(err, workspace.ErrCreationUnavailable):

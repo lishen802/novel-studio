@@ -36,7 +36,7 @@ func TestWorkbenchReadDoesNotRecoverInterruptedRun(t *testing.T) {
 	service, store, kernel := newTestService(t, newFakeKernel(), nil)
 	session := seedIntentSession(t, service)
 	session, _ = session.AttachRun("operation-1", "run-1", testClock{}.Now())
-	if err := store.SaveSession(context.Background(), session); err != nil {
+	if err := store.SaveRunSlot(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
 	kernel.runs["run-1"] = agentdomain.Run{ID: "run-1", Status: agentdomain.RunFailed}

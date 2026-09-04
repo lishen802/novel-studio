@@ -17,6 +17,17 @@ type creationStore struct {
 
 var _ creationapp.Store = creationStore{}
 
+// CreateSession 在工作区短锁内原子创建或返回已有会话。
+func (store creationStore) CreateSession(ctx context.Context, proposed creationdomain.Session) (session creationdomain.Session, err error) {
+	err = store.guard.access(ctx, true, func() error { session, err = store.inner.CreateSession(ctx, proposed); return err })
+	return
+}
+
+// SaveRunSlot 对独立的运行槽更新同样验证工作区代次和租约。
+func (store creationStore) SaveRunSlot(ctx context.Context, session creationdomain.Session) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.SaveRunSlot(ctx, session) })
+}
+
 // SaveSession 在访问创作存储前核对工作区和运行租约。
 func (store creationStore) SaveSession(ctx context.Context, session creationdomain.Session) error {
 	return store.guard.access(ctx, true, func() error { return store.inner.SaveSession(ctx, session) })

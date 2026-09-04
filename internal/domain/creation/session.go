@@ -1,14 +1,19 @@
 package creation
 
 import (
+	"errors"
 	"strings"
 	"time"
 )
+
+var ErrSessionVersionConflict = errors.New("creation session version conflict")
 
 type Session struct {
 	ID                           string
 	ProjectID                    string
 	BranchID                     string
+	ContentVersion               int64
+	RunSlotVersion               int64
 	Stage                        Stage
 	AdvanceMode                  AdvanceMode
 	IntentText                   string
@@ -34,7 +39,8 @@ func NewSession(id, projectID, branchID string, now time.Time) (Session, error) 
 	now = now.UTC()
 	return Session{
 		ID: id, ProjectID: projectID, BranchID: branchID,
-		Stage: StageIntent, AdvanceMode: ModeStepReview,
+		ContentVersion: 1,
+		Stage:          StageIntent, AdvanceMode: ModeStepReview,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
