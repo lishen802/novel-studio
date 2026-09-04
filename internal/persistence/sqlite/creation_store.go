@@ -86,17 +86,23 @@ func (s *Store) SaveCreationCandidate(ctx context.Context, candidate creationdom
 	if string(locks) == "null" {
 		locks = []byte("{}")
 	}
+	refs, err := encodeImpactRefs(candidate.ImpactRefs)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO creation_candidates (
 			id, session_id, stage, kind, version, parent_candidate_id, supersedes_candidate_id,
 			run_id, artifact_id, payload_json, payload_schema_id, payload_schema_version,
-			content_sha256, lock_map_json, status, origin, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			content_sha256, lock_map_json, status, origin, stale_reason, impact_refs_json,
+			upstream_digest, excepted_upstream_digest, impact_severity, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		candidate.ID, candidate.SessionID, string(candidate.Stage), string(candidate.Kind), candidate.Version,
 		candidate.ParentCandidateID, candidate.SupersedesCandidateID, candidate.RunID, candidate.ArtifactID,
 		candidate.PayloadJSON, candidate.PayloadSchemaID, candidate.PayloadSchemaVersion, candidate.ContentSHA256,
-		string(locks), string(candidate.Status), string(candidate.Origin),
+		string(locks), string(candidate.Status), string(candidate.Origin), candidate.StaleReason, string(refs),
+		candidate.UpstreamDigest, candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
 		formatTime(candidate.CreatedAt), formatTime(candidate.UpdatedAt),
 	)
 	if err != nil {
@@ -108,18 +114,20 @@ func (s *Store) SaveCreationCandidate(ctx context.Context, candidate creationdom
 func (s *Store) CreationCandidate(ctx context.Context, id string) (creationdomain.Candidate, error) {
 	var candidate creationdomain.Candidate
 	var parent, supersedes, runID, artifactID sql.NullString
-	var lockJSON, createdAt, updatedAt string
+	var lockJSON, refsJSON, createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, session_id, stage, kind, version, parent_candidate_id, supersedes_candidate_id,
 			run_id, artifact_id, payload_json, payload_schema_id, payload_schema_version,
-			content_sha256, lock_map_json, status, origin, created_at, updated_at
+			content_sha256, lock_map_json, status, origin, stale_reason, impact_refs_json,
+			upstream_digest, excepted_upstream_digest, impact_severity, created_at, updated_at
 		FROM creation_candidates
 		WHERE id = ?
 	`, strings.TrimSpace(id)).Scan(
 		&candidate.ID, &candidate.SessionID, &candidate.Stage, &candidate.Kind, &candidate.Version,
 		&parent, &supersedes, &runID, &artifactID, &candidate.PayloadJSON, &candidate.PayloadSchemaID,
 		&candidate.PayloadSchemaVersion, &candidate.ContentSHA256, &lockJSON, &candidate.Status,
-		&candidate.Origin, &createdAt, &updatedAt,
+		&candidate.Origin, &candidate.StaleReason, &refsJSON, &candidate.UpstreamDigest,
+		&candidate.ExceptedUpstreamDigest, &candidate.ImpactSeverity, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return creationdomain.Candidate{}, fmt.Errorf("read creation candidate: %w", err)
@@ -133,6 +141,15 @@ func (s *Store) CreationCandidate(ctx context.Context, id string) (creationdomai
 	}
 	if candidate.LockMap == nil {
 		candidate.LockMap = map[string]bool{}
+	}
+	if strings.TrimSpace(refsJSON) == "" {
+		refsJSON = "[]"
+	}
+	if err := json.Unmarshal([]byte(refsJSON), &candidate.ImpactRefs); err != nil {
+		return creationdomain.Candidate{}, fmt.Errorf("decode creation candidate impact refs: %w", err)
+	}
+	if candidate.ImpactRefs == nil {
+		candidate.ImpactRefs = []string{}
 	}
 	candidate.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
@@ -187,16 +204,27 @@ func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationd
 	if string(locks) == "null" {
 		locks = []byte("{}")
 	}
+	refs, err := encodeImpactRefs(candidate.ImpactRefs)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE creation_candidates SET
 			parent_candidate_id = NULLIF(?, ''),
 			supersedes_candidate_id = NULLIF(?, ''),
 			lock_map_json = ?,
 			status = ?,
+			stale_reason = ?,
+			impact_refs_json = ?,
+			upstream_digest = ?,
+			excepted_upstream_digest = ?,
+			impact_severity = ?,
 			updated_at = ?
 		WHERE id = ?
 	`, candidate.ParentCandidateID, candidate.SupersedesCandidateID, string(locks),
-		string(candidate.Status), formatTime(candidate.UpdatedAt), candidate.ID)
+		string(candidate.Status), candidate.StaleReason, string(refs), candidate.UpstreamDigest,
+		candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
+		formatTime(candidate.UpdatedAt), candidate.ID)
 	if err != nil {
 		return databaseOperationError("update creation candidate", err)
 	}
@@ -447,4 +475,18 @@ func scanAssistantActionRow(row assistantActionRow) (assistantdomain.Action, err
 		return assistantdomain.Action{}, fmt.Errorf("parse assistant action updated_at: %w", err)
 	}
 	return action, nil
+}
+
+func encodeImpactRefs(values []string) ([]byte, error) {
+	if values == nil {
+		return []byte("[]"), nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("encode creation candidate impact refs: %w", err)
+	}
+	if string(encoded) == "null" {
+		return []byte("[]"), nil
+	}
+	return encoded, nil
 }

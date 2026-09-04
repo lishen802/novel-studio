@@ -106,3 +106,40 @@ func mustProposal(t *testing.T) Candidate {
 	}
 	return candidate
 }
+
+func TestMarkStaleAndKeepException(t *testing.T) {
+	candidate := mustProposal(t)
+	stale, err := candidate.MarkStale("方向已改", []string{"dir-1"}, ImpactMaybe, time.Unix(210, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Status != StatusStale || stale.StaleReason == "" {
+		t.Fatalf("stale = %#v", stale)
+	}
+	kept, err := stale.KeepException("upstream-hash", time.Unix(211, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !kept.ExceptionMatches("upstream-hash") {
+		t.Fatal("exception should match current upstream hash")
+	}
+	cleared, err := kept.ClearStale(time.Unix(212, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Status != StatusDraft || cleared.StaleReason != "" {
+		t.Fatalf("cleared = %#v", cleared)
+	}
+}
+
+func TestRestoreSupersededCandidate(t *testing.T) {
+	candidate := mustProposal(t)
+	superseded, err := candidate.MarkSuperseded(time.Unix(210, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := superseded.Restore(time.Unix(211, 0))
+	if err != nil || restored.Status != StatusDraft {
+		t.Fatalf("restore = %#v, err=%v", restored, err)
+	}
+}

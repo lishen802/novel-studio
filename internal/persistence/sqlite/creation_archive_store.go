@@ -125,16 +125,27 @@ func persistCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidate creat
 	if string(locks) == "null" {
 		locks = []byte("{}")
 	}
+	refs, err := encodeImpactRefs(candidate.ImpactRefs)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE creation_candidates SET
 			parent_candidate_id = NULLIF(?, ''),
 			supersedes_candidate_id = NULLIF(?, ''),
 			lock_map_json = ?,
 			status = ?,
+			stale_reason = ?,
+			impact_refs_json = ?,
+			upstream_digest = ?,
+			excepted_upstream_digest = ?,
+			impact_severity = ?,
 			updated_at = ?
 		WHERE id = ?
 	`, candidate.ParentCandidateID, candidate.SupersedesCandidateID, string(locks),
-		string(candidate.Status), formatTime(candidate.UpdatedAt), candidate.ID)
+		string(candidate.Status), candidate.StaleReason, string(refs), candidate.UpstreamDigest,
+		candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
+		formatTime(candidate.UpdatedAt), candidate.ID)
 	if err != nil {
 		return databaseOperationError("update creation candidate after archive", err)
 	}

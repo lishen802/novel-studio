@@ -53,6 +53,11 @@ type Candidate struct {
 	LockMap               map[string]bool
 	Status                CandidateStatus
 	Origin                CandidateOrigin
+	UpstreamDigest        string
+	StaleReason           string
+	ImpactRefs            []string
+	ImpactSeverity        ImpactSeverity
+	ExceptedUpstreamDigest string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
@@ -82,7 +87,7 @@ func NewCandidate(
 		RunID:             strings.TrimSpace(runID), ArtifactID: strings.TrimSpace(artifactID),
 		PayloadJSON: payloadJSON, PayloadSchemaID: schemaID, PayloadSchemaVersion: schemaVersion,
 		ContentSHA256: digestJSON(payloadJSON), LockMap: map[string]bool{},
-		Status: StatusDraft, Origin: origin, CreatedAt: now, UpdatedAt: now,
+		Status: StatusDraft, Origin: origin, ImpactRefs: []string{}, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
@@ -169,6 +174,7 @@ func (candidate Candidate) SaveDraft(newID, payloadJSON string, now time.Time) (
 	draft.Origin = OriginAuthor
 	draft.ParentCandidateID = candidate.ID
 	draft.SupersedesCandidateID = candidate.ID
+	draft.UpstreamDigest = candidate.UpstreamDigest
 	return draft, nil
 }
 
@@ -188,6 +194,7 @@ func (candidate Candidate) Regenerate(newID, runID, artifactID, payloadJSON stri
 	next.LockMap = cloneLocks(candidate.LockMap)
 	next.ParentCandidateID = candidate.ID
 	next.SupersedesCandidateID = candidate.ID
+	next.UpstreamDigest = candidate.UpstreamDigest
 	return next, nil
 }
 

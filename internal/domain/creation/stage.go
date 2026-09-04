@@ -9,6 +9,7 @@ var (
 	ErrFieldLocked       = err("creation field is locked")
 	ErrInvalidJSON       = err("creation payload is not valid json")
 	ErrFieldMissing      = err("creation field path is missing")
+	ErrImpactUnresolved  = err("creation impact must be resolved")
 )
 
 type errorString string

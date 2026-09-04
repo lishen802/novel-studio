@@ -56,6 +56,18 @@ func TestCreationStoreRoundTripsSessionCandidateAndAsset(t *testing.T) {
 	if loadedCandidate.ContentSHA256 != candidate.ContentSHA256 || loadedCandidate.RunID != "run-1" {
 		t.Fatalf("candidate = %#v", loadedCandidate)
 	}
+	stale, err := loadedCandidate.MarkStale("故事方向已改", []string{"dir-1"}, creationdomain.ImpactMaybe, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateCreationCandidate(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	staleLoaded, err := store.CreationCandidate(ctx, candidate.ID)
+	if err != nil || staleLoaded.Status != creationdomain.StatusStale || staleLoaded.StaleReason != "故事方向已改" ||
+		len(staleLoaded.ImpactRefs) != 1 || staleLoaded.ImpactRefs[0] != "dir-1" {
+		t.Fatalf("stale candidate = %#v, error %v", staleLoaded, err)
+	}
 	listed, err := store.ListCreationCandidates(ctx, session.ID)
 	if err != nil || len(listed) != 1 || listed[0].ID != candidate.ID {
 		t.Fatalf("list candidates = %#v, error %v", listed, err)

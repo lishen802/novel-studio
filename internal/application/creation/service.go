@@ -135,6 +135,9 @@ func (service *Service) SaveIntent(ctx context.Context, projectID, text string) 
 	if err := service.store.SaveSession(ctx, session); err != nil {
 		return creationdomain.Session{}, err
 	}
+	if err := service.refreshImpact(ctx, session); err != nil {
+		return creationdomain.Session{}, err
+	}
 	return session, nil
 }
 
@@ -603,8 +606,19 @@ func (service *Service) autoAdvance(ctx context.Context, result GenerateResult, 
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		if current, exists := currentCandidate(candidates, session.Stage); exists && hasLocks(current) {
+		if current, exists := currentCandidate(candidates, session.Stage); exists && current.HasLocks() {
 			paused, err := session.Pause(creationdomain.BlockLockedFields, service.clock.Now())
+			if err != nil {
+				return GenerateResult{}, err
+			}
+			if err := service.store.SaveSession(ctx, paused); err != nil {
+				return GenerateResult{}, err
+			}
+			result.Session = paused
+			return result, nil
+		}
+		if unresolvedMustFix(session, candidates) {
+			paused, err := session.Pause(creationdomain.BlockConflict, service.clock.Now())
 			if err != nil {
 				return GenerateResult{}, err
 			}
@@ -670,6 +684,7 @@ func (service *Service) persistCandidate(
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
+	candidate = candidate.WithUpstream(liveUpstreamDigest(session, candidates, session.Stage))
 	if hasPrevious {
 		superseded, markErr := previous.MarkSuperseded(service.clock.Now())
 		if markErr != nil {
@@ -681,6 +696,9 @@ func (service *Service) persistCandidate(
 		}
 	}
 	if err := service.store.SaveCandidate(ctx, candidate); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if err := service.refreshImpact(ctx, session); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	return candidate, nil
@@ -782,6 +800,12 @@ func stageReady(session creationdomain.Session, candidates []creationdomain.Cand
 			return err
 		}
 	}
+	if current, ok := currentCandidate(candidates, session.Stage); ok {
+		live := liveUpstreamDigest(session, candidates, session.Stage)
+		if current.Status == creationdomain.StatusStale && !current.ExceptionMatches(live) {
+			return creationdomain.ErrImpactUnresolved
+		}
+	}
 	return nil
 }
 
@@ -827,15 +851,6 @@ func candidateByID(candidates []creationdomain.Candidate, id string) (creationdo
 		}
 	}
 	return creationdomain.Candidate{}, false
-}
-
-func hasLocks(candidate creationdomain.Candidate) bool {
-	for _, locked := range candidate.LockMap {
-		if locked {
-			return true
-		}
-	}
-	return false
 }
 
 func architectPayload(run agentdomain.Run, artifacts []agentdomain.Artifact) (string, string, error) {
