@@ -12,6 +12,8 @@ var (
 	ErrImpactUnresolved  = err("creation impact must be resolved")
 	ErrDirectionCard     = err("creation direction card not found in candidate")
 	ErrQualityBlocked    = err("creation candidate quality is blocked")
+	// ErrConfirmationStale 表示入档事务内发现确认前置条件在预览后已变化（改锁、改选、候选修改或质量变化）。
+	ErrConfirmationStale = err("creation confirmation prerequisites changed")
 )
 
 // MaxKeptDirections 限制作者保留的方向卡数量，与初始三卡规模一致。

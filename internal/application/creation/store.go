@@ -50,7 +50,10 @@ type ArchiveApply struct {
 	ChangeSet  revisiondomain.ChangeSet
 	Session    creationdomain.Session
 	Candidates []creationdomain.Candidate
-	Workbench  projectdomain.WorkbenchState
+	// Verify 是确认前置条件的一部分但不会改为 confirmed 的候选（如选中的方向），
+	// 事务内按快照校验它们未被替代/废弃/改锁/改质量。
+	Verify    []creationdomain.Candidate
+	Workbench projectdomain.WorkbenchState
 }
 
 func isMissingSession(err error) bool {

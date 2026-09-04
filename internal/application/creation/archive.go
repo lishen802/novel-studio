@@ -43,16 +43,57 @@ type archivePlan struct {
 	Outlines   int
 }
 
-func archiveDigest(session creationdomain.Session, candidates []creationdomain.Candidate) (string, error) {
+// archiveCandidateSnapshot 冻结候选及依赖处理状态；成功重放由会话回执判断，不重算摘要。
+type archiveCandidateSnapshot struct {
+	ID                     string                          `json:"id"`
+	ContentSHA256          string                          `json:"contentSha256"`
+	Quality                creationdomain.CandidateQuality `json:"quality"`
+	Locks                  map[string]bool                 `json:"locks"`
+	Status                 creationdomain.CandidateStatus  `json:"status"`
+	UpstreamDigest         string                          `json:"upstreamDigest"`
+	ExceptedUpstreamDigest string                          `json:"exceptedUpstreamDigest"`
+	ImpactSeverity         creationdomain.ImpactSeverity   `json:"impactSeverity"`
+	ImpactRefs             []string                        `json:"impactRefs"`
+}
+
+func snapshotArchiveCandidate(candidate creationdomain.Candidate) archiveCandidateSnapshot {
+	return archiveCandidateSnapshot{
+		ID: candidate.ID, ContentSHA256: candidate.ContentSHA256,
+		Quality: candidate.QualityStatus, Locks: candidate.LockMap,
+		Status: candidate.Status, UpstreamDigest: candidate.UpstreamDigest,
+		ExceptedUpstreamDigest: candidate.ExceptedUpstreamDigest,
+		ImpactSeverity:         candidate.ImpactSeverity, ImpactRefs: candidate.ImpactRefs,
+	}
+}
+
+func archiveDigest(session creationdomain.Session, candidates []creationdomain.Candidate, project projectdomain.Project) (string, error) {
 	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
 	if err != nil {
 		return "", err
 	}
+	direction, err := requiredDirectionCandidate(session, candidates)
+	if err != nil {
+		return "", err
+	}
 	payload, err := json.Marshal(struct {
-		Selected, Proposal, People, Roadmap string
+		Project, Branch, Selected, SelectedCard    string
+		ContentVersion                             int64
+		ProjectTitle, ProjectGenre, ProjectSummary string
+		Direction                                  archiveCandidateSnapshot
+		Proposal, People, Roadmap                  archiveCandidateSnapshot
 	}{
-		Selected: session.SelectedDirectionCandidateID,
-		Proposal: proposal.ContentSHA256, People: people.ContentSHA256, Roadmap: roadmap.ContentSHA256,
+		Project:        session.ProjectID,
+		Branch:         session.BranchID,
+		Selected:       session.SelectedDirectionCandidateID,
+		SelectedCard:   session.SelectedDirectionCardID,
+		ContentVersion: session.ContentVersion,
+		ProjectTitle:   project.Title,
+		ProjectGenre:   project.Genre,
+		ProjectSummary: project.Summary,
+		Direction:      snapshotArchiveCandidate(direction),
+		Proposal:       snapshotArchiveCandidate(proposal),
+		People:         snapshotArchiveCandidate(people),
+		Roadmap:        snapshotArchiveCandidate(roadmap),
 	})
 	if err != nil {
 		return "", err
@@ -88,8 +129,27 @@ func requiredArchiveCandidates(
 	return proposal, people, roadmap, nil
 }
 
+// requiredDirectionCandidate 返回作者选中的方向候选；选中候选缺失或已失效（被替代/废弃）时拒绝入档，
+// 方向是方案、人物世界与路线图的共同上游，不能只校验下游三份候选。
+func requiredDirectionCandidate(session creationdomain.Session, candidates []creationdomain.Candidate) (creationdomain.Candidate, error) {
+	if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
+		return creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	candidate, ok := candidateByID(candidates, session.SelectedDirectionCandidateID)
+	if !ok {
+		return creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	if candidate.Status == creationdomain.StatusSuperseded || candidate.Status == creationdomain.StatusDiscarded {
+		return creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	return candidate, nil
+}
+
 // validateArchiveReadiness 校验确认前置条件：全链路候选质量未阻断、无未解决 stale、载荷有效。
 func validateArchiveReadiness(session creationdomain.Session, candidates []creationdomain.Candidate) error {
+	if _, err := requiredDirectionCandidate(session, candidates); err != nil {
+		return err
+	}
 	for _, stage := range []creationdomain.Stage{
 		creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap,
 	} {
@@ -100,8 +160,13 @@ func validateArchiveReadiness(session creationdomain.Session, candidates []creat
 		if current.Blocked() {
 			return creationdomain.ErrQualityBlocked
 		}
-		if current.Status == creationdomain.StatusStale &&
-			!current.ExceptionMatches(liveUpstreamDigest(session, candidates, stage)) {
+		// 影响标记可能尚未落库，必须直接比较生成时冻结的输入与实时依赖。
+		live := liveUpstreamDigest(session, candidates, stage)
+		if live == "" || current.UpstreamDigest == "" || current.ImpactSeverity == creationdomain.ImpactMust {
+			return creationdomain.ErrImpactUnresolved
+		}
+		excepted := current.ImpactSeverity == creationdomain.ImpactMaybe && !current.HasLocks() && current.ExceptionMatches(live)
+		if (current.UpstreamDigest != live || current.Status == creationdomain.StatusStale) && !excepted {
 			return creationdomain.ErrImpactUnresolved
 		}
 		if err := validateCandidatePayload(stage, current.PayloadJSON); err != nil {
@@ -121,7 +186,7 @@ func buildArchivePlan(
 	if err != nil {
 		return archivePlan{}, err
 	}
-	digest, err := archiveDigest(session, candidates)
+	digest, err := archiveDigest(session, candidates, project)
 	if err != nil {
 		return archivePlan{}, err
 	}

@@ -1107,7 +1107,17 @@ func (service *Service) PreviewConfirmArchive(ctx context.Context, projectID str
 	if err := validateArchiveReadiness(session, candidates); err != nil {
 		return ArchivePreview{}, err
 	}
-	digest, err := archiveDigest(session, candidates)
+	project, err := service.store.Project(ctx)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	return buildArchivePreview(session, candidates, project)
+}
+
+// buildArchivePreview 从已读取的单一快照（会话 + 候选 + 项目基线）计算确认摘要与预览，不再读库。
+// ConfirmArchive 复用同一份快照，避免“预览摘要来自一次读取、入档计划来自另一次读取”的错位。
+func buildArchivePreview(session creationdomain.Session, candidates []creationdomain.Candidate, project projectdomain.Project) (ArchivePreview, error) {
+	digest, err := archiveDigest(session, candidates, project)
 	if err != nil {
 		return ArchivePreview{}, err
 	}
@@ -1135,32 +1145,39 @@ func (service *Service) PreviewConfirmArchive(ctx context.Context, projectID str
 }
 
 // ConfirmArchive 把已阶段确认的候选映射为 ChangeSet 并一次性写入正式资产。
+// 预览摘要、入档计划与写入的会话/候选/项目都来自同一次读取；候选确认在事务内按快照条件执行，
+// 选中方向作为上游依赖一并校验，预览后发生的改锁、改选、候选修改、质量或项目基线变化都会被拒绝并整单回滚。
 func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveRequest) (ArchiveResult, error) {
 	session, candidates, err := service.loadArchiveInputs(ctx, request.ProjectID)
 	if err != nil {
 		return ArchiveResult{}, err
 	}
-	preview, err := service.PreviewConfirmArchive(ctx, request.ProjectID)
-	if err != nil {
-		return ArchiveResult{}, err
-	}
-	if strings.TrimSpace(request.ConfirmationDigest) == "" || request.ConfirmationDigest != preview.ConfirmationDigest {
-		return ArchiveResult{}, ErrConfirmationRequired
-	}
 	if strings.TrimSpace(request.IdempotencyKey) == "" {
 		return ArchiveResult{}, creationdomain.ErrBlankValue
 	}
-	if strings.TrimSpace(session.ArchiveChangeSetID) != "" {
-		if session.ArchiveDigest != preview.ConfirmationDigest {
-			return ArchiveResult{}, ErrConfirmationRequired
-		}
-		return ArchiveResult{Session: session, ChangeSetID: session.ArchiveChangeSetID}, nil
+	if strings.TrimSpace(request.ConfirmationDigest) == "" {
+		return ArchiveResult{}, ErrConfirmationRequired
 	}
-	if err := validateArchiveReadiness(session, candidates); err != nil {
-		return ArchiveResult{}, err
+	// 幂等重放：已入档时按回执键与请求摘要直接返回原结果，不重新计算实时摘要，
+	// 入档成功后的候选/锁/质量/项目变化不影响已成功 ChangeSet 的重放。
+	if strings.TrimSpace(session.ArchiveChangeSetID) != "" {
+		if session.ArchiveIdempotencyKey == request.IdempotencyKey && session.ArchiveDigest == request.ConfirmationDigest {
+			return ArchiveResult{Session: session, ChangeSetID: session.ArchiveChangeSetID}, nil
+		}
+		return ArchiveResult{}, ErrConfirmationRequired
 	}
 	project, err := service.store.Project(ctx)
 	if err != nil {
+		return ArchiveResult{}, err
+	}
+	preview, err := buildArchivePreview(session, candidates, project)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	if request.ConfirmationDigest != preview.ConfirmationDigest {
+		return ArchiveResult{}, ErrConfirmationRequired
+	}
+	if err := validateArchiveReadiness(session, candidates); err != nil {
 		return ArchiveResult{}, err
 	}
 	workbench, err := service.store.WorkbenchState(ctx)
@@ -1188,13 +1205,22 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	if err != nil {
 		return ArchiveResult{}, err
 	}
-	confirmed := make([]creationdomain.Candidate, 0, len(plan.Confirmed))
+	// 依赖校验已验证软影响例外；仅在校验副本上解除 stale，保留原快照供事务复核。
+	// 真正的状态迁移由入档事务内的条件更新完成，校验后到提交前的并发改动由快照条件拒绝。
 	for _, candidate := range plan.Confirmed {
-		next, confirmErr := candidate.Confirm(now)
-		if confirmErr != nil {
-			return ArchiveResult{}, confirmErr
+		if candidate.Status == creationdomain.StatusStale {
+			candidate, err = candidate.ClearStale(now)
+			if err != nil {
+				return ArchiveResult{}, err
+			}
 		}
-		confirmed = append(confirmed, next)
+		if _, err := candidate.Confirm(now); err != nil {
+			return ArchiveResult{}, err
+		}
+	}
+	direction, err := requiredDirectionCandidate(session, candidates)
+	if err != nil {
+		return ArchiveResult{}, err
 	}
 	session, err = session.RecordArchive(preview.ConfirmationDigest, request.IdempotencyKey, changeSet.ID, now)
 	if err != nil {
@@ -1204,7 +1230,8 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	workbench.ArchiveStatus = "confirmed"
 	workbench.UpdatedAt = now
 	if err := service.store.ApplyArchive(ctx, ArchiveApply{
-		ChangeSet: changeSet, Session: session, Candidates: confirmed, Workbench: workbench,
+		ChangeSet: changeSet, Session: session, Candidates: plan.Confirmed,
+		Verify: []creationdomain.Candidate{direction}, Workbench: workbench,
 	}); err != nil {
 		return ArchiveResult{}, err
 	}

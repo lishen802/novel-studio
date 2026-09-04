@@ -24,7 +24,7 @@ type SQLBackend interface {
 	PendingAssistantActionCount(context.Context, string) (int, error)
 	Project(context.Context) (projectdomain.Project, error)
 	WorkbenchState(context.Context) (projectdomain.WorkbenchState, error)
-	ApplyCreationArchive(context.Context, revisiondomain.ChangeSet, creationdomain.Session, []creationdomain.Candidate, projectdomain.WorkbenchState) error
+	ApplyCreationArchive(context.Context, revisiondomain.ChangeSet, creationdomain.Session, []creationdomain.Candidate, []creationdomain.Candidate, projectdomain.WorkbenchState) error
 	ReserveCreationOperation(context.Context, creationdomain.Operation) (creationdomain.Operation, bool, error)
 	CreationOperationByIdempotency(context.Context, string, string, string, string) (creationdomain.Operation, error)
 	UpdateCreationOperation(context.Context, creationdomain.Operation) error
@@ -89,7 +89,7 @@ func (store sqliteStore) WorkbenchState(ctx context.Context) (projectdomain.Work
 }
 
 func (store sqliteStore) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
-	return store.inner.ApplyCreationArchive(ctx, apply.ChangeSet, apply.Session, apply.Candidates, apply.Workbench)
+	return store.inner.ApplyCreationArchive(ctx, apply.ChangeSet, apply.Session, apply.Candidates, apply.Verify, apply.Workbench)
 }
 
 func (store sqliteStore) ReserveOperation(ctx context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error) {

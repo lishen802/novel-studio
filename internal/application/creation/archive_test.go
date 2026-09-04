@@ -92,6 +92,291 @@ func TestArchiveSessionCASRollsBackWholeTransaction(t *testing.T) {
 	}
 }
 
+// archiveCandidateMutator 在入档事务提交前修改候选，复现“预览后改锁/改质量/候选被替代”的并发窗口。
+type archiveCandidateMutator struct {
+	Store
+	mutate func(creationdomain.Candidate) (creationdomain.Candidate, error)
+}
+
+func (store archiveCandidateMutator) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
+	for _, candidate := range apply.Candidates {
+		if candidate.Stage != creationdomain.StageProposal {
+			continue
+		}
+		changed, err := store.mutate(candidate)
+		if err != nil {
+			return err
+		}
+		if err := store.UpdateCandidate(ctx, changed); err != nil {
+			return err
+		}
+	}
+	return store.Store.ApplyArchive(ctx, apply)
+}
+
+// TestConfirmArchiveRejectsCandidateChangedAfterPreview 覆盖入档事务对候选快照的条件校验：
+// 预览摘要通过后、事务提交前发生的改锁、质量变化或候选被替代都必须拒绝并整单回滚。
+func TestConfirmArchiveRejectsCandidateChangedAfterPreview(t *testing.T) {
+	now := testClock{}.Now()
+	cases := map[string]func(creationdomain.Candidate) (creationdomain.Candidate, error){
+		"改锁": func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+			return candidate.LockField("/title", now)
+		},
+		"改质量": func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+			return candidate.WithQuality(creationdomain.QualityBlocked), nil
+		},
+		"被替代": func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+			return candidate.MarkSuperseded(now)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			raw, project := sqliteCreateStore(t)
+			defer raw.Close()
+			bridge := NewSQLiteStore(raw)
+			seedArchiveSession(t, bridge, project.ID)
+			if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			service, err := New(Config{Store: archiveCandidateMutator{Store: bridge, mutate: mutate}, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-" + name}); !errors.Is(err, creationdomain.ErrConfirmationStale) {
+				t.Fatalf("候选改动未返回确认过期错误: %v", err)
+			}
+			characters, err := raw.ListCharacters(ctx)
+			if err != nil || len(characters) != 0 {
+				t.Fatalf("失败入档留下人物: %+v, %v", characters, err)
+			}
+			nodes, err := raw.ListOutlineNodes(ctx)
+			if err != nil || len(nodes) != 0 {
+				t.Fatalf("失败入档留下路线图: %+v, %v", nodes, err)
+			}
+			latest, err := bridge.Session(ctx, project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := bridge.ListCandidates(ctx, latest.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range candidates {
+				if candidate.Status == creationdomain.StatusConfirmed {
+					t.Fatalf("失败入档确认了候选: %s", candidate.ID)
+				}
+			}
+		})
+	}
+}
+
+// titleOverrideStore 覆盖项目标题读取，模拟“预览后手工修改标题”。
+type titleOverrideStore struct {
+	Store
+	title string
+}
+
+func (store *titleOverrideStore) Project(ctx context.Context) (projectdomain.Project, error) {
+	project, err := store.Store.Project(ctx)
+	if err != nil {
+		return project, err
+	}
+	project.Title = store.title
+	return project, nil
+}
+
+// archiveDirectionDiscarder 在入档事务提交前废弃选中的方向，复现“上游依赖在事务前被废弃”。
+type archiveDirectionDiscarder struct{ Store }
+
+func (store archiveDirectionDiscarder) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
+	for _, candidate := range apply.Verify {
+		discarded, err := candidate.Discard(testClock{}.Now())
+		if err != nil {
+			return err
+		}
+		if err := store.UpdateCandidate(ctx, discarded); err != nil {
+			return err
+		}
+	}
+	return store.Store.ApplyArchive(ctx, apply)
+}
+
+// TestConfirmArchiveRejectsIntentSavedAfterPreview 覆盖摘要绑定会话内容版本：预览后保存意图、
+// stale 尚未传播时，旧摘要必须失效，不能再把旧方案入档。
+func TestConfirmArchiveRejectsIntentSavedAfterPreview(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 预览后保存新意图：内容版本递增，下游 stale 尚未传播。
+	latest, err := bridge.Session(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.IntentText = "预览后新保存的意图"
+	if err := bridge.SaveSession(ctx, latest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-intent"}); !errors.Is(err, ErrConfirmationRequired) {
+		t.Fatalf("意图变化后入档未拒绝: %v", err)
+	}
+}
+
+// TestConfirmArchiveRejectsProjectBaselineChangedAfterPreview 覆盖摘要冻结正式项目基线：
+// 预览后手工修改标题，旧确认摘要必须失效，不能把新标题覆盖回方案标题。
+func TestConfirmArchiveRejectsProjectBaselineChangedAfterPreview(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	store := &titleOverrideStore{Store: bridge, title: project.Title}
+	service, err := New(Config{Store: store, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 预览后手工修改标题。
+	store.title = "作者手工改的新标题"
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-title"}); !errors.Is(err, ErrConfirmationRequired) {
+		t.Fatalf("项目基线变化后入档未拒绝: %v", err)
+	}
+}
+
+// TestConfirmArchiveRejectsDirectionDiscardedAfterPreview 覆盖选中的方向作为上游依赖被校验：
+// 预览后废弃方向，入档必须拒绝。
+func TestConfirmArchiveRejectsDirectionDiscardedAfterPreview(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direction, err := bridge.Candidate(ctx, "dir-set-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discarded, err := direction.Discard(testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.UpdateCandidate(ctx, discarded); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-direction"}); !errors.Is(err, creationdomain.ErrStageIncomplete) {
+		t.Fatalf("方向废弃后入档未拒绝: %v", err)
+	}
+}
+
+// TestConfirmArchiveRejectsDirectionDiscardedInsideTransaction 覆盖事务内对方向依赖的快照校验：
+// 确认读取后、提交前废弃方向，必须拒绝并整单回滚。
+func TestConfirmArchiveRejectsDirectionDiscardedInsideTransaction(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: archiveDirectionDiscarder{Store: bridge}, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-direction-tx"}); !errors.Is(err, creationdomain.ErrConfirmationStale) {
+		t.Fatalf("事务内方向废弃未返回确认过期错误: %v", err)
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil || len(characters) != 0 {
+		t.Fatalf("失败入档留下人物: %+v, %v", characters, err)
+	}
+	nodes, err := raw.ListOutlineNodes(ctx)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("失败入档留下路线图: %+v, %v", nodes, err)
+	}
+}
+
+// TestConfirmArchiveReplaysIdempotentlyDespiteCandidateChange 覆盖成功请求的幂等重放不依赖实时状态：
+// 首次入档成功后修改候选锁，再用完全相同的请求重试，必须返回原 ChangeSet。
+func TestConfirmArchiveReplaysIdempotentlyDespiteCandidateChange(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-replay"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 入档成功后修改候选锁。
+	proposal, err := bridge.Candidate(ctx, "proposal-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, err := proposal.LockField("/title", testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.UpdateCandidate(ctx, locked); err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "archive-replay"})
+	if err != nil {
+		t.Fatalf("幂等重放失败: %v", err)
+	}
+	if second.ChangeSetID != first.ChangeSetID {
+		t.Fatalf("幂等重放返回不同 ChangeSet: %q vs %q", second.ChangeSetID, first.ChangeSetID)
+	}
+}
+
 func TestConfirmArchiveWritesAssetsIdempotently(t *testing.T) {
 	ctx := context.Background()
 	raw, project := sqliteCreateStore(t)
@@ -208,7 +493,7 @@ func TestApplyCreationArchiveRollsBackPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = raw.ApplyCreationArchive(ctx, changeSet, session, nil, projectdomain.WorkbenchState{
+	err = raw.ApplyCreationArchive(ctx, changeSet, session, nil, nil, projectdomain.WorkbenchState{
 		Stage: projectdomain.StageWriting, ArchiveStatus: "confirmed", UpdatedAt: now,
 	})
 	if err == nil {
@@ -286,10 +571,13 @@ func seedArchiveSession(t *testing.T, store Store, projectID string) creationdom
 	}
 	session.Stage = creationdomain.StageArchiveConfirm
 	session.SelectedDirectionCandidateID = dir.ID
+	session.SelectedDirectionCardID = "d1"
 	if session, err = store.CreateSession(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	for _, candidate := range []creationdomain.Candidate{dir, proposal, people, roadmap} {
+	candidates := []creationdomain.Candidate{dir, proposal, people, roadmap}
+	for _, candidate := range candidates {
+		candidate = candidate.WithUpstream(liveUpstreamDigest(session, candidates, candidate.Stage))
 		if err := store.SaveCandidate(context.Background(), candidate); err != nil {
 			t.Fatal(err)
 		}
