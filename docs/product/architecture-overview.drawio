@@ -1,13 +1,13 @@
-<mxfile host="app.diagrams.net" modified="2026-09-02T05:36:00.000Z" agent="Cursor" version="22.1.0" type="device">
+<mxfile host="app.diagrams.net" modified="2026-09-07T00:00:00.000Z" agent="Cursor" version="22.1.0" type="device">
   <diagram id="topo" name="01 系统拓扑">
     <mxGraphModel dx="1400" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="2100" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="t-title" value="织境 Story Studio · 运行时拓扑（对照当前代码）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#1c1917;" vertex="1" parent="1">
+        <mxCell id="t-title" value="织境 Story Studio · 运行时拓扑（目标流程与冻结能力）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#1c1917;" vertex="1" parent="1">
           <mxGeometry x="80" y="20" width="720" height="32" as="geometry"/>
         </mxCell>
-        <mxCell id="t-note" value="权威规格：docs/product/architecture.md。本图把该规格映射到现有包与 R3 工作流。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#57534e;" vertex="1" parent="1">
+        <mxCell id="t-note" value="权威规格：docs/product/architecture.md。当前 R4 待验收；R5 补查/核验/复检与最小后验，R6 批次/弧评估，R7 长篇扩展。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#57534e;" vertex="1" parent="1">
           <mxGeometry x="80" y="48" width="900" height="24" as="geometry"/>
         </mxCell>
         <mxCell id="t-ui" value="&lt;b&gt;React UI&lt;/b&gt;&lt;br&gt;创作驾驶舱 / 正文工作台 / 审阅与候选 / Lab 观察器&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;apps/desktop/frontend · Cockpit · Chapters · Review · Lab · Archive&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;align=center;" vertex="1" parent="1">
@@ -43,7 +43,7 @@
         <mxCell id="t-kernel" value="智能体能力执行内核  Agent Execution Kernel    ·    internal/application/agentkernel + domain/agent" style="swimlane;fontStyle=1;childLayout=0;horizontal=1;startSize=40;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;align=center;" vertex="1" parent="1">
           <mxGeometry x="80" y="580" width="1440" height="1180" as="geometry"/>
         </mxCell>
-        <mxCell id="t-a-label" value="阶段 A · 导演与分析　　公开阶段 chapter_directing / professional_analysis" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+        <mxCell id="t-a-label" value="阶段 A · 导演、分析与有界补查　　公开阶段 chapter_directing / professional_analysis" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
           <mxGeometry x="24" y="52" width="700" height="24" as="geometry"/>
         </mxCell>
         <mxCell id="t-director" value="&lt;b&gt;Chapter Director&lt;/b&gt;&lt;br&gt;能力 chapter_planner · 槽 planner&lt;br&gt;把路线图与冻结 Manifest 转成可执行叙事任务&lt;br&gt;chapter_goal / scenes / anchors / forbidden_reveals / improvisation_bounds&lt;br&gt;&lt;font style=&quot;font-size:11px&quot; color=&quot;#57534e&quot;&gt;节点 director · Prompt chapter_plan.prompt v2 · Schema chapter_plan.schema v2&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;align=center;" vertex="1" parent="t-kernel">
@@ -67,7 +67,7 @@
         <mxCell id="t-ec" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="t-kernel" source="t-writer" target="t-cont">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="t-c-label" value="阶段 C · 隔离审阅 &amp; Finding Merger　　公开阶段 independent_review　　审阅者互不读取结论" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+        <mxCell id="t-c-label" value="阶段 C · 隔离审阅、合并与按需核验　　公开阶段 independent_review　　审阅者互不读取结论" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
           <mxGeometry x="24" y="360" width="1000" height="24" as="geometry"/>
         </mxCell>
         <mxCell id="t-cont" value="&lt;b&gt;Continuity Review&lt;/b&gt;&lt;br&gt;continuity_review&lt;br&gt;事实 / 状态 / 知识边界 / 时间线 / 伏笔&lt;br&gt;槽 continuity_reviewer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;align=center;" vertex="1" parent="t-kernel">
@@ -97,10 +97,10 @@
         <mxCell id="t-lint" value="&lt;b&gt;Deterministic Lint + Quality Gate&lt;/b&gt;&lt;br&gt;quality.Engine　·　锚点 / 禁止项 / 字数 / 重复 / 机械句式 / 元话语&lt;br&gt;质量状态 passed / needs_review / blocked　≠ AgentRun 终态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=center;" vertex="1" parent="t-kernel">
           <mxGeometry x="40" y="540" width="220" height="88" as="geometry"/>
         </mxCell>
-        <mxCell id="t-d-label" value="阶段 D · 有界修订　　公开阶段 bounded_revision / revision_verify" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
+        <mxCell id="t-d-label" value="阶段 D · 有界修订、复检与选稿　　公开阶段 bounded_revision / revision_verify" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#166534;" vertex="1" parent="t-kernel">
           <mxGeometry x="24" y="650" width="800" height="24" as="geometry"/>
         </mxCell>
-        <mxCell id="t-rev" value="&lt;b&gt;Bounded Revision&lt;/b&gt;　能力 bounded_revision　·　正文默认槽 writer，方案用 planner&lt;br&gt;只接收规范化公开发现或作者指令（RevisionDirective），不接收其它模型隐藏推理&lt;br&gt;quality_findings 与 author_directed 分模式；自动修订最多一次；只改未定稿候选并保留上一 attempt&lt;br&gt;v2 追加 revision_verify（固定 continuity_reviewer，禁止修订槽兼任）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;align=center;" vertex="1" parent="t-kernel">
+        <mxCell id="t-rev" value="&lt;b&gt;Bounded Revision&lt;/b&gt;　能力 bounded_revision　·　正文默认槽 writer，方案用 planner&lt;br&gt;只接收规范化公开发现或作者指令（RevisionDirective），不接收其它模型隐藏推理&lt;br&gt;quality_findings 与 author_directed 分模式；自动修订最多一次；只改未定稿候选并保留上一 attempt&lt;br&gt;v2 已有独立复核；R5 新版本每稿复检，退化可选有效前稿，预算到限暂停" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=12;align=center;" vertex="1" parent="t-kernel">
           <mxGeometry x="40" y="682" width="1360" height="110" as="geometry"/>
         </mxCell>
         <mxCell id="t-wf" value="已发布工作流（internal/agentassets）&#xa;baseline.chapter.v1　|　quality.chapter.v1/v2　|　quality.blueprint.v1/v2　|　quality.chapter.director.v1/v2　|　quality.chapter.split-review.v1/v2　|　quality.chapter.slot-parallel.v1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfccb;strokeColor=#65a30d;fontSize=11;align=center;" vertex="1" parent="t-kernel">
@@ -115,7 +115,7 @@
         <mxCell id="t-e6" value="5. 校验 &amp; 流式返回（未确认候选）" style="endArrow=classic;html=1;rounded=0;strokeWidth=1.5;fontSize=11;fontColor=#57534e;" edge="1" parent="1" source="t-kernel" target="t-cand">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="t-cand" value="&lt;b&gt;Candidate Buffer 未确认候选区&lt;/b&gt;&lt;br&gt;DraftCandidate / Artifact / ChangeSet　·　确认后才原子写入 Canonical Head 与长期记忆&lt;br&gt;R3 只写 Harness 工件或未确认候选，不写 canonical 正文和正式资产　·　同批前序候选只能 provisional 进入后序上下文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=center;" vertex="1" parent="1">
+        <mxCell id="t-cand" value="&lt;b&gt;Candidate Buffer 未确认候选区&lt;/b&gt;&lt;br&gt;DraftCandidate / Artifact / ChangeSet　·　确认后原子写 Canonical Head，再异步核验记忆&lt;br&gt;R3 只写 Harness 工件或未确认候选，不写 canonical 正文和正式资产　·　同批前序候选只能 provisional 进入后序上下文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=center;" vertex="1" parent="1">
           <mxGeometry x="80" y="1810" width="1440" height="90" as="geometry"/>
         </mxCell>
       </root>
@@ -353,13 +353,13 @@
         <mxCell id="m-title" value="长期记忆：定稿后写入，下次生成经 Manifest 读回" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=18;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="900" height="32" as="geometry"/>
         </mxCell>
-        <mxCell id="m-canon" value="Canonical Head&#xa;已定稿 ChapterRevision&#xa;最高事实来源" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+        <mxCell id="m-canon" value="Canonical Head&#xa;已定稿 ChapterRevision&#xa;最高正文证据来源" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="40" y="70" width="180" height="80" as="geometry"/>
         </mxCell>
-        <mxCell id="m-obs" value="观察节点&#xa;只输出与现有记忆的差异&#xa;不做入库判断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
+        <mxCell id="m-obs" value="观察节点&#xa;带语境的陈述与状态差异&#xa;人物陈述不等于客观事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="260" y="70" width="200" height="80" as="geometry"/>
         </mxCell>
-        <mxCell id="m-judge" value="裁决节点&#xa;采纳 / 待定 / 冲突&#xa;伏笔或叙事债务归类" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
+        <mxCell id="m-judge" value="裁决节点&#xa;采纳 / 待定 / 冲突&#xa;歧义时申请有界原文补查" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0e8080;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="500" y="70" width="200" height="80" as="geometry"/>
         </mxCell>
         <mxCell id="m-chk" value="证据 + 有效区间校验&#xa;确定性应用层&#xa;不在 DB 事务中调模型" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
@@ -393,7 +393,7 @@
         <mxCell id="m-asm" value="ContextAssembler&#xa;结构化关系 + 时间线 + 伏笔 + 近期窗口 + 本地检索&#xa;输出 ContextManifest（纳入/省略原因、版本、哈希、预算）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="40" y="440" width="560" height="80" as="geometry"/>
         </mxCell>
-        <mxCell id="m-kernel" value="Agent Kernel 节点&#xa;只能读 Manifest 已选择的局部上下文&#xa;不能自行搜索项目或把建议升为事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+        <mxCell id="m-kernel" value="Agent Kernel 节点&#xa;可申请补查，由应用层冻结新版 Manifest&#xa;不能自行搜索项目或把建议升为事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="640" y="440" width="560" height="80" as="geometry"/>
         </mxCell>
         <mxCell id="m-e5" style="endArrow=classic;html=1;" edge="1" parent="1" source="m-layers" target="m-asm"><mxGeometry relative="1" as="geometry"/></mxCell>
@@ -404,7 +404,7 @@
         <mxCell id="m-chg" value="影响模式&#xa;future_only / in_story_change / retcon&#xa;历史定稿默认只报告冲突" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="760" y="560" width="440" height="70" as="geometry"/>
         </mxCell>
-        <mxCell id="m-status" value="现状：Fact / Event / CharacterKnowledge / ForeshadowingHook 与 Manifest 骨架已在领域层落地。完整检索、观察/裁决后验与 500 章连续性 Harness 属 R7；R5 只提供 memory_pending_rebuild 挂点。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacing=8;fontSize=12;" vertex="1" parent="1">
+        <mxCell id="m-status" value="现状：Fact / Event / CharacterKnowledge / ForeshadowingHook 与 Manifest 骨架已在领域层落地。R5 最小语境核验后验闭环；R6 批次与故事弧评估；R7 五层检索、跨卷承诺与长篇 Harness。普通事件不强制归为叙事债务。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacing=8;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="40" y="660" width="1160" height="60" as="geometry"/>
         </mxCell>
         <mxCell id="m-e7" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="m-commit" target="m-layers">

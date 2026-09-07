@@ -115,10 +115,11 @@
   <h1>项目架构总图与模块设计</h1>
   <p class="lead">把你给的运行时拓扑落到当前仓库：Go 领域 / 应用 / 内核 / 持久化边界，R3 Agent Kernel 的能力节点，以及五层长期记忆如何写入、过期和被 Context Assembler 读回。产品事实仍以 <code>docs/product/architecture.md</code> 为准；本文只做对照图与模块说明。</p>
 </header>
-<p class="note">可编辑图：同目录 <code>architecture-overview.drawio</code>，用 <a href="https://app.diagrams.net">diagrams.net</a> 打开。当前开发阶段是 R3（内核与创作质量 Harness）；R4–R7 的批次、正式资产确认和五层长期记忆按同一 Kernel 扩展，不另起运行时。</p>
+<p class="note">可编辑图：同目录 <code>architecture-overview.drawio</code>，用 <a href="https://app.diagrams.net">diagrams.net</a> 打开。当前阶段为 R4，待实现对齐与重新验收。下文版本化代码表用于解释已冻结能力；R5–R7 的新增流程是待实施设计，沿用同一 Kernel。</p>
 
 <h2 id="topo">1. 系统拓扑</h2>
-<p>这条链路是产品主循环：界面发命令，应用层冻结任务并给出权威投影，再分三路做上下文装配、工作流编译调度、领域读写；真正的模型调用发生在内核四阶段之内；结果只进未确认候选区。作者确认后才写入 Canonical Head，并异步进入五层长期记忆；下次生成由 Assembler 按 Manifest 读回，模型不能自己翻整本书。</p>
+<p class="note">目标流程（待按路线图实施）：任务预检 → 初步上下文 → 导演与有界补查 → 冻结输入 → 单一主写 → 独立审阅 → 确定性合并与按需证据核验 → 有界修订 → 最终版本复检与选稿 → 作者定稿 → 带语境的后验记忆。批次与故事弧结束后评估实际推进、阶段回报和承诺兑现，形成需作者确认的规划候选。</p>
+<p>这条链路是产品主循环：界面发命令，应用层冻结任务并给出权威投影，再分三路做上下文装配、工作流编译调度、领域读写；真正的模型调用发生在内核四阶段之内；结果只进未确认候选区。作者确认后才写入 Canonical Head，并异步进入五层长期记忆；下次生成由 Assembler 按 Manifest 读回，模型不能自己翻整本书；可由应用层执行有界补查，补查产生新的不可变 Manifest。</p>
 <div class="diagram">
 <svg viewBox="0 0 1100 1324" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="织境运行时拓扑">
   <style>
@@ -174,7 +175,7 @@
   <text class="t" x="550" y="402" text-anchor="middle" font-size="14" font-weight="700">智能体能力执行内核 Agent Execution Kernel</text>
   <text class="t muted" x="550" y="420" text-anchor="middle" font-size="11">internal/application/agentkernel · internal/domain/agent · internal/agentassets</text>
 
-  <text class="t" x="60" y="448" font-size="12" font-weight="700" fill="#166534">阶段 A · 导演与分析</text>
+  <text class="t" x="60" y="448" font-size="12" font-weight="700" fill="#166534">阶段 A · 导演、分析与有界补查</text>
   <rect class="box" x="60" y="458" width="470" height="86" rx="5" fill="#fff" stroke="#16a34a"/>
   <text class="t" x="295" y="486" text-anchor="middle" font-size="13" font-weight="700">Chapter Director</text>
   <text class="t muted" x="295" y="506" text-anchor="middle" font-size="11">chapter_planner · planner 槽 · 不写正文</text>
@@ -190,7 +191,7 @@
   <text class="t" x="550" y="610" text-anchor="middle" font-size="13" font-weight="700">Prose Writer　主写模型：统一叙事声音，拒绝多模型拼接成章</text>
   <text class="t muted" x="550" y="630" text-anchor="middle" font-size="11">prose_writer · writer 槽 · 只读任务 / Manifest / 导演产物</text>
 
-  <text class="t" x="60" y="682" font-size="12" font-weight="700" fill="#166534">阶段 C · 隔离审阅 &amp; Finding Merger</text>
+  <text class="t" x="60" y="682" font-size="12" font-weight="700" fill="#166534">阶段 C · 隔离审阅、合并与按需核验</text>
   <rect class="box" x="60" y="694" width="300" height="78" rx="5" fill="#fff" stroke="#3b82f6"/>
   <text class="t" x="210" y="722" text-anchor="middle" font-size="12" font-weight="700">Continuity Review</text>
   <text class="t muted" x="210" y="742" text-anchor="middle" font-size="11">事实 / 状态 / 知识边界 / 伏笔</text>
@@ -208,10 +209,10 @@
   <text class="t" x="550" y="832" text-anchor="middle" font-size="12" font-weight="700">Finding Merger（确定性，不调用模型）</text>
   <text class="t muted" x="550" y="850" text-anchor="middle" font-size="11">去重 / 关联证据 / 标注冲突 · MergeFindings</text>
 
-  <text class="t" x="60" y="900" font-size="12" font-weight="700" fill="#166534">阶段 D · 有界修订</text>
+  <text class="t" x="60" y="900" font-size="12" font-weight="700" fill="#166534">阶段 D · 有界修订、复检与选稿</text>
   <rect class="box" x="60" y="910" width="980" height="72" rx="5" fill="#fff" stroke="#16a34a"/>
   <text class="t" x="550" y="938" text-anchor="middle" font-size="13" font-weight="700">Bounded Revision　依据 Merged Findings / 作者指令做定点修润</text>
-  <text class="t muted" x="550" y="958" text-anchor="middle" font-size="11">最多一次 · 只改未定稿候选 · v2 追加独立 revision_verify</text>
+  <text class="t muted" x="550" y="958" text-anchor="middle" font-size="11">次数与预算有界 · 每版复检 · 退化可保留有效前稿</text>
 
   <rect class="box" x="60" y="1000" width="980" height="44" rx="5" fill="#ecfccb" stroke="#65a30d"/>
   <text class="t muted" x="550" y="1027" text-anchor="middle" font-size="11">兼容槽 planner / writer / continuity_reviewer　·　Provider：OpenAI 兼容 / Anthropic　·　密钥仅执行时读取</text>
@@ -272,7 +273,7 @@
   </div>
   <div class="card">
     <h3>规划 / 写作 / 审阅隔离</h3>
-    <p>写手不读审阅标准答案或其他模型隐藏推理。独立审阅互不读取结论。修订只拿规范化问题清单。复核者不能由修订槽兼任。</p>
+    <p>写手不读审阅标准答案或其他模型隐藏推理。独立审阅互不读取结论。质量修订依据已核验问题、允许范围和保持项，作者定向修订依据明确指令。复核者不能由修订槽兼任。</p>
   </div>
   <div class="card">
     <h3>冻结后只读</h3>
@@ -326,7 +327,7 @@
 <p>选择权属于版本化 Assembler，模型不得自由遍历作品或把未确认建议升为事实。每个实际调用的节点生成独立 <code>ContextManifest</code>：来源类型、ID、版本、哈希、优先级、纳入/省略原因、是否 provisional、字符与估算 Token 预算。</p>
 <p>装配顺序固定：硬约束与禁止项 → 当前任务与作者指令 → 已确认结构化输入 → 当前章节或必要近期正文 → 上游节点结果 → 软目标。预算不足按优先级截断；硬约束截不断则创建失败。</p>
 <p>R3 来源限于 Harness 规格、作者指令、当前章节 revision、已明确选择的结构化资产、上游工件和锚点。每个纳入来源带 <code>source_id@source_version</code> 边界标记，计入哈希；节点输出里的引用只能复制这些公开标识。</p>
-<p>代码落点：作品侧清单在 <code>workspace/context_manifest.go</code>（<code>context-v2</code>）；内核节点用 <code>json.assembler</code> v1 把 <code>$task</code> / <code>$context</code> / <code>node:…</code> 选择器渲染进 Prompt。二者都是确定性的，不让模型决定「读什么」。R7 之后 Assembler 的候选集来自五层长期记忆（结构化关系、时间线、活跃伏笔、近期窗口和本地检索），而不是把整本小说塞进上下文。详见 <a href="#memory">第 13 节</a>。</p>
+<p>代码落点：作品侧清单在 <code>workspace/context_manifest.go</code>（<code>context-v2</code>）；内核节点用 <code>json.assembler</code> v1 把 <code>$task</code> / <code>$context</code> / <code>node:…</code> 选择器渲染进 Prompt。二者由应用层控制权限和预算；R5 允许模型提出结构化证据需求，由应用层补查并冻结新版本，未命中不代表事实不存在。R5 先使用已确认资产、近期正文及有界历史证据，R7 扩展到五层长期记忆（结构化关系、时间线、活跃伏笔、近期窗口和本地检索），而不是把整本小说塞进上下文。详见 <a href="#memory">第 13 节</a>。</p>
 
 <h2 id="kernel">7. 智能体内核怎么设计</h2>
 <p>内核不是「固定三个 Agent」，而是<strong>版本化 DAG 执行器</strong>。工作流定义含节点、边、入口、结果节点、预算策略、质量策略和定义哈希。一经用于运行不可改；任何 Prompt / Schema / 条件变化都发新版本。</p>
@@ -337,7 +338,7 @@
 <div class="grid">
   <div class="card">
     <h3>A. 章节导演</h3>
-    <p><code>chapter_planner</code> 把路线图和冻结上下文变成可执行叙事任务：章节目标、场景（视角、欲望、阻力、信息释放、状态变化）、硬/软锚点、禁止提前揭示、结尾钩子、允许即兴范围。每项区分 canonical 来源与本章创作建议。导演不写正文。</p>
+    <p><code>chapter_planner</code> 把路线图和冻结上下文变成可执行叙事任务：章节目标、场景（视角、欲望、阻力、信息释放、状态变化）、硬/软锚点、禁止提前揭示、结尾钩子、允许即兴范围。每项区分 canonical 来源与本章创作建议。导演不写正文。R5 增加章节作用、起始/结束状态、选择与代价及证据缺口；即兴新增设定保持候选身份。</p>
   </div>
   <div class="card">
     <h3>A′. 专业状态分析</h3>
@@ -397,6 +398,7 @@
 <p><code>quality.Engine</code> 按冻结策略版本跑本地规则：空正文、字数偏离、代码围栏、提示词泄漏、硬锚点/禁止项、重复句段、机械排比、总结腔、测试集保留专名、修订丢失已满足硬约束、slot-parallel 的槽位覆盖与整合漂移。规则有 ID 和版本，阈值变化必须升质量策略版本。</p>
 <p>质量状态与运行终态分离：工作流可以 <code>completed</code> 同时质量 <code>blocked</code>。任一未解决 blocker → <code>blocked</code>；无 blocker 但有 major 或审阅不完整 → <code>needs_review</code>；blocker/major 已解决且门禁通过 → <code>passed</code>。模型打分不能覆盖确定性 blocker。</p>
 <h3>修订复核</h3>
+<p>R5 新设计将硬冲突、语义不确定、偏好建议分开；合并器不裁决真伪，核验可返回证据不足。文风修订和部分采纳也须复检，评估绑定候选与上下文版本。退化时可选仍有效的前稿，不默认最后一稿最好；费用或次数到限保留问题并暂停。下述 v2 是已冻结协议，新行为通过新版本实现。</p>
 <p>确定性对账只能证明改动能精确应用到原文，不能证明语义问题被解决。v2 的 <code>revision_verify</code> 读原问题、修订前后正文和改动明细，但剥离修订自述的 status/note。只有修订与复核都判 resolved 才退出未解决计数；复核登记的回归进入独立 ID 空间。</p>
 
 <h2 id="store">11. 领域模型与持久化怎么设计</h2>
@@ -425,14 +427,14 @@
 <ul>
   <li>R3：结果进入 Harness 工件或未确认候选。失败、取消、重试都不改 canonical。</li>
   <li>R4：作品方案候选经作者确认后写入正式档案；对话修改先变成待确认 Action。</li>
-  <li>R5：单章作者审阅、编辑、定稿；定稿事务原子提交 revision、审阅摘要与版本信息。定稿成功不依赖后验模型。</li>
+  <li>R5：单章补查、审阅核验、修订复检、选稿与最小后验闭环；定稿事务原子提交 revision、审阅摘要与版本信息。定稿成功不依赖后验模型。</li>
   <li>R6：批次由多个独立 ChapterRun 组成；同批前序候选仅 provisional；检查点熔断进 <code>needs_confirmation</code>。</li>
-  <li>R7：后验工作流从 canonical revision 抽事实/状态/摘要/伏笔候选，校验后幂等写入五层长期记忆。未确认候选不能启动正式记忆写入。</li>
+  <li>R7：扩展 R5 后验闭环至五层记忆、跨卷承诺和大规模重建。未确认候选不能启动正式记忆写入。</li>
 </ul>
 <p>五类产品工作流族共享同一 Kernel：<code>story.foundation</code>、<code>story.roadmap</code>、<code>chapter.production</code>、<code>batch.production</code>、<code>chapter.posthoc</code>。工作流族是用途标识，不是固定节点图。</p>
 
 <h2 id="memory">13. 长期记忆怎么设计</h2>
-<p>人物、世界观、事实和伏笔首先是 AI 的可审阅长期记忆，其次才是作者控制面板。它不是把整本书反复塞进 Prompt，也不是作者必须先填满的资料库。最高事实来源永远是作者定稿的 <code>ChapterRevision</code>；摘要、状态和抽取结果都是可重建的派生物，必须能指回章节、revision 与正文证据。</p>
+<p>人物、世界观、事实和伏笔首先是 AI 的可审阅长期记忆，其次才是作者控制面板。它不是把整本书反复塞进 Prompt，也不是作者必须先填满的资料库。最高正文证据来源是作者定稿的 <code>ChapterRevision</code>；摘要、状态和抽取结果都是可重建的派生物，必须能指回章节、revision 与正文证据。</p>
 
 <div class="diagram">
 <svg viewBox="0 0 1100 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="长期记忆读写回路">
@@ -452,14 +454,14 @@
   <line class="arr" x1="200" y1="76" x2="228" y2="76"/>
   <rect class="box" x="230" y="44" width="170" height="64" rx="5" fill="#fff" stroke="#0f766e"/>
   <text class="t" x="315" y="70" text-anchor="middle" font-size="12" font-weight="700">观察节点</text>
-  <text class="t muted" x="315" y="90" text-anchor="middle" font-size="10">只报差异，不做判断</text>
+  <text class="t muted" x="315" y="90" text-anchor="middle" font-size="10">带语境的陈述与差异</text>
   <line class="arr" x1="400" y1="76" x2="428" y2="76"/>
   <rect class="box" x="430" y="44" width="170" height="64" rx="5" fill="#fff" stroke="#0f766e"/>
   <text class="t" x="515" y="70" text-anchor="middle" font-size="12" font-weight="700">裁决节点</text>
   <text class="t muted" x="515" y="90" text-anchor="middle" font-size="10">采纳 / 待定 / 冲突</text>
   <line class="arr" x1="600" y1="76" x2="628" y2="76"/>
   <rect class="box" x="630" y="44" width="180" height="64" rx="5" fill="#f4f4f5" stroke="#52525b"/>
-  <text class="t" x="720" y="70" text-anchor="middle" font-size="12" font-weight="700">证据与区间校验</text>
+  <text class="t" x="720" y="70" text-anchor="middle" font-size="12" font-weight="700">证据、语境与区间校验</text>
   <text class="t muted" x="720" y="90" text-anchor="middle" font-size="10">引文定位 / 有效区间</text>
   <line class="arr" x1="810" y1="76" x2="838" y2="76"/>
   <rect class="box" x="840" y="44" width="220" height="64" rx="5" fill="#ccfbf1" stroke="#0f766e"/>
@@ -482,7 +484,7 @@
   <text class="t" x="60" y="482" font-size="12" font-weight="700">不得写入正式记忆</text>
   <text class="t muted" x="60" y="506" font-size="11">初稿、自动修订稿、未确认候选</text>
   <text class="t muted" x="60" y="524" font-size="11">同批前序候选（仅 provisional 进后序上下文）</text>
-  <text class="t muted" x="60" y="542" font-size="11">定稿前事实预检候选（R5 挂点）</text>
+  <text class="t muted" x="60" y="542" font-size="11">定稿前预检候选（非正式记忆）</text>
   <text class="t muted" x="60" y="560" font-size="11">验证失败或缺少证据的抽取</text>
   <text class="t muted" x="60" y="578" font-size="11">Invocation Artifact（完整 Prompt / 流事件）</text>
 
@@ -504,21 +506,21 @@
     <tr><td>宪法层</td><td>已确认作品方案、世界规则、主线、不可违背设定、禁写项、作者锁定</td><td><code>world.WorldRule</code>、方案资产、锚点中的硬约束</td><td>最高；预算不足也不得截断。装不下则任务创建失败。</td></tr>
     <tr><td>结构层</td><td>全书 → 卷 → 故事弧 → 近期 3–10 章路线图</td><td><code>story.OutlineNode</code> / 路线图资产。默认只滚动近期层，高层变化要作者批准或 <code>retcon</code></td><td>硬结构稳定，近期层随批次刷新。</td></tr>
     <tr><td>状态层</td><td>人物、关系、物品、地点、能力、知识边界、未解问题</td><td><code>world.*</code>、<code>canon.CharacterKnowledge</code>（<code>known</code> 与 <code>misinformed</code> 分离）</td><td>按本章出场、关系图和时间窗口筛选。</td></tr>
-    <tr><td>摘要层</td><td>章节、卷、近期场景摘要</td><td>R7 后验产物。近场用较细摘要，远场只保留骨架</td><td>原文始终可回溯；摘要不能替代定稿正文。</td></tr>
+    <tr><td>摘要层</td><td>章节、卷、近期场景摘要</td><td>R5 提供最小章摘要，R7 扩展卷与远场骨架</td><td>原文始终可回溯；摘要不能替代定稿正文。</td></tr>
     <tr><td>证据层</td><td>原文片段、revision、审阅发现、伏笔登记</td><td><code>canon.Fact</code> + Evidence、<code>timeline.StoryEvent</code>、<code>world.ForeshadowingHook</code>、<code>ReviewFinding</code></td><td>必须带章节 / revision / 引文范围。无证据不能自动变正式事实。</td></tr>
   </tbody>
 </table>
 
 <h3>事实、状态与有效区间</h3>
 <p><code>canon.Fact</code> 区分来源（作者 / 正文 / 模型 / 规则）和状态（作者确认 / 正文证据 / AI 推断 / 冲突 / 拒绝）。模型推断不得直接变成 <code>author_confirmed</code> 或 <code>text_evidenced</code>。事实可挂 <code>validFrom</code> / <code>validUntil</code> 事件，所以「曾经为真、现在已变」不会被当成连续性错误。人物知识边界单独建模：角色知道什么、被误导相信什么，不能把全书事实等同于角色所知。</p>
-<p>伏笔是状态层与证据层的交叉：<code>ForeshadowingHook</code> 记录埋设章、到期章、已解决/已放弃。未回收钩子进入后续 Manifest；已解决或放弃的不得再当硬约束。叙事债务（承诺未兑现）由后验裁决节点从「未登记事件」归类，不能由写作模型自行注销。</p>
+<p>伏笔是状态层与证据层的交叉：<code>ForeshadowingHook</code> 记录埋设章、到期章、已解决/已放弃。未回收钩子进入后续 Manifest；已解决或放弃的不得再当硬约束。普通事件、潜在线索与已建立承诺分别管理；未登记细节不自动成为债务，规划埋设与正文兑现分开，不能由写作模型自行注销承诺。</p>
 
 <h3><code>chapter.posthoc</code> 工作流</h3>
-<p>这是独立工作流族，不是写作流水线的尾巴。R5 只留定稿后异步挂点和 <code>memory_pending_rebuild</code>；完整节点在 R7 落地。</p>
+<p>这是独立工作流族，不是写作流水线的尾巴。R5 实现带语境的陈述、状态、摘要提取与核验提交；R7 扩展五层检索、跨卷承诺及大规模重建。</p>
 <ul>
   <li>唯一合法来源：作者定稿的 <code>ChapterRevision</code>。初稿、自动修订、未确认候选只能形成 provisional 状态，不能启动正式写入。</li>
-  <li>观察节点：逐条比对定稿正文与现有记忆，只输出差异，不做「该不该入库」的判断。</li>
-  <li>裁决节点：只读差异报告，不重读正文；把事实候选裁为采纳、待定或冲突；把未登记事件归为伏笔或叙事债务。</li>
+  <li>观察职责：对照定稿正文与现有记忆，输出带语境、来源与证据的差异；人物陈述不等于客观事实。</li>
+  <li>裁决职责：默认读取差异，歧义时经应用层有界补读；输出采纳、待定或冲突，证据不足不强行裁决；不强制拆成独立模型调用。</li>
   <li>应用层做证据、有效区间和一致性校验后，才幂等提交。模型调用不在数据库事务里跑；记忆失败不能阻止正文已经完成的定稿。</li>
   <li>定稿事务本身只提交 canonical revision、已有确定性校验、审阅摘要和版本信息，不夹带未完成的后验结果。</li>
 </ul>
@@ -561,7 +563,7 @@
     <tr><td>Domain Store / .zjproject</td><td>已落地</td><td>WAL + 锁 + 恢复副本。</td></tr>
     <tr><td>记忆领域对象</td><td>Fact / Event / Knowledge / ForeshadowingHook 已有</td><td>作者可手工维护；不是完整后验流水线。</td></tr>
     <tr><td>Context Manifest 骨架</td><td>已落地</td><td>完整五层检索与装配解释属 R7。</td></tr>
-    <tr><td><code>chapter.posthoc</code></td><td>未落地</td><td>R5 只留 <code>memory_pending_rebuild</code> 挂点。</td></tr>
+    <tr><td><code>chapter.posthoc</code></td><td>未落地</td><td>R5 最小语境核验闭环，R7 长篇扩展。</td></tr>
     <tr><td>五层记忆读写回路</td><td>设计已定，R7 实现</td><td>与 Kernel 同运行时，不另建记忆引擎。</td></tr>
   </tbody>
 </table>
