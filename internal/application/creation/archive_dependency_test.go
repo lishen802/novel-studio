@@ -3,6 +3,7 @@ package creation
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
@@ -450,5 +451,136 @@ func TestArchiveDirectionEligibilityCAS(t *testing.T) {
 				t.Fatalf("失败确认留下正式人物: %+v, %v", characters, readErr)
 			}
 		})
+	}
+}
+
+// archiveOverlapStore 在外层确认进入事务前执行同一请求，确定性复现两个请求都读到未入档会话。
+type archiveOverlapStore struct {
+	Store
+	beforeApply func() error
+}
+
+func (store *archiveOverlapStore) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
+	if store.beforeApply != nil {
+		if err := store.beforeApply(); err != nil {
+			return err
+		}
+	}
+	return store.Store.ApplyArchive(ctx, apply)
+}
+
+func TestOverlappingArchiveRequestsReturnSameReceipt(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	store := &archiveOverlapStore{Store: bridge}
+	service, err := New(Config{Store: store, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "overlap"}
+	var winner ArchiveResult
+	store.beforeApply = func() error {
+		store.beforeApply = nil
+		var innerErr error
+		winner, innerErr = service.ConfirmArchive(ctx, request)
+		return innerErr
+	}
+	replay, err := service.ConfirmArchive(ctx, request)
+	if err != nil {
+		t.Fatalf("重叠请求未返回成功回执: %v", err)
+	}
+	if winner.ChangeSetID == "" || replay.ChangeSetID != winner.ChangeSetID {
+		t.Fatalf("重叠请求返回不同回执: winner=%q replay=%q", winner.ChangeSetID, replay.ChangeSetID)
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil || len(characters) != 1 {
+		t.Fatalf("重叠请求重复或遗漏物化人物: %+v, %v", characters, err)
+	}
+}
+
+func TestOverlappingArchiveDoesNotHideDifferentKeyConflict(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	store := &archiveOverlapStore{Store: bridge}
+	service, err := New(Config{Store: store, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer := ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "loser"}
+	winner := outer
+	winner.IdempotencyKey = "winner"
+	store.beforeApply = func() error {
+		store.beforeApply = nil
+		_, innerErr := service.ConfirmArchive(ctx, winner)
+		return innerErr
+	}
+	if result, err := service.ConfirmArchive(ctx, outer); err == nil || result.ChangeSetID != "" {
+		t.Fatalf("不同幂等键被错误当作成功重放: %+v, %v", result, err)
+	}
+}
+
+type archiveBarrierStore struct {
+	Store
+	arrived sync.WaitGroup
+}
+
+func (store *archiveBarrierStore) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
+	store.arrived.Done()
+	store.arrived.Wait()
+	return store.Store.ApplyArchive(ctx, apply)
+}
+
+func TestConcurrentArchiveRequestsReturnSameReceipt(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	store := &archiveBarrierStore{Store: bridge}
+	store.arrived.Add(2)
+	service, err := New(Config{Store: store, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "concurrent"}
+	type outcome struct {
+		result ArchiveResult
+		err    error
+	}
+	outcomes := make(chan outcome, 2)
+	for range 2 {
+		go func() {
+			result, err := service.ConfirmArchive(ctx, request)
+			outcomes <- outcome{result: result, err: err}
+		}()
+	}
+	first, second := <-outcomes, <-outcomes
+	if first.err != nil || second.err != nil {
+		t.Fatalf("并发相同请求未全部成功: first=%v second=%v", first.err, second.err)
+	}
+	if first.result.ChangeSetID == "" || first.result.ChangeSetID != second.result.ChangeSetID {
+		t.Fatalf("并发相同请求返回不同回执: first=%q second=%q", first.result.ChangeSetID, second.result.ChangeSetID)
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil || len(characters) != 1 {
+		t.Fatalf("并发相同请求重复物化人物: %+v, %v", characters, err)
 	}
 }

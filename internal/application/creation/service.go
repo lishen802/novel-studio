@@ -1161,8 +1161,8 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	// 幂等重放：已入档时按回执键与请求摘要直接返回原结果，不重新计算实时摘要，
 	// 入档成功后的候选/锁/质量/项目变化不影响已成功 ChangeSet 的重放。
 	if strings.TrimSpace(session.ArchiveChangeSetID) != "" {
-		if session.ArchiveIdempotencyKey == request.IdempotencyKey && session.ArchiveDigest == request.ConfirmationDigest {
-			return ArchiveResult{Session: session, ChangeSetID: session.ArchiveChangeSetID}, nil
+		if replay, ok := matchingArchiveReceipt(session, request); ok {
+			return replay, nil
 		}
 		return ArchiveResult{}, ErrConfirmationRequired
 	}
@@ -1233,11 +1233,28 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 		ChangeSet: changeSet, Session: session, Candidates: plan.Confirmed,
 		Verify: []creationdomain.Candidate{direction}, Workbench: workbench,
 	}); err != nil {
+		// 另一个完全相同的请求可能刚刚提交成功。事务失败后只信任持久化回执；
+		// 不匹配或读取失败仍返回原错误，不能把真实冲突伪装成幂等成功。
+		if latest, readErr := service.store.Session(ctx, request.ProjectID); readErr == nil {
+			if replay, ok := matchingArchiveReceipt(latest, request); ok {
+				return replay, nil
+			}
+		}
 		return ArchiveResult{}, err
 	}
 	session.ContentVersion++
 	session.RunSlotVersion++
 	return ArchiveResult{Session: session, ChangeSetID: changeSet.ID}, nil
+}
+
+// matchingArchiveReceipt 仅匹配已原子提交、且键与参数摘要都相同的入档回执。
+func matchingArchiveReceipt(session creationdomain.Session, request ArchiveRequest) (ArchiveResult, bool) {
+	if strings.TrimSpace(session.ArchiveChangeSetID) == "" ||
+		session.ArchiveIdempotencyKey != request.IdempotencyKey ||
+		session.ArchiveDigest != request.ConfirmationDigest {
+		return ArchiveResult{}, false
+	}
+	return ArchiveResult{Session: session, ChangeSetID: session.ArchiveChangeSetID}, true
 }
 
 func (service *Service) loadArchiveInputs(ctx context.Context, projectID string) (creationdomain.Session, []creationdomain.Candidate, error) {
