@@ -55,7 +55,7 @@
 - sidebar-w: 220px
 - right-panel-w: 360px
 - content-max-w: none (fluid inside main area)
-- breakpoints: narrow < 1024, standard 1440×960, wide > 1600
+- breakpoints: compact < 1440, standard 1440×900, wide > 1600；1280×720 为必验窗口，更小窗口提供单栏阅读
 
 ## Component Spec
 
@@ -103,7 +103,7 @@
 ### Shell (React Layout)
 - `Layout` component renders the title bar, app menu, sidebar, main outlet, and optional right panel. 首页与应用设置属于应用工作区，不渲染当前作品侧栏或项目级 AI 面板。
 - Title bar contains macOS traffic lights (red/yellow/green) and one application-name menu on the left；不重复展示第二个品牌下拉。
-- Sidebar fixed at 220px; main content has `margin-left: 220px`.
+- 展开侧栏宽 220px；主区域随真实侧栏宽度布局，折叠后不得保留固定 220px 空白。
 - Right AI panel is a slide-over `position: fixed` overlay when toggled in writing/review phase. 创意驾驶舱使用自己的方向讨论工作面，避免出现两个通用聊天入口。
 
 ### Sidebar Nav Items (frozen order)
@@ -145,7 +145,7 @@
 | 8  | ProjectSettings | Project-level settings only                                            | FormGroups                              | —                                     |
 | 9  | 智能体实验室    | 原创测试集、费用确认、运行观察、匿名盲评和回归报告                     | RunConfig, Observer, BlindRating, Report | /                                    |
 
-智能体实验室属于应用工作区，不渲染作品侧栏。候选在整组评分提交前只显示稳定匿名槽位，提交成功后才揭示来源和冻结绑定；所有状态都持续显示“不会写入作品正文或正式资产”。
+智能体实验室从“设置 → 高级 → 智能体实验室”进入，不与首页创作入口并列；属于应用工作区，不渲染作品侧栏。候选在整组评分提交前只显示稳定匿名槽位，提交成功后才揭示来源和冻结绑定；所有状态都持续显示“不会写入作品正文或正式资产”。
 
 ### Stateful Views (embedded inside pages as needed)
 - NoModelConfig: settings prompt when no model is configured
@@ -218,3 +218,24 @@ Frequently used: Compass, BookOpen, GitPullRequest, Upload, Library, GitBranch, 
 - Hover transitions: 150ms ease.
 - Panel slide: 220ms cubic-bezier(0.16, 1, 0.3, 1).
 - Background: subtle radial gradient from top-left primary-subtle glow, plus noise texture overlay at 3% opacity.
+
+## 多起点与阅读交互验收契约
+
+本节是后续原型与生产界面的目标合同，尚未实现的入口明确标为未就绪。沿用现有 Token 与组件，不把文档更新视为页面已完成。
+
+| 场景 | 必须呈现的交互 | 实施阶段 |
+|---|---|---|
+| 首页 | 从想法开始、我已有方案、导入小说并续写、打开及最近项目；实验室移至设置高级分类 | R4 |
+| 灵感引导 | 每轮 1–3 个关键问题，可选“你来建议”；方向后可选试写，不先强制审完世界与全书路线图 | R4 交接，R5 试写 |
+| 试写 | 明示非正式候选、范围与费用；喜欢后完善方案、调整语气/人物/节奏或放弃；不计定稿字数 | R5 |
+| 试写转正 | 档案确认后按新约束复检，展示差异与风险并由作者采纳；不能一键绕过正式检查 | R5 |
+| 已有方案 | 原文、来源、缺口与适用阶段；方向显示“不需要此步骤”，已有内容可验证复用，不伪造已选卡 | R4 |
+| 已有正文 | 导入后立即阅读编辑；档案后台进度与续写限制清晰，不能误入灵感流程 | 原入口保留，R8 完整档案 |
+| 驾驶舱 | 显示当前进展、待决定与一个主要下一步；已有正文、待审阅、运行、记忆待恢复各有投影，回看不回退作品阶段 | R4 基础，R5/R6 后续状态 |
+| 方案操作 | 接受、锁定、入档分离；明确范围批量接受，未查看不自动接受；锁定只保护值 | R4 |
+| 正文/审阅 | 1280×720 和 1440×900 下中央阅读区目标至少 560 CSS px；先收一级导航，再用结论抽屉，更窄时单栏；标签不拆字换行、确认按钮可达 | R5 |
+| 批次摘要 | 优先待处理问题，重复发现归组但保留章节证据与状态；点击定位、返回原队列；逐章定稿独立 | R6 |
+
+抽屉支持 Escape、焦点圈定与关闭后焦点返回；布局或路由变化保留未保存正文、未发送 AI 输入和队列位置。原型可用明确标识的本地状态演示这些流程，生产端必须使用权威投影，不能以示例伪造后端完成。
+
+原型回归样例必须覆盖：零经验用户方向后试写；专业作者已有完整/不完整方案；已有正文项目回看策划；接受不锁定、锁定不接受；1280×720 双侧栏挤压；归组问题的多章证据与状态。新手和专业作者均使用同一组件体系，不增加强制模式切换。
