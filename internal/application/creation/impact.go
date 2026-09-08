@@ -481,6 +481,9 @@ func stageReady(session creationdomain.Session, candidates []creationdomain.Cand
 			strings.TrimSpace(session.SelectedDirectionCardID) == "" {
 			return creationdomain.ErrStageIncomplete
 		}
+		if _, err := validateSelectedDirection(session, candidates); err != nil {
+			return err
+		}
 	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
 		current, ok := currentCandidate(candidates, session.Stage)
 		if !ok {

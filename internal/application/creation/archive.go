@@ -71,7 +71,7 @@ func archiveDigest(session creationdomain.Session, candidates []creationdomain.C
 	if err != nil {
 		return "", err
 	}
-	direction, err := requiredDirectionCandidate(session, candidates)
+	direction, err := requiredSelectedDirectionCandidate(session, candidates)
 	if err != nil {
 		return "", err
 	}
@@ -129,9 +129,8 @@ func requiredArchiveCandidates(
 	return proposal, people, roadmap, nil
 }
 
-// requiredDirectionCandidate 返回作者选中的方向候选；选中候选缺失或已失效（被替代/废弃）时拒绝入档，
-// 方向是方案、人物世界与路线图的共同上游，不能只校验下游三份候选。
-func requiredDirectionCandidate(session creationdomain.Session, candidates []creationdomain.Candidate) (creationdomain.Candidate, error) {
+// requiredSelectedDirectionCandidate 返回作者精确选中的有效方向候选，不跟随最新版本漂移。
+func requiredSelectedDirectionCandidate(session creationdomain.Session, candidates []creationdomain.Candidate) (creationdomain.Candidate, error) {
 	if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
 		return creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
 	}
@@ -147,7 +146,7 @@ func requiredDirectionCandidate(session creationdomain.Session, candidates []cre
 
 // validateArchiveReadiness 校验确认前置条件：全链路候选质量未阻断、无未解决 stale、载荷有效。
 func validateArchiveReadiness(session creationdomain.Session, candidates []creationdomain.Candidate) error {
-	if _, err := requiredDirectionCandidate(session, candidates); err != nil {
+	if _, err := validateSelectedDirection(session, candidates); err != nil {
 		return err
 	}
 	for _, stage := range []creationdomain.Stage{
@@ -160,18 +159,50 @@ func validateArchiveReadiness(session creationdomain.Session, candidates []creat
 		if current.Blocked() {
 			return creationdomain.ErrQualityBlocked
 		}
-		// 影响标记可能尚未落库，必须直接比较生成时冻结的输入与实时依赖。
-		live := liveUpstreamDigest(session, candidates, stage)
-		if live == "" || current.UpstreamDigest == "" || current.ImpactSeverity == creationdomain.ImpactMust {
-			return creationdomain.ErrImpactUnresolved
-		}
-		excepted := current.ImpactSeverity == creationdomain.ImpactMaybe && !current.HasLocks() && current.ExceptionMatches(live)
-		if (current.UpstreamDigest != live || current.Status == creationdomain.StatusStale) && !excepted {
-			return creationdomain.ErrImpactUnresolved
+		if err := validateCandidateDependency(session, candidates, current); err != nil {
+			return err
 		}
 		if err := validateCandidatePayload(stage, current.PayloadJSON); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateSelectedDirection 统一校验方向推进与入档所依赖的精确候选、卡、质量和输入版本。
+func validateSelectedDirection(session creationdomain.Session, candidates []creationdomain.Candidate) (creationdomain.Candidate, error) {
+	direction, err := requiredSelectedDirectionCandidate(session, candidates)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if direction.Stage != creationdomain.StageDirections ||
+		(direction.Kind != creationdomain.KindDirectionSet && direction.Kind != creationdomain.KindDirection) {
+		return creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
+	}
+	if _, err := directionCardByID(direction, session.SelectedDirectionCardID); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if direction.Blocked() {
+		return creationdomain.Candidate{}, creationdomain.ErrQualityBlocked
+	}
+	if err := validateCandidateDependency(session, candidates, direction); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if err := validateCandidatePayload(creationdomain.StageDirections, direction.PayloadJSON); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	return direction, nil
+}
+
+// validateCandidateDependency 直接比较候选冻结输入与实时依赖，不依赖异步 stale 标记是否已传播。
+func validateCandidateDependency(session creationdomain.Session, candidates []creationdomain.Candidate, candidate creationdomain.Candidate) error {
+	live := liveUpstreamDigest(session, candidates, candidate.Stage)
+	if live == "" || candidate.UpstreamDigest == "" || candidate.ImpactSeverity == creationdomain.ImpactMust {
+		return creationdomain.ErrImpactUnresolved
+	}
+	excepted := candidate.ImpactSeverity == creationdomain.ImpactMaybe && !candidate.HasLocks() && candidate.ExceptionMatches(live)
+	if (candidate.UpstreamDigest != live || candidate.Status == creationdomain.StatusStale) && !excepted {
+		return creationdomain.ErrImpactUnresolved
 	}
 	return nil
 }

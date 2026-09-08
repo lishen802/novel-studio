@@ -276,3 +276,179 @@ func TestArchiveRejectsChangedDependencyHead(t *testing.T) {
 		t.Fatalf("失败后留下人物: %+v, %v", characters, err)
 	}
 }
+
+func TestArchiveRejectsIneligibleDirection(t *testing.T) {
+	cases := map[string]struct {
+		want   error
+		mutate func(creationdomain.Candidate) (creationdomain.Candidate, error)
+	}{
+		"质量阻断": {want: creationdomain.ErrQualityBlocked, mutate: func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+			return candidate.WithQuality(creationdomain.QualityBlocked), nil
+		}},
+		"硬影响": {want: creationdomain.ErrImpactUnresolved, mutate: func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+			return candidate.MarkStale("创作意图改变", []string{"intent"}, creationdomain.ImpactMust, testClock{}.Now())
+		}},
+		"未知依赖": {want: creationdomain.ErrImpactUnresolved, mutate: func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+			candidate.UpstreamDigest = ""
+			return candidate, nil
+		}},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			raw, project := sqliteCreateStore(t)
+			defer raw.Close()
+			bridge := NewSQLiteStore(raw)
+			session := seedArchiveSession(t, bridge, project.ID)
+			direction, err := bridge.Candidate(ctx, session.SelectedDirectionCandidateID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			direction, err = test.mutate(direction)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := bridge.UpdateCandidate(ctx, direction); err != nil {
+				t.Fatal(err)
+			}
+			service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.PreviewConfirmArchive(ctx, project.ID); !errors.Is(err, test.want) {
+				t.Fatalf("无效方向返回错误 = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestDirectionSoftImpactExceptionCanArchive(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	session := seedArchiveSession(t, bridge, project.ID)
+	direction, err := bridge.Candidate(ctx, session.SelectedDirectionCandidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direction.UpstreamDigest = "previous-intent"
+	direction, err = direction.MarkStale("软偏好变化", []string{"intent"}, creationdomain.ImpactMaybe, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	direction, err = direction.KeepException(liveUpstreamDigest(session, nil, creationdomain.StageDirections), testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.UpdateCandidate(ctx, direction); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "direction-soft-exception"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdvanceRejectsIneligibleDirection(t *testing.T) {
+	for _, blocked := range []bool{true, false} {
+		t.Run(map[bool]string{true: "blocked", false: "stale"}[blocked], func(t *testing.T) {
+			ctx := context.Background()
+			raw, project := sqliteCreateStore(t)
+			defer raw.Close()
+			bridge := NewSQLiteStore(raw)
+			session := seedArchiveSession(t, bridge, project.ID)
+			latest, err := bridge.Session(ctx, project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			latest.Stage = creationdomain.StageDirections
+			if err := bridge.SaveSession(ctx, latest); err != nil {
+				t.Fatal(err)
+			}
+			direction, err := bridge.Candidate(ctx, session.SelectedDirectionCandidateID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := creationdomain.ErrImpactUnresolved
+			if blocked {
+				direction = direction.WithQuality(creationdomain.QualityBlocked)
+				want = creationdomain.ErrQualityBlocked
+			} else {
+				direction, err = direction.MarkStale("创作意图改变", []string{"intent"}, creationdomain.ImpactMust, testClock{}.Now())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := bridge.UpdateCandidate(ctx, direction); err != nil {
+				t.Fatal(err)
+			}
+			service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.AdvanceStage(ctx, project.ID); !errors.Is(err, want) {
+				t.Fatalf("无效方向推进错误 = %v, want %v", err, want)
+			}
+		})
+	}
+}
+
+// archiveDirectionMutator 在预览校验后改变选中方向，验证事务必须按方向完整快照回滚。
+type archiveDirectionMutator struct {
+	Store
+	mutate func(creationdomain.Candidate) (creationdomain.Candidate, error)
+}
+
+func (store archiveDirectionMutator) ApplyArchive(ctx context.Context, apply ArchiveApply) error {
+	direction := apply.Verify[0]
+	changed, err := store.mutate(direction)
+	if err != nil {
+		return err
+	}
+	if err := store.UpdateCandidate(ctx, changed); err != nil {
+		return err
+	}
+	return store.Store.ApplyArchive(ctx, apply)
+}
+
+func TestArchiveDirectionEligibilityCAS(t *testing.T) {
+	for _, kind := range []string{"blocked", "stale"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := context.Background()
+			raw, project := sqliteCreateStore(t)
+			defer raw.Close()
+			bridge := NewSQLiteStore(raw)
+			seedArchiveSession(t, bridge, project.ID)
+			mutate := func(candidate creationdomain.Candidate) (creationdomain.Candidate, error) {
+				if kind == "blocked" {
+					return candidate.WithQuality(creationdomain.QualityBlocked), nil
+				}
+				return candidate.MarkStale("创作意图改变", []string{"intent"}, creationdomain.ImpactMust, testClock{}.Now())
+			}
+			service, err := New(Config{Store: archiveDirectionMutator{Store: bridge, mutate: mutate}, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.ConfirmArchive(ctx, ArchiveRequest{ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "direction-" + kind})
+			if !errors.Is(err, creationdomain.ErrConfirmationStale) {
+				t.Fatalf("方向有效性变化没有使确认过期: %v", err)
+			}
+			characters, readErr := raw.ListCharacters(ctx)
+			if readErr != nil || len(characters) != 0 {
+				t.Fatalf("失败确认留下正式人物: %+v, %v", characters, readErr)
+			}
+		})
+	}
+}

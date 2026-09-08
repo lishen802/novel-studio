@@ -1218,7 +1218,7 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 			return ArchiveResult{}, err
 		}
 	}
-	direction, err := requiredDirectionCandidate(session, candidates)
+	direction, err := requiredSelectedDirectionCandidate(session, candidates)
 	if err != nil {
 		return ArchiveResult{}, err
 	}
