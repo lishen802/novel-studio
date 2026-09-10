@@ -116,7 +116,7 @@ func (candidate Candidate) Restore(now time.Time) (Candidate, error) {
 
 func (candidate Candidate) ExceptionMatches(upstreamDigest string) bool {
 	digest := strings.TrimSpace(upstreamDigest)
-	return candidate.Status == StatusStale && digest != "" && candidate.ExceptedUpstreamDigest == digest
+	return digest != "" && candidate.ExceptedUpstreamDigest == digest
 }
 
 func (candidate Candidate) HasLocks() bool {

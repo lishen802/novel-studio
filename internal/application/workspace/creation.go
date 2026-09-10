@@ -259,6 +259,18 @@ func (s *Service) AdvanceCreationStage(ctx context.Context) (creationapp.Workben
 	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
 }
 
+// AcceptCreationCandidate 接受当前阶段的精确候选，不隐式推进或写入正式档案。
+func (s *Service) AcceptCreationCandidate(ctx context.Context, candidateID string) (creationapp.WorkbenchView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if _, err := runtime.service.AcceptCandidate(ctx, runtime.projectID, candidateID); err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+}
+
 func (s *Service) LookBackCreationStage(ctx context.Context, stage string) (creationapp.WorkbenchView, error) {
 	runtime, err := s.creationRuntime(ctx, true)
 	if err != nil {

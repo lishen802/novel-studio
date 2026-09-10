@@ -181,6 +181,11 @@ func TestArchiveDependencyExceptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if mode == "soft" {
+				if _, err := service.AcceptCandidate(ctx, project.ID, candidate.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			preview, err := service.PreviewConfirmArchive(ctx, project.ID)
 			if mode != "soft" {
 				if !errors.Is(err, creationdomain.ErrImpactUnresolved) {

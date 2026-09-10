@@ -164,6 +164,9 @@ func validateArchiveReadiness(session creationdomain.Session, candidates []creat
 		if err := validateCandidatePayload(stage, current.PayloadJSON); err != nil {
 			return err
 		}
+		if current.Status != creationdomain.StatusConfirmed {
+			return creationdomain.ErrCandidateAcceptanceRequired
+		}
 	}
 	return nil
 }

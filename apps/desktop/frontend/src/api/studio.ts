@@ -490,6 +490,7 @@ export const studio = {
   selectCreationDirection: (candidateId: string, cardId: string) => call<CreationWorkbenchView>('SelectCreationDirection', candidateId, cardId),
   keepCreationDirection: (cardId: string) => call<CreationWorkbenchView>('KeepCreationDirection', cardId),
   unkeepCreationDirection: (cardId: string) => call<CreationWorkbenchView>('UnkeepCreationDirection', cardId),
+  acceptCreationCandidate: (candidateId: string) => call<CreationWorkbenchView>('AcceptCreationCandidate', candidateId),
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
   saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>

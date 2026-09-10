@@ -14,6 +14,7 @@ type CreationUseCases interface {
 	SelectCreationDirection(ctx context.Context, candidateID, cardID string) (creationapp.WorkbenchView, error)
 	KeepCreationDirection(ctx context.Context, cardID string) (creationapp.WorkbenchView, error)
 	UnkeepCreationDirection(ctx context.Context, cardID string) (creationapp.WorkbenchView, error)
+	AcceptCreationCandidate(ctx context.Context, candidateID string) (creationapp.WorkbenchView, error)
 	AdvanceCreationStage(ctx context.Context) (creationapp.WorkbenchView, error)
 	LookBackCreationStage(ctx context.Context, stage string) (creationapp.WorkbenchView, error)
 	SaveCreationCandidateDraft(ctx context.Context, candidateID, payloadJSON string) (creationapp.WorkbenchView, error)
@@ -103,6 +104,14 @@ func (a *DesktopAPI) AdvanceCreationStage() (creationapp.WorkbenchView, error) {
 		return creationapp.WorkbenchView{}, safeDesktopError(err)
 	}
 	return safeResult(svc.AdvanceCreationStage(a.ctx))
+}
+
+func (a *DesktopAPI) AcceptCreationCandidate(candidateID string) (creationapp.WorkbenchView, error) {
+	svc, err := a.creationUseCases()
+	if err != nil {
+		return creationapp.WorkbenchView{}, safeDesktopError(err)
+	}
+	return safeResult(svc.AcceptCreationCandidate(a.ctx, candidateID))
 }
 
 func (a *DesktopAPI) LookBackCreationStage(stage string) (creationapp.WorkbenchView, error) {

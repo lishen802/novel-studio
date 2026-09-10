@@ -395,7 +395,7 @@ func workbenchCapabilities(session creationdomain.Session, view WorkbenchView) [
 			caps = append(caps, "SelectDirection", "SaveCandidateDraft")
 		}
 	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
-		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AdvanceStage")
+		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AcceptCandidate", "AdvanceStage")
 		if view.Proposal.CandidateID != "" {
 			caps = append(caps, "LockField", "UnlockField")
 		}

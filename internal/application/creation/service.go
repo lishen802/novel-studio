@@ -328,6 +328,12 @@ func (service *Service) AdvanceStage(ctx context.Context, projectID string) (cre
 	if err := stageReady(session, candidates); err != nil {
 		return creationdomain.Session{}, err
 	}
+	if stageRequiresCandidateAcceptance(session.Stage) {
+		current, ok := currentCandidate(candidates, session.Stage)
+		if !ok || current.Status != creationdomain.StatusConfirmed {
+			return creationdomain.Session{}, creationdomain.ErrCandidateAcceptanceRequired
+		}
+	}
 	session, err = session.Advance(service.clock.Now())
 	if err != nil {
 		return creationdomain.Session{}, err
@@ -336,6 +342,64 @@ func (service *Service) AdvanceStage(ctx context.Context, projectID string) (cre
 		return creationdomain.Session{}, err
 	}
 	return session, nil
+}
+
+// AcceptCandidate 明确接受指定阶段的当前精确候选版本，但不推进阶段、不写正式档案。
+func (service *Service) AcceptCandidate(ctx context.Context, projectID, candidateID string) (creationdomain.Candidate, error) {
+	session, err := service.store.Session(ctx, projectID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	candidates, err := service.store.ListCandidates(ctx, session.ID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	target, ok := candidateByID(candidates, strings.TrimSpace(candidateID))
+	if !ok || !stageRequiresCandidateAcceptance(target.Stage) || !stageReached(session.Stage, target.Stage) {
+		return creationdomain.Candidate{}, creationdomain.ErrCandidateAcceptanceRequired
+	}
+	current, ok := currentCandidate(candidates, target.Stage)
+	if !ok || current.ID != target.ID {
+		return creationdomain.Candidate{}, creationdomain.ErrCandidateAcceptanceRequired
+	}
+	if current.Status == creationdomain.StatusConfirmed {
+		return current, nil
+	}
+	if err := validateCandidatePayload(current.Stage, current.PayloadJSON); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if err := validateCandidateDependency(session, candidates, current); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	// 软影响例外已经绑定当前上游摘要时，接受动作保留例外证据并结束 stale 状态。
+	if current.Status == creationdomain.StatusStale && current.ExceptionMatches(liveUpstreamDigest(session, candidates, current.Stage)) {
+		current.Status = creationdomain.StatusDraft
+	}
+	accepted, err := current.Confirm(service.clock.Now())
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	if err := service.store.UpdateCandidate(ctx, accepted); err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	return accepted, nil
+}
+
+func stageRequiresCandidateAcceptance(stage creationdomain.Stage) bool {
+	return stage == creationdomain.StageProposal || stage == creationdomain.StagePeopleWorld || stage == creationdomain.StageRoadmap
+}
+
+func stageReached(current, target creationdomain.Stage) bool {
+	currentIndex, targetIndex := -1, -1
+	for index, stage := range creationdomain.Rail() {
+		if stage == current {
+			currentIndex = index
+		}
+		if stage == target {
+			targetIndex = index
+		}
+	}
+	return currentIndex >= 0 && targetIndex >= 0 && targetIndex <= currentIndex
 }
 
 // LookBackStage 回到更早阶段，不删除候选、不写正式资产。
@@ -1204,19 +1268,6 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	)
 	if err != nil {
 		return ArchiveResult{}, err
-	}
-	// 依赖校验已验证软影响例外；仅在校验副本上解除 stale，保留原快照供事务复核。
-	// 真正的状态迁移由入档事务内的条件更新完成，校验后到提交前的并发改动由快照条件拒绝。
-	for _, candidate := range plan.Confirmed {
-		if candidate.Status == creationdomain.StatusStale {
-			candidate, err = candidate.ClearStale(now)
-			if err != nil {
-				return ArchiveResult{}, err
-			}
-		}
-		if _, err := candidate.Confirm(now); err != nil {
-			return ArchiveResult{}, err
-		}
 	}
 	direction, err := requiredSelectedDirectionCandidate(session, candidates)
 	if err != nil {

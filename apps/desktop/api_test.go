@@ -827,6 +827,7 @@ func TestSafeDesktopErrorClassifiesCreationFailuresWithoutLeakingBody(t *testing
 	}{
 		{name: "digest", err: creation.ErrConfirmationRequired, code: errorCreationConfirmation, message: "创作费用确认已变化，请重新预览并确认。"},
 		{name: "impact", err: creationdomain.ErrImpactUnresolved, code: errorCreationImpact, message: "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"},
+		{name: "acceptance", err: creationdomain.ErrCandidateAcceptanceRequired, code: errorCreationAcceptance, message: "请先接受当前候选版本，再继续推进或确认作品档案。"},
 		{name: "unavailable workspace", err: workspace.ErrCreationUnavailable, code: errorFeatureNotAvailable, message: "当前项目无法打开创作工作台。"},
 		{name: "run active", err: creation.ErrRunActive, code: errorAgentRunActive, message: "已有创作运行正在进行，请等待完成或取消后再试。"},
 		{name: "unavailable service", err: creation.ErrUnavailable, code: errorFeatureNotAvailable, message: "创作编排服务尚未就绪。"},

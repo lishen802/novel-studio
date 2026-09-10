@@ -82,6 +82,8 @@ const expected = [
   ["SelectCreationDirection card binding", apiRuntime, "export function SelectCreationDirection(arg1, arg2)"],
   ["KeepCreationDirection declaration", apiDeclaration, "KeepCreationDirection(arg1:string):Promise<creation.WorkbenchView>"],
   ["UnkeepCreationDirection declaration", apiDeclaration, "UnkeepCreationDirection(arg1:string):Promise<creation.WorkbenchView>"],
+  ["AcceptCreationCandidate declaration", apiDeclaration, "AcceptCreationCandidate(arg1:string):Promise<creation.WorkbenchView>"],
+  ["AcceptCreationCandidate binding", apiRuntime, "export function AcceptCreationCandidate(arg1)"],
   [
     "ConfirmCreationGenerate runtime binding",
     apiRuntime,

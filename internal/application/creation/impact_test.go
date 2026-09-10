@@ -50,6 +50,10 @@ func TestKeepExceptionAllowsAdvanceAfterStale(t *testing.T) {
 	if !result.Projection.CanAdvance || len(result.Projection.Items) == 0 || !result.Projection.Items[0].Excepted {
 		t.Fatalf("projection = %#v", result.Projection)
 	}
+	currentID := currentCandidateID(t, service, store, creationdomain.StageProposal)
+	if _, err := service.AcceptCandidate(context.Background(), session.ProjectID, currentID); err != nil {
+		t.Fatal(err)
+	}
 	advanced, err := service.AdvanceStage(context.Background(), session.ProjectID)
 	if err != nil {
 		t.Fatal(err)

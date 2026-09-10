@@ -30,6 +30,31 @@ func TestConfirmArchiveRejectsWithoutSelectedDirection(t *testing.T) {
 	}
 }
 
+func TestPreviewArchiveRejectsUnacceptedCandidate(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	session := seedArchiveSession(t, bridge, project.ID)
+
+	proposal, err := bridge.Candidate(ctx, "proposal-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal.Status = creationdomain.StatusDraft
+	if err := bridge.UpdateCandidate(ctx, proposal); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.PreviewConfirmArchive(ctx, session.ProjectID); !errors.Is(err, creationdomain.ErrCandidateAcceptanceRequired) {
+		t.Fatalf("preview with unaccepted proposal error = %v", err)
+	}
+}
+
 // archiveSessionConflictStore 在入档事务前插入作者保存，验证事务不能用旧会话覆盖新内容。
 type archiveSessionConflictStore struct{ Store }
 
@@ -84,15 +109,6 @@ func TestArchiveSessionCASRollsBackWholeTransaction(t *testing.T) {
 	workbench, err := raw.WorkbenchState(ctx)
 	if err != nil || workbench.Stage == projectdomain.StageWriting || workbench.ArchiveStatus == "confirmed" {
 		t.Fatalf("失败入档改变工作台: %+v, %v", workbench, err)
-	}
-	candidates, err := bridge.ListCandidates(ctx, latest.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, candidate := range candidates {
-		if candidate.Status == creationdomain.StatusConfirmed {
-			t.Fatalf("失败入档确认了候选: %s", candidate.ID)
-		}
 	}
 }
 
@@ -161,19 +177,6 @@ func TestConfirmArchiveRejectsCandidateChangedAfterPreview(t *testing.T) {
 			nodes, err := raw.ListOutlineNodes(ctx)
 			if err != nil || len(nodes) != 0 {
 				t.Fatalf("失败入档留下路线图: %+v, %v", nodes, err)
-			}
-			latest, err := bridge.Session(ctx, project.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			candidates, err := bridge.ListCandidates(ctx, latest.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, candidate := range candidates {
-				if candidate.Status == creationdomain.StatusConfirmed {
-					t.Fatalf("失败入档确认了候选: %s", candidate.ID)
-				}
 			}
 		})
 	}
@@ -917,8 +920,15 @@ func seedArchiveSessionWithCastVersion(t *testing.T, store Store, projectID, pro
 		t.Fatal(err)
 	}
 	candidates := []creationdomain.Candidate{dir, proposal, people, roadmap}
-	for _, candidate := range candidates {
+	for index, candidate := range candidates {
 		candidate = candidate.WithUpstream(liveUpstreamDigest(session, candidates, candidate.Stage))
+		if candidate.Stage == creationdomain.StageProposal || candidate.Stage == creationdomain.StagePeopleWorld || candidate.Stage == creationdomain.StageRoadmap {
+			candidate, err = candidate.Confirm(now)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		candidates[index] = candidate
 		if err := store.SaveCandidate(context.Background(), candidate); err != nil {
 			t.Fatal(err)
 		}

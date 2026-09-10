@@ -249,6 +249,34 @@ func TestQualityGateBlocksAdvanceAndRevisionResultWins(t *testing.T) {
 	}
 }
 
+func TestManualAdvanceRequiresExplicitCandidateAcceptance(t *testing.T) {
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	session := seedDirectionsSelection(t, service, store, "d1")
+	candidate := seedStageCandidate(t, service, store, creationdomain.StageProposal, proposalPayload)
+	candidates, err := store.ListCandidates(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate = candidate.WithUpstream(liveUpstreamDigest(session, candidates, creationdomain.StageProposal))
+	if err := store.UpdateCandidate(context.Background(), candidate); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.AdvanceStage(context.Background(), session.ProjectID); !errors.Is(err, creationdomain.ErrCandidateAcceptanceRequired) {
+		t.Fatalf("advance with unaccepted proposal error = %v", err)
+	}
+	accepted, err := service.AcceptCandidate(context.Background(), session.ProjectID, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Status != creationdomain.StatusConfirmed {
+		t.Fatalf("accepted candidate status = %q", accepted.Status)
+	}
+	if _, err := service.AdvanceStage(context.Background(), session.ProjectID); err != nil {
+		t.Fatalf("advance after acceptance: %v", err)
+	}
+}
+
 // P1-7：运行期间作者保存的意图不被旧会话副本覆盖。
 func TestRunDoesNotOverwriteConcurrentIntentSave(t *testing.T) {
 	kernel := newFakeKernel()

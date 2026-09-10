@@ -211,6 +211,14 @@ export default function Cockpit() {
       if (!selectedId) { setError('请先选择一张故事方向卡。'); return; }
       await run(() => studio.selectCreationDirection(workbench.directionSet.candidateId, selectedId));
     }
+    const candidateId = workbench.stage === 'proposal'
+      ? workbench.proposal.candidateId
+      : workbench.stage === 'people_world'
+        ? workbench.peopleWorld.candidateId
+        : workbench.stage === 'roadmap'
+          ? workbench.roadmap.candidateId
+          : '';
+    if (candidateId) await run(() => studio.acceptCreationCandidate(candidateId));
     await run(() => studio.advanceCreationStage());
   };
 
@@ -491,7 +499,7 @@ export default function Cockpit() {
           </Button>
           <Button disabled={generating || busy} onClick={() => void run(() => studio.saveCreationIntent(intent.trim() || workbench.intentText))}>保存草稿</Button>
           <Button variant="primary" disabled={generating || busy} onClick={() => void confirmNext()} className="gap-1">
-            确认进入下一步 <ChevronRight className="w-4 h-4" />
+            {['proposal', 'people_world', 'roadmap'].includes(workbench.stage) ? '接受并进入下一步' : '确认进入下一步'} <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
       </footer>

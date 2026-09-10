@@ -66,7 +66,7 @@ func (s *Store) ApplyCreationArchive(
 		}
 	}
 	for _, candidate := range candidates {
-		if err := persistCreationCandidateTx(ctx, tx, candidate, appliedAt); err != nil {
+		if err := verifyAcceptedCreationCandidateTx(ctx, tx, candidate); err != nil {
 			return err
 		}
 	}
@@ -125,42 +125,26 @@ func verifyCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidate creati
 	return nil
 }
 
-// persistCreationCandidateTx 把候选确认成正式版本，同时以入档前快照为条件更新。
-// 内容哈希、质量结论、锁与状态任一与预览时不一致（改锁、改质量、被替代、新版本），
-// 都命中 0 行并整事务回滚，避免把已过期的候选写成 confirmed。
-func persistCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidate creationdomain.Candidate, confirmedAt time.Time) error {
+// verifyAcceptedCreationCandidateTx 只校验候选已由作者提前接受且仍是当前版本；
+// 正式入档不能在事务中替作者执行接受动作。
+func verifyAcceptedCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidate creationdomain.Candidate) error {
+	if candidate.Status != creationdomain.StatusConfirmed {
+		return creationdomain.ErrCandidateAcceptanceRequired
+	}
 	if err := verifyCreationCandidateTx(ctx, tx, candidate); err != nil {
 		return err
 	}
-	locks, err := json.Marshal(candidate.LockMap)
-	if err != nil {
-		return err
+	var newer int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM creation_candidates
+		WHERE session_id = ? AND stage = ?
+		AND status NOT IN ('superseded', 'discarded')
+		AND version >= ? AND id != ?
+	`, candidate.SessionID, string(candidate.Stage), candidate.Version, candidate.ID).Scan(&newer); err != nil {
+		return databaseOperationError("verify current accepted creation candidate", err)
 	}
-	if string(locks) == "null" {
-		locks = []byte("{}")
-	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE creation_candidates SET status = ?, updated_at = ?
-		WHERE id = ? AND content_sha256 = ? AND quality_status = ? AND lock_map_json = ? AND status = ?
-		AND NOT EXISTS (
-			SELECT 1 FROM creation_candidates AS newer
-			WHERE newer.session_id = creation_candidates.session_id
-			AND newer.stage = creation_candidates.stage
-			AND newer.status NOT IN ('superseded', 'discarded')
-			AND newer.version >= creation_candidates.version
-			AND newer.id != creation_candidates.id
-		)
-	`, string(creationdomain.StatusConfirmed), formatTime(confirmedAt),
-		candidate.ID, candidate.ContentSHA256, string(candidate.QualityStatus), string(locks), string(candidate.Status))
-	if err != nil {
-		return databaseOperationError("confirm creation candidate after archive", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return databaseOperationError("read creation candidate confirm result", err)
-	}
-	if changed != 1 {
-		return fmt.Errorf("%w: candidate %s changed since preview", creationdomain.ErrConfirmationStale, candidate.ID)
+	if newer != 0 {
+		return fmt.Errorf("%w: candidate %s is no longer current", creationdomain.ErrConfirmationStale, candidate.ID)
 	}
 	return nil
 }

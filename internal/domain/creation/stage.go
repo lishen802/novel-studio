@@ -3,15 +3,16 @@ package creation
 import "strings"
 
 var (
-	ErrBlankValue        = err("creation value must not be blank")
-	ErrInvalidTransition = err("invalid creation stage transition")
-	ErrStageIncomplete   = err("creation stage is incomplete")
-	ErrFieldLocked       = err("creation field is locked")
-	ErrInvalidJSON       = err("creation payload is not valid json")
-	ErrFieldMissing      = err("creation field path is missing")
-	ErrImpactUnresolved  = err("creation impact must be resolved")
-	ErrDirectionCard     = err("creation direction card not found in candidate")
-	ErrQualityBlocked    = err("creation candidate quality is blocked")
+	ErrBlankValue                  = err("creation value must not be blank")
+	ErrInvalidTransition           = err("invalid creation stage transition")
+	ErrStageIncomplete             = err("creation stage is incomplete")
+	ErrFieldLocked                 = err("creation field is locked")
+	ErrInvalidJSON                 = err("creation payload is not valid json")
+	ErrFieldMissing                = err("creation field path is missing")
+	ErrImpactUnresolved            = err("creation impact must be resolved")
+	ErrDirectionCard               = err("creation direction card not found in candidate")
+	ErrQualityBlocked              = err("creation candidate quality is blocked")
+	ErrCandidateAcceptanceRequired = err("creation candidate must be accepted before advancing or archiving")
 	// ErrConfirmationStale 表示入档事务内发现确认前置条件在预览后已变化（改锁、改选、候选修改或质量变化）。
 	ErrConfirmationStale = err("creation confirmation prerequisites changed")
 )

@@ -117,6 +117,7 @@ const (
 	errorCreationVersionConflict        desktopErrorCode = "CREATION_VERSION_CONFLICT"
 	errorCreationConfirmationStale      desktopErrorCode = "CREATION_CONFIRMATION_STALE"
 	errorCreationImpact                 desktopErrorCode = "CREATION_IMPACT_UNRESOLVED"
+	errorCreationAcceptance             desktopErrorCode = "CREATION_ACCEPTANCE_REQUIRED"
 )
 
 var (
@@ -155,6 +156,8 @@ func safeDesktopError(err error) error {
 		code, message = errorCreationConfirmationStale, "确认前置条件已变化，本次入档未执行。请重新预览并确认。"
 	case errors.Is(err, creationdomain.ErrImpactUnresolved):
 		code, message = errorCreationImpact, "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"
+	case errors.Is(err, creationdomain.ErrCandidateAcceptanceRequired):
+		code, message = errorCreationAcceptance, "请先接受当前候选版本，再继续推进或确认作品档案。"
 	case errors.Is(err, workspace.ErrCreationUnavailable):
 		code, message = errorFeatureNotAvailable, "当前项目无法打开创作工作台。"
 	case errors.Is(err, creation.ErrRunActive):

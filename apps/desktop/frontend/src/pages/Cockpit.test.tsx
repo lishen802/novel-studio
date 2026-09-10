@@ -158,6 +158,26 @@ describe('创作驾驶舱', () => {
     expect(advance).toHaveBeenCalledTimes(1);
   });
 
+  it('方案阶段先接受精确候选，再进入下一阶段', async () => {
+	const user = userEvent.setup();
+	const view = workbench({
+	  stage: 'proposal',
+	  proposal: { candidateId: 'proposal-2', version: 2, status: 'draft', title: '潮汐关', sections: [] },
+	});
+	recoverCreation.mockResolvedValue(view);
+	const accept = vi.fn().mockResolvedValue(workbench({
+	  ...view,
+	  proposal: { ...view.proposal, status: 'confirmed' },
+	}));
+	const advance = vi.fn().mockResolvedValue(workbench({ stage: 'people_world' }));
+	Object.assign(window.go!.main!.DesktopAPI!, { AcceptCreationCandidate: accept, AdvanceCreationStage: advance });
+
+	render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+	await user.click(await screen.findByRole('button', { name: /接受并进入下一步/ }));
+	expect(accept).toHaveBeenCalledWith('proposal-2');
+	expect(advance).toHaveBeenCalledTimes(1);
+  });
+
   it('异步运行启动后继续刷新直到后端结束，不把请求返回当完成', async () => {
     const user = userEvent.setup();
     const running = workbench({ currentRun: { runId: 'run-1', status: 'queued', cancellable: true, publicStage: 'context_preparing' } });
