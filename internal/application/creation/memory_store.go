@@ -54,6 +54,17 @@ func (store *memoryStore) OperationByIdempotency(_ context.Context, projectID, b
 	return operation, nil
 }
 
+func (store *memoryStore) Operation(_ context.Context, id string) (creationdomain.Operation, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, operation := range store.operations {
+		if operation.ID == id {
+			return operation, nil
+		}
+	}
+	return creationdomain.Operation{}, ErrOperationNotFound
+}
+
 func (store *memoryStore) UpdateOperation(_ context.Context, operation creationdomain.Operation) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()

@@ -563,7 +563,7 @@ func (service *Service) ConfirmGenerate(ctx context.Context, request GenerateReq
 	reserved, created, err := service.store.ReserveOperation(ctx, creationdomain.Operation{
 		ID: service.ids.NewID(), ProjectID: request.ProjectID, BranchID: request.BranchID,
 		Command: command, IdempotencyKey: request.IdempotencyKey,
-		ArgumentsHash: argumentsHash, Status: creationdomain.OperationReserved,
+		ArgumentsHash: argumentsHash, FrozenInputDigest: frozenDigest, Status: creationdomain.OperationReserved,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -659,6 +659,10 @@ func (service *Service) launchRun(
 			return
 		}
 		if latest.ActiveOperationID == operation.ID {
+			// 自动推进可能已把同一操作回执切换到后续子运行；重读以免完成回调覆盖其冻结摘要。
+			if current, operationErr := service.store.Operation(storeCtx, operation.ID); operationErr == nil {
+				operation = current
+			}
 			operation.RunID = latest.ActiveRunID
 		}
 		if execErr != nil {
@@ -952,6 +956,19 @@ func (service *Service) autoAdvance(lease RunLease, result GenerateResult, reque
 			childRelease()
 			return GenerateResult{}, startErr
 		}
+		operation, operationErr := service.store.Operation(storeCtx, session.ActiveOperationID)
+		if operationErr != nil {
+			childRelease()
+			return GenerateResult{}, operationErr
+		}
+		operation.RunID = run.ID
+		operation.FrozenInputDigest = frozen
+		operation.Status = creationdomain.OperationRunning
+		operation.UpdatedAt = service.clock.Now()
+		if operationErr := service.store.UpdateOperation(storeCtx, operation); operationErr != nil {
+			childRelease()
+			return GenerateResult{}, operationErr
+		}
 		advanced, err := service.executeStageRun(childLease, session, request, session.Stage, run.ID, frozen, captured)
 		childRelease()
 		if err != nil {
@@ -1084,6 +1101,16 @@ func (service *Service) materializeRunResult(ctx context.Context, session creati
 			return nil
 		}
 	}
+	operation, err := service.store.Operation(ctx, session.ActiveOperationID)
+	if err != nil {
+		return err
+	}
+	if operation.RunID != run.ID {
+		return fmt.Errorf("%w: operation %s belongs to run %s, not %s", ErrUnavailable, operation.ID, operation.RunID, run.ID)
+	}
+	if strings.TrimSpace(operation.FrozenInputDigest) == "" {
+		return fmt.Errorf("%w: missing frozen input digest for run %s", ErrUnavailable, run.ID)
+	}
 	artifacts, err := service.kernel.Artifacts(ctx, run.ID)
 	if err != nil {
 		return err
@@ -1092,7 +1119,7 @@ func (service *Service) materializeRunResult(ctx context.Context, session creati
 	if err != nil {
 		return err
 	}
-	_, err = service.persistCandidate(ctx, session, binding.Stage, run.ID, artifactID, payload, run, liveUpstreamDigest(session, candidates, binding.Stage), binding)
+	_, err = service.persistCandidate(ctx, session, binding.Stage, run.ID, artifactID, payload, run, operation.FrozenInputDigest, binding)
 	return err
 }
 

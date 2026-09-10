@@ -26,6 +26,7 @@ type SQLBackend interface {
 	WorkbenchState(context.Context) (projectdomain.WorkbenchState, error)
 	ApplyCreationArchive(context.Context, revisiondomain.ChangeSet, creationdomain.Session, []creationdomain.Candidate, []creationdomain.Candidate, projectdomain.WorkbenchState) error
 	ReserveCreationOperation(context.Context, creationdomain.Operation) (creationdomain.Operation, bool, error)
+	CreationOperation(context.Context, string) (creationdomain.Operation, error)
 	CreationOperationByIdempotency(context.Context, string, string, string, string) (creationdomain.Operation, error)
 	UpdateCreationOperation(context.Context, creationdomain.Operation) error
 	SaveAssistantSessionRecord(context.Context, assistantdomain.Session) error
@@ -94,6 +95,14 @@ func (store sqliteStore) ApplyArchive(ctx context.Context, apply ArchiveApply) e
 
 func (store sqliteStore) ReserveOperation(ctx context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error) {
 	return store.inner.ReserveCreationOperation(ctx, operation)
+}
+
+func (store sqliteStore) Operation(ctx context.Context, id string) (creationdomain.Operation, error) {
+	operation, err := store.inner.CreationOperation(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return creationdomain.Operation{}, ErrOperationNotFound
+	}
+	return operation, err
 }
 
 func (store sqliteStore) OperationByIdempotency(ctx context.Context, projectID, branchID, command, idempotencyKey string) (creationdomain.Operation, error) {

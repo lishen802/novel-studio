@@ -36,6 +36,7 @@ type Store interface {
 	// ReserveOperation 以 (project, branch, command, key) 唯一键预留操作回执；
 	// 键已存在时返回既有回执与 created=false，不依赖内存缓存即可跨重启去重。
 	ReserveOperation(ctx context.Context, operation creationdomain.Operation) (creationdomain.Operation, bool, error)
+	Operation(ctx context.Context, id string) (creationdomain.Operation, error)
 	OperationByIdempotency(ctx context.Context, projectID, branchID, command, idempotencyKey string) (creationdomain.Operation, error)
 	UpdateOperation(ctx context.Context, operation creationdomain.Operation) error
 	SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error

@@ -547,7 +547,16 @@ func TestRecoverMaterializesCompletedRunOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed.ActiveRunID = result.RunID
+	operation, err := store.OperationByIdempotency(
+		context.Background(), "project-1", "branch-1", "generate:directions", "directions-recover",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err = completed.AttachRun(operation.ID, result.RunID, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SaveRunSlot(context.Background(), completed); err != nil {
 		t.Fatal(err)
 	}
@@ -570,6 +579,142 @@ func TestRecoverMaterializesCompletedRunOnce(t *testing.T) {
 	}
 	if sets != 1 || kernel.executeN != 1 {
 		t.Fatalf("recover duplicated result: sets=%d execute=%d", sets, kernel.executeN)
+	}
+}
+
+// 恢复物化必须沿用运行启动时冻结的依赖摘要，作者后续修改不能让旧结果伪装成最新结果。
+func TestRecoverUsesPersistedFrozenInputDigest(t *testing.T) {
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	session := seedIntentSession(t, service)
+	request := generateRequest(creationdomain.StageDirections)
+	preview, err := service.PreviewGenerate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ConfirmationDigest = preview.ConfirmationDigest
+	request.IdempotencyKey = "directions-frozen-recover"
+	result, err := service.ConfirmGenerate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, func() bool {
+		current, lookupErr := store.OperationByIdempotency(
+			context.Background(), "project-1", "branch-1", "generate:directions", request.IdempotencyKey,
+		)
+		return lookupErr == nil && current.Status == creationdomain.OperationSucceeded
+	}) {
+		t.Fatal("operation did not succeed")
+	}
+	operation, err := store.OperationByIdempotency(
+		context.Background(), "project-1", "branch-1", "generate:directions", request.IdempotencyKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalDigest := liveUpstreamDigest(session, nil, creationdomain.StageDirections)
+	if operation.FrozenInputDigest != originalDigest {
+		t.Fatalf("persisted frozen digest = %q, want %q", operation.FrozenInputDigest, originalDigest)
+	}
+
+	// 模拟候选尚未落库便崩溃，并在恢复前修改作者意图。
+	store.mu.Lock()
+	for id, candidate := range store.candidates {
+		if candidate.RunID == result.RunID {
+			delete(store.candidates, id)
+		}
+	}
+	store.mu.Unlock()
+	changed, err := service.SaveIntent(context.Background(), session.ProjectID, "恢复前已经修改的创作意图")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err = changed.AttachRun(operation.ID, result.RunID, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRunSlot(context.Background(), changed); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.Recover(context.Background(), session.ProjectID); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := store.ListCandidates(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("recovered candidates = %#v", candidates)
+	}
+	recovered := candidates[0]
+	if recovered.UpstreamDigest != originalDigest {
+		t.Fatalf("recovered upstream digest = %q, want frozen %q", recovered.UpstreamDigest, originalDigest)
+	}
+	if recovered.Status != creationdomain.StatusStale {
+		t.Fatalf("recovered candidate status = %q, want stale", recovered.Status)
+	}
+}
+
+func TestRecoverRejectsMissingFrozenInputEvidence(t *testing.T) {
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	session := seedIntentSession(t, service)
+	request := generateRequest(creationdomain.StageDirections)
+	preview, err := service.PreviewGenerate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ConfirmationDigest = preview.ConfirmationDigest
+	request.IdempotencyKey = "directions-missing-frozen"
+	result, err := service.ConfirmGenerate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, func() bool {
+		current, lookupErr := store.OperationByIdempotency(
+			context.Background(), "project-1", "branch-1", "generate:directions", request.IdempotencyKey,
+		)
+		return lookupErr == nil && current.Status == creationdomain.OperationSucceeded
+	}) {
+		t.Fatal("operation did not succeed")
+	}
+	operation, err := store.OperationByIdempotency(
+		context.Background(), "project-1", "branch-1", "generate:directions", request.IdempotencyKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	operation.FrozenInputDigest = ""
+	store.operations[operationKey(operation.ProjectID, operation.BranchID, operation.Command, operation.IdempotencyKey)] = operation
+	for id, candidate := range store.candidates {
+		if candidate.RunID == result.RunID {
+			delete(store.candidates, id)
+		}
+	}
+	store.mu.Unlock()
+	current, err := store.Session(context.Background(), session.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = current.AttachRun(operation.ID, result.RunID, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRunSlot(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.Recover(context.Background(), session.ProjectID); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("recover error = %v, want unavailable", err)
+	}
+	candidates, err := store.ListCandidates(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("recovery fabricated candidate without frozen evidence: %#v", candidates)
 	}
 }
 
@@ -606,17 +751,30 @@ func TestAutoAdvanceStopsBeforeArchiveConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 	kinds := map[creationdomain.CandidateKind]int{}
+	var roadmap creationdomain.Candidate
 	for _, candidate := range listed {
 		if candidate.Status == creationdomain.StatusSuperseded {
 			continue
 		}
 		kinds[candidate.Kind]++
+		if candidate.Kind == creationdomain.KindRoadmap {
+			roadmap = candidate
+		}
 	}
 	if kinds[creationdomain.KindProposal] != 1 || kinds[creationdomain.KindPeopleWorld] != 1 || kinds[creationdomain.KindRoadmap] != 1 {
 		t.Fatalf("candidates = %#v", listed)
 	}
 	if kernel.executeN != 3 {
 		t.Fatalf("executeN = %d, want 3", kernel.executeN)
+	}
+	operation, err := store.OperationByIdempotency(
+		context.Background(), "project-1", "branch-1", "generate:proposal", request.IdempotencyKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operation.RunID != roadmap.RunID || operation.FrozenInputDigest != roadmap.UpstreamDigest {
+		t.Fatalf("auto operation did not follow final child run: operation=%+v roadmap=%+v", operation, roadmap)
 	}
 }
 

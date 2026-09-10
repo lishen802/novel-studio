@@ -90,6 +90,12 @@ func (store creationStore) ReserveOperation(ctx context.Context, operation creat
 	return
 }
 
+// Operation 在访问创作存储前核对工作区和运行租约。
+func (store creationStore) Operation(ctx context.Context, id string) (operation creationdomain.Operation, err error) {
+	err = store.guard.access(ctx, false, func() error { operation, err = store.inner.Operation(ctx, id); return err })
+	return
+}
+
 // OperationByIdempotency 在访问创作存储前核对工作区和运行租约。
 func (store creationStore) OperationByIdempotency(ctx context.Context, projectID, branchID, command, key string) (operation creationdomain.Operation, err error) {
 	err = store.guard.access(ctx, false, func() error {

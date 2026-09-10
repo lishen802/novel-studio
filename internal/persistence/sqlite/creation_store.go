@@ -328,13 +328,13 @@ func (s *Store) ReserveCreationOperation(ctx context.Context, operation creation
 	trimmed := normalizeOperation(operation)
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO creation_operations (
-			id, project_id, branch_id, command, idempotency_key, arguments_hash,
+			id, project_id, branch_id, command, idempotency_key, arguments_hash, frozen_input_digest,
 			status, run_id, candidate_id, error_code, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id, branch_id, command, idempotency_key) DO NOTHING
 	`,
 		trimmed.ID, trimmed.ProjectID, trimmed.BranchID, trimmed.Command, trimmed.IdempotencyKey,
-		trimmed.ArgumentsHash, string(trimmed.Status), trimmed.RunID, trimmed.CandidateID,
+		trimmed.ArgumentsHash, trimmed.FrozenInputDigest, string(trimmed.Status), trimmed.RunID, trimmed.CandidateID,
 		trimmed.ErrorCode, formatTime(trimmed.CreatedAt), formatTime(trimmed.UpdatedAt),
 	)
 	if err != nil {
@@ -354,6 +354,17 @@ func (s *Store) ReserveCreationOperation(ctx context.Context, operation creation
 	return trimmed, true, nil
 }
 
+// CreationOperation 按操作身份读取恢复所需的冻结输入证据。
+func (s *Store) CreationOperation(ctx context.Context, id string) (creationdomain.Operation, error) {
+	operation, err := scanCreationOperation(s.db.QueryRowContext(ctx, creationOperationSelect+`
+		WHERE id = ?
+	`, strings.TrimSpace(id)))
+	if err != nil {
+		return creationdomain.Operation{}, fmt.Errorf("read creation operation: %w", err)
+	}
+	return operation, nil
+}
+
 func (s *Store) CreationOperationByIdempotency(
 	ctx context.Context, projectID, branchID, command, idempotencyKey string,
 ) (creationdomain.Operation, error) {
@@ -366,14 +377,14 @@ func (s *Store) CreationOperationByIdempotency(
 	return operation, nil
 }
 
-// UpdateCreationOperation 只更新状态与结果引用，不改身份与参数摘要。
+// UpdateCreationOperation 只更新执行状态、当前子运行的冻结摘要与结果引用，不改操作身份和参数摘要。
 func (s *Store) UpdateCreationOperation(ctx context.Context, operation creationdomain.Operation) error {
 	trimmed := normalizeOperation(operation)
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE creation_operations SET
-			status = ?, run_id = ?, candidate_id = ?, error_code = ?, updated_at = ?
+			status = ?, run_id = ?, frozen_input_digest = ?, candidate_id = ?, error_code = ?, updated_at = ?
 		WHERE id = ?
-	`, string(trimmed.Status), trimmed.RunID, trimmed.CandidateID, trimmed.ErrorCode,
+	`, string(trimmed.Status), trimmed.RunID, trimmed.FrozenInputDigest, trimmed.CandidateID, trimmed.ErrorCode,
 		formatTime(trimmed.UpdatedAt), trimmed.ID)
 	if err != nil {
 		return databaseOperationError("update creation operation", err)
@@ -382,7 +393,7 @@ func (s *Store) UpdateCreationOperation(ctx context.Context, operation creationd
 }
 
 const creationOperationSelect = `
-	SELECT id, project_id, branch_id, command, idempotency_key, arguments_hash,
+	SELECT id, project_id, branch_id, command, idempotency_key, arguments_hash, frozen_input_digest,
 		status, run_id, candidate_id, error_code, created_at, updated_at
 	FROM creation_operations
 `
@@ -392,7 +403,7 @@ func scanCreationOperation(row *sql.Row) (creationdomain.Operation, error) {
 	var createdAt, updatedAt string
 	err := row.Scan(
 		&operation.ID, &operation.ProjectID, &operation.BranchID, &operation.Command,
-		&operation.IdempotencyKey, &operation.ArgumentsHash, &operation.Status,
+		&operation.IdempotencyKey, &operation.ArgumentsHash, &operation.FrozenInputDigest, &operation.Status,
 		&operation.RunID, &operation.CandidateID, &operation.ErrorCode, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -413,6 +424,7 @@ func normalizeOperation(operation creationdomain.Operation) creationdomain.Opera
 	operation.BranchID = strings.TrimSpace(operation.BranchID)
 	operation.Command = strings.TrimSpace(operation.Command)
 	operation.IdempotencyKey = strings.TrimSpace(operation.IdempotencyKey)
+	operation.FrozenInputDigest = strings.TrimSpace(operation.FrozenInputDigest)
 	operation.RunID = strings.TrimSpace(operation.RunID)
 	operation.CandidateID = strings.TrimSpace(operation.CandidateID)
 	return operation

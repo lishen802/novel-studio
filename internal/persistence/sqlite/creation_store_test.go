@@ -13,6 +13,33 @@ import (
 	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 )
 
+func TestCreationOperationPersistsFrozenInputDigest(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := time.Unix(500, 0).UTC()
+	operation := creationdomain.Operation{
+		ID: "operation-frozen", ProjectID: project.ID, BranchID: "main",
+		Command: "generate:directions", IdempotencyKey: "frozen-1",
+		ArgumentsHash: "arguments", FrozenInputDigest: "frozen-upstream",
+		Status: creationdomain.OperationReserved, CreatedAt: now, UpdatedAt: now,
+	}
+	reserved, created, err := store.ReserveCreationOperation(ctx, operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || reserved.FrozenInputDigest != operation.FrozenInputDigest {
+		t.Fatalf("reserved operation = %+v, created=%v", reserved, created)
+	}
+	loaded, err := store.CreationOperation(ctx, operation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.FrozenInputDigest != operation.FrozenInputDigest {
+		t.Fatalf("loaded frozen digest = %q, want %q", loaded.FrozenInputDigest, operation.FrozenInputDigest)
+	}
+}
+
 // TestCreationSessionRejectsLostUpdate 固定两个请求先读后写的顺序，验证旧快照不能覆盖已保存的意图。
 func TestCreationSessionRejectsLostUpdate(t *testing.T) {
 	ctx := context.Background()
