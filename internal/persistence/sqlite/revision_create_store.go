@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -584,8 +585,19 @@ func prepareCreateAnchorOperation(
 	}
 	statement := strings.TrimSpace(proposed.Statement)
 	scopeKind := strings.TrimSpace(proposed.ScopeKind)
+	scopeID := strings.TrimSpace(proposed.ScopeID)
 	if statement == "" || scopeKind == "" {
 		return preparedOperation{}, storyassetdomain.ErrBlankValue
+	}
+	if scopeID == "" {
+		return preparedOperation{}, storyassetdomain.ErrInvalidReference
+	}
+	resolved, err := anchorScopeTargetExists(ctx, tx, changeSet, scopeKind, scopeID)
+	if err != nil {
+		return preparedOperation{}, err
+	}
+	if !resolved {
+		return preparedOperation{}, storyassetdomain.ErrInvalidReference
 	}
 	payload, err := json.Marshal(map[string]string{"statement": statement})
 	if err != nil {
@@ -599,12 +611,60 @@ func prepareCreateAnchorOperation(
 			INSERT INTO story_anchors (id, asset_id, project_id, strength, scope_kind, scope_id, statement, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, operation.TargetID, asset.ID, changeSet.ProjectID, proposed.Strength, scopeKind,
-			strings.TrimSpace(proposed.ScopeID), statement, formatTime(appliedAt))
+			scopeID, statement, formatTime(appliedAt))
 		if err != nil {
 			return nil, databaseOperationError("apply create anchor operation", err)
 		}
 		return nil, requireOneRow(result, "story anchor", operation.TargetID)
 	}}, nil
+}
+
+// anchorScopeTargetExists 同时识别数据库现有目标和本 ChangeSet 将创建的稳定目标。
+func anchorScopeTargetExists(
+	ctx context.Context,
+	tx *sql.Tx,
+	changeSet revision.ChangeSet,
+	scopeKind, scopeID string,
+) (bool, error) {
+	var query string
+	switch scopeKind {
+	case "proposal":
+		query = `SELECT 1 FROM story_assets WHERE id = ? AND project_id = ? AND kind = 'proposal'`
+	case "roadmap_node":
+		query = `SELECT 1 FROM outline_nodes WHERE id = ? AND project_id = ? AND deleted_at IS NULL`
+	case "chapter_range":
+		// 当前写入合同没有全局章序区间字段，不能把任意文本冒充已解析范围。
+		return false, nil
+	default:
+		return false, nil
+	}
+	var found int
+	err := tx.QueryRowContext(ctx, query, scopeID, changeSet.ProjectID).Scan(&found)
+	if err == nil {
+		return true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, databaseOperationError("read anchor scope target", err)
+	}
+	for _, operation := range changeSet.Operations {
+		if operation.TargetID != scopeID {
+			continue
+		}
+		switch scopeKind {
+		case "roadmap_node":
+			return operation.Kind == revision.OperationCreateOutlineNode, nil
+		case "proposal":
+			if operation.Kind != revision.OperationCreateStoryAsset {
+				return false, nil
+			}
+			var value createStoryAssetValue
+			if err := decodeOperationValue(operation.AfterValue, &value); err != nil {
+				return false, err
+			}
+			return storyassetdomain.Kind(value.Kind) == storyassetdomain.KindProposal, nil
+		}
+	}
+	return false, nil
 }
 
 func prepareCreateStoryAssetOperation(

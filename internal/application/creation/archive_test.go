@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -620,6 +621,102 @@ func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
 	}
 }
 
+func TestConfirmArchivePersistsResolvedAnchorScopes(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	const peopleWithForbidden = `{"characters":[{"name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"放过过仇敌","arc":"学会取舍"}],"relationships":[],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":["不得使用火器"],"omission_reasons":[]}`
+	seedArchiveSessionWithPayloads(t, bridge, project.ID, peopleWithForbidden, roadmapPayload)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ConfirmArchive(ctx, ArchiveRequest{
+		ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "anchor-scopes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err := raw.ChangeSet(ctx, result.ChangeSetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposalID := ""
+	chapterIDs := map[string]string{}
+	for _, operation := range changeSet.Operations {
+		if operation.Kind == revisiondomain.OperationCreateStoryAsset {
+			var value struct{ Kind string }
+			if err := json.Unmarshal([]byte(operation.AfterValue), &value); err != nil {
+				t.Fatal(err)
+			}
+			if value.Kind == "proposal" {
+				proposalID = operation.TargetID
+			}
+		}
+		if operation.Kind == revisiondomain.OperationCreateOutlineNode {
+			var value struct {
+				Level string
+				Title string
+			}
+			if err := json.Unmarshal([]byte(operation.AfterValue), &value); err != nil {
+				t.Fatal(err)
+			}
+			if value.Level == "chapter" {
+				chapterIDs[value.Title] = operation.TargetID
+			}
+		}
+	}
+	if proposalID == "" || chapterIDs["空船"] == "" || chapterIDs["开关"] == "" {
+		t.Fatalf("未建立锚点所需正式目标: proposal=%q chapters=%v", proposalID, chapterIDs)
+	}
+	anchors, err := raw.ListStoryAnchors(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct{ kind, id string }{
+		"现代武器":   {"proposal", proposalID},
+		"钟楼必须三响": {"proposal", proposalID},
+		"不得使用火器": {"proposal", proposalID},
+		"钟楼三响":   {"roadmap_node", chapterIDs["空船"]},
+		"潮汐律":    {"roadmap_node", chapterIDs["开关"]},
+	}
+	if len(anchors) != len(want) {
+		t.Fatalf("正式锚点数量 = %d, want %d: %+v", len(anchors), len(want), anchors)
+	}
+	for _, anchor := range anchors {
+		target, ok := want[anchor.Statement]
+		if !ok || anchor.ScopeKind != target.kind || anchor.ScopeID != target.id {
+			t.Fatalf("锚点作用域未解析: %+v, want=%+v", anchor, target)
+		}
+	}
+}
+
+func TestArchiveRejectsUnresolvedChapterScopeHint(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	unresolved := strings.Replace(proposalPayload, `"scope_hint":"proposal"`, `"scope_hint":"chapter"`, 1)
+	seedArchiveSessionWithAllPayloads(t, bridge, project.ID, unresolved, peopleWorldPayload, roadmapPayload)
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PreviewConfirmArchive(ctx, project.ID); !errors.Is(err, creationdomain.ErrStageIncomplete) {
+		t.Fatalf("未解析 chapter scope_hint 应阻断入档预览: %v", err)
+	}
+}
+
 func TestApplyCreationArchiveRollsBackPartialFailure(t *testing.T) {
 	ctx := context.Background()
 	raw, project := sqliteCreateStore(t)
@@ -699,6 +796,10 @@ func seedArchiveSession(t *testing.T, store Store, projectID string) creationdom
 }
 
 func seedArchiveSessionWithPayloads(t *testing.T, store Store, projectID, peoplePayload, roadPayload string) creationdomain.Session {
+	return seedArchiveSessionWithAllPayloads(t, store, projectID, proposalPayload, peoplePayload, roadPayload)
+}
+
+func seedArchiveSessionWithAllPayloads(t *testing.T, store Store, projectID, proposalValue, peoplePayload, roadPayload string) creationdomain.Session {
 	t.Helper()
 	now := testClock{}.Now()
 	session, err := creationdomain.NewSession("session-1", projectID, "branch-1", now)
@@ -718,7 +819,7 @@ func seedArchiveSessionWithPayloads(t *testing.T, store Store, projectID, people
 	}
 	proposal, err := creationdomain.NewCandidate(
 		"proposal-1", session.ID, creationdomain.StageProposal, creationdomain.KindProposal,
-		1, "", "run-prop", "art-prop", proposalPayload, "story_blueprint.schema", 2, now,
+		1, "", "run-prop", "art-prop", proposalValue, "story_blueprint.schema", 2, now,
 	)
 	if err != nil {
 		t.Fatal(err)

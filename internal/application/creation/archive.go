@@ -256,10 +256,11 @@ func buildArchivePlan(
 }
 
 type archiveMapper struct {
-	ids      ports.IDGenerator
-	specs    []revisiondomain.PatchOperationSpec
-	outlines int
-	chars    map[string]string
+	ids             ports.IDGenerator
+	specs           []revisiondomain.PatchOperationSpec
+	outlines        int
+	chars           map[string]string
+	proposalAssetID string
 }
 
 func (mapper *archiveMapper) add(kind revisiondomain.OperationKind, target, after, reason string) {
@@ -303,30 +304,33 @@ func (mapper *archiveMapper) addProposal(candidate creationdomain.Candidate, blu
 	}
 	assetID := mapper.ids.NewID()
 	mapper.add(revisiondomain.OperationCreateStoryAsset, assetID, after, "确认作品方案信封")
+	mapper.proposalAssetID = assetID
 	for _, statement := range blueprint.Forbidden {
-		if err := mapper.addAnchor(candidate, "forbidden", "proposal", statement); err != nil {
+		if err := mapper.addAnchor(candidate, "forbidden", "proposal", assetID, statement); err != nil {
 			return err
 		}
 	}
 	for _, anchor := range blueprint.Anchors {
-		// scope_hint 映射到既有锚点作用域枚举：chapter → chapter_range，其余归入 proposal。
-		scope := strings.TrimSpace(anchor.ScopeHint)
-		if scope != "chapter" {
-			scope = "proposal"
-		} else {
-			scope = "chapter_range"
-		}
-		if err := mapper.addAnchor(candidate, anchor.Strength, scope, anchor.Statement); err != nil {
-			return err
+		// 方案锚点只有明确指向方案时才能解析；其他提示缺少节点或章序区间，必须留待作者补齐。
+		switch strings.TrimSpace(anchor.ScopeHint) {
+		case "proposal":
+			if err := mapper.addAnchor(candidate, anchor.Strength, "proposal", assetID, anchor.Statement); err != nil {
+				return err
+			}
+		default:
+			return creationdomain.ErrStageIncomplete
 		}
 	}
 	return nil
 }
 
 // addAnchor 生成锚点操作：强度、作用域、语句与候选来源完整进入正式约束资产。
-func (mapper *archiveMapper) addAnchor(candidate creationdomain.Candidate, strength, scope, statement string) error {
+func (mapper *archiveMapper) addAnchor(candidate creationdomain.Candidate, strength, scope, scopeID, statement string) error {
+	if strings.TrimSpace(scopeID) == "" {
+		return creationdomain.ErrStageIncomplete
+	}
 	after, err := encodeJSON(map[string]string{
-		"strength": strength, "scopeKind": scope, "statement": statement,
+		"strength": strength, "scopeKind": scope, "scopeId": scopeID, "statement": statement,
 		"origin":            string(storyassetdomain.OriginModel),
 		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,
 	})
@@ -411,7 +415,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 	}
 	// 人物世界禁写项必须完整映射为禁止锚点，不能留在候选 JSON 中丢失（P1-11）。
 	for _, statement := range cast.Forbidden {
-		if err := mapper.addAnchor(candidate, "forbidden", "proposal", statement); err != nil {
+		if err := mapper.addAnchor(candidate, "forbidden", "proposal", mapper.proposalAssetID, statement); err != nil {
 			return err
 		}
 	}
@@ -510,7 +514,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		}
 		mapper.outlines++
 		for _, anchor := range chapter.Anchors {
-			if err := mapper.addAnchor(candidate, anchor.Strength, "roadmap_node", anchor.Statement); err != nil {
+			if err := mapper.addAnchor(candidate, anchor.Strength, "roadmap_node", id, anchor.Statement); err != nil {
 				return err
 			}
 		}
@@ -526,6 +530,11 @@ func decodeBlueprint(payload string) (agentdomain.StoryBlueprintOutput, error) {
 	output := *decoded.(*agentdomain.StoryBlueprintOutput)
 	if err := output.ValidateProduct(); err != nil {
 		return agentdomain.StoryBlueprintOutput{}, err
+	}
+	for _, anchor := range output.Anchors {
+		if strings.TrimSpace(anchor.ScopeHint) != "proposal" {
+			return agentdomain.StoryBlueprintOutput{}, creationdomain.ErrStageIncomplete
+		}
 	}
 	return output, nil
 }

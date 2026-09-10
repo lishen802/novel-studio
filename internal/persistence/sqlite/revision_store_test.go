@@ -11,8 +11,43 @@ import (
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
+	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
+
+func TestApplyChangeSetRejectsAnchorWithMissingScopeTarget(t *testing.T) {
+	cases := map[string]string{
+		"空目标":  `{"strength":"hard","scopeKind":"roadmap_node","statement":"钟楼三响"}`,
+		"悬空目标": `{"strength":"hard","scopeKind":"roadmap_node","scopeId":"missing-node","statement":"钟楼三响"}`,
+		"伪造区间": `{"strength":"hard","scopeKind":"chapter_range","scopeId":"1-3","statement":"钟楼三响"}`,
+	}
+	for name, after := range cases {
+		t.Run(name, func(t *testing.T) {
+			store, project := createTestStore(t)
+			defer store.Close()
+			ctx := context.Background()
+			changeSet, err := revisiondomain.NewChangeSet(
+				"change-anchor-scope", project.ID, "创建锚点", "验证稳定作用域", "author",
+				[]revisiondomain.PatchOperationSpec{{
+					ID: "operation-anchor", Kind: revisiondomain.OperationCreateAnchor, TargetID: "anchor-1", AfterValue: after,
+				}}, time.Unix(200, 0),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CreateChangeSet(ctx, changeSet); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.ApplyChangeSet(ctx, changeSet.ID, time.Unix(201, 0)); !errors.Is(err, storyassetdomain.ErrInvalidReference) {
+				t.Fatalf("非法锚点作用域错误 = %v", err)
+			}
+			anchors, err := store.ListStoryAnchors(ctx)
+			if err != nil || len(anchors) != 0 {
+				t.Fatalf("非法锚点不应落库: %+v, %v", anchors, err)
+			}
+		})
+	}
+}
 
 func TestStoreAppliesChapterChangeSetAtomicallyAndIdempotently(t *testing.T) {
 	store, project := createTestStore(t)

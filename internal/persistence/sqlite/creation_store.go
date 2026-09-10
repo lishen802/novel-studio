@@ -543,6 +543,39 @@ func (s *Store) StoryAssetRevision(ctx context.Context, assetID string, revision
 	return result, nil
 }
 
+// ListStoryAnchors 返回正式锚点及其已解析的稳定作用域。
+func (s *Store) ListStoryAnchors(ctx context.Context) ([]storyassetdomain.Anchor, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, asset_id, project_id, strength, scope_kind, scope_id, statement, created_at
+		FROM story_anchors
+		ORDER BY created_at, id
+	`)
+	if err != nil {
+		return nil, databaseOperationError("list story anchors", err)
+	}
+	defer rows.Close()
+	anchors := make([]storyassetdomain.Anchor, 0)
+	for rows.Next() {
+		var anchor storyassetdomain.Anchor
+		var createdAt string
+		if err := rows.Scan(
+			&anchor.ID, &anchor.AssetID, &anchor.ProjectID, &anchor.Strength,
+			&anchor.ScopeKind, &anchor.ScopeID, &anchor.Statement, &createdAt,
+		); err != nil {
+			return nil, databaseOperationError("scan story anchor", err)
+		}
+		anchor.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse story anchor created_at: %w", err)
+		}
+		anchors = append(anchors, anchor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseOperationError("iterate story anchors", err)
+	}
+	return anchors, nil
+}
+
 // SaveAssistantAction 要求会话已存在，用于保存待确认或状态变化后的 Action。
 func (s *Store) SaveAssistantSession(ctx context.Context, id, projectID, branchID string, now string) error {
 	_, err := s.db.ExecContext(ctx, `
