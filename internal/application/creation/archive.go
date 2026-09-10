@@ -224,7 +224,7 @@ func buildArchivePlan(
 	if err != nil {
 		return archivePlan{}, err
 	}
-	cast, err := decodeCast(people.PayloadJSON)
+	cast, err := decodeArchivableCast(people)
 	if err != nil {
 		return archivePlan{}, err
 	}
@@ -345,7 +345,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 	mapper.chars = map[string]string{}
 	for _, character := range cast.Characters {
 		id := mapper.ids.NewID()
-		mapper.chars[character.Name] = id
+		mapper.chars[strings.TrimSpace(character.ID)] = id
 		after, err := encodeJSON(map[string]any{
 			"name": character.Name, "aliases": character.Aliases, "role": character.Role,
 			"summary": character.Summary, "motivation": character.Motivation, "fear": character.Fear,
@@ -382,8 +382,8 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 		}
 	}
 	for _, relation := range cast.Relationships {
-		sourceID, sok := mapper.chars[relation.SourceName]
-		targetID, tok := mapper.chars[relation.TargetName]
+		sourceID, sok := mapper.chars[strings.TrimSpace(relation.SourceCharacterRef)]
+		targetID, tok := mapper.chars[strings.TrimSpace(relation.TargetCharacterRef)]
 		if !sok || !tok {
 			return creationdomain.ErrStageIncomplete
 		}
@@ -539,6 +539,21 @@ func decodeBlueprint(payload string) (agentdomain.StoryBlueprintOutput, error) {
 	return output, nil
 }
 
+func decodeArchivableCast(candidate creationdomain.Candidate) (agentdomain.StoryCastOutput, error) {
+	if candidate.PayloadSchemaID != "story_cast.schema" || candidate.PayloadSchemaVersion != 2 {
+		return agentdomain.StoryCastOutput{}, creationdomain.ErrStageIncomplete
+	}
+	output, err := decodeCast(candidate.PayloadJSON)
+	if err != nil {
+		return agentdomain.StoryCastOutput{}, err
+	}
+	if err := output.ValidateStableReferences(); err != nil {
+		return agentdomain.StoryCastOutput{}, err
+	}
+	return output, nil
+}
+
+// decodeCast 兼容读取历史 v1 与当前 v2 人物世界载荷；正式入档另行要求 v2 稳定引用。
 func decodeCast(payload string) (agentdomain.StoryCastOutput, error) {
 	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryCast, []byte(payload))
 	if err != nil {

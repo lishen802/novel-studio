@@ -99,6 +99,7 @@ func (output StoryBlueprintOutput) ValidateProduct() error {
 }
 
 type CastCharacter struct {
+	ID         string   `json:"id,omitempty"`
 	Name       string   `json:"name"`
 	Role       string   `json:"role"`
 	Aliases    []string `json:"aliases"`
@@ -110,11 +111,14 @@ type CastCharacter struct {
 }
 
 type CastRelationship struct {
-	SourceName string `json:"source_name"`
-	TargetName string `json:"target_name"`
-	Kind       string `json:"kind"`
-	Label      string `json:"label"`
-	Strength   int    `json:"strength"`
+	ID                 string `json:"id,omitempty"`
+	SourceCharacterRef string `json:"source_character_ref,omitempty"`
+	TargetCharacterRef string `json:"target_character_ref,omitempty"`
+	SourceName         string `json:"source_name,omitempty"`
+	TargetName         string `json:"target_name,omitempty"`
+	Kind               string `json:"kind"`
+	Label              string `json:"label"`
+	Strength           int    `json:"strength"`
 }
 
 type CastFaction struct {
@@ -154,15 +158,27 @@ func (output StoryCastOutput) Validate() error {
 		(len(output.Forbidden) == 0 && len(output.OmissionReasons) == 0) {
 		return ErrInvalidTaskOutput
 	}
+	stableReferences := false
+	for _, character := range output.Characters {
+		stableReferences = stableReferences || strings.TrimSpace(character.ID) != ""
+	}
+	for _, relation := range output.Relationships {
+		stableReferences = stableReferences || strings.TrimSpace(relation.ID) != "" ||
+			strings.TrimSpace(relation.SourceCharacterRef) != "" || strings.TrimSpace(relation.TargetCharacterRef) != ""
+	}
 	names := map[string]bool{}
+	characterIDs := map[string]bool{}
 	hasProtagonist := false
 	for _, character := range output.Characters {
 		name := strings.TrimSpace(character.Name)
-		if name == "" || names[name] || !validCastRole(character.Role) || blank(character.Summary) ||
+		id := strings.TrimSpace(character.ID)
+		if name == "" || (!stableReferences && names[name]) || (stableReferences && (id == "" || characterIDs[id])) ||
+			!validCastRole(character.Role) || blank(character.Summary) ||
 			blank(character.Motivation) || blank(character.Arc) {
 			return ErrInvalidTaskOutput
 		}
 		names[name] = true
+		characterIDs[id] = true
 		if character.Role == "protagonist" {
 			hasProtagonist = true
 		}
@@ -170,11 +186,22 @@ func (output StoryCastOutput) Validate() error {
 	if !hasProtagonist {
 		return ErrInvalidTaskOutput
 	}
+	relationIDs := map[string]bool{}
 	for _, relation := range output.Relationships {
-		source := strings.TrimSpace(relation.SourceName)
-		target := strings.TrimSpace(relation.TargetName)
-		if !names[source] || !names[target] || source == target || !validCastRelationKind(relation.Kind) ||
-			relation.Strength < -100 || relation.Strength > 100 {
+		validReference := false
+		if stableReferences {
+			id := strings.TrimSpace(relation.ID)
+			source := strings.TrimSpace(relation.SourceCharacterRef)
+			target := strings.TrimSpace(relation.TargetCharacterRef)
+			validReference = id != "" && !relationIDs[id] && characterIDs[source] && characterIDs[target] && source != target &&
+				strings.TrimSpace(relation.SourceName) == "" && strings.TrimSpace(relation.TargetName) == ""
+			relationIDs[id] = true
+		} else {
+			source := strings.TrimSpace(relation.SourceName)
+			target := strings.TrimSpace(relation.TargetName)
+			validReference = names[source] && names[target] && source != target
+		}
+		if !validReference || !validCastRelationKind(relation.Kind) || relation.Strength < -100 || relation.Strength > 100 {
 			return ErrInvalidTaskOutput
 		}
 	}
@@ -203,6 +230,22 @@ func (output StoryCastOutput) Validate() error {
 		ruleNames[name] = true
 	}
 	return nil
+}
+
+// ValidateStableReferences 要求人物与关系完整使用 v2 稳定 ID，禁止退回姓名猜测。
+func (output StoryCastOutput) ValidateStableReferences() error {
+	for _, character := range output.Characters {
+		if strings.TrimSpace(character.ID) == "" {
+			return ErrInvalidTaskOutput
+		}
+	}
+	for _, relation := range output.Relationships {
+		if strings.TrimSpace(relation.ID) == "" || strings.TrimSpace(relation.SourceCharacterRef) == "" ||
+			strings.TrimSpace(relation.TargetCharacterRef) == "" {
+			return ErrInvalidTaskOutput
+		}
+	}
+	return output.Validate()
 }
 
 type RoadmapBook struct {

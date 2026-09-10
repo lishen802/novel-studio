@@ -105,6 +105,28 @@ func TestStoryCastRequiresProtagonistRuleAndOmission(t *testing.T) {
 	}
 }
 
+func TestStoryCastStableReferencesAllowDuplicateNames(t *testing.T) {
+	output := StoryCastOutput{
+		Characters: []CastCharacter{
+			{ID: "char-a", Name: "无名", Role: "protagonist", Summary: "守关人", Motivation: "守城", Arc: "承担"},
+			{ID: "char-b", Name: "无名", Role: "antagonist", Summary: "来犯者", Motivation: "破城", Arc: "醒悟"},
+		},
+		Relationships: []CastRelationship{{
+			ID: "rel-1", SourceCharacterRef: "char-a", TargetCharacterRef: "char-b",
+			Kind: "rival", Label: "同名宿敌", Strength: -80,
+		}},
+		WorldRules:      []CastWorldRule{{Name: "潮汐律", Description: "潮位决定航路", ScopeType: "project"}},
+		OmissionReasons: []string{"无需其他分类"},
+	}
+	if err := output.ValidateStableReferences(); err != nil {
+		t.Fatalf("稳定 ID 引用应允许同名人物: %v", err)
+	}
+	output.Relationships[0].TargetCharacterRef = "missing"
+	if !errors.Is(output.ValidateStableReferences(), ErrInvalidTaskOutput) {
+		t.Fatal("悬空稳定引用必须失败")
+	}
+}
+
 func TestStoryRoadmapRequiresConsecutivePositionsAndNearTermBounds(t *testing.T) {
 	valid := StoryRoadmapOutput{
 		Book:    RoadmapBook{ID: "book-1", Title: "潮汐关", Proposition: "守关抉择", Ending: "开城", ProtagonistArc: "承担"},

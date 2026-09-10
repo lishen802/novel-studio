@@ -40,6 +40,9 @@ const (
 // roadmap v2 要求四层稳定 id、arc_ref 引用与结构化锚点；v1 保留不变，供旧运行按原定义哈希恢复。
 const StoryRoadmapWorkflowVersionV2 = 2
 
+// StoryPeopleWorldWorkflowVersionV2 要求人物与关系使用稳定 ID；v1 保持冻结供历史运行恢复。
+const StoryPeopleWorldWorkflowVersionV2 = 2
+
 // StoryAuthorReviseWorkflowVersion 发布显式基线绑定，不修改旧版本的冻结定义。
 const StoryAuthorReviseWorkflowVersion = 2
 
@@ -54,6 +57,8 @@ var (
 	storyProposalPrompt string
 	//go:embed assets/prompts/story_cast_v1.tmpl
 	storyCastPrompt string
+	//go:embed assets/prompts/story_cast_v2.tmpl
+	storyCastPromptV2 string
 	//go:embed assets/prompts/story_roadmap_v1.tmpl
 	storyRoadmapPrompt string
 	//go:embed assets/prompts/story_roadmap_v2.tmpl
@@ -104,6 +109,8 @@ var (
 	storyDirectionsSchema []byte
 	//go:embed assets/schemas/story_cast_v1.json
 	storyCastSchema []byte
+	//go:embed assets/schemas/story_cast_v2.json
+	storyCastSchemaV2 []byte
 	//go:embed assets/schemas/story_roadmap_v1.json
 	storyRoadmapSchema []byte
 	//go:embed assets/schemas/story_roadmap_v2.json
@@ -139,6 +146,7 @@ func Builtin() (*Registry, error) {
 	directionsPromptBinding := BindingForText("story_directions.prompt", 1, []byte(storyDirectionsPrompt))
 	proposalPromptBinding := BindingForText("story_proposal.prompt", 2, []byte(storyProposalPrompt))
 	castPromptBinding := BindingForText("story_cast.prompt", 1, []byte(storyCastPrompt))
+	castPromptBindingV2 := BindingForText("story_cast.prompt", 2, []byte(storyCastPromptV2))
 	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 1, []byte(storyRoadmapPrompt))
 	roadmapPromptBindingV2 := BindingForText("story_roadmap.prompt", 2, []byte(storyRoadmapPromptV2))
 	planPromptBinding := BindingForText("chapter_plan.prompt", 1, []byte(chapterPlanPrompt))
@@ -155,6 +163,7 @@ func Builtin() (*Registry, error) {
 	blueprintSchemaV2 := BindingForText("story_blueprint.schema", 2, storyBlueprintSchemaV2)
 	directionsSchema := BindingForText("story_directions.schema", 1, storyDirectionsSchema)
 	castSchema := BindingForText("story_cast.schema", 1, storyCastSchema)
+	castSchemaV2 := BindingForText("story_cast.schema", 2, storyCastSchemaV2)
 	roadmapSchema := BindingForText("story_roadmap.schema", 1, storyRoadmapSchema)
 	roadmapSchemaV2 := BindingForText("story_roadmap.schema", 2, storyRoadmapSchemaV2)
 	planSchema := BindingForText("chapter_plan.schema", 1, chapterPlanSchema)
@@ -350,6 +359,10 @@ func Builtin() (*Registry, error) {
 		StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion, agentdomain.TaskStoryCast,
 		castPromptBinding, castSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
 	)
+	peopleWorldV2 := productGenerateAndReview(
+		StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2, agentdomain.TaskStoryCast,
+		castPromptBindingV2, castSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
+	)
 	roadmap := productGenerateAndReview(
 		StoryRoadmapWorkflowID, StoryProductWorkflowVersion, agentdomain.TaskStoryRoadmap,
 		roadmapPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
@@ -377,7 +390,7 @@ func Builtin() (*Registry, error) {
 	workflows := []ports.WorkflowAsset{
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
-		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
+		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(peopleWorldV2), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
 	}
 	return New(
 		workflows,
@@ -387,6 +400,7 @@ func Builtin() (*Registry, error) {
 			{Binding: directionsPromptBinding, Template: storyDirectionsPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: proposalPromptBinding, Template: storyProposalPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: castPromptBinding, Template: storyCastPrompt, Variables: []string{"Task", "Context"}},
+			{Binding: castPromptBindingV2, Template: storyCastPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: roadmapPromptBinding, Template: storyRoadmapPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: roadmapPromptBindingV2, Template: storyRoadmapPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: planPromptBinding, Template: chapterPlanPrompt, Variables: []string{"Task", "Context"}},
@@ -414,6 +428,7 @@ func Builtin() (*Registry, error) {
 			{Binding: blueprintSchemaV2, JSON: storyBlueprintSchemaV2},
 			{Binding: directionsSchema, JSON: storyDirectionsSchema},
 			{Binding: castSchema, JSON: storyCastSchema},
+			{Binding: castSchemaV2, JSON: storyCastSchemaV2},
 			{Binding: roadmapSchema, JSON: storyRoadmapSchema},
 			{Binding: roadmapSchemaV2, JSON: storyRoadmapSchemaV2},
 			{Binding: planSchema, JSON: chapterPlanSchema},

@@ -43,6 +43,7 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		BaselineWorkflowID + "@1":         "d3b99323219a347153d613743dad46e50f5dfe7f060c8b531464b61c845f2b5b",
 		QualityChapterWorkflowID + "@1":   "8cd791a01ce61989c61f4c4f057cb040cd0f6d1e28f06ef116e5022285582a68",
 		QualityBlueprintWorkflowID + "@1": "2ae580fe57ef8ad6960717925b098c545359a419c8b0406d8533d25410fadeba",
+		StoryPeopleWorldWorkflowID + "@1": "c65e4f4e77e021de2f773f0dc0cbc75e92da40afed8f24e2b566894cb1018205",
 		// roadmap v1 哈希在引入 v2 前采集：定义哈希涵盖 Prompt/Schema 绑定哈希，不变即证明 v1 资产未被改动。
 		StoryRoadmapWorkflowID + "@1": "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1",
 	}
@@ -64,6 +65,7 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{StoryDirectionsWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
 		{StoryProposalWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review", "revision"}},
 		{StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
+		{StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2, []string{"blueprint", "review"}},
 		{StoryRoadmapWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
 		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
 		{StoryAuthorReviseWorkflowID, StoryProductWorkflowVersion, []string{"revise"}},
@@ -189,6 +191,39 @@ func TestBuiltinRegistersRoadmapV2AlongsideImmutableV1(t *testing.T) {
 	for _, marker := range []string{`"id"`, `"arc_ref"`, `"strength"`} {
 		if !strings.Contains(string(v2Schema.JSON), marker) {
 			t.Fatalf("roadmap v2 schema missing contract marker %s", marker)
+		}
+	}
+}
+
+func TestBuiltinRegistersPeopleWorldV2WithStableRelationshipReferences(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1, err := registry.Workflow(context.Background(), StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion)
+	if err != nil {
+		t.Fatalf("people/world v1: %v", err)
+	}
+	v2, err := registry.Workflow(context.Background(), StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2)
+	if err != nil {
+		t.Fatalf("people/world v2: %v", err)
+	}
+	if v1.Definition.DefinitionHash == v2.Definition.DefinitionHash {
+		t.Fatal("people/world v2 must not reuse v1 definition hash")
+	}
+	if v1.Definition.Nodes[0].Prompt.Version != 1 || v1.Definition.Nodes[0].Schema.Version != 1 {
+		t.Fatalf("people/world v1 bindings changed: %+v", v1.Definition.Nodes[0])
+	}
+	if v2.Definition.Nodes[0].Prompt.Version != 2 || v2.Definition.Nodes[0].Schema.Version != 2 {
+		t.Fatalf("people/world v2 bindings = %+v", v2.Definition.Nodes[0])
+	}
+	schema, err := registry.Schema(context.Background(), "story_cast.schema", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`"id"`, `"source_character_ref"`, `"target_character_ref"`} {
+		if !strings.Contains(string(schema.JSON), marker) {
+			t.Fatalf("people/world v2 schema missing %s", marker)
 		}
 	}
 }

@@ -465,7 +465,7 @@ func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
 	raw, project := sqliteCreateStore(t)
 	defer raw.Close()
 	bridge := NewSQLiteStore(raw)
-	const completePeopleWorld = `{"characters":[{"name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"曾放走仇敌","arc":"学会取舍"},{"name":"陆衡","role":"antagonist","aliases":["盐使"],"summary":"敌船统领","motivation":"夺关","fear":"身份败露","secret":"阿绫旧友","arc":"从利用到牺牲"}],"relationships":[{"source_name":"阿绫","target_name":"陆衡","kind":"rival","label":"旧友成敌","strength":-70}],"factions":[{"name":"潮汐卫","summary":"守卫关隘的军团","goal":"守住航路"}],"locations":[{"name":"潮汐关","kind":"settlement","summary":"控制航路的关城"}],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":[],"omission_reasons":["无额外禁写项"]}`
+	const completePeopleWorld = `{"characters":[{"id":"char-a","name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"曾放走仇敌","arc":"学会取舍"},{"id":"char-b","name":"陆衡","role":"antagonist","aliases":["盐使"],"summary":"敌船统领","motivation":"夺关","fear":"身份败露","secret":"阿绫旧友","arc":"从利用到牺牲"}],"relationships":[{"id":"rel-1","source_character_ref":"char-a","target_character_ref":"char-b","kind":"rival","label":"旧友成敌","strength":-70}],"factions":[{"name":"潮汐卫","summary":"守卫关隘的军团","goal":"守住航路"}],"locations":[{"name":"潮汐关","kind":"settlement","summary":"控制航路的关城"}],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":[],"omission_reasons":["无额外禁写项"]}`
 	seedArchiveSessionWithPayloads(t, bridge, project.ID, completePeopleWorld, roadmapPayload)
 	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
 		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
@@ -626,7 +626,7 @@ func TestConfirmArchivePersistsResolvedAnchorScopes(t *testing.T) {
 	raw, project := sqliteCreateStore(t)
 	defer raw.Close()
 	bridge := NewSQLiteStore(raw)
-	const peopleWithForbidden = `{"characters":[{"name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"放过过仇敌","arc":"学会取舍"}],"relationships":[],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":["不得使用火器"],"omission_reasons":[]}`
+	const peopleWithForbidden = `{"characters":[{"id":"char-a","name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"放过过仇敌","arc":"学会取舍"}],"relationships":[],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":["不得使用火器"],"omission_reasons":[]}`
 	seedArchiveSessionWithPayloads(t, bridge, project.ID, peopleWithForbidden, roadmapPayload)
 	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
 		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
@@ -698,6 +698,74 @@ func TestConfirmArchivePersistsResolvedAnchorScopes(t *testing.T) {
 		if !ok || anchor.ScopeKind != target.kind || anchor.ScopeID != target.id {
 			t.Fatalf("锚点作用域未解析: %+v, want=%+v", anchor, target)
 		}
+	}
+}
+
+func TestConfirmArchiveMapsRelationshipsByStableCharacterID(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	const stableCast = `{"characters":[{"id":"char-a","name":"无名","role":"protagonist","aliases":["甲"],"summary":"守关人","motivation":"守城","fear":"失守","secret":"旧友","arc":"承担"},{"id":"char-b","name":"无名","role":"antagonist","aliases":["乙"],"summary":"来犯者","motivation":"破城","fear":"失败","secret":"旧友","arc":"醒悟"}],"relationships":[{"id":"rel-1","source_character_ref":"char-a","target_character_ref":"char-b","kind":"rival","label":"同名宿敌","strength":-80}],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路","scope_type":"project"}],"forbidden":[],"omission_reasons":["无需其他分类"]}`
+	seedArchiveSessionWithPayloads(t, bridge, project.ID, stableCast, roadmapPayload)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ConfirmArchive(ctx, ArchiveRequest{
+		ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "stable-relationship",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ChangeSetID == "" {
+		t.Fatal("入档未返回 ChangeSet")
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	characterByAlias := map[string]string{}
+	for _, character := range characters {
+		for _, alias := range character.Aliases {
+			characterByAlias[alias] = character.ID
+		}
+	}
+	relationships, err := raw.ListRelationships(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(relationships) != 1 || relationships[0].SourceCharacterID != characterByAlias["甲"] ||
+		relationships[0].TargetCharacterID != characterByAlias["乙"] {
+		t.Fatalf("关系未按稳定候选 ID 映射: characters=%+v relationships=%+v", characters, relationships)
+	}
+}
+
+func TestArchiveRejectsLegacyNameBasedRelationships(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	const legacyCast = `{"characters":[{"name":"阿绫","role":"protagonist","aliases":[],"summary":"守关人","motivation":"守城","fear":"失守","secret":"","arc":"承担"},{"name":"陆衡","role":"antagonist","aliases":[],"summary":"来犯者","motivation":"破城","fear":"失败","secret":"","arc":"醒悟"}],"relationships":[{"source_name":"阿绫","target_name":"陆衡","kind":"rival","label":"旧友成敌","strength":-70}],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路","scope_type":"project"}],"forbidden":[],"omission_reasons":["无需其他分类"]}`
+	seedArchiveSessionWithCastVersion(t, bridge, project.ID, proposalPayload, legacyCast, roadmapPayload, 1)
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PreviewConfirmArchive(ctx, project.ID); !errors.Is(err, creationdomain.ErrStageIncomplete) {
+		t.Fatalf("v1 姓名关系候选应阻断入档: %v", err)
+	}
+	if relationships, err := raw.ListRelationships(ctx); err != nil || len(relationships) != 0 {
+		t.Fatalf("被拒绝的 v1 关系不应落库: %+v, %v", relationships, err)
 	}
 }
 
@@ -800,6 +868,10 @@ func seedArchiveSessionWithPayloads(t *testing.T, store Store, projectID, people
 }
 
 func seedArchiveSessionWithAllPayloads(t *testing.T, store Store, projectID, proposalValue, peoplePayload, roadPayload string) creationdomain.Session {
+	return seedArchiveSessionWithCastVersion(t, store, projectID, proposalValue, peoplePayload, roadPayload, 2)
+}
+
+func seedArchiveSessionWithCastVersion(t *testing.T, store Store, projectID, proposalValue, peoplePayload, roadPayload string, castSchemaVersion int) creationdomain.Session {
 	t.Helper()
 	now := testClock{}.Now()
 	session, err := creationdomain.NewSession("session-1", projectID, "branch-1", now)
@@ -826,7 +898,7 @@ func seedArchiveSessionWithAllPayloads(t *testing.T, store Store, projectID, pro
 	}
 	people, err := creationdomain.NewCandidate(
 		"people-1", session.ID, creationdomain.StagePeopleWorld, creationdomain.KindPeopleWorld,
-		1, "", "run-cast", "art-cast", peoplePayload, "story_cast.schema", 1, now,
+		1, "", "run-cast", "art-cast", peoplePayload, "story_cast.schema", castSchemaVersion, now,
 	)
 	if err != nil {
 		t.Fatal(err)

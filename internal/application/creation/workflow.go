@@ -36,8 +36,8 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 		}, nil
 	case creationdomain.StagePeopleWorld:
 		return stageBinding{
-			WorkflowID: agentassets.StoryPeopleWorldWorkflowID, Version: agentassets.StoryProductWorkflowVersion,
-			Kind: creationdomain.KindPeopleWorld, SchemaID: "story_cast.schema", SchemaVersion: 1,
+			WorkflowID: agentassets.StoryPeopleWorldWorkflowID, Version: agentassets.StoryPeopleWorldWorkflowVersionV2,
+			Kind: creationdomain.KindPeopleWorld, SchemaID: "story_cast.schema", SchemaVersion: 2,
 			Stage: stage,
 		}, nil
 	case creationdomain.StageRoadmap:
@@ -53,6 +53,10 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 
 // bindingByWorkflow 按冻结运行的 WorkflowBinding 反查阶段绑定，供恢复对账物化结果。
 func bindingByWorkflow(workflowID string, version int) (stageBinding, error) {
+	if workflowID == agentassets.StoryPeopleWorldWorkflowID && version == 1 {
+		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindPeopleWorld,
+			SchemaID: "story_cast.schema", SchemaVersion: 1, Stage: creationdomain.StagePeopleWorld}, nil
+	}
 	if workflowID == agentassets.StoryRoadmapWorkflowID && version == 1 {
 		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindRoadmap,
 			SchemaID: "story_roadmap.schema", SchemaVersion: 1, Stage: creationdomain.StageRoadmap}, nil

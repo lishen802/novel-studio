@@ -328,8 +328,12 @@ func projectPeopleWorld(candidate creationdomain.Candidate) PeopleWorldView {
 		return view
 	}
 	for _, item := range cast.Characters {
+		entityID := strings.TrimSpace(item.ID)
+		if entityID == "" {
+			entityID = item.Name
+		}
 		view.Entities = append(view.Entities, PeopleWorldNodeView{
-			ID: "character:" + item.Name, Kind: "character", Title: item.Name, Summary: item.Summary,
+			ID: "character:" + entityID, Kind: "character", Title: item.Name, Summary: item.Summary,
 			Complete: strings.TrimSpace(item.Summary) != "",
 		})
 	}

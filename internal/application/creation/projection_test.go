@@ -52,3 +52,11 @@ func TestWorkbenchReadDoesNotRecoverInterruptedRun(t *testing.T) {
 		t.Fatalf("read changed session: %+v", loaded)
 	}
 }
+
+func TestPeopleWorldProjectionUsesStableCharacterIDs(t *testing.T) {
+	const payload = `{"characters":[{"id":"char-a","name":"无名","role":"protagonist","aliases":[],"summary":"甲","motivation":"守城","fear":"","secret":"","arc":"承担"},{"id":"char-b","name":"无名","role":"antagonist","aliases":[],"summary":"乙","motivation":"破城","fear":"","secret":"","arc":"醒悟"}],"relationships":[{"id":"rel-1","source_character_ref":"char-a","target_character_ref":"char-b","kind":"rival","label":"宿敌","strength":-80}],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路","scope_type":"project"}],"forbidden":[],"omission_reasons":["无需其他分类"]}`
+	view := projectPeopleWorld(creationdomain.Candidate{ID: "people-1", PayloadJSON: payload})
+	if len(view.Entities) < 2 || view.Entities[0].ID != "character:char-a" || view.Entities[1].ID != "character:char-b" {
+		t.Fatalf("同名人物投影未使用稳定 ID: %+v", view.Entities)
+	}
+}

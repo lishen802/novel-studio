@@ -1129,7 +1129,7 @@ func buildArchivePreview(session creationdomain.Session, candidates []creationdo
 	if err != nil {
 		return ArchivePreview{}, err
 	}
-	cast, err := decodeCast(people.PayloadJSON)
+	cast, err := decodeArchivableCast(people)
 	if err != nil {
 		return ArchivePreview{}, err
 	}
