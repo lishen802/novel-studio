@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -352,7 +351,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateCharacter, id, after, "确认人物")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindCharacter, "characters", id, character.Name); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindCharacter, "characters", id, after); err != nil {
 			return err
 		}
 	}
@@ -363,7 +362,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateFaction, id, after, "确认势力")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindFaction, "factions", id, faction.Name); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindFaction, "factions", id, after); err != nil {
 			return err
 		}
 	}
@@ -374,7 +373,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateLocation, id, after, "确认地点")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindLocation, "locations", id, location.Name); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindLocation, "locations", id, after); err != nil {
 			return err
 		}
 	}
@@ -393,7 +392,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateRelationship, id, after, "确认人物关系")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindRelationship, "character_relationships", id, relation.Label); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindRelationship, "character_relationships", id, after); err != nil {
 			return err
 		}
 	}
@@ -406,7 +405,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateWorldRule, id, after, "确认世界规则")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindWorldRule, "world_rules", id, rule.Name); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindWorldRule, "world_rules", id, after); err != nil {
 			return err
 		}
 	}
@@ -420,12 +419,12 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 }
 
 func (mapper *archiveMapper) addTypedAsset(
-	candidate creationdomain.Candidate, kind storyassetdomain.Kind, table, typedID, label string,
+	candidate creationdomain.Candidate, kind storyassetdomain.Kind, table, typedID, payloadJSON string,
 ) error {
 	after, err := encodeJSON(map[string]string{
 		"kind": string(kind), "origin": string(storyassetdomain.OriginModel),
 		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,
-		"typedTable": table, "typedId": typedID, "payloadJson": `{"name":` + jsonString(label) + `}`,
+		"typedTable": table, "typedId": typedID, "payloadJson": payloadJSON,
 	})
 	if err != nil {
 		return err
@@ -447,7 +446,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		return err
 	}
 	mapper.add(revisiondomain.OperationCreateOutlineNode, bookID, bookAfter, "确认全书层")
-	if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", bookID, road.Book.Title); err != nil {
+	if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", bookID, bookAfter); err != nil {
 		return err
 	}
 	mapper.outlines++
@@ -464,7 +463,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateOutlineNode, id, after, "确认卷层")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, volume.Title); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, after); err != nil {
 			return err
 		}
 		mapper.outlines++
@@ -486,7 +485,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateOutlineNode, id, after, "确认故事弧")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, arc.Title); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, after); err != nil {
 			return err
 		}
 		mapper.outlines++
@@ -506,7 +505,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 			return err
 		}
 		mapper.add(revisiondomain.OperationCreateOutlineNode, id, after, "确认近期章节范围")
-		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, chapter.Title); err != nil {
+		if err := mapper.addTypedAsset(candidate, storyassetdomain.KindOutlineNode, "outline_nodes", id, after); err != nil {
 			return err
 		}
 		mapper.outlines++
@@ -553,12 +552,4 @@ func encodeJSON(value any) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
-}
-
-func jsonString(value string) string {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Sprintf("%q", value)
-	}
-	return string(encoded)
 }

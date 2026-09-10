@@ -2,6 +2,9 @@ package creation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -456,6 +459,167 @@ func TestConfirmArchiveWritesAssetsIdempotently(t *testing.T) {
 	}
 }
 
+func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	const completePeopleWorld = `{"characters":[{"name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"曾放走仇敌","arc":"学会取舍"},{"name":"陆衡","role":"antagonist","aliases":["盐使"],"summary":"敌船统领","motivation":"夺关","fear":"身份败露","secret":"阿绫旧友","arc":"从利用到牺牲"}],"relationships":[{"source_name":"阿绫","target_name":"陆衡","kind":"rival","label":"旧友成敌","strength":-70}],"factions":[{"name":"潮汐卫","summary":"守卫关隘的军团","goal":"守住航路"}],"locations":[{"name":"潮汐关","kind":"settlement","summary":"控制航路的关城"}],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":[],"omission_reasons":["无额外禁写项"]}`
+	seedArchiveSessionWithPayloads(t, bridge, project.ID, completePeopleWorld, roadmapPayload)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ConfirmArchive(ctx, ArchiveRequest{
+		ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "complete-revisions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, err := raw.ChangeSet(ctx, result.ChangeSetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedPayloads := map[string]string{}
+	for _, operation := range changeSet.Operations {
+		switch operation.Kind {
+		case revisiondomain.OperationCreateCharacter, revisiondomain.OperationCreateRelationship,
+			revisiondomain.OperationCreateFaction, revisiondomain.OperationCreateLocation,
+			revisiondomain.OperationCreateWorldRule, revisiondomain.OperationCreateOutlineNode:
+			typedPayloads[operation.TargetID] = operation.AfterValue
+		}
+	}
+	persistedPayloads := map[string]string{}
+	remember := func(id string, value any) {
+		t.Helper()
+		payload, err := encodeJSON(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		persistedPayloads[id] = payload
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, character := range characters {
+		remember(character.ID, map[string]any{
+			"name": character.Name, "aliases": character.Aliases, "role": character.Role,
+			"summary": character.Summary, "motivation": character.Motivation, "fear": character.Fear,
+			"secret": character.Secret, "arc": character.Arc,
+		})
+	}
+	relationships, err := raw.ListRelationships(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relationship := range relationships {
+		remember(relationship.ID, map[string]any{
+			"sourceCharacterId": relationship.SourceCharacterID, "targetCharacterId": relationship.TargetCharacterID,
+			"kind": relationship.Kind, "label": relationship.Label, "strength": relationship.Strength,
+		})
+	}
+	factions, err := raw.ListFactions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, faction := range factions {
+		remember(faction.ID, map[string]string{"name": faction.Name, "summary": faction.Summary, "goal": faction.Goal})
+	}
+	locations, err := raw.ListLocations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, location := range locations {
+		remember(location.ID, map[string]any{"name": location.Name, "kind": location.Kind, "summary": location.Summary})
+	}
+	rules, err := raw.ListWorldRules(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range rules {
+		remember(rule.ID, map[string]any{"name": rule.Name, "description": rule.Description, "scopeType": rule.ScopeType})
+	}
+	nodes, err := raw.ListOutlineNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range nodes {
+		payload := map[string]any{
+			"level": node.Level, "title": node.Title, "summary": node.Summary, "goal": node.Goal,
+			"conflict": node.Conflict, "outcome": node.Outcome, "position": node.Position,
+		}
+		if node.ParentID != "" {
+			payload["parentId"] = node.ParentID
+		}
+		remember(node.ID, payload)
+	}
+	wantKinds := map[string]int{
+		"character": 2, "relationship": 1, "faction": 1, "location": 1, "world_rule": 1, "outline_node": 6,
+	}
+	gotKinds := map[string]int{}
+	for _, operation := range changeSet.Operations {
+		if operation.Kind != revisiondomain.OperationCreateStoryAsset {
+			continue
+		}
+		var envelope struct {
+			Kind, SourceCandidateID, SourceRunID, SourceArtifactID string
+			TypedTable, TypedID, PayloadJSON                       string
+		}
+		if err := json.Unmarshal([]byte(operation.AfterValue), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.TypedID == "" {
+			continue
+		}
+		wantPayload, ok := typedPayloads[envelope.TypedID]
+		if !ok {
+			t.Fatalf("资产 %s 未关联类型表写入: %+v", operation.TargetID, envelope)
+		}
+		if envelope.PayloadJSON != wantPayload {
+			t.Fatalf("资产 %s 操作载荷不完整:\n got %s\nwant %s", operation.TargetID, envelope.PayloadJSON, wantPayload)
+		}
+		if persistedPayloads[envelope.TypedID] != wantPayload {
+			t.Fatalf("类型表 %s 与规范化写入载荷不一致:\n got %s\nwant %s", envelope.TypedID, persistedPayloads[envelope.TypedID], wantPayload)
+		}
+		asset, err := raw.StoryAsset(ctx, operation.TargetID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if asset.TypedID != envelope.TypedID || asset.TypedTable != envelope.TypedTable ||
+			asset.SourceCandidateID != envelope.SourceCandidateID || asset.SourceRunID != envelope.SourceRunID ||
+			asset.SourceArtifactID != envelope.SourceArtifactID {
+			t.Fatalf("正式资产信封与入档来源不一致: %+v / %+v", asset, envelope)
+		}
+		revision, err := raw.StoryAssetRevision(ctx, asset.ID, asset.CurrentRevision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if revision.PayloadJSON != wantPayload {
+			t.Fatalf("资产 %s revision 载荷不完整:\n got %s\nwant %s", asset.ID, revision.PayloadJSON, wantPayload)
+		}
+		sum := sha256.Sum256([]byte(wantPayload))
+		if revision.ContentSHA256 != hex.EncodeToString(sum[:]) || revision.CreatedBy != "creation-archive" {
+			t.Fatalf("资产 %s revision 审计信息不一致: %+v", asset.ID, revision)
+		}
+		gotKinds[string(asset.Kind)]++
+	}
+	for kind, want := range wantKinds {
+		if gotKinds[kind] != want {
+			t.Fatalf("%s 正式 revision 数量 = %d, want %d", kind, gotKinds[kind], want)
+		}
+	}
+}
+
 func TestApplyCreationArchiveRollsBackPartialFailure(t *testing.T) {
 	ctx := context.Background()
 	raw, project := sqliteCreateStore(t)
@@ -531,6 +695,10 @@ func sqliteCreateStore(t *testing.T) (*sqlite.Store, projectdomain.Project) {
 }
 
 func seedArchiveSession(t *testing.T, store Store, projectID string) creationdomain.Session {
+	return seedArchiveSessionWithPayloads(t, store, projectID, peopleWorldPayload, roadmapPayload)
+}
+
+func seedArchiveSessionWithPayloads(t *testing.T, store Store, projectID, peoplePayload, roadPayload string) creationdomain.Session {
 	t.Helper()
 	now := testClock{}.Now()
 	session, err := creationdomain.NewSession("session-1", projectID, "branch-1", now)
@@ -557,14 +725,14 @@ func seedArchiveSession(t *testing.T, store Store, projectID string) creationdom
 	}
 	people, err := creationdomain.NewCandidate(
 		"people-1", session.ID, creationdomain.StagePeopleWorld, creationdomain.KindPeopleWorld,
-		1, "", "run-cast", "art-cast", peopleWorldPayload, "story_cast.schema", 1, now,
+		1, "", "run-cast", "art-cast", peoplePayload, "story_cast.schema", 1, now,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	roadmap, err := creationdomain.NewCandidate(
 		"roadmap-1", session.ID, creationdomain.StageRoadmap, creationdomain.KindRoadmap,
-		1, "", "run-map", "art-map", roadmapPayload, "story_roadmap.schema", 1, now,
+		1, "", "run-map", "art-map", roadPayload, "story_roadmap.schema", 1, now,
 	)
 	if err != nil {
 		t.Fatal(err)

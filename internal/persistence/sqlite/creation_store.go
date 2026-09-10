@@ -521,6 +521,28 @@ func (s *Store) StoryAsset(ctx context.Context, id string) (storyassetdomain.Ass
 	return asset, nil
 }
 
+// StoryAssetRevision 读取正式资产指定版本的完整载荷与审计信息。
+func (s *Store) StoryAssetRevision(ctx context.Context, assetID string, revision int64) (storyassetdomain.Revision, error) {
+	var result storyassetdomain.Revision
+	var createdAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT asset_id, revision, payload_json, content_sha256, created_by, created_at
+		FROM story_asset_revisions
+		WHERE asset_id = ? AND revision = ?
+	`, strings.TrimSpace(assetID), revision).Scan(
+		&result.AssetID, &result.Revision, &result.PayloadJSON, &result.ContentSHA256,
+		&result.CreatedBy, &createdAt,
+	)
+	if err != nil {
+		return storyassetdomain.Revision{}, fmt.Errorf("read story asset revision: %w", err)
+	}
+	result.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return storyassetdomain.Revision{}, fmt.Errorf("parse story asset revision created_at: %w", err)
+	}
+	return result, nil
+}
+
 // SaveAssistantAction 要求会话已存在，用于保存待确认或状态变化后的 Action。
 func (s *Store) SaveAssistantSession(ctx context.Context, id, projectID, branchID string, now string) error {
 	_, err := s.db.ExecContext(ctx, `
