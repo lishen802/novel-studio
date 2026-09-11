@@ -2,6 +2,7 @@ package creation
 
 import (
 	"context"
+	"reflect"
 	"sync"
 
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
@@ -146,6 +147,16 @@ func (store *memoryStore) Session(_ context.Context, projectID string) (creation
 func (store *memoryStore) SaveCandidate(_ context.Context, candidate creationdomain.Candidate) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if _, exists := store.candidates[candidate.ID]; exists {
+		return creationdomain.ErrCandidateVersionConflict
+	}
+	if candidate.RunID != "" && candidate.ArtifactID != "" {
+		for _, existing := range store.candidates {
+			if existing.RunID == candidate.RunID && existing.ArtifactID == candidate.ArtifactID && existing.Kind == candidate.Kind {
+				return creationdomain.ErrCandidateResultExists
+			}
+		}
+	}
 	store.candidates[candidate.ID] = candidate
 	return nil
 }
@@ -157,6 +168,41 @@ func (store *memoryStore) UpdateCandidate(_ context.Context, candidate creationd
 		return ErrSessionNotFound
 	}
 	store.candidates[candidate.ID] = candidate
+	return nil
+}
+
+func (store *memoryStore) ApplyCandidateChanges(_ context.Context, expected, updates, inserts []creationdomain.Candidate) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, candidate := range expected {
+		current, ok := store.candidates[candidate.ID]
+		if !ok || !reflect.DeepEqual(current, candidate) {
+			return creationdomain.ErrCandidateVersionConflict
+		}
+	}
+	for _, candidate := range updates {
+		if _, ok := store.candidates[candidate.ID]; !ok {
+			return creationdomain.ErrCandidateVersionConflict
+		}
+	}
+	for _, candidate := range inserts {
+		if _, ok := store.candidates[candidate.ID]; ok {
+			return creationdomain.ErrCandidateVersionConflict
+		}
+		if candidate.RunID != "" && candidate.ArtifactID != "" {
+			for _, existing := range store.candidates {
+				if existing.RunID == candidate.RunID && existing.ArtifactID == candidate.ArtifactID && existing.Kind == candidate.Kind {
+					return creationdomain.ErrCandidateResultExists
+				}
+			}
+		}
+	}
+	for _, candidate := range updates {
+		store.candidates[candidate.ID] = candidate
+	}
+	for _, candidate := range inserts {
+		store.candidates[candidate.ID] = candidate
+	}
 	return nil
 }
 

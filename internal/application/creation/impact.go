@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/lishen802/novel-studio/internal/application/agentkernel"
@@ -62,6 +63,10 @@ func (service *Service) SaveCandidateDraft(ctx context.Context, projectID, candi
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
+	current, ok := currentCandidate(candidates, parent.Stage)
+	if !ok || current.ID != parent.ID {
+		return creationdomain.Candidate{}, creationdomain.ErrCandidateVersionConflict
+	}
 	draft, err := parent.SaveDraft(service.ids.NewID(), payloadJSON, service.clock.Now())
 	if err != nil {
 		return creationdomain.Candidate{}, err
@@ -71,10 +76,9 @@ func (service *Service) SaveCandidateDraft(ctx context.Context, projectID, candi
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	if err := service.store.UpdateCandidate(ctx, superseded); err != nil {
-		return creationdomain.Candidate{}, err
-	}
-	if err := service.store.SaveCandidate(ctx, draft); err != nil {
+	if err := service.store.ApplyCandidateChanges(ctx,
+		[]creationdomain.Candidate{parent}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{draft},
+	); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	if err := service.refreshImpact(ctx, session); err != nil {
@@ -163,7 +167,9 @@ func (service *Service) refreshImpact(ctx context.Context, session creationdomai
 				if clearErr != nil {
 					return fmt.Errorf("clear creation stale: %w", clearErr)
 				}
-				if err := service.store.UpdateCandidate(ctx, cleared); err != nil {
+				if err := service.store.ApplyCandidateChanges(ctx,
+					[]creationdomain.Candidate{current}, []creationdomain.Candidate{cleared}, nil,
+				); err != nil {
 					return err
 				}
 				replace(cleared)
@@ -184,7 +190,9 @@ func (service *Service) refreshImpact(ctx context.Context, session creationdomai
 		if markErr != nil {
 			return fmt.Errorf("mark creation stale: %w", markErr)
 		}
-		if err := service.store.UpdateCandidate(ctx, marked); err != nil {
+		if err := service.store.ApplyCandidateChanges(ctx,
+			[]creationdomain.Candidate{current}, []creationdomain.Candidate{marked}, nil,
+		); err != nil {
 			return err
 		}
 		replace(marked)
@@ -211,7 +219,9 @@ func (service *Service) keepImpactExceptions(ctx context.Context, session creati
 		if err != nil {
 			return err
 		}
-		if err := service.store.UpdateCandidate(ctx, kept); err != nil {
+		if err := service.store.ApplyCandidateChanges(ctx,
+			[]creationdomain.Candidate{current}, []creationdomain.Candidate{kept}, nil,
+		); err != nil {
 			return err
 		}
 	}
@@ -241,6 +251,8 @@ func (service *Service) abandonUpstream(ctx context.Context, session creationdom
 			seen[ref] = struct{}{}
 		}
 	}
+	expectedByID := make(map[string]creationdomain.Candidate, len(seen)*2)
+	updatesByID := make(map[string]creationdomain.Candidate, len(seen)*2)
 	for id := range seen {
 		upstream, err := service.store.Candidate(ctx, id)
 		if err != nil {
@@ -253,9 +265,8 @@ func (service *Service) abandonUpstream(ctx context.Context, session creationdom
 		if err != nil {
 			return err
 		}
-		if err := service.store.UpdateCandidate(ctx, discarded); err != nil {
-			return err
-		}
+		expectedByID[upstream.ID] = upstream
+		updatesByID[upstream.ID] = discarded
 		if strings.TrimSpace(upstream.SupersedesCandidateID) == "" {
 			continue
 		}
@@ -267,11 +278,24 @@ func (service *Service) abandonUpstream(ctx context.Context, session creationdom
 		if err != nil {
 			return err
 		}
-		if err := service.store.UpdateCandidate(ctx, restored); err != nil {
-			return err
+		// 同一批明确放弃的版本优先保持 discarded，不能因另一条谱系引用又被恢复。
+		if _, alsoDiscarded := seen[previous.ID]; !alsoDiscarded {
+			expectedByID[previous.ID] = previous
+			updatesByID[previous.ID] = restored
 		}
 	}
-	return nil
+	ids := make([]string, 0, len(expectedByID))
+	for id := range expectedByID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	expected := make([]creationdomain.Candidate, 0, len(ids))
+	updates := make([]creationdomain.Candidate, 0, len(ids))
+	for _, id := range ids {
+		expected = append(expected, expectedByID[id])
+		updates = append(updates, updatesByID[id])
+	}
+	return service.store.ApplyCandidateChanges(ctx, expected, updates, nil)
 }
 
 func (service *Service) projectImpact(ctx context.Context, session creationdomain.Session) (ImpactProjection, error) {

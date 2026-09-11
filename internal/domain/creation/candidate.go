@@ -4,8 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
+)
+
+var (
+	ErrCandidateVersionConflict = errors.New("creation candidate version conflict")
+	ErrCandidateResultExists    = errors.New("creation candidate result already exists")
 )
 
 type CandidateKind string

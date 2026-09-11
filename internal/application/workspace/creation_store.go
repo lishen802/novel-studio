@@ -49,6 +49,13 @@ func (store creationStore) UpdateCandidate(ctx context.Context, candidate creati
 	return store.guard.access(ctx, true, func() error { return store.inner.UpdateCandidate(ctx, candidate) })
 }
 
+// ApplyCandidateChanges 在同一工作区租约内提交候选换版事务。
+func (store creationStore) ApplyCandidateChanges(ctx context.Context, expected, updates, inserts []creationdomain.Candidate) error {
+	return store.guard.access(ctx, true, func() error {
+		return store.inner.ApplyCandidateChanges(ctx, expected, updates, inserts)
+	})
+}
+
 // Candidate 在访问创作存储前核对工作区和运行租约。
 func (store creationStore) Candidate(ctx context.Context, id string) (candidate creationdomain.Candidate, err error) {
 	err = store.guard.access(ctx, false, func() error { candidate, err = store.inner.Candidate(ctx, id); return err })

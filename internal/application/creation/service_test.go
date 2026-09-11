@@ -190,6 +190,52 @@ func TestRegenerateKeepsLockedFieldsAndLocks(t *testing.T) {
 	}
 }
 
+func TestPersistCandidateConvergesDuplicateRunResult(t *testing.T) {
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	session := seedDirectionsSelection(t, service, store, "d1")
+	seedStageCandidate(t, service, store, creationdomain.StageProposal, proposalPayload)
+	session, err := store.Session(context.Background(), session.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := bindingFor(creationdomain.StageProposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := agentdomain.Run{ID: "run-same-result", QualityStatus: agentdomain.QualityPassed}
+	digest := liveUpstreamDigest(session, mustListCandidates(t, store, session.ID), creationdomain.StageProposal)
+	first, err := service.persistCandidate(
+		context.Background(), session, creationdomain.StageProposal, run.ID, "artifact-same-result",
+		proposalAltEnding, run, digest, binding,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.persistCandidate(
+		context.Background(), session, creationdomain.StageProposal, run.ID, "artifact-same-result",
+		proposalAltEnding, run, digest, binding,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("duplicate result returned different candidate: %s != %s", second.ID, first.ID)
+	}
+	candidates := mustListCandidates(t, store, session.ID)
+	matches := 0
+	for _, candidate := range candidates {
+		if candidate.RunID == run.ID && candidate.ArtifactID == "artifact-same-result" {
+			matches++
+			if candidate.Status == creationdomain.StatusSuperseded {
+				t.Fatal("duplicate materialization superseded the winning result")
+			}
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("run result candidate count = %d, want 1", matches)
+	}
+}
+
 // P1-5：最终产物指向修订稿而非初稿；质量 needs_review/blocked 暂停自动推进并阻断阶段推进。
 func TestQualityGateBlocksAdvanceAndRevisionResultWins(t *testing.T) {
 	kernel := newFakeKernel()
@@ -973,6 +1019,15 @@ func currentCandidateID(t *testing.T, service *Service, store *memoryStore, stag
 		t.Fatalf("no current candidate for %s", stage)
 	}
 	return current.ID
+}
+
+func mustListCandidates(t *testing.T, store *memoryStore, sessionID string) []creationdomain.Candidate {
+	t.Helper()
+	candidates, err := store.ListCandidates(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return candidates
 }
 
 func generateRequest(stage creationdomain.Stage) GenerateRequest {

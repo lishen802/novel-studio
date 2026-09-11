@@ -8,6 +8,29 @@ import (
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 )
 
+func TestSaveCandidateDraftRejectsHistoricalBaseline(t *testing.T) {
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	session := seedDirectionsSelection(t, service, store, "d1")
+	originalID := currentCandidateID(t, service, store, creationdomain.StageDirections)
+	first, err := service.SaveCandidateDraft(context.Background(), session.ProjectID, originalID, altDirectionPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SaveCandidateDraft(
+		context.Background(), session.ProjectID, originalID, directionPayload,
+	); !errors.Is(err, creationdomain.ErrCandidateVersionConflict) {
+		t.Fatalf("historical draft error = %v", err)
+	}
+	candidates, err := store.ListCandidates(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, ok := currentCandidate(candidates, creationdomain.StageDirections)
+	if !ok || current.ID != first.ID {
+		t.Fatalf("historical edit changed current candidate: %+v", current)
+	}
+}
+
 func TestChangingDirectionMarksProposalStale(t *testing.T) {
 	service, store, kernel := newTestService(t, newFakeKernel(), nil)
 	session, direction, proposal := seedTrackedProposal(t, service, store)

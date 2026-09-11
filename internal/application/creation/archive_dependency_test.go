@@ -253,6 +253,8 @@ func (store archiveNewHeadStore) ApplyArchive(ctx context.Context, apply Archive
 	candidate := apply.Candidates[0]
 	candidate.ID = "new-head"
 	candidate.Version++
+	candidate.RunID = "run-new-head"
+	candidate.ArtifactID = "artifact-new-head"
 	if err := store.SaveCandidate(ctx, candidate); err != nil {
 		return err
 	}

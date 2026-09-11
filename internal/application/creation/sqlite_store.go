@@ -19,6 +19,7 @@ type SQLBackend interface {
 	CreationSession(context.Context, string) (creationdomain.Session, error)
 	SaveCreationCandidate(context.Context, creationdomain.Candidate) error
 	UpdateCreationCandidate(context.Context, creationdomain.Candidate) error
+	ApplyCreationCandidateChanges(context.Context, []creationdomain.Candidate, []creationdomain.Candidate, []creationdomain.Candidate) error
 	CreationCandidate(context.Context, string) (creationdomain.Candidate, error)
 	ListCreationCandidates(context.Context, string) ([]creationdomain.Candidate, error)
 	PendingAssistantActionCount(context.Context, string) (int, error)
@@ -67,6 +68,10 @@ func (store sqliteStore) SaveCandidate(ctx context.Context, candidate creationdo
 
 func (store sqliteStore) UpdateCandidate(ctx context.Context, candidate creationdomain.Candidate) error {
 	return store.inner.UpdateCreationCandidate(ctx, candidate)
+}
+
+func (store sqliteStore) ApplyCandidateChanges(ctx context.Context, expected, updates, inserts []creationdomain.Candidate) error {
+	return store.inner.ApplyCreationCandidateChanges(ctx, expected, updates, inserts)
 }
 
 func (store sqliteStore) Candidate(ctx context.Context, id string) (creationdomain.Candidate, error) {

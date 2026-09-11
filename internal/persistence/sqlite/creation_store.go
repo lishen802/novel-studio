@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -169,6 +171,10 @@ func creationSessionCASResult(result sql.Result, err error) error {
 
 // SaveCreationCandidate 写入新的候选版本，不覆盖已有行。
 func (s *Store) SaveCreationCandidate(ctx context.Context, candidate creationdomain.Candidate) error {
+	return insertCreationCandidate(ctx, s.db, candidate)
+}
+
+func insertCreationCandidate(ctx context.Context, exec txExecutor, candidate creationdomain.Candidate) error {
 	locks, err := json.Marshal(candidate.LockMap)
 	if err != nil {
 		return fmt.Errorf("encode creation candidate locks: %w", err)
@@ -180,13 +186,14 @@ func (s *Store) SaveCreationCandidate(ctx context.Context, candidate creationdom
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	result, err := exec.ExecContext(ctx, `
 		INSERT INTO creation_candidates (
 			id, session_id, stage, kind, version, parent_candidate_id, supersedes_candidate_id,
 			run_id, artifact_id, payload_json, payload_schema_id, payload_schema_version,
 			content_sha256, lock_map_json, status, quality_status, origin, stale_reason, impact_refs_json,
-			upstream_digest, excepted_upstream_digest, impact_severity, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			upstream_digest, excepted_upstream_digest, impact_severity, result_key, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(result_key) WHERE result_key <> '' DO NOTHING
 	`,
 		candidate.ID, candidate.SessionID, string(candidate.Stage), string(candidate.Kind), candidate.Version,
 		candidate.ParentCandidateID, candidate.SupersedesCandidateID, candidate.RunID, candidate.ArtifactID,
@@ -194,12 +201,28 @@ func (s *Store) SaveCreationCandidate(ctx context.Context, candidate creationdom
 		string(locks), string(candidate.Status), string(candidate.QualityStatus), string(candidate.Origin),
 		candidate.StaleReason, string(refs),
 		candidate.UpstreamDigest, candidate.ExceptedUpstreamDigest, string(candidate.ImpactSeverity),
+		candidateResultKey(candidate),
 		formatTime(candidate.CreatedAt), formatTime(candidate.UpdatedAt),
 	)
 	if err != nil {
 		return databaseOperationError("save creation candidate", err)
 	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return databaseOperationError("read creation candidate insert result", err)
+	}
+	if affected == 0 {
+		return creationdomain.ErrCandidateResultExists
+	}
 	return nil
+}
+
+func candidateResultKey(candidate creationdomain.Candidate) string {
+	if strings.TrimSpace(candidate.RunID) == "" || strings.TrimSpace(candidate.ArtifactID) == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(candidate.RunID + "\x00" + candidate.ArtifactID + "\x00" + string(candidate.Kind)))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Store) CreationCandidate(ctx context.Context, id string) (creationdomain.Candidate, error) {
@@ -288,6 +311,10 @@ func (s *Store) ListCreationCandidates(ctx context.Context, sessionID string) ([
 
 // UpdateCreationCandidate 保存状态、锁和谱系，不改 payload。
 func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationdomain.Candidate) error {
+	return updateCreationCandidate(ctx, s.db, candidate)
+}
+
+func updateCreationCandidate(ctx context.Context, exec txExecutor, candidate creationdomain.Candidate) error {
 	locks, err := json.Marshal(candidate.LockMap)
 	if err != nil {
 		return fmt.Errorf("encode creation candidate locks: %w", err)
@@ -299,7 +326,7 @@ func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationd
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	result, err := exec.ExecContext(ctx, `
 		UPDATE creation_candidates SET
 			parent_candidate_id = NULLIF(?, ''),
 			supersedes_candidate_id = NULLIF(?, ''),
@@ -319,6 +346,82 @@ func (s *Store) UpdateCreationCandidate(ctx context.Context, candidate creationd
 		formatTime(candidate.UpdatedAt), candidate.ID)
 	if err != nil {
 		return databaseOperationError("update creation candidate", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return databaseOperationError("read creation candidate update result", err)
+	}
+	if count != 1 {
+		return creationdomain.ErrCandidateVersionConflict
+	}
+	return nil
+}
+
+// ApplyCreationCandidateChanges 在写锁事务中先校验全部旧快照，再原子提交候选状态与新版本。
+func (s *Store) ApplyCreationCandidateChanges(
+	ctx context.Context,
+	expected, updates, inserts []creationdomain.Candidate,
+) error {
+	tx, err := beginImmediate(ctx, s.db)
+	if err != nil {
+		return databaseOperationError("begin creation candidate transaction", err)
+	}
+	defer tx.Rollback()
+	for _, candidate := range expected {
+		if err := verifyCreationCandidateSnapshot(ctx, tx, candidate); err != nil {
+			return err
+		}
+	}
+	for _, candidate := range updates {
+		if err := updateCreationCandidate(ctx, tx, candidate); err != nil {
+			return err
+		}
+	}
+	for _, candidate := range inserts {
+		if err := insertCreationCandidate(ctx, tx, candidate); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return databaseOperationError("commit creation candidate transaction", err)
+	}
+	return nil
+}
+
+func verifyCreationCandidateSnapshot(ctx context.Context, reader creationSessionReader, candidate creationdomain.Candidate) error {
+	locks, err := json.Marshal(candidate.LockMap)
+	if err != nil {
+		return err
+	}
+	if string(locks) == "null" {
+		locks = []byte("{}")
+	}
+	refs, err := encodeImpactRefs(candidate.ImpactRefs)
+	if err != nil {
+		return err
+	}
+	var count int
+	err = reader.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM creation_candidates
+		WHERE id = ? AND session_id = ? AND stage = ? AND kind = ? AND version = ?
+		AND COALESCE(parent_candidate_id, '') = ? AND COALESCE(supersedes_candidate_id, '') = ?
+		AND COALESCE(run_id, '') = ? AND COALESCE(artifact_id, '') = ?
+		AND payload_json = ? AND payload_schema_id = ? AND payload_schema_version = ? AND content_sha256 = ?
+		AND lock_map_json = ? AND status = ? AND quality_status = ? AND origin = ?
+		AND stale_reason = ? AND impact_refs_json = ? AND upstream_digest = ?
+		AND excepted_upstream_digest = ? AND impact_severity = ? AND created_at = ? AND updated_at = ?
+	`, candidate.ID, candidate.SessionID, string(candidate.Stage), string(candidate.Kind), candidate.Version,
+		candidate.ParentCandidateID, candidate.SupersedesCandidateID, candidate.RunID, candidate.ArtifactID,
+		candidate.PayloadJSON, candidate.PayloadSchemaID, candidate.PayloadSchemaVersion, candidate.ContentSHA256,
+		string(locks), string(candidate.Status), string(candidate.QualityStatus), string(candidate.Origin),
+		candidate.StaleReason, string(refs), candidate.UpstreamDigest, candidate.ExceptedUpstreamDigest,
+		string(candidate.ImpactSeverity), formatTime(candidate.CreatedAt), formatTime(candidate.UpdatedAt),
+	).Scan(&count)
+	if err != nil {
+		return databaseOperationError("verify creation candidate snapshot", err)
+	}
+	if count != 1 {
+		return creationdomain.ErrCandidateVersionConflict
 	}
 	return nil
 }

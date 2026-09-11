@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -37,6 +38,96 @@ func TestCreationOperationPersistsFrozenInputDigest(t *testing.T) {
 	}
 	if loaded.FrozenInputDigest != operation.FrozenInputDigest {
 		t.Fatalf("loaded frozen digest = %q, want %q", loaded.FrozenInputDigest, operation.FrozenInputDigest)
+	}
+}
+
+func TestCreationCandidateChangesRollbackAsOneTransaction(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := time.Unix(550, 0).UTC()
+	session, err := creationdomain.NewSession("session-replace", project.ID, "main", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err = store.CreateCreationSession(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := creationdomain.NewCandidate(
+		"candidate-old", session.ID, creationdomain.StageProposal, creationdomain.KindProposal,
+		1, "", "run-old", "artifact-old", `{"title":"旧方案"}`, "story_proposal.schema", 1, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCreationCandidate(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := parent.SaveDraft("candidate-new", `{"title":"新方案"}`, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	superseded, err := parent.MarkSuperseded(now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		CREATE TRIGGER fail_candidate_replacement
+		BEFORE INSERT ON creation_candidates
+		WHEN NEW.id = 'candidate-new'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected candidate replacement failure');
+		END
+	`); err != nil {
+		t.Fatal(err)
+	}
+	err = store.ApplyCreationCandidateChanges(ctx,
+		[]creationdomain.Candidate{parent}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{replacement},
+	)
+	if err == nil {
+		t.Fatal("candidate replacement succeeded despite injected insert failure")
+	}
+	loaded, err := store.CreationCandidate(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != creationdomain.StatusDraft {
+		t.Fatalf("failed replacement changed previous status to %q", loaded.Status)
+	}
+	if _, err := store.CreationCandidate(ctx, replacement.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("failed replacement left new candidate: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER fail_candidate_replacement`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApplyCreationCandidateChanges(ctx,
+		[]creationdomain.Candidate{parent}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{replacement},
+	); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = store.CreationCandidate(ctx, parent.ID)
+	if err != nil || loaded.Status != creationdomain.StatusSuperseded {
+		t.Fatalf("previous candidate = %+v, error %v", loaded, err)
+	}
+	loaded, err = store.CreationCandidate(ctx, replacement.ID)
+	if err != nil || loaded.Status != creationdomain.StatusDraft {
+		t.Fatalf("replacement candidate = %+v, error %v", loaded, err)
+	}
+	if err := store.ApplyCreationCandidateChanges(ctx,
+		[]creationdomain.Candidate{parent}, []creationdomain.Candidate{superseded}, nil,
+	); !errors.Is(err, creationdomain.ErrCandidateVersionConflict) {
+		t.Fatalf("stale candidate snapshot error = %v", err)
+	}
+	duplicateResult, err := creationdomain.NewCandidate(
+		"candidate-duplicate-result", session.ID, creationdomain.StageProposal, creationdomain.KindProposal,
+		3, "", parent.RunID, parent.ArtifactID, `{"title":"重复运行结果"}`, "story_proposal.schema", 1, now.Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCreationCandidate(ctx, duplicateResult); !errors.Is(err, creationdomain.ErrCandidateResultExists) {
+		t.Fatalf("duplicate run result error = %v", err)
 	}
 }
 

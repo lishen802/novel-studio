@@ -338,6 +338,7 @@ func (service *Service) executeEditLocks(
 	args actionArguments,
 ) (ActionResult, error) {
 	now := service.clock.Now()
+	expected := candidate
 	updated := candidate
 	var err error
 	for path, locked := range args.Locks {
@@ -350,7 +351,9 @@ func (service *Service) executeEditLocks(
 			return ActionResult{}, err
 		}
 	}
-	if err := service.store.UpdateCandidate(ctx, updated); err != nil {
+	if err := service.store.ApplyCandidateChanges(ctx,
+		[]creationdomain.Candidate{expected}, []creationdomain.Candidate{updated}, nil,
+	); err != nil {
 		return ActionResult{}, err
 	}
 	succeeded, err := action.Succeed([]string{updated.ID}, now)
@@ -427,10 +430,9 @@ func (service *Service) executeReviseFields(
 	if err != nil {
 		return ActionResult{}, err
 	}
-	if err := service.store.UpdateCandidate(ctx, superseded); err != nil {
-		return ActionResult{}, err
-	}
-	if err := service.store.SaveCandidate(ctx, next); err != nil {
+	if err := service.store.ApplyCandidateChanges(ctx,
+		[]creationdomain.Candidate{candidate}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{next},
+	); err != nil {
 		return ActionResult{}, err
 	}
 	succeeded, err := action.Succeed([]string{next.ID}, service.clock.Now())

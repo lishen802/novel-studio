@@ -371,6 +371,7 @@ func (service *Service) AcceptCandidate(ctx context.Context, projectID, candidat
 	if err := validateCandidateDependency(session, candidates, current); err != nil {
 		return creationdomain.Candidate{}, err
 	}
+	expected := current
 	// 软影响例外已经绑定当前上游摘要时，接受动作保留例外证据并结束 stale 状态。
 	if current.Status == creationdomain.StatusStale && current.ExceptionMatches(liveUpstreamDigest(session, candidates, current.Stage)) {
 		current.Status = creationdomain.StatusDraft
@@ -379,7 +380,9 @@ func (service *Service) AcceptCandidate(ctx context.Context, projectID, candidat
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	if err := service.store.UpdateCandidate(ctx, accepted); err != nil {
+	if err := service.store.ApplyCandidateChanges(ctx,
+		[]creationdomain.Candidate{expected}, []creationdomain.Candidate{accepted}, nil,
+	); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	return accepted, nil
@@ -440,6 +443,7 @@ func (service *Service) updateCandidateLock(ctx context.Context, projectID, cand
 	if candidate.SessionID != session.ID {
 		return creationdomain.Candidate{}, ErrSessionNotFound
 	}
+	expected := candidate
 	if lock {
 		candidate, err = candidate.LockField(path, service.clock.Now())
 	} else {
@@ -448,7 +452,9 @@ func (service *Service) updateCandidateLock(ctx context.Context, projectID, cand
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	if err := service.store.UpdateCandidate(ctx, candidate); err != nil {
+	if err := service.store.ApplyCandidateChanges(ctx,
+		[]creationdomain.Candidate{expected}, []creationdomain.Candidate{candidate}, nil,
+	); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	return candidate, nil
@@ -1098,7 +1104,7 @@ func (service *Service) materializeRunResult(ctx context.Context, session creati
 	}
 	for _, candidate := range candidates {
 		if candidate.RunID == run.ID {
-			return nil
+			return service.refreshImpact(ctx, session)
 		}
 	}
 	operation, err := service.store.Operation(ctx, session.ActiveOperationID)
@@ -1147,7 +1153,8 @@ func (service *Service) persistCandidate(
 		if item.Version >= version {
 			version = item.Version + 1
 		}
-		if !hasPrevious || item.Version > previous.Version {
+		if item.Status != creationdomain.StatusSuperseded && item.Status != creationdomain.StatusDiscarded &&
+			(!hasPrevious || item.Version > previous.Version) {
 			previous = item
 			hasPrevious = true
 		}
@@ -1156,6 +1163,9 @@ func (service *Service) persistCandidate(
 	if hasPrevious {
 		// 重生成强制保留锁定字段与锁元数据（P1-4）。
 		candidate, err = previous.Regenerate(service.ids.NewID(), runID, artifactID, payload, service.clock.Now())
+		if err == nil {
+			candidate.Version = version
+		}
 	} else {
 		candidate, err = creationdomain.NewCandidate(
 			service.ids.NewID(), session.ID, stage, binding.Kind, version,
@@ -1171,11 +1181,18 @@ func (service *Service) persistCandidate(
 		if markErr != nil {
 			return creationdomain.Candidate{}, markErr
 		}
-		if err := service.store.UpdateCandidate(ctx, superseded); err != nil {
+		if err := service.store.ApplyCandidateChanges(ctx,
+			[]creationdomain.Candidate{previous}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{candidate},
+		); err != nil {
+			if errors.Is(err, creationdomain.ErrCandidateResultExists) {
+				return service.candidateForRunResult(ctx, session, runID, artifactID, binding.Kind)
+			}
 			return creationdomain.Candidate{}, err
 		}
-	}
-	if err := service.store.SaveCandidate(ctx, candidate); err != nil {
+	} else if err := service.store.SaveCandidate(ctx, candidate); err != nil {
+		if errors.Is(err, creationdomain.ErrCandidateResultExists) {
+			return service.candidateForRunResult(ctx, session, runID, artifactID, binding.Kind)
+		}
 		return creationdomain.Candidate{}, err
 	}
 	// 用最新会话重算下游影响，避免旧快照误判 stale。
@@ -1187,6 +1204,28 @@ func (service *Service) persistCandidate(
 		return creationdomain.Candidate{}, err
 	}
 	return candidate, nil
+}
+
+func (service *Service) candidateForRunResult(
+	ctx context.Context, session creationdomain.Session, runID, artifactID string, kind creationdomain.CandidateKind,
+) (creationdomain.Candidate, error) {
+	candidates, err := service.store.ListCandidates(ctx, session.ID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	for _, candidate := range candidates {
+		if candidate.RunID == runID && candidate.ArtifactID == artifactID && candidate.Kind == kind {
+			latest, loadErr := service.store.Session(ctx, session.ProjectID)
+			if loadErr != nil {
+				return creationdomain.Candidate{}, loadErr
+			}
+			if refreshErr := service.refreshImpact(ctx, latest); refreshErr != nil {
+				return creationdomain.Candidate{}, refreshErr
+			}
+			return service.store.Candidate(ctx, candidate.ID)
+		}
+	}
+	return creationdomain.Candidate{}, creationdomain.ErrCandidateResultExists
 }
 
 // PreviewConfirmArchive 冻结档案确认摘要，不写正式资产。

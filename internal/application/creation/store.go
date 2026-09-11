@@ -27,6 +27,8 @@ type Store interface {
 	Session(ctx context.Context, projectID string) (creationdomain.Session, error)
 	SaveCandidate(ctx context.Context, candidate creationdomain.Candidate) error
 	UpdateCandidate(ctx context.Context, candidate creationdomain.Candidate) error
+	// ApplyCandidateChanges 原子校验候选快照并提交状态更新和新版本。
+	ApplyCandidateChanges(ctx context.Context, expected, updates, inserts []creationdomain.Candidate) error
 	Candidate(ctx context.Context, id string) (creationdomain.Candidate, error)
 	ListCandidates(ctx context.Context, sessionID string) ([]creationdomain.Candidate, error)
 	PendingActionCount(ctx context.Context, projectID string) (int, error)
