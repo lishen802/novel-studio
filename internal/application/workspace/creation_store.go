@@ -167,3 +167,14 @@ func (store creationStore) Entry(ctx context.Context, session, id string) (entry
 func (store creationStore) AppendEntry(ctx context.Context, session creationdomain.Session, entry creationdomain.EntryRevision) error {
 	return store.guard.access(ctx, true, func() error { return store.inner.AppendEntry(ctx, session, entry) })
 }
+
+// SaveSample 在可写项目保护下保存试写准备。
+func (store creationStore) SaveSample(ctx context.Context, s creationdomain.Session, c creationdomain.Candidate, h creationdomain.SampleHandoff) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.SaveSample(ctx, s, c, h) })
+}
+
+// LatestSample 在项目代次保护下读取试写准备。
+func (store creationStore) LatestSample(ctx context.Context, id string) (h creationdomain.SampleHandoff, err error) {
+	err = store.guard.access(ctx, false, func() error { h, err = store.inner.LatestSample(ctx, id); return err })
+	return
+}

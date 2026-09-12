@@ -19,6 +19,8 @@ var (
 )
 
 type Store interface {
+	SaveSample(context.Context, creationdomain.Session, creationdomain.Candidate, creationdomain.SampleHandoff) error
+	LatestSample(context.Context, string) (creationdomain.SampleHandoff, error)
 	CurrentEntry(context.Context, string) (creationdomain.EntryRevision, error)
 	Entry(context.Context, string, string) (creationdomain.EntryRevision, error)
 	AppendEntry(context.Context, creationdomain.Session, creationdomain.EntryRevision) error

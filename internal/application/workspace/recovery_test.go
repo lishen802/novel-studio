@@ -245,7 +245,7 @@ func TestWorkspaceOpensLegacyProjectAndPreservesDataAfterMigration(t *testing.T)
 	}
 
 	// Backup created and is independently openable at v9.
-	backupPath := filepath.Join(recoveryDir, "migration-v09-v32.sqlite")
+	backupPath := filepath.Join(recoveryDir, "migration-v09-v33.sqlite")
 	if _, err := os.Stat(backupPath); err != nil {
 		t.Fatalf("backup missing: %v", err)
 	}

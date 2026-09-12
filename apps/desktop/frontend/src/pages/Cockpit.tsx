@@ -25,6 +25,7 @@ import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { SamplePanel } from '../components/creation/SamplePanel';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 
@@ -332,6 +333,7 @@ export default function Cockpit() {
         )}
 
         <main className="flex-1 overflow-auto p-8">
+          {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={workbench.sessionId} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
           {workbench.sessionId && <EntryPanel key={workbench.sessionId} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
             await run(() => studio.saveCreationEntry({ projectId: workbench.projectId, sessionId: workbench.sessionId, kind, material, expectedVersion, expectedRunSlotVersion }));
           }} />}
@@ -425,6 +427,7 @@ export default function Cockpit() {
                           <Button variant="primary" size="sm" className="w-full" disabled={generating || busy || workbench.readOnly} onClick={() => void confirmNext(card.id).catch((err) => setError(err.message))}>
                             选择此方向
                           </Button>
+                          <Button size="sm" className="w-full mt-2" disabled={generating || busy || workbench.readOnly || materialDirty} onClick={() => void run(() => studio.selectCreationDirection(workbench.directionSet.candidateId, card.id)).catch(() => undefined)}>选定并准备试写</Button>
                         </div>
                       </Card>
                     ))}

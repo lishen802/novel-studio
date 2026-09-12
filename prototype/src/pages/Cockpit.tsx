@@ -28,6 +28,7 @@ import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
+import { SamplePanel } from '../components/creation/SamplePanel';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 import { getActiveModel } from '../types';
@@ -173,6 +174,8 @@ const initialContext: CreativeContext = {
 };
 
 export default function Cockpit() {
+ const [sampleCard,setSampleCard] = useState('');
+ const [samplePreview,setSamplePreview] = useState<{id:string;status:string;pointOfView:string;tone:string;constraints:string[];targetRunes:number}|null>(null);
   const [entryPreview, setEntryPreview] = useState<{ id: string; kind: 'idea' | 'author_plan'; material: string }>({ id: '', kind: 'idea', material: '' });
   const navigate = useNavigate();
   const { state } = useApp();
@@ -296,6 +299,7 @@ export default function Cockpit() {
       <div className="flex-1 flex overflow-hidden">
         {/* Main creative area */}
         <main className="flex-1 overflow-auto p-8">
+          {sampleCard && entryPreview.kind === 'idea' && <SamplePanel preview directionCandidateId="prototype-direction" directionCardId={sampleCard} version={1} runVersion={0} sample={samplePreview} onSave={async (value) => {setSamplePreview({...value,id:String(Date.now()),status:'prepared'});}} />}
           <EntryPanel entry={entryPreview} contentVersion={1} runSlotVersion={0} onSave={async (kind, material) => { setEntryPreview({ id: String(Date.now()), kind, material }); }} />
           {entryPreview.kind === 'author_plan' && <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-text-sub">已有方案入口预览：方向不适用，保存材料后进入缺口检查与候选复用。此浏览器原型未接模型解析，真实调用未就绪。</div>}
           {entryPreview.kind !== 'author_plan' && <>
@@ -415,7 +419,7 @@ export default function Cockpit() {
                           className="flex-1"
                         >
                           选择此方向
-                        </Button>
+                        </Button><Button size="sm" onClick={() => {setSampleCard(dir.id);setSamplePreview(null);}}>选定并准备试写</Button>
                         <Button variant="ghost" size="sm" onClick={() => redoDirection(dir.id)}>
                           <RefreshCw className="w-4 h-4" />
                         </Button>

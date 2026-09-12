@@ -9,6 +9,8 @@ import (
 )
 
 type WorkbenchView struct {
+	SampleHandoff    *SampleView                   `json:"sampleHandoff"`
+	CanPrepareSample bool                          `json:"canPrepareSample"`
 	Material         MaterialView                  `json:"material"`
 	ContentVersion   int64                         `json:"contentVersion"`
 	RunSlotVersion   int64                         `json:"runSlotVersion"`
@@ -158,6 +160,9 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 		return WorkbenchView{}, err
 	}
 	view := assembleWorkbench(session, candidates, impact, pending)
+	if err := service.projectSample(ctx, session, candidates, &view); err != nil {
+		return WorkbenchView{}, err
+	}
 	runID := session.ActiveRunID
 	if runID == "" {
 		// 已物化候选仍保留运行入口，不能因槽位清空而丢失完成结果。

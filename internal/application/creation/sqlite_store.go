@@ -13,6 +13,8 @@ import (
 
 // SQLBackend 是 SQLite 创作表的最小持久化端口，供工作区把活动项目 store 适配进来。
 type SQLBackend interface {
+	SaveCreationSample(context.Context, creationdomain.Session, creationdomain.Candidate, creationdomain.SampleHandoff) error
+	LatestCreationSample(context.Context, string) (creationdomain.SampleHandoff, error)
 	CurrentCreationEntry(context.Context, string) (creationdomain.EntryRevision, error)
 	CreationEntry(context.Context, string, string) (creationdomain.EntryRevision, error)
 	AppendCreationEntry(context.Context, creationdomain.Session, creationdomain.EntryRevision) error
@@ -157,4 +159,14 @@ func (store sqliteStore) Entry(ctx context.Context, session, id string) (creatio
 }
 func (store sqliteStore) AppendEntry(ctx context.Context, session creationdomain.Session, entry creationdomain.EntryRevision) error {
 	return store.inner.AppendCreationEntry(ctx, session, entry)
+}
+
+// SaveSample 原子保存来源快照与试写准备。
+func (store sqliteStore) SaveSample(ctx context.Context, s creationdomain.Session, c creationdomain.Candidate, h creationdomain.SampleHandoff) error {
+	return store.inner.SaveCreationSample(ctx, s, c, h)
+}
+
+// LatestSample 读取最近的试写准备。
+func (store sqliteStore) LatestSample(ctx context.Context, id string) (creationdomain.SampleHandoff, error) {
+	return store.inner.LatestCreationSample(ctx, id)
 }

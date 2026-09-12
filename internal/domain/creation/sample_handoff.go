@@ -11,6 +11,7 @@ var ErrInvalidSampleHandoff = errors.New("invalid opening sample handoff")
 
 // SampleHandoff 只冻结开篇试写的来源与局部约束，不创建章节、费用授权或正式记忆。
 type SampleHandoff struct {
+	SourceDigest           string    `json:"sourceDigest"`
 	ID                     string    `json:"id"`
 	SessionID              string    `json:"sessionId"`
 	DirectionCandidateID   string    `json:"directionCandidateId"`
@@ -30,7 +31,7 @@ func (handoff SampleHandoff) Validate(direction Candidate) error {
 		direction.Stage != StageDirections || (direction.Kind != KindDirectionSet && direction.Kind != KindDirection) ||
 		direction.Status == StatusStale || direction.Status == StatusSuperseded || direction.Status == StatusDiscarded || direction.Blocked() ||
 		strings.TrimSpace(handoff.DirectionCardID) == "" || strings.TrimSpace(handoff.PointOfView) == "" || strings.TrimSpace(handoff.Tone) == "" ||
-		handoff.TargetRunes < 1 || handoff.TargetRunes > 10000 || handoff.CreatedAt.IsZero() || len(handoff.Constraints) > 100 {
+		len([]rune(handoff.PointOfView)) > 500 || len([]rune(handoff.Tone)) > 500 || handoff.TargetRunes < 1 || handoff.TargetRunes > 10000 || handoff.CreatedAt.IsZero() || len(handoff.Constraints) > 100 {
 		return ErrInvalidSampleHandoff
 	}
 	// 卡的结构由版本化任务校验；此处只验证稳定卡 ID 确实存在于绑定载荷。
@@ -38,7 +39,7 @@ func (handoff SampleHandoff) Validate(direction Candidate) error {
 		return ErrInvalidSampleHandoff
 	}
 	for _, constraint := range handoff.Constraints {
-		if strings.TrimSpace(constraint) == "" {
+		if strings.TrimSpace(constraint) == "" || len([]rune(constraint)) > 1000 {
 			return ErrInvalidSampleHandoff
 		}
 	}

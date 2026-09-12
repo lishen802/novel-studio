@@ -27,3 +27,16 @@ func (a *DesktopAPI) UseCreationMaterial(request creationapp.UseMaterialRequest)
 	}
 	return safeResult(service.UseCreationMaterial(a.ctx, request))
 }
+
+type creationSampleUseCases interface {
+	SaveCreationSample(context.Context, creationapp.SaveSampleRequest) (creationapp.WorkbenchView, error)
+}
+
+// SaveCreationSample 仅转发带版本的准备命令，不提供未就绪的生成旁路。
+func (a *DesktopAPI) SaveCreationSample(request creationapp.SaveSampleRequest) (creationapp.WorkbenchView, error) {
+	service, ok := a.workspace.(creationSampleUseCases)
+	if !ok {
+		return creationapp.WorkbenchView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(service.SaveCreationSample(a.ctx, request))
+}

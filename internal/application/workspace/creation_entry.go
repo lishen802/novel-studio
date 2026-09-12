@@ -34,3 +34,18 @@ func (s *Service) UseCreationMaterial(ctx context.Context, request creationapp.U
 	}
 	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
 }
+
+// SaveCreationSample 在当前可写工作区内保存试写准备，不启动模型。
+func (s *Service) SaveCreationSample(ctx context.Context, request creationapp.SaveSampleRequest) (creationapp.WorkbenchView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if request.ProjectID != runtime.projectID {
+		return creationapp.WorkbenchView{}, creationapp.ErrStaleStore
+	}
+	if _, err := runtime.service.SaveSample(ctx, request); err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+}

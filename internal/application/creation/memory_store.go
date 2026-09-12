@@ -12,6 +12,7 @@ import (
 )
 
 type memoryStore struct {
+	samples    map[string]creationdomain.SampleHandoff
 	entries    map[string]creationdomain.EntryRevision
 	entryHeads map[string]string
 	mu         sync.Mutex
@@ -361,4 +362,40 @@ func (store *memoryStore) AppendEntry(_ context.Context, expected creationdomain
 	current.UpdatedAt = entry.CreatedAt
 	store.sessions[current.ProjectID] = current
 	return nil
+}
+
+// SaveSample 模拟事务内的会话与候选快照校验。
+func (store *memoryStore) SaveSample(_ context.Context, s creationdomain.Session, c creationdomain.Candidate, h creationdomain.SampleHandoff) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current := store.sessions[s.ProjectID]
+	if current.ID != s.ID || current.ContentVersion != s.ContentVersion || current.RunSlotVersion != s.RunSlotVersion || current.ActiveRunID != "" || current.ActiveOperationID != "" {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	if !reflect.DeepEqual(store.candidates[c.ID], c) {
+		return creationdomain.ErrCandidateVersionConflict
+	}
+	if err := h.Validate(c); err != nil {
+		return err
+	}
+	if store.samples == nil {
+		store.samples = map[string]creationdomain.SampleHandoff{}
+	}
+	h.Constraints = append([]string{}, h.Constraints...)
+	store.samples[s.ID] = h
+	current.ContentVersion++
+	store.sessions[s.ProjectID] = current
+	return nil
+}
+
+// LatestSample 返回副本，避免调用方改写已保存的约束。
+func (store *memoryStore) LatestSample(_ context.Context, id string) (creationdomain.SampleHandoff, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	h, ok := store.samples[id]
+	if !ok {
+		return h, sql.ErrNoRows
+	}
+	h.Constraints = append([]string{}, h.Constraints...)
+	return h, nil
 }

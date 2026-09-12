@@ -330,3 +330,19 @@ describe('已有方案工作台', () => {
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ stage: 'intent', confirmationDigest: 'source-bound' })));
   });
 });
+
+describe('试写准备工作台', () => {
+ afterEach(()=>{cleanup();delete window.go;});
+ it('只保存准备，不调用模型或推进阶段', async()=>{
+  const user=userEvent.setup();
+  const view=workbench({stage:'directions',canPrepareSample:true,contentVersion:4,runSlotVersion:1,directionSet:{candidateId:'c1',version:1,selectedId:'d1',status:'draft',cards:[]}});
+  const save=vi.fn().mockResolvedValue({...view,contentVersion:5,sampleHandoff:{id:'sample',status:'prepared',directionCandidateId:'c1',directionCardId:'d1',pointOfView:'第三人称限知',tone:'自然、克制',constraints:[],targetRunes:1200}});
+  const generate=vi.fn(),advance=vi.fn();
+  window.go={main:{DesktopAPI:{RecoverCreation:vi.fn().mockResolvedValue(view),CreationWorkbench:vi.fn().mockResolvedValue(view),SaveCreationSample:save,ConfirmCreationGenerate:generate,AdvanceCreationStage:advance}}};
+  render(<MemoryRouter><AppContext.Provider value={contextValue()}><Cockpit/></AppContext.Provider></MemoryRouter>);
+  await user.click(await screen.findByRole('button',{name:'保存试写准备'}));
+  await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({projectId:'project-1',sessionId:'session-1',expectedVersion:4,expectedRunSlotVersion:1,directionCandidateId:'c1',directionCardId:'d1',targetRunes:1200})));
+  expect(generate).not.toHaveBeenCalled();expect(advance).not.toHaveBeenCalled();
+  expect((screen.getByRole('button',{name:'生成试写（尚未就绪）'}) as HTMLButtonElement).disabled).toBe(true);
+ });
+});

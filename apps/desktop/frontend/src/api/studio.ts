@@ -267,7 +267,12 @@ export interface HarnessCaseView {
   rating?: Record<string, unknown>; revealed?: Record<string, string>; binding?: Record<string, unknown>;
 }
 
+export interface CreationSampleInput {
+ pointOfView: string; tone: string; constraints: string[]; targetRunes: number;
+}
 export interface CreationWorkbenchView {
+ canPrepareSample?: boolean;
+ sampleHandoff?: (CreationSampleInput & { id: string; directionCandidateId: string; directionCardId: string; status: string }) | null;
   contentVersion?: number;
   runSlotVersion?: number;
   entry?: { id: string; version: number; kind: 'idea' | 'author_plan'; material: string };
@@ -489,6 +494,7 @@ export const studio = {
   compareCreativeHarnessRuns: (baseId: string, candidateId: string) => call<Record<string, unknown>>('CompareCreativeHarnessRuns', baseId, candidateId),
   exportCreativeHarnessReport: (id: string) => call<string>('ExportCreativeHarnessReport', id),
 
+  saveCreationSample: (request: CreationSampleInput & { projectId: string; sessionId: string; expectedVersion: number; expectedRunSlotVersion: number; directionCandidateId: string; directionCardId: string }) => call<CreationWorkbenchView>('SaveCreationSample', request),
   saveCreationEntry: (request: { projectId: string; sessionId: string; expectedVersion: number; expectedRunSlotVersion: number; kind: 'idea' | 'author_plan'; material: string }) => call<CreationWorkbenchView>('SaveCreationEntry', request),
   useCreationMaterial: (request: { projectId: string; sessionId: string; expectedVersion: number; analysisId: string; stage: string }) => call<CreationWorkbenchView>('UseCreationMaterial', request),
   creationWorkbench: () => call<CreationWorkbenchView>('CreationWorkbench'),

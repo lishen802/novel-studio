@@ -42,3 +42,25 @@ func TestDesktopEntryForwardsExactTextAndVersions(t *testing.T) {
 		t.Fatal("绑定改变来源或阶段")
 	}
 }
+
+type sampleWorkspace struct {
+	fakeWorkspace
+	saved creationapp.SaveSampleRequest
+}
+
+func (w *sampleWorkspace) SaveCreationSample(_ context.Context, r creationapp.SaveSampleRequest) (creationapp.WorkbenchView, error) {
+	w.saved = r
+	return creationapp.WorkbenchView{}, nil
+}
+func TestDesktopSamplePreservesSourceAndVersions(t *testing.T) {
+	w := &sampleWorkspace{}
+	api := newDesktopAPI(w, &fakeDirectoryPicker{})
+	api.startup(context.Background())
+	r := creationapp.SaveSampleRequest{ProjectID: "p", SessionID: "s", ExpectedVersion: 7, ExpectedRunSlotVersion: 2, DirectionCandidateID: "c", DirectionCardID: "d", PointOfView: "第三人称", Tone: "轻松", Constraints: []string{"不揭晓谜底"}, TargetRunes: 1200}
+	if _, err := api.SaveCreationSample(r); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(w.saved, r) {
+		t.Fatal("绑定改变了来源或范围")
+	}
+}
