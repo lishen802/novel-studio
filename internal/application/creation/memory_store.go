@@ -2,6 +2,7 @@ package creation
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
 	"sync"
 
@@ -11,6 +12,8 @@ import (
 )
 
 type memoryStore struct {
+	entries    map[string]creationdomain.EntryRevision
+	entryHeads map[string]string
 	mu         sync.Mutex
 	sessions   map[string]creationdomain.Session
 	candidates map[string]creationdomain.Candidate
@@ -22,6 +25,7 @@ type memoryStore struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
+		entries: map[string]creationdomain.EntryRevision{}, entryHeads: map[string]string{},
 		sessions:   map[string]creationdomain.Session{},
 		candidates: map[string]creationdomain.Candidate{},
 		operations: map[string]creationdomain.Operation{},
@@ -312,4 +316,49 @@ func (store *memoryStore) ListActions(_ context.Context, sessionID string) ([]as
 		}
 	}
 	return result, nil
+}
+
+func (store *memoryStore) CurrentEntry(_ context.Context, id string) (creationdomain.EntryRevision, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	entry, ok := store.entries[store.entryHeads[id]]
+	if !ok {
+		return entry, sql.ErrNoRows
+	}
+	return entry, nil
+}
+func (store *memoryStore) Entry(_ context.Context, session, id string) (creationdomain.EntryRevision, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	entry, ok := store.entries[id]
+	if !ok || entry.SessionID != session {
+		return creationdomain.EntryRevision{}, sql.ErrNoRows
+	}
+	return entry, nil
+}
+func (store *memoryStore) AppendEntry(_ context.Context, expected creationdomain.Session, entry creationdomain.EntryRevision) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	current, ok := store.sessions[expected.ProjectID]
+	if !ok || current.ID != expected.ID || current.BranchID != expected.BranchID || current.ContentVersion != expected.ContentVersion || current.RunSlotVersion != expected.RunSlotVersion || current.ActiveRunID != "" || current.ActiveOperationID != "" || entry.SessionID != current.ID {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	parent := store.entries[store.entryHeads[current.ID]]
+	if entry.ParentID != parent.ID || entry.Version != parent.Version+1 {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	if _, exists := store.entries[entry.ID]; exists {
+		return creationdomain.ErrSessionVersionConflict
+	}
+	store.entries[entry.ID] = entry
+	store.entryHeads[current.ID] = entry.ID
+	current.ContentVersion++
+	current.Stage = creationdomain.StageIntent
+	current.AdvanceMode = creationdomain.ModeStepReview
+	current.UpdatedAt = entry.CreatedAt
+	store.sessions[current.ProjectID] = current
+	return nil
 }

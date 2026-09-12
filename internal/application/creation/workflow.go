@@ -22,6 +22,8 @@ type stageBinding struct {
 
 func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 	switch stage {
+	case creationdomain.StageIntent:
+		return stageBinding{WorkflowID: "story.author_material", Version: 1, Kind: creationdomain.KindProposal, SchemaID: "author_material.schema", SchemaVersion: 1, Stage: stage}, nil
 	case creationdomain.StageDirections:
 		return stageBinding{
 			WorkflowID: agentassets.StoryDirectionsWorkflowID, Version: agentassets.StoryProductWorkflowVersion,
@@ -53,6 +55,12 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 
 // bindingByWorkflow 按冻结运行的 WorkflowBinding 反查阶段绑定，供恢复对账物化结果。
 func bindingByWorkflow(workflowID string, version int) (stageBinding, error) {
+	for _, stage := range []creationdomain.Stage{creationdomain.StageIntent, creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap} {
+		binding, err := bindingForEntry(creationdomain.EntryAuthorPlan, stage)
+		if err == nil && binding.WorkflowID == workflowID && binding.Version == version {
+			return binding, nil
+		}
+	}
 	if workflowID == agentassets.StoryPeopleWorldWorkflowID && version == 1 {
 		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindPeopleWorld,
 			SchemaID: "story_cast.schema", SchemaVersion: 1, Stage: creationdomain.StagePeopleWorld}, nil
@@ -180,24 +188,35 @@ func lockedConstraints(candidate creationdomain.Candidate) (string, bool) {
 func generateSources(session creationdomain.Session, candidates []creationdomain.Candidate, stage creationdomain.Stage) ([]agentkernel.Source, error) {
 	sources := []agentkernel.Source{{
 		Kind: agentdomain.ManifestAuthorInstruction, ID: "intent", Version: "1",
-		Content: session.IntentText, Priority: 1000, SelectionReason: "作者创作意图", Required: true,
+		Content: creationInstruction(session), Priority: 1000, SelectionReason: "作者创作意图", Required: true,
 	}}
 	if stage == creationdomain.StageDirections {
 		return sources, nil
 	}
-	card, cardCandidate, err := selectedDirectionCard(session, candidates)
-	if err != nil {
-		return nil, err
+	if session.EntryKind() == creationdomain.EntryAuthorPlan {
+		if session.Entry == nil || session.Entry.Validate() != nil {
+			return nil, creationdomain.ErrInvalidEntry
+		}
+		raw, _ := json.Marshal(session.Entry)
+		sources = append(sources, agentkernel.Source{Kind: agentdomain.ManifestAuthorInstruction, ID: "author_material", Version: fmt.Sprint(session.Entry.Version), Content: string(raw), Priority: 1100, Required: true, SelectionReason: "作者原始方案及不可变来源"})
+		if stage == creationdomain.StageIntent {
+			return sources, nil
+		}
+	} else {
+		card, cardCandidate, err := selectedDirectionCard(session, candidates)
+		if err != nil {
+			return nil, err
+		}
+		cardJSON, err := json.Marshal(card)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, agentkernel.Source{
+			Kind: agentdomain.ManifestStoryAsset, ID: "direction:" + card.ID,
+			Version: fmt.Sprintf("%d", cardCandidate.Version), Content: string(cardJSON),
+			Priority: 900, SelectionReason: "作者选中的故事方向", Provisional: true, Required: true,
+		})
 	}
-	cardJSON, err := json.Marshal(card)
-	if err != nil {
-		return nil, err
-	}
-	sources = append(sources, agentkernel.Source{
-		Kind: agentdomain.ManifestStoryAsset, ID: "direction:" + card.ID,
-		Version: fmt.Sprintf("%d", cardCandidate.Version), Content: string(cardJSON),
-		Priority: 900, SelectionReason: "作者选中的故事方向", Provisional: true, Required: true,
-	})
 	if stage == creationdomain.StageProposal {
 		return sources, nil
 	}
@@ -233,4 +252,33 @@ func generateSources(session creationdomain.Session, candidates []creationdomain
 		})
 	}
 	return sources, nil
+}
+
+// bindingForEntry 为已有方案选择新冻结工作流，保留灵感链路的旧版本。
+func bindingForEntry(kind creationdomain.EntryKind, stage creationdomain.Stage) (stageBinding, error) {
+	binding, err := bindingFor(stage)
+	if err != nil {
+		return binding, err
+	}
+	if kind != creationdomain.EntryAuthorPlan {
+		return binding, nil
+	}
+	switch stage {
+	case creationdomain.StageProposal:
+		binding.WorkflowID = "story.author_proposal"
+		binding.Version = 1
+	case creationdomain.StagePeopleWorld:
+		binding.WorkflowID = "story.author_people_world"
+		binding.Version = 1
+	case creationdomain.StageRoadmap:
+		binding.WorkflowID = "story.author_roadmap"
+		binding.Version = 1
+	}
+	return binding, nil
+}
+func creationInstruction(session creationdomain.Session) string {
+	if session.EntryKind() == creationdomain.EntryAuthorPlan {
+		return "整理并保留作者已有方案；仅补齐当前阶段必要缺口，所有新内容均待作者审阅。"
+	}
+	return session.IntentText
 }

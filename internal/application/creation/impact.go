@@ -45,7 +45,7 @@ type ResolveImpactResult struct {
 
 // SaveCandidateDraft 把作者直接编辑存为新候选版本，并重算下游 stale，不调用模型。
 func (service *Service) SaveCandidateDraft(ctx context.Context, projectID, candidateID, payloadJSON string) (creationdomain.Candidate, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
@@ -89,7 +89,7 @@ func (service *Service) SaveCandidateDraft(ctx context.Context, projectID, candi
 
 // ProjectImpact 计算当前会话的下游过期范围，不创建运行、不改写正式资产。
 func (service *Service) ProjectImpact(ctx context.Context, projectID string) (ImpactProjection, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return ImpactProjection{}, err
 	}
@@ -104,7 +104,7 @@ func (service *Service) ResolveImpact(ctx context.Context, request ResolveImpact
 	if !request.Choice.Valid() {
 		return ResolveImpactResult{}, creationdomain.ErrBlankValue
 	}
-	session, err := service.store.Session(ctx, request.ProjectID)
+	session, err := service.loadSession(ctx, request.ProjectID)
 	if err != nil {
 		return ResolveImpactResult{}, err
 	}
@@ -152,7 +152,10 @@ func (service *Service) refreshImpact(ctx context.Context, session creationdomai
 			candidates[i] = updated
 		}
 	}
-	for _, stage := range generateStages() {
+	for _, stage := range append([]creationdomain.Stage{creationdomain.StageIntent}, generateStages()...) {
+		if session.EntryKind() == creationdomain.EntryAuthorPlan && stage == creationdomain.StageDirections {
+			continue
+		}
 		current, ok := currentCandidate(candidates, stage)
 		if !ok {
 			continue
@@ -207,6 +210,9 @@ func (service *Service) keepImpactExceptions(ctx context.Context, session creati
 	}
 	now := service.clock.Now()
 	for _, stage := range generateStages() {
+		if session.EntryKind() == creationdomain.EntryAuthorPlan && stage == creationdomain.StageDirections {
+			continue
+		}
 		current, ok := currentCandidate(candidates, stage)
 		if !ok || current.Status != creationdomain.StatusStale {
 			continue
@@ -236,6 +242,9 @@ func (service *Service) abandonUpstream(ctx context.Context, session creationdom
 	now := service.clock.Now()
 	seen := map[string]struct{}{}
 	for _, stage := range generateStages() {
+		if session.EntryKind() == creationdomain.EntryAuthorPlan && stage == creationdomain.StageDirections {
+			continue
+		}
 		current, ok := currentCandidate(candidates, stage)
 		if !ok || current.Status != creationdomain.StatusStale {
 			continue
@@ -307,6 +316,9 @@ func (service *Service) projectImpact(ctx context.Context, session creationdomai
 	reasons := make([]string, 0)
 	seenStage := map[creationdomain.Stage]bool{}
 	for _, stage := range generateStages() {
+		if session.EntryKind() == creationdomain.EntryAuthorPlan && stage == creationdomain.StageDirections {
+			continue
+		}
 		current, ok := currentCandidate(candidates, stage)
 		if !ok || current.Status != creationdomain.StatusStale {
 			continue
@@ -365,12 +377,23 @@ func (service *Service) estimateRegenerateCalls(ctx context.Context, stages []cr
 // liveUpstreamDigest 计算某阶段当前实际输入的级联摘要：任一上游输入变化都会改变下游摘要。
 func liveUpstreamDigest(session creationdomain.Session, candidates []creationdomain.Candidate, stage creationdomain.Stage) string {
 	switch stage {
+	case creationdomain.StageIntent:
+		if session.Entry == nil {
+			return ""
+		}
+		return hashParts("entry", session.Entry.ID, session.Entry.MaterialSHA256, string(session.Entry.Kind))
 	case creationdomain.StageDirections:
 		if strings.TrimSpace(session.IntentText) == "" {
 			return ""
 		}
+		if session.Entry != nil {
+			return hashParts("entry", session.Entry.ID, "intent", strings.TrimSpace(session.IntentText))
+		}
 		return hashParts("intent", strings.TrimSpace(session.IntentText))
 	case creationdomain.StageProposal:
+		if session.EntryKind() == creationdomain.EntryAuthorPlan {
+			return liveUpstreamDigest(session, candidates, creationdomain.StageIntent)
+		}
 		if strings.TrimSpace(session.IntentText) == "" {
 			return ""
 		}
@@ -381,6 +404,9 @@ func liveUpstreamDigest(session creationdomain.Session, candidates []creationdom
 		encoded, err := json.Marshal(card)
 		if err != nil {
 			return ""
+		}
+		if session.Entry != nil {
+			return hashParts("entry", session.Entry.ID, "intent", strings.TrimSpace(session.IntentText), "direction", string(encoded))
 		}
 		return hashParts("intent", strings.TrimSpace(session.IntentText), "direction", string(encoded))
 	case creationdomain.StagePeopleWorld:
@@ -444,6 +470,9 @@ func staleReasonFor(stage creationdomain.Stage) string {
 
 func unresolvedMustFix(session creationdomain.Session, candidates []creationdomain.Candidate) bool {
 	for _, stage := range generateStages() {
+		if session.EntryKind() == creationdomain.EntryAuthorPlan && stage == creationdomain.StageDirections {
+			continue
+		}
 		current, ok := currentCandidate(candidates, stage)
 		if !ok || current.Status != creationdomain.StatusStale || current.ImpactSeverity != creationdomain.ImpactMust {
 			continue

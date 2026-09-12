@@ -71,7 +71,7 @@ func (service *Service) Explain(ctx context.Context, projectID string, candidate
 	if len(candidateIDs) == 0 {
 		return Explanation{}, creationdomain.ErrBlankValue
 	}
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return Explanation{}, err
 	}
@@ -130,7 +130,7 @@ func (service *Service) ProposeAction(ctx context.Context, request ProposeReques
 	if strings.TrimSpace(request.IdempotencyKey) == "" || strings.TrimSpace(request.CandidateID) == "" {
 		return assistantdomain.Action{}, creationdomain.ErrBlankValue
 	}
-	session, err := service.store.Session(ctx, request.ProjectID)
+	session, err := service.loadSession(ctx, request.ProjectID)
 	if err != nil {
 		return assistantdomain.Action{}, err
 	}
@@ -458,7 +458,7 @@ func (service *Service) executeRegenerate(
 		return ActionResult{}, err
 	}
 	defer release()
-	session, err := service.store.Session(ctx, action.ProjectID)
+	session, err := service.loadSession(ctx, action.ProjectID)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -473,7 +473,7 @@ func (service *Service) executeRegenerate(
 		unlock := service.lockProject(action.ProjectID)
 		unlock.Lock()
 		defer unlock.Unlock()
-		loaded, err := service.store.Session(ctx, action.ProjectID)
+		loaded, err := service.loadSession(ctx, action.ProjectID)
 		if err != nil {
 			return agentdomain.Run{}, err
 		}

@@ -28,6 +28,7 @@ import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
+import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 import { getActiveModel } from '../types';
 
@@ -172,6 +173,7 @@ const initialContext: CreativeContext = {
 };
 
 export default function Cockpit() {
+  const [entryPreview, setEntryPreview] = useState<{ id: string; kind: 'idea' | 'author_plan'; material: string }>({ id: '', kind: 'idea', material: '' });
   const navigate = useNavigate();
   const { state } = useApp();
   const [mode, setMode] = useState<'brainstorm' | 'draft'>('brainstorm');
@@ -278,7 +280,7 @@ export default function Cockpit() {
           <StatusBadge variant="info">创意构建中</StatusBadge>
           <div className="flex items-center gap-2 text-sm text-text-sub bg-surface-hover px-3 py-1.5 rounded-md">
             <Lightbulb className="w-4 h-4 text-warning" />
-            {nextHint}
+            {entryPreview.kind === 'author_plan' ? '已有方案先检查缺口，再复用已提供的内容。' : nextHint}
           </div>
         </div>
       </header>
@@ -286,7 +288,7 @@ export default function Cockpit() {
       {!getActiveModel(state.settings).apiKeyConfigured && (
         <div className="px-8 py-3 bg-warning/5 border-b border-warning/15 flex items-center gap-3 shrink-0">
           <AlertCircle className="w-4 h-4 text-warning" />
-          <p className="text-sm text-text-sub flex-1">尚未配置 AI 模型，方向卡仅展示示例内容。</p>
+          <p className="text-sm text-text-sub flex-1">{entryPreview.kind === 'author_plan' ? '已有方案解析尚未接入此浏览器原型。' : '尚未配置 AI 模型，方向卡仅展示示例内容。'}</p>
           <Button size="sm" onClick={() => navigate('/settings')}>前往配置</Button>
         </div>
       )}
@@ -294,6 +296,10 @@ export default function Cockpit() {
       <div className="flex-1 flex overflow-hidden">
         {/* Main creative area */}
         <main className="flex-1 overflow-auto p-8">
+          <EntryPanel entry={entryPreview} contentVersion={1} runSlotVersion={0} onSave={async (kind, material) => { setEntryPreview({ id: String(Date.now()), kind, material }); }} />
+          {entryPreview.kind === 'author_plan' && <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-text-sub">已有方案入口预览：方向不适用，保存材料后进入缺口检查与候选复用。此浏览器原型未接模型解析，真实调用未就绪。</div>}
+          {entryPreview.kind !== 'author_plan' && <>
+
           {mode === 'brainstorm' ? (
             <div className="max-w-5xl mx-auto space-y-8">
               {/* Natural language input */}
@@ -533,7 +539,8 @@ export default function Cockpit() {
               )}
             </div>
           )}
-        </main>
+        </>}
+</main>
 
         {/* Right creative context */}
         <aside className="w-[280px] shrink-0 border-l border-border bg-surface p-5 overflow-auto">

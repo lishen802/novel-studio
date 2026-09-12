@@ -9,6 +9,8 @@ import (
 var ErrSessionVersionConflict = errors.New("creation session version conflict")
 
 type Session struct {
+	// Entry 由来源仓储装配，只读投影不随会话普通保存回写。
+	Entry                        *EntryRevision `json:"-"`
 	ID                           string
 	ProjectID                    string
 	BranchID                     string
@@ -104,7 +106,7 @@ func (session Session) RecordArchive(digest, idempotencyKey, changeSetID string,
 	if session.Stage != StageArchiveConfirm {
 		return Session{}, ErrInvalidTransition
 	}
-	if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
+	if session.EntryKind() != EntryAuthorPlan && strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
 		return Session{}, ErrStageIncomplete
 	}
 	session.ArchiveDigest = digest
@@ -219,4 +221,12 @@ func (session Session) MustPauseBefore(next Stage) bool {
 // ShouldAutoContinue 表示恢复后是否可以不经作者确认继续付费运行。
 func (session Session) ShouldAutoContinue() bool {
 	return session.AdvanceMode == ModeAutoAdvance && session.BlockingReason == BlockNone
+}
+
+// EntryKind 为旧会话保留灵感默认值，不回填虚构来源。
+func (session Session) EntryKind() EntryKind {
+	if session.Entry != nil {
+		return session.Entry.Kind
+	}
+	return EntryIdea
 }

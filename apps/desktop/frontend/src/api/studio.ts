@@ -268,6 +268,11 @@ export interface HarnessCaseView {
 }
 
 export interface CreationWorkbenchView {
+  contentVersion?: number;
+  runSlotVersion?: number;
+  entry?: { id: string; version: number; kind: 'idea' | 'author_plan'; material: string };
+  material?: { analysisId: string; status: string; availableStages: string[]; gaps: Array<{ id: string; stage: string; field_path: string; kind: string; reason: string; suggested_action: string; quote: string }> };
+
 	readOnly?: boolean;
 	applicability?: string;
   sessionId: string;
@@ -484,6 +489,8 @@ export const studio = {
   compareCreativeHarnessRuns: (baseId: string, candidateId: string) => call<Record<string, unknown>>('CompareCreativeHarnessRuns', baseId, candidateId),
   exportCreativeHarnessReport: (id: string) => call<string>('ExportCreativeHarnessReport', id),
 
+  saveCreationEntry: (request: { projectId: string; sessionId: string; expectedVersion: number; expectedRunSlotVersion: number; kind: 'idea' | 'author_plan'; material: string }) => call<CreationWorkbenchView>('SaveCreationEntry', request),
+  useCreationMaterial: (request: { projectId: string; sessionId: string; expectedVersion: number; analysisId: string; stage: string }) => call<CreationWorkbenchView>('UseCreationMaterial', request),
   creationWorkbench: () => call<CreationWorkbenchView>('CreationWorkbench'),
   saveCreationIntent: (text: string) => call<CreationWorkbenchView>('SaveCreationIntent', text),
   setCreationAdvanceMode: (mode: string) => call<CreationWorkbenchView>('SetCreationAdvanceMode', mode),

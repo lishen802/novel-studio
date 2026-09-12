@@ -156,6 +156,12 @@ func safeDesktopError(err error) error {
 		code, message = errorCreationConfirmationStale, "确认前置条件已变化，本次入档未执行。请重新预览并确认。"
 	case errors.Is(err, creationdomain.ErrImpactUnresolved):
 		code, message = errorCreationImpact, "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"
+	case errors.Is(err, creationdomain.ErrInvalidEntry):
+		return errors.New("请提供有效的作者材料，单版最多十万字。")
+	case errors.Is(err, creationdomain.ErrInvalidSourceSpan):
+		return errors.New("解析结果的来源无法核实，请重新解析材料。")
+	case errors.Is(err, creationdomain.ErrInvalidGapReport):
+		return errors.New("已有方案仍有未解决的缺口或冲突，请检查材料分析。")
 	case errors.Is(err, creationdomain.ErrCandidateAcceptanceRequired):
 		code, message = errorCreationAcceptance, "请先接受当前候选版本，再继续推进或确认作品档案。"
 	case errors.Is(err, workspace.ErrCreationUnavailable):

@@ -1261,6 +1261,16 @@ func decodeNodeOutput(
 	artifacts []agentdomain.Artifact,
 	content string,
 ) (agentdomain.TaskOutput, error) {
+	if node.Schema.ID == "author_material.schema" && node.Schema.Version == 1 {
+		var output agentdomain.MaterialAnalysisOutput
+		if err := agentdomain.UnmarshalModelJSON([]byte(content), &output); err != nil {
+			return nil, err
+		}
+		if err := output.Validate(); err != nil {
+			return nil, err
+		}
+		return &output, nil
+	}
 	if node.Capability == agentdomain.CapabilityBoundedRevision && kind == agentdomain.TaskReviseDraft {
 		return decodeDraftRevisionOutput(node, latest, artifacts, content)
 	}

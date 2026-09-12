@@ -24,7 +24,7 @@ func (s *Store) AppendCreationEntry(ctx context.Context, expected creationdomain
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE creation_sessions SET content_version=content_version+1,
-  advance_mode='step_review',
+  advance_mode='step_review', stage='intent',
   updated_at=CASE WHEN RTRIM(updated_at,'Z') < RTRIM(?,'Z') THEN ? ELSE updated_at END
   WHERE id=? AND project_id=? AND branch_id=? AND content_version=? AND run_slot_version=?
   AND active_run_id='' AND COALESCE(active_operation_id,'')=''`,

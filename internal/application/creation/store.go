@@ -19,6 +19,9 @@ var (
 )
 
 type Store interface {
+	CurrentEntry(context.Context, string) (creationdomain.EntryRevision, error)
+	Entry(context.Context, string, string) (creationdomain.EntryRevision, error)
+	AppendEntry(context.Context, creationdomain.Session, creationdomain.EntryRevision) error
 	CreateSession(ctx context.Context, session creationdomain.Session) (creationdomain.Session, error)
 	// SaveSession 以 ContentVersion 为前置条件，仅写作者内容；成功后内容版本加一。
 	SaveSession(ctx context.Context, session creationdomain.Session) error

@@ -70,7 +70,12 @@ func archiveDigest(session creationdomain.Session, candidates []creationdomain.C
 	if err != nil {
 		return "", err
 	}
-	direction, err := requiredSelectedDirectionCandidate(session, candidates)
+	var direction creationdomain.Candidate
+	if session.EntryKind() == creationdomain.EntryAuthorPlan {
+		direction, _, err = validatedMaterial(session, candidates)
+	} else {
+		direction, err = requiredSelectedDirectionCandidate(session, candidates)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -105,10 +110,10 @@ func requiredArchiveCandidates(
 	session creationdomain.Session,
 	candidates []creationdomain.Candidate,
 ) (creationdomain.Candidate, creationdomain.Candidate, creationdomain.Candidate, error) {
-	if strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
+	if session.EntryKind() != creationdomain.EntryAuthorPlan && strings.TrimSpace(session.SelectedDirectionCandidateID) == "" {
 		return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
 	}
-	if _, ok := candidateByID(candidates, session.SelectedDirectionCandidateID); !ok {
+	if _, ok := candidateByID(candidates, session.SelectedDirectionCandidateID); !ok && session.EntryKind() != creationdomain.EntryAuthorPlan {
 		if _, found := currentCandidate(candidates, creationdomain.StageDirections); !found {
 			return creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
 		}
@@ -145,7 +150,11 @@ func requiredSelectedDirectionCandidate(session creationdomain.Session, candidat
 
 // validateArchiveReadiness 校验确认前置条件：全链路候选质量未阻断、无未解决 stale、载荷有效。
 func validateArchiveReadiness(session creationdomain.Session, candidates []creationdomain.Candidate) error {
-	if _, err := validateSelectedDirection(session, candidates); err != nil {
+	if session.EntryKind() == creationdomain.EntryAuthorPlan {
+		if err := validateMaterialGapsForArchive(session, candidates); err != nil {
+			return err
+		}
+	} else if _, err := validateSelectedDirection(session, candidates); err != nil {
 		return err
 	}
 	for _, stage := range []creationdomain.Stage{

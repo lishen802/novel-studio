@@ -82,6 +82,10 @@ const expected = [
   ["SelectCreationDirection card binding", apiRuntime, "export function SelectCreationDirection(arg1, arg2)"],
   ["KeepCreationDirection declaration", apiDeclaration, "KeepCreationDirection(arg1:string):Promise<creation.WorkbenchView>"],
   ["UnkeepCreationDirection declaration", apiDeclaration, "UnkeepCreationDirection(arg1:string):Promise<creation.WorkbenchView>"],
+  ["SaveCreationEntry declaration", apiDeclaration, "SaveCreationEntry(arg1:creation.SaveEntryRequest):Promise<creation.WorkbenchView>"],
+  ["UseCreationMaterial declaration", apiDeclaration, "UseCreationMaterial(arg1:creation.UseMaterialRequest):Promise<creation.WorkbenchView>"],
+  ["SaveCreationEntry binding", apiRuntime, "export function SaveCreationEntry(arg1)"],
+  ["UseCreationMaterial binding", apiRuntime, "export function UseCreationMaterial(arg1)"],
   ["AcceptCreationCandidate declaration", apiDeclaration, "AcceptCreationCandidate(arg1:string):Promise<creation.WorkbenchView>"],
   ["AcceptCreationCandidate binding", apiRuntime, "export function AcceptCreationCandidate(arg1)"],
   [

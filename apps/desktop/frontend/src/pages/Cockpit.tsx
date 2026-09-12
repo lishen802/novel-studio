@@ -25,6 +25,7 @@ import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 
 const emptyWorkbench = (): CreationWorkbenchView => ({
@@ -83,6 +84,7 @@ export default function Cockpit() {
   const [intent, setIntent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [materialDirty, setMaterialDirty] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState<CreationCostPreview | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -154,7 +156,8 @@ export default function Cockpit() {
     }
   };
 
-  const startGenerate = async () => {
+  const startGenerate = async (requestedStage?: string) => {
+    if (materialDirty) { setError("请先保存已修改的材料与起点，再开始解析或生成。"); return; }
     if (!modelReady) {
       setError('尚未配置 AI 模型，无法生成方向候选。请先完成模型连接。');
       return;
@@ -162,7 +165,7 @@ export default function Cockpit() {
     setBusy(true);
     setError(null);
     try {
-      const next = await studio.previewCreationGenerate(generateStage(workbench.stage));
+      const next = await studio.previewCreationGenerate(requestedStage ?? (workbench.entry?.kind === 'author_plan' ? workbench.stage : generateStage(workbench.stage)));
       setPreview(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : '费用预览失败');
@@ -195,6 +198,7 @@ export default function Cockpit() {
   };
 
   const confirmNext = async (cardId?: string) => {
+    if (materialDirty) { setError("请先保存材料，再审阅下一阶段。"); return; }
     if (workbench.stage === 'archive_confirm') {
       const archive = await studio.previewCreationArchive();
       await studio.confirmCreationArchive({
@@ -267,10 +271,10 @@ export default function Cockpit() {
               stop.status === 'current' && 'bg-primary text-white border-primary',
               stop.status === 'confirmed' && 'bg-success/10 text-success border-success/20',
               stop.status === 'blocked' && 'bg-warning/10 text-warning border-warning/20',
-              stop.status === 'upcoming' && 'text-text-muted border-border',
+              ['upcoming', 'not_applicable'].includes(stop.status) && 'text-text-muted border-border',
             )}
           >
-            {stop.label}
+            {stop.label}{stop.status === 'not_applicable' ? ' · 不适用' : ''}
           </div>
         ))}
       </nav>
@@ -328,7 +332,27 @@ export default function Cockpit() {
         )}
 
         <main className="flex-1 overflow-auto p-8">
-          {(workbench.stage === 'intent' || workbench.stage === 'directions') && (
+          {workbench.sessionId && <EntryPanel key={workbench.sessionId} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
+            await run(() => studio.saveCreationEntry({ projectId: workbench.projectId, sessionId: workbench.sessionId, kind, material, expectedVersion, expectedRunSlotVersion }));
+          }} />}
+          {workbench.entry?.kind === 'author_plan' && <section className="max-w-5xl mx-auto mb-6 space-y-4" aria-label="已有方案分析">
+            <h2 className="text-base font-medium">已有方案 · 缺口与复用</h2>
+            <p className="text-sm text-text-sub">方向步骤不适用。解析不会修改正式档案；完整内容可直接复用为待审候选。</p>
+            {workbench.stage === 'intent' && <Button disabled={materialDirty || busy || generating || workbench.readOnly} onClick={() => void startGenerate('intent')}>解析已有方案与检查缺口</Button>}
+            {workbench.material?.status === 'needs_review' && <p role="status" className="text-sm text-warning">分析结果已过期、被阻断或来源无法核实，请重新解析。</p>}
+            {workbench.material?.status === 'ready' && <>
+              <p className="text-sm text-text-sub">已完成结构与来源检查，仍需作者审阅。</p>
+              {workbench.material.gaps.map((gap) => <div key={gap.id} className="rounded-lg border border-border p-3 text-sm">
+                <p className="font-medium">{gap.kind === 'conflict' ? '冲突' : gap.kind === 'required' ? '必要缺口' : '可选建议'} · {({ proposal: '作品方案', people_world: '人物世界', roadmap: '路线图' } as Record<string, string>)[gap.stage]}</p>
+                <p>{gap.reason}</p><p className="text-text-sub">{gap.suggested_action}</p>
+                {gap.quote && <blockquote className="mt-2 border-l-2 border-border pl-2 text-text-sub">{gap.quote}</blockquote>}
+              </div>)}
+              {workbench.material.availableStages.includes(workbench.stage) && !({ proposal: workbench.proposal.candidateId, people_world: workbench.peopleWorld.candidateId, roadmap: workbench.roadmap.candidateId } as Record<string, string>)[workbench.stage] &&
+                <Button variant="primary" disabled={materialDirty || busy || generating || workbench.readOnly} onClick={() => void run(() => studio.useCreationMaterial({ projectId: workbench.projectId, sessionId: workbench.sessionId, expectedVersion: workbench.contentVersion ?? 0, analysisId: workbench.material!.analysisId, stage: workbench.stage })).catch(() => undefined)}>复用已提供的本阶段内容</Button>}
+            </>}
+          </section>}
+
+          {workbench.entry?.kind !== 'author_plan' && (workbench.stage === 'intent' || workbench.stage === 'directions') && (
             <div className="max-w-5xl mx-auto space-y-8">
               <section className="space-y-4">
                 <label className="text-sm font-medium text-text" htmlFor="creation-intent">创作输入</label>
@@ -487,7 +511,7 @@ export default function Cockpit() {
           variant="ghost"
           disabled={!previousStage(workbench.stage) || generating}
           onClick={() => {
-            const target = previousStage(workbench.stage);
+            const target = workbench.entry?.kind === 'author_plan' && workbench.stage === 'proposal' ? 'intent' : previousStage(workbench.stage);
             if (target) void run(() => studio.lookBackCreationStage(target));
           }}
         >
@@ -495,9 +519,9 @@ export default function Cockpit() {
         </Button>
         <div className="flex gap-2">
           <Button disabled={generating || busy} onClick={() => void startGenerate()} className="gap-1">
-            <RefreshCw className="w-4 h-4" />重新生成
+            <RefreshCw className="w-4 h-4" />{workbench.entry?.kind === 'author_plan' ? (workbench.stage === 'intent' ? '重新解析' : '补齐本阶段候选') : '重新生成'}
           </Button>
-          <Button disabled={generating || busy} onClick={() => void run(() => studio.saveCreationIntent(intent.trim() || workbench.intentText))}>保存草稿</Button>
+          {workbench.entry?.kind !== 'author_plan' && <Button disabled={generating || busy} onClick={() => void run(() => studio.saveCreationIntent(intent.trim() || workbench.intentText))}>保存草稿</Button>}
           <Button variant="primary" disabled={generating || busy} onClick={() => void confirmNext()} className="gap-1">
             {['proposal', 'people_world', 'roadmap'].includes(workbench.stage) ? '接受并进入下一步' : '确认进入下一步'} <ChevronRight className="w-4 h-4" />
           </Button>

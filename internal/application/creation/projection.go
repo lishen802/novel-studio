@@ -9,6 +9,10 @@ import (
 )
 
 type WorkbenchView struct {
+	Material         MaterialView                  `json:"material"`
+	ContentVersion   int64                         `json:"contentVersion"`
+	RunSlotVersion   int64                         `json:"runSlotVersion"`
+	Entry            EntryView                     `json:"entry"`
 	ReadOnly         bool                          `json:"readOnly"`
 	Applicability    string                        `json:"applicability"`
 	SessionID        string                        `json:"sessionId"`
@@ -129,7 +133,7 @@ type CandidateView struct {
 
 // Workbench 组装驾驶舱权威投影，不含 Prompt、密钥或隐藏推理。
 func (service *Service) Workbench(ctx context.Context, projectID, branchID string) (WorkbenchView, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if isMissingSession(err) {
 		view := assembleWorkbench(creationdomain.Session{ProjectID: projectID, BranchID: branchID,
 			Stage: creationdomain.StageIntent, AdvanceMode: creationdomain.ModeStepReview}, nil,
@@ -203,7 +207,8 @@ func assembleWorkbench(
 	pending int,
 ) WorkbenchView {
 	view := WorkbenchView{
-		Applicability:    "active",
+		Applicability:  "active",
+		ContentVersion: session.ContentVersion, RunSlotVersion: session.RunSlotVersion, Entry: EntryView{Kind: session.EntryKind()},
 		SessionID:        session.ID,
 		ProjectID:        session.ProjectID,
 		BranchID:         session.BranchID,
@@ -238,6 +243,10 @@ func assembleWorkbench(
 	if current, ok := currentCandidate(candidates, creationdomain.StageRoadmap); ok {
 		view.Roadmap = projectRoadmap(current)
 	}
+	if session.Entry != nil {
+		view.Entry = EntryView{ID: session.Entry.ID, Version: session.Entry.Version, Kind: session.Entry.Kind, Material: session.Entry.Material}
+	}
+	view.Material = projectMaterial(session, candidates)
 	view.Capabilities = workbenchCapabilities(session, view)
 	return view
 }
@@ -250,6 +259,9 @@ func buildStageRail(session creationdomain.Session) []RailStopView {
 		creationdomain.StagePeopleWorld:    "人物世界",
 		creationdomain.StageRoadmap:        "全书路线图",
 		creationdomain.StageArchiveConfirm: "确认档案",
+	}
+	if session.EntryKind() == creationdomain.EntryAuthorPlan {
+		labels[creationdomain.StageIntent] = "已有方案"
 	}
 	current := stageIndex(session.Stage)
 	rail := make([]RailStopView, 0, len(creationdomain.Rail()))
@@ -264,6 +276,9 @@ func buildStageRail(session creationdomain.Session) []RailStopView {
 			} else {
 				status = "current"
 			}
+		}
+		if stage == creationdomain.StageDirections && session.EntryKind() == creationdomain.EntryAuthorPlan {
+			status = "not_applicable"
 		}
 		rail = append(rail, RailStopView{ID: stage, Label: labels[stage], Status: status})
 	}
@@ -384,18 +399,24 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 }
 
 func workbenchCapabilities(session creationdomain.Session, view WorkbenchView) []string {
-	caps := []string{"SaveIntent", "SetAdvanceMode"}
+	caps := []string{"SaveIntent", "SetAdvanceMode", "SaveCreationEntry"}
 	if strings.TrimSpace(session.ActiveRunID) != "" {
 		return append(caps, "CancelCreationRun")
 	}
 	switch session.Stage {
 	case creationdomain.StageIntent, creationdomain.StageDirections:
+		if session.EntryKind() == creationdomain.EntryAuthorPlan {
+			return append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "AdvanceStage")
+		}
 		caps = append(caps, "PreviewGenerateDirections", "ConfirmGenerateDirections")
 		if len(view.DirectionSet.Cards) > 0 {
 			caps = append(caps, "SelectDirection", "SaveCandidateDraft")
 		}
 	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
 		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AcceptCandidate", "AdvanceStage")
+		if session.EntryKind() == creationdomain.EntryAuthorPlan {
+			caps = append(caps, "UseCreationMaterial")
+		}
 		if view.Proposal.CandidateID != "" {
 			caps = append(caps, "LockField", "UnlockField")
 		}

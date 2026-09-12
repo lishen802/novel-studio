@@ -150,3 +150,20 @@ func (store creationStore) ListActions(ctx context.Context, sessionID string) (a
 	err = store.guard.access(ctx, false, func() error { actions, err = store.inner.ListActions(ctx, sessionID); return err })
 	return
 }
+
+// CurrentEntry 在项目代次保护下读取当前作者来源。
+func (store creationStore) CurrentEntry(ctx context.Context, id string) (entry creationdomain.EntryRevision, err error) {
+	err = store.guard.access(ctx, false, func() error { entry, err = store.inner.CurrentEntry(ctx, id); return err })
+	return
+}
+
+// Entry 在项目代次保护下读取来源历史。
+func (store creationStore) Entry(ctx context.Context, session, id string) (entry creationdomain.EntryRevision, err error) {
+	err = store.guard.access(ctx, false, func() error { entry, err = store.inner.Entry(ctx, session, id); return err })
+	return
+}
+
+// AppendEntry 在可写项目保护下原子保存作者来源。
+func (store creationStore) AppendEntry(ctx context.Context, session creationdomain.Session, entry creationdomain.EntryRevision) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.AppendEntry(ctx, session, entry) })
+}

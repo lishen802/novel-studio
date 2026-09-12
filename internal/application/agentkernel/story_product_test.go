@@ -86,3 +86,27 @@ func TestStoryProposalRejectsV1PayloadOnProductSchema(t *testing.T) {
 		t.Fatalf("expected product schema rejection, failed=%#v err=%v", failed, err)
 	}
 }
+
+func TestAuthorMaterialWorkflowKeepsNullableStagesAndGapEvidence(t *testing.T) {
+	payload := `{"entry_id":"source-1","source_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","proposal":null,"people_world":null,"roadmap":null,"gaps":[{"id":"p","stage":"proposal","field_path":"/ending","kind":"required","reason":"结局未定","quote":"","suggested_action":"补充结局"},{"id":"c","stage":"people_world","field_path":"/characters","kind":"required","reason":"人物未定","quote":"","suggested_action":"补充人物"},{"id":"r","stage":"roadmap","field_path":"/book","kind":"required","reason":"结构未定","quote":"","suggested_action":"补充结构"}],"field_sources":[]}`
+	service, store, provider := newRunnerHarness(t, []providerReply{{text: payload, inputTokens: 10, outputTokens: 20}, {text: `{"quality_status":"passed","summary":"缺口保留","findings":[]}`, inputTokens: 5, outputTokens: 10}})
+	request := qualityRequest("story.author_material", 1, 30000)
+	run, err := service.CreateRun(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Status != agentdomain.RunCompleted || len(provider.requests) != 2 {
+		t.Fatalf("运行未完成: %v", done.Status)
+	}
+	artifact, ok := artifactByID(store.artifacts, done.Steps[0].PrimaryArtifactID)
+	if !ok || !strings.Contains(artifact.Content, `"proposal":null`) || !strings.Contains(artifact.Content, "结局未定") {
+		t.Fatal("解析缺口丢失或被补造")
+	}
+	if provider.requests[0].Model == provider.requests[1].Model {
+		t.Fatal("解析与审阅应允许不同模型")
+	}
+}

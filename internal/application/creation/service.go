@@ -196,7 +196,7 @@ func (service *Service) lockProject(projectID string) *sync.Mutex {
 
 // EnsureSession 为项目取得或新建原创构建会话。
 func (service *Service) EnsureSession(ctx context.Context, projectID, branchID string) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err == nil {
 		if session.BranchID != branchID {
 			return creationdomain.Session{}, creationdomain.ErrSessionVersionConflict
@@ -224,7 +224,7 @@ func (service *Service) saveSession(ctx context.Context, session *creationdomain
 
 // SaveIntent 保存作者创意文本，不创建运行。
 func (service *Service) SaveIntent(ctx context.Context, projectID, text string) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
@@ -243,7 +243,7 @@ func (service *Service) SaveIntent(ctx context.Context, projectID, text string) 
 
 // SetAdvanceMode 切换逐步审阅或自动推进，不触发付费调用。
 func (service *Service) SetAdvanceMode(ctx context.Context, projectID string, mode creationdomain.AdvanceMode) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
@@ -259,7 +259,7 @@ func (service *Service) SetAdvanceMode(ctx context.Context, projectID string, mo
 
 // SelectDirection 记录作者选中的方向候选与其中一张卡，后端校验卡属于该版本。
 func (service *Service) SelectDirection(ctx context.Context, projectID, candidateID, cardID string) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
@@ -297,7 +297,7 @@ func (service *Service) UnkeepDirection(ctx context.Context, projectID, cardID s
 }
 
 func (service *Service) updateKeptDirection(ctx context.Context, projectID, cardID string, keep bool) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
@@ -317,13 +317,23 @@ func (service *Service) updateKeptDirection(ctx context.Context, projectID, card
 
 // AdvanceStage 在当前阶段完成条件满足时进入下一阶段，不写类型表。
 func (service *Service) AdvanceStage(ctx context.Context, projectID string) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
 	candidates, err := service.store.ListCandidates(ctx, session.ID)
 	if err != nil {
 		return creationdomain.Session{}, err
+	}
+	if session.EntryKind() == creationdomain.EntryAuthorPlan && session.Stage == creationdomain.StageIntent {
+		if _, _, err := validatedMaterial(session, candidates); err != nil {
+			return creationdomain.Session{}, err
+		}
+		session.Stage = creationdomain.StageProposal
+		if err := service.saveSession(ctx, &session); err != nil {
+			return creationdomain.Session{}, err
+		}
+		return session, nil
 	}
 	if err := stageReady(session, candidates); err != nil {
 		return creationdomain.Session{}, err
@@ -346,7 +356,7 @@ func (service *Service) AdvanceStage(ctx context.Context, projectID string) (cre
 
 // AcceptCandidate 明确接受指定阶段的当前精确候选版本，但不推进阶段、不写正式档案。
 func (service *Service) AcceptCandidate(ctx context.Context, projectID, candidateID string) (creationdomain.Candidate, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
@@ -407,9 +417,12 @@ func stageReached(current, target creationdomain.Stage) bool {
 
 // LookBackStage 回到更早阶段，不删除候选、不写正式资产。
 func (service *Service) LookBackStage(ctx context.Context, projectID string, target creationdomain.Stage) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
+	}
+	if session.EntryKind() == creationdomain.EntryAuthorPlan && target == creationdomain.StageDirections {
+		return creationdomain.Session{}, ErrInvalidStage
 	}
 	session, err = session.LookBack(target, service.clock.Now())
 	if err != nil {
@@ -432,7 +445,7 @@ func (service *Service) UnlockCandidateField(ctx context.Context, projectID, can
 }
 
 func (service *Service) updateCandidateLock(ctx context.Context, projectID, candidateID, path string, lock bool) (creationdomain.Candidate, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
@@ -462,7 +475,7 @@ func (service *Service) updateCandidateLock(ctx context.Context, projectID, cand
 
 // CandidatePayload 有界读取单个候选的完整 payload，供中央区编辑。
 func (service *Service) CandidatePayload(ctx context.Context, projectID, candidateID string) (creationdomain.Candidate, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
@@ -478,7 +491,7 @@ func (service *Service) CandidatePayload(ctx context.Context, projectID, candida
 
 // PreviewGenerate 冻结费用预览摘要，不创建运行、不写候选。
 func (service *Service) PreviewGenerate(ctx context.Context, request GenerateRequest) (CostPreview, error) {
-	session, err := service.store.Session(ctx, request.ProjectID)
+	session, err := service.loadSession(ctx, request.ProjectID)
 	if err != nil {
 		return CostPreview{}, err
 	}
@@ -511,7 +524,7 @@ func (service *Service) ConfirmGenerate(ctx context.Context, request GenerateReq
 	} else if !errors.Is(lookupErr, ErrOperationNotFound) {
 		return GenerateResult{}, lookupErr
 	}
-	session, err := service.store.Session(ctx, request.ProjectID)
+	session, err := service.loadSession(ctx, request.ProjectID)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -542,7 +555,7 @@ func (service *Service) ConfirmGenerate(ctx context.Context, request GenerateReq
 	unlock := service.lockProject(request.ProjectID)
 	unlock.Lock()
 	defer unlock.Unlock()
-	latest, err := service.store.Session(ctx, request.ProjectID)
+	latest, err := service.loadSession(ctx, request.ProjectID)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -620,7 +633,7 @@ func (service *Service) replayOperation(
 	}
 	switch operation.Status {
 	case creationdomain.OperationSucceeded:
-		session, err := service.store.Session(ctx, operation.ProjectID)
+		session, err := service.loadSession(ctx, operation.ProjectID)
 		if err != nil {
 			return GenerateResult{}, err
 		}
@@ -634,7 +647,7 @@ func (service *Service) replayOperation(
 	case creationdomain.OperationFailed:
 		return GenerateResult{}, fmt.Errorf("%w: %s", ErrOperationFailed, operation.ErrorCode)
 	default:
-		session, err := service.store.Session(ctx, operation.ProjectID)
+		session, err := service.loadSession(ctx, operation.ProjectID)
 		return GenerateResult{Session: session, RunID: operation.RunID}, err
 	}
 }
@@ -653,14 +666,14 @@ func (service *Service) launchRun(
 	go func() {
 		defer release()
 		result, execErr := service.executeStageRun(lease, session, request, stage, operation.RunID, frozenDigest, captured)
-		if execErr == nil && session.AdvanceMode == creationdomain.ModeAutoAdvance {
+		if execErr == nil && session.AdvanceMode == creationdomain.ModeAutoAdvance && stage != creationdomain.StageIntent {
 			result, execErr = service.autoAdvance(lease, result, request, captured)
 		}
 		if lease.Stale() || service.generation() != captured {
 			return
 		}
 		storeCtx := context.WithoutCancel(lease.Context())
-		latest, readErr := service.store.Session(storeCtx, session.ProjectID)
+		latest, readErr := service.loadSession(storeCtx, session.ProjectID)
 		if readErr != nil {
 			return
 		}
@@ -700,13 +713,13 @@ func (service *Service) startStageRun(
 	stage creationdomain.Stage,
 	sources []agentkernel.Source,
 ) (agentdomain.Run, error) {
-	binding, err := bindingFor(stage)
+	binding, err := bindingForEntry(session.EntryKind(), stage)
 	if err != nil {
 		return agentdomain.Run{}, err
 	}
 	created, err := service.kernel.CreateRun(ctx, agentkernel.CreateRequest{
 		RunID: runID, ProjectID: session.ProjectID, BranchID: request.BranchID, ChapterID: request.ChapterID,
-		ChapterBaseRevision: 1, CanonicalHead: request.CanonicalHead, AuthorInstruction: session.IntentText,
+		ChapterBaseRevision: 1, CanonicalHead: request.CanonicalHead, AuthorInstruction: creationInstruction(session),
 		WorkflowID: binding.WorkflowID, WorkflowVersion: binding.Version, Profile: request.Profile,
 		Sources: sources, QualitySpec: quality.Spec{}, Deadline: service.clock.Now().Add(defaultRunTimeout),
 	})
@@ -714,7 +727,7 @@ func (service *Service) startStageRun(
 		return agentdomain.Run{}, err
 	}
 	// 重读后用独立槽版本 CAS；读取与写入之间的作者修改不参与回写。
-	latest, err := service.store.Session(ctx, session.ProjectID)
+	latest, err := service.loadSession(ctx, session.ProjectID)
 	if err != nil {
 		return agentdomain.Run{}, err
 	}
@@ -743,7 +756,7 @@ func (service *Service) executeStageRun(
 	if service.generation() != captured || lease.Stale() {
 		return GenerateResult{}, ErrStaleStore
 	}
-	binding, err := bindingFor(stage)
+	binding, err := bindingForEntry(session.EntryKind(), stage)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -768,7 +781,7 @@ func (service *Service) executeStageRun(
 		return GenerateResult{}, err
 	}
 	// 只读回最新会话投影，不整份回写作者期间的修改。
-	latest, err := service.store.Session(storeCtx, session.ProjectID)
+	latest, err := service.loadSession(storeCtx, session.ProjectID)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -908,7 +921,7 @@ func (service *Service) autoAdvance(lease RunLease, result GenerateResult, reque
 			return result, nil
 		}
 		// 推进前重读会话，避免覆盖作者期间的修改。
-		latest, err := service.store.Session(storeCtx, session.ProjectID)
+		latest, err := service.loadSession(storeCtx, session.ProjectID)
 		if err != nil {
 			return GenerateResult{}, err
 		}
@@ -987,7 +1000,7 @@ func (service *Service) autoAdvance(lease RunLease, result GenerateResult, reque
 
 // pauseSession 重读最新会话后只设置暂停原因，不覆盖其他字段。
 func (service *Service) pauseSession(ctx context.Context, session creationdomain.Session, reason creationdomain.BlockingReason) (creationdomain.Session, error) {
-	latest, err := service.store.Session(ctx, session.ProjectID)
+	latest, err := service.loadSession(ctx, session.ProjectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
@@ -1001,14 +1014,14 @@ func (service *Service) pauseSession(ctx context.Context, session creationdomain
 	if err := service.store.SaveRunSlot(ctx, paused); err != nil {
 		return creationdomain.Session{}, err
 	}
-	return service.store.Session(ctx, session.ProjectID)
+	return service.loadSession(ctx, session.ProjectID)
 }
 
 // clearRunSlot 只在运行槽仍指向本次运行时清除，不覆盖作者期间的修改。
 func (service *Service) clearRunSlot(ctx context.Context, projectID, runID string) error {
 	// 仅对同一运行的幂等清理重试；每次都重新核对归属，绝不重放内容写入。
 	for range 3 {
-		latest, err := service.store.Session(ctx, projectID)
+		latest, err := service.loadSession(ctx, projectID)
 		if err != nil {
 			return err
 		}
@@ -1025,7 +1038,7 @@ func (service *Service) clearRunSlot(ctx context.Context, projectID, runID strin
 
 // CancelRun 取消进行中的生成；进程内无对应运行时清理恢复后残留的运行槽。
 func (service *Service) CancelRun(ctx context.Context, projectID string) error {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return err
 	}
@@ -1042,7 +1055,7 @@ func (service *Service) CancelRun(ctx context.Context, projectID string) error {
 // Recover 恢复会话状态，但绝不自动继续未重新确认的付费运行。
 // 进程内无活跃执行时按持久化运行状态对账：完成的运行物化结果，终结的清理槽位，中断的暂停并释放槽。
 func (service *Service) Recover(ctx context.Context, projectID string) (creationdomain.Session, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
@@ -1068,12 +1081,12 @@ func (service *Service) reconcileInterruptedRun(ctx context.Context, session cre
 		if saveErr := service.clearRunSlot(ctx, session.ProjectID, run.ID); saveErr != nil {
 			return session, saveErr
 		}
-		return service.store.Session(ctx, session.ProjectID)
+		return service.loadSession(ctx, session.ProjectID)
 	case agentdomain.RunFailed, agentdomain.RunCancelled:
 		if saveErr := service.clearRunSlot(ctx, session.ProjectID, session.ActiveRunID); saveErr != nil {
 			return session, saveErr
 		}
-		return service.store.Session(ctx, session.ProjectID)
+		return service.loadSession(ctx, session.ProjectID)
 	default:
 		return service.markInterrupted(ctx, session)
 	}
@@ -1089,7 +1102,7 @@ func (service *Service) markInterrupted(ctx context.Context, session creationdom
 	if err := service.store.SaveRunSlot(ctx, paused); err != nil {
 		return session, err
 	}
-	return service.store.Session(ctx, session.ProjectID)
+	return service.loadSession(ctx, session.ProjectID)
 }
 
 // materializeRunResult 结果重放：运行完成但候选未落库时，按运行产物物化一次候选，不调用模型。
@@ -1142,6 +1155,11 @@ func (service *Service) persistCandidate(
 	candidates, err := service.store.ListCandidates(ctx, session.ID)
 	if err != nil {
 		return creationdomain.Candidate{}, err
+	}
+	if binding.SchemaID == "author_material.schema" {
+		if _, err := decodeMaterialForEntry(session.Entry, payload); err != nil {
+			return creationdomain.Candidate{}, err
+		}
 	}
 	version := 1
 	var previous creationdomain.Candidate
@@ -1196,7 +1214,7 @@ func (service *Service) persistCandidate(
 		return creationdomain.Candidate{}, err
 	}
 	// 用最新会话重算下游影响，避免旧快照误判 stale。
-	latest, err := service.store.Session(ctx, session.ProjectID)
+	latest, err := service.loadSession(ctx, session.ProjectID)
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
@@ -1215,7 +1233,7 @@ func (service *Service) candidateForRunResult(
 	}
 	for _, candidate := range candidates {
 		if candidate.RunID == runID && candidate.ArtifactID == artifactID && candidate.Kind == kind {
-			latest, loadErr := service.store.Session(ctx, session.ProjectID)
+			latest, loadErr := service.loadSession(ctx, session.ProjectID)
 			if loadErr != nil {
 				return creationdomain.Candidate{}, loadErr
 			}
@@ -1335,9 +1353,19 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	if err != nil {
 		return ArchiveResult{}, err
 	}
-	direction, err := requiredSelectedDirectionCandidate(session, candidates)
-	if err != nil {
-		return ArchiveResult{}, err
+	verify := []creationdomain.Candidate{}
+	if session.EntryKind() != creationdomain.EntryAuthorPlan {
+		direction, err := requiredSelectedDirectionCandidate(session, candidates)
+		if err != nil {
+			return ArchiveResult{}, err
+		}
+		verify = append(verify, direction)
+	} else {
+		analysis, _, err := validatedMaterial(session, candidates)
+		if err != nil {
+			return ArchiveResult{}, err
+		}
+		verify = append(verify, analysis)
 	}
 	session, err = session.RecordArchive(preview.ConfirmationDigest, request.IdempotencyKey, changeSet.ID, now)
 	if err != nil {
@@ -1348,11 +1376,11 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	workbench.UpdatedAt = now
 	if err := service.store.ApplyArchive(ctx, ArchiveApply{
 		ChangeSet: changeSet, Session: session, Candidates: plan.Confirmed,
-		Verify: []creationdomain.Candidate{direction}, Workbench: workbench,
+		Verify: verify, Workbench: workbench,
 	}); err != nil {
 		// 另一个完全相同的请求可能刚刚提交成功。事务失败后只信任持久化回执；
 		// 不匹配或读取失败仍返回原错误，不能把真实冲突伪装成幂等成功。
-		if latest, readErr := service.store.Session(ctx, request.ProjectID); readErr == nil {
+		if latest, readErr := service.loadSession(ctx, request.ProjectID); readErr == nil {
 			if replay, ok := matchingArchiveReceipt(latest, request); ok {
 				return replay, nil
 			}
@@ -1375,7 +1403,7 @@ func matchingArchiveReceipt(session creationdomain.Session, request ArchiveReque
 }
 
 func (service *Service) loadArchiveInputs(ctx context.Context, projectID string) (creationdomain.Session, []creationdomain.Candidate, error) {
-	session, err := service.store.Session(ctx, projectID)
+	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, nil, err
 	}
@@ -1387,7 +1415,23 @@ func (service *Service) loadArchiveInputs(ctx context.Context, projectID string)
 }
 
 func (service *Service) preview(ctx context.Context, session creationdomain.Session, profile agentdomain.ResolvedCreativeProfile, stage creationdomain.Stage) (CostPreview, error) {
-	binding, err := bindingFor(stage)
+	if session.EntryKind() == creationdomain.EntryAuthorPlan && stage != creationdomain.StageIntent {
+		candidates, err := service.store.ListCandidates(ctx, session.ID)
+		if err != nil {
+			return CostPreview{}, err
+		}
+		_, output, err := validatedMaterial(session, candidates)
+		if err != nil {
+			return CostPreview{}, err
+		}
+		for _, gap := range output.Gaps {
+			if gap.Kind == "conflict" {
+				return CostPreview{}, creationdomain.ErrInvalidGapReport
+			}
+		}
+	}
+
+	binding, err := bindingForEntry(session.EntryKind(), stage)
 	if err != nil {
 		return CostPreview{}, err
 	}
@@ -1403,7 +1447,7 @@ func (service *Service) preview(ctx context.Context, session creationdomain.Sess
 	if session.AdvanceMode == creationdomain.ModeAutoAdvance {
 		remaining = remainingGenerateStages(stage)
 		for _, next := range remaining {
-			nextBinding, bindErr := bindingFor(next)
+			nextBinding, bindErr := bindingForEntry(session.EntryKind(), next)
 			if bindErr != nil {
 				return CostPreview{}, bindErr
 			}
@@ -1458,6 +1502,12 @@ func (service *Service) preview(ctx context.Context, session creationdomain.Sess
 }
 
 func resolveGenerateStage(session creationdomain.Session, requested creationdomain.Stage) (creationdomain.Stage, error) {
+	if session.EntryKind() == creationdomain.EntryAuthorPlan && requested == creationdomain.StageDirections {
+		return "", ErrInvalidStage
+	}
+	if session.EntryKind() != creationdomain.EntryAuthorPlan && requested == creationdomain.StageIntent {
+		return "", ErrInvalidStage
+	}
 	if requested != "" {
 		if _, err := bindingFor(requested); err != nil {
 			return "", err
@@ -1465,6 +1515,9 @@ func resolveGenerateStage(session creationdomain.Session, requested creationdoma
 		return requested, nil
 	}
 	if session.Stage == creationdomain.StageIntent {
+		if session.EntryKind() == creationdomain.EntryAuthorPlan {
+			return creationdomain.StageIntent, nil
+		}
 		return creationdomain.StageDirections, nil
 	}
 	if _, err := bindingFor(session.Stage); err != nil {

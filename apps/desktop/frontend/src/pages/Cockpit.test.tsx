@@ -312,3 +312,21 @@ describe('档案页确认入口', () => {
     expect(screen.getByText('正式大纲')).toBeTruthy();
   });
 });
+
+describe('已有方案工作台', () => {
+  afterEach(() => { cleanup(); delete window.go; });
+  it('解析使用已有方案阶段，明确跳过方向且只在确认费用后调用', async () => {
+    const user = userEvent.setup();
+    const view = workbench({ contentVersion: 2, runSlotVersion: 0, entry: { id: 'entry-1', version: 1, kind: 'author_plan', material: '作者自己的结局' }, stageRail: [{ id: 'intent', label: '已有方案', status: 'current' }, { id: 'directions', label: '故事方向', status: 'not_applicable' }] });
+    const preview = vi.fn().mockResolvedValue({ stage: 'intent', workflowId: 'story.author_material', workflowVersion: 1, estimatedCalls: 2, maxRunTokens: 30000, remainingStages: [], confirmationDigest: 'source-bound' });
+    const confirm = vi.fn().mockResolvedValue({ runId: 'material-run' });
+    window.go = { main: { DesktopAPI: { RecoverCreation: vi.fn().mockResolvedValue(view), CreationWorkbench: vi.fn().mockResolvedValue(view), PreviewCreationGenerate: preview, ConfirmCreationGenerate: confirm } } };
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '解析已有方案与检查缺口' }));
+    expect(preview).toHaveBeenCalledWith('intent');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByText('故事方向候选')).toBeNull();
+    await user.click(await screen.findByRole('button', { name: '确认生成' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ stage: 'intent', confirmationDigest: 'source-bound' })));
+  });
+});

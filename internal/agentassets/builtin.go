@@ -141,6 +141,9 @@ var (
 
 // Builtin 构造应用随版本发布的只读资源集合；资产更新必须创建新版本。
 func Builtin() (*Registry, error) {
+	materialPromptBinding := BindingForText("author_material.prompt", 1, []byte(authorMaterialPrompt))
+	materialSchemaBinding := BindingForText("author_material.schema", 1, authorMaterialSchema)
+	fillPromptBinding := BindingForText("author_plan_fill.prompt", 1, []byte(authorPlanFillPrompt))
 	baselinePromptBinding := BindingForText("baseline.chapter.prompt", 1, []byte(baselinePrompt))
 	architectPromptBinding := BindingForText("story_architect.prompt", 1, []byte(storyArchitectPrompt))
 	directionsPromptBinding := BindingForText("story_directions.prompt", 1, []byte(storyDirectionsPrompt))
@@ -387,7 +390,16 @@ func Builtin() (*Registry, error) {
 	authorReviseV2.Version = StoryAuthorReviseWorkflowVersion
 	authorReviseV2.Nodes = append([]agentdomain.WorkflowNode(nil), authorRevise.Nodes...)
 	authorReviseV2.Nodes[0].InputSelectors = []string{"$task", "$context", "$base", "$directive"}
+	materialWorkflow := productGenerateAndReview("story.author_material", 1, agentdomain.TaskStoryBlueprint,
+		materialPromptBinding, materialSchemaBinding, assembler, blueprintReviewPromptBinding, reviewSchema, 12000, 30000)
+	authorProposal := productGenerateAndReview("story.author_proposal", 1, agentdomain.TaskStoryBlueprint,
+		fillPromptBinding, blueprintSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
+	authorPeople := productGenerateAndReview("story.author_people_world", 1, agentdomain.TaskStoryCast,
+		fillPromptBinding, castSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
+	authorRoadmap := productGenerateAndReview("story.author_roadmap", 1, agentdomain.TaskStoryRoadmap,
+		fillPromptBinding, roadmapSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
 	workflows := []ports.WorkflowAsset{
+		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
 		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(peopleWorldV2), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
@@ -395,6 +407,8 @@ func Builtin() (*Registry, error) {
 	return New(
 		workflows,
 		[]ports.PromptAsset{
+			{Binding: materialPromptBinding, Template: authorMaterialPrompt, Variables: []string{"Task", "Context"}},
+			{Binding: fillPromptBinding, Template: authorPlanFillPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: baselinePromptBinding, Template: baselinePrompt, Variables: []string{"Task", "Context"}},
 			{Binding: architectPromptBinding, Template: storyArchitectPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: directionsPromptBinding, Template: storyDirectionsPrompt, Variables: []string{"Task", "Context"}},
@@ -423,6 +437,7 @@ func Builtin() (*Registry, error) {
 			{Binding: integrationPromptBinding, Template: integrateSlotsPrompt, Variables: []string{"Task", "Context", "Skeleton", "MechanicalJoin"}},
 		},
 		[]ports.SchemaAsset{
+			{Binding: materialSchemaBinding, JSON: authorMaterialSchema},
 			{Binding: draftSchema, JSON: chapterDraftSchema},
 			{Binding: blueprintSchema, JSON: storyBlueprintSchema},
 			{Binding: blueprintSchemaV2, JSON: storyBlueprintSchemaV2},
@@ -490,3 +505,12 @@ func workflowAsset(definition agentdomain.WorkflowDefinition) ports.WorkflowAsse
 		Definition: definition,
 	}
 }
+
+var (
+	//go:embed assets/prompts/author_material_v1.tmpl
+	authorMaterialPrompt string
+	//go:embed assets/prompts/author_plan_fill_v1.tmpl
+	authorPlanFillPrompt string
+	//go:embed assets/schemas/author_material_v1.json
+	authorMaterialSchema []byte
+)
