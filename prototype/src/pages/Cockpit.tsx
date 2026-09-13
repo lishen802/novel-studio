@@ -29,6 +29,7 @@ import { Textarea } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
 import { SamplePanel } from '../components/creation/SamplePanel';
+import { CreationProgress } from '../components/creation/CreationProgress';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 import { getActiveModel } from '../types';
@@ -176,6 +177,8 @@ const initialContext: CreativeContext = {
 export default function Cockpit() {
  const [sampleCard,setSampleCard] = useState('');
  const [samplePreview,setSamplePreview] = useState<{id:string;status:string;pointOfView:string;tone:string;constraints:string[];targetRunes:number}|null>(null);
+  const [progressStarted,setProgressStarted] = useState(() => new Date().toISOString());
+  const [progressDemo,setProgressDemo] = useState('running');
   const [entryPreview, setEntryPreview] = useState<{ id: string; kind: 'idea' | 'author_plan'; material: string }>({ id: '', kind: 'idea', material: '' });
   const navigate = useNavigate();
   const { state } = useApp();
@@ -548,7 +551,7 @@ export default function Cockpit() {
 
         {/* Right creative context */}
         <aside className="w-[280px] shrink-0 border-l border-border bg-surface p-5 overflow-auto">
-          <h3 className="text-sm font-medium text-text mb-4">创作上下文</h3>
+          <div className="mb-5 space-y-2"><p className="text-xs text-text-muted">进度展示示例 · 未调用模型</p><CreationProgress createdAt={progressStarted} updatedAt={progressDemo === 'running' ? undefined : new Date().toISOString()} status={progressDemo} stage="story_planning" steps={[{stage:'context_preparing',status:'completed'},{stage:'story_planning',status:progressDemo === 'running' ? 'running' : 'cancelled'},{stage:'independent_review',status:'queued'}]} onCancel={async()=>setProgressDemo('cancelled')} /><Button size="sm" variant="ghost" onClick={()=>{setProgressStarted(new Date().toISOString());setProgressDemo('running');}}>重看进度示例</Button></div><h3 className="text-sm font-medium text-text mb-4">创作上下文</h3>
 
           <div className="space-y-5">
             <ContextList

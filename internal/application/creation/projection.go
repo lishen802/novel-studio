@@ -2,7 +2,9 @@ package creation
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"time"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
@@ -112,11 +114,18 @@ type RoadmapNodeView struct {
 	Position int    `json:"position"`
 }
 
+type RunProgressStep struct {
+	Stage  string `json:"stage"`
+	Status string `json:"status"`
+}
 type RunView struct {
-	RunID       string `json:"runId"`
-	Status      string `json:"status"`
-	Cancellable bool   `json:"cancellable"`
-	PublicStage string `json:"publicStage"`
+	Steps       []RunProgressStep `json:"steps"`
+	CreatedAt   string            `json:"createdAt"`
+	UpdatedAt   string            `json:"updatedAt"`
+	RunID       string            `json:"runId"`
+	Status      string            `json:"status"`
+	Cancellable bool              `json:"cancellable"`
+	PublicStage string            `json:"publicStage"`
 }
 
 type AssistantSummaryView struct {
@@ -189,15 +198,49 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 
 // projectCreationRun 从持久化步骤投影公开阶段，不使用工作流内部节点名猜测状态。
 func projectCreationRun(run agentdomain.Run, live bool) RunView {
-	view := RunView{RunID: run.ID, Status: string(run.Status), Cancellable: live,
-		PublicStage: string(agentdomain.PublicStageContextPreparing)}
-	for _, step := range run.Steps {
-		if step.PublicStageID != "" && (step.Status == agentdomain.StepRunning || step.Status == agentdomain.StepCompleted || step.Status == agentdomain.StepFailed) {
-			view.PublicStage = string(step.PublicStageID)
+	view := RunView{RunID: run.ID, Status: string(run.Status), Cancellable: live, PublicStage: string(agentdomain.PublicStageContextPreparing), Steps: []RunProgressStep{}}
+	if !run.CreatedAt.IsZero() {
+		view.CreatedAt = run.CreatedAt.Format(time.RFC3339Nano)
+	}
+	if !run.UpdatedAt.IsZero() {
+		view.UpdatedAt = run.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	if run.CompletedAt != nil {
+		view.UpdatedAt = run.CompletedAt.Format(time.RFC3339Nano)
+	}
+	// 同一节点只投影最新尝试，历史失败不能遮挡正在重试的步骤。
+	positions := map[string]int{}
+	latest := []agentdomain.RunStep{}
+	for index, step := range run.Steps {
+		key := step.NodeID
+		if key == "" {
+			key = step.ID
 		}
-		if step.Status == agentdomain.StepRunning {
-			break
+		if key == "" {
+			key = strconv.Itoa(index)
 		}
+		if position, ok := positions[key]; ok {
+			if step.Attempt >= latest[position].Attempt {
+				latest[position] = step
+			}
+			continue
+		}
+		positions[key] = len(latest)
+		latest = append(latest, step)
+	}
+	running := ""
+	for _, step := range latest {
+		stage := string(step.PublicStageID)
+		view.Steps = append(view.Steps, RunProgressStep{Stage: stage, Status: string(step.Status)})
+		if stage != "" && (step.Status == agentdomain.StepCompleted || step.Status == agentdomain.StepFailed) {
+			view.PublicStage = stage
+		}
+		if stage != "" && step.Status == agentdomain.StepRunning && running == "" {
+			running = stage
+		}
+	}
+	if running != "" {
+		view.PublicStage = running
 	}
 	if run.Status == agentdomain.RunCompleted {
 		view.PublicStage = string(agentdomain.PublicStageCandidateReady)

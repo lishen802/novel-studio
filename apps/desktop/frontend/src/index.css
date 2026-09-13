@@ -139,3 +139,9 @@ html, body, #root {
   outline: none;
   box-shadow: 0 0 0 2px rgba(26, 31, 46, 0.18);
 }
+
+/* 不定进度只表达任务仍在运行，不代表完成百分比。 */
+@keyframes creation-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}

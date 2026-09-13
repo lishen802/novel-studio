@@ -187,7 +187,8 @@ describe('创作驾驶舱', () => {
     await user.type(screen.getByLabelText('创作输入'), '海上灯塔');
     await user.click(screen.getByRole('button', { name: /发送给 AI 团队/ }));
     await user.click(await screen.findByRole('button', { name: '确认生成' }));
-    await screen.findByText(/context_preparing/);
+    await screen.findByText('准备开始创作');
+    expect(screen.queryByText(/context_preparing/)).toBeNull();
     expect((screen.getByRole('button', { name: /发送给 AI 团队/ }) as HTMLButtonElement).disabled).toBe(true);
     creationWorkbench.mockResolvedValue(workbench({ currentRun: { runId: 'run-1', status: 'completed', cancellable: false, publicStage: 'candidate_ready' } }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '取消运行' })).toBeNull(), { timeout: 3000 });

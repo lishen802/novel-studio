@@ -1,3 +1,4 @@
+import { CreationProgress } from '../components/creation/CreationProgress';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -83,18 +84,6 @@ function countWords(text: string) {
   return text.replace(/\s/g, '').length;
 }
 
-function runStatusLabel(status: string) {
-  switch (status) {
-    case 'queued': return '排队中';
-    case 'running': return '创作中';
-    case 'completed': return '已完成';
-    case 'failed': return '失败';
-    case 'cancelled': return '已取消';
-    case 'recoverable': return '需恢复';
-    default: return status;
-  }
-}
-
 function stepStatusLabel(status: string) {
   switch (status) {
     case 'queued': return '等待中';
@@ -102,7 +91,7 @@ function stepStatusLabel(status: string) {
     case 'completed': return '完成';
     case 'failed': return '失败';
     case 'cancelled': return '已取消';
-    default: return status;
+    default: return '待确认';
   }
 }
 
@@ -111,7 +100,7 @@ function roleLabel(role: string) {
     case 'planner': return '规划';
     case 'writer': return '写作';
     case 'continuity_reviewer': return '审阅';
-    default: return role;
+    default: return '其他协作';
   }
 }
 
@@ -991,23 +980,10 @@ export default function Chapters() {
 
             {activeRun && (
               <div className="space-y-3">
-                <h4 className="text-xs font-medium text-text-sub uppercase tracking-wider">创作任务</h4>
-                <div className="p-3 border border-border rounded-lg space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-text">{runStatusLabel(activeRun.status)}</span>
-                    <div className="flex gap-2">
-                      {(activeRun.status === 'running' || activeRun.status === 'queued') && (
-                        <Button variant="ghost" size="sm" onClick={() => void cancelRun()} disabled={cancelBusy} className="text-danger hover:text-danger">
-                          {cancelBusy ? '取消中…' : '取消'}
-                        </Button>
-                      )}
-                      {(activeRun.status === 'recoverable' || activeRun.status === 'failed') && (
-                        <Button variant="ghost" size="sm" onClick={() => void retryRun()} disabled={retryBusy}>
-                          {retryBusy ? '重试中…' : '重试'}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+                <CreationProgress status={activeRun.status} steps={activeRun.steps.map(step => ({stage:step.role,status:step.status}))} createdAt={activeRun.createdAt} updatedAt={activeRun.updatedAt} onCancel={cancelRun} cancelDisabled={cancelBusy} cancelLabel="取消" />
+                {(activeRun.status === 'recoverable' || activeRun.status === 'failed') && <Button variant="ghost" size="sm" onClick={() => void retryRun()} disabled={retryBusy}>{retryBusy ? '重试中…' : '重试'}</Button>}
+                <div className="space-y-2">
+                  <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-xs text-text-sub">模型与用量详情</summary>
                   <div className="text-xs text-text-sub">
                     预算 {activeRun.tokenBudget} · 已用 {activeRun.inputTokens + activeRun.outputTokens} tokens
                   </div>
@@ -1025,10 +1001,11 @@ export default function Chapters() {
                       </div>
                     ))}
                   </div>
+                  </details>
                   {jobSnapshot?.pendingAction && (
-                    <p className="text-xs text-text-muted">待处理动作：{jobSnapshot.pendingAction}</p>
+                    <p className="text-xs text-text-muted">正在处理你的操作，请稍候。</p>
                   )}
-                  {runPollError && <p className="text-xs text-danger">轮询运行状态失败：{runPollError}</p>}
+                  {runPollError && <p className="text-xs text-danger">暂时无法更新进度：{runPollError}</p>}
                   {activeRun.errorMessage && <p className="text-xs text-danger">{activeRun.errorMessage}</p>}
                   {activeRun.status === 'recoverable' && (
                     <p className="text-xs text-warning">运行被中断，可重新发起以继续。</p>

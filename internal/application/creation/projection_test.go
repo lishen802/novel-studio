@@ -60,3 +60,18 @@ func TestPeopleWorldProjectionUsesStableCharacterIDs(t *testing.T) {
 		t.Fatalf("同名人物投影未使用稳定 ID: %+v", view.Entities)
 	}
 }
+
+func TestRunProgressKeepsOnlyLatestAttemptAndAllVisibleSteps(t *testing.T) {
+	run := agentdomain.Run{ID: "run", Status: agentdomain.RunRunning, Steps: []agentdomain.RunStep{
+		{NodeID: "plan", PublicStageID: agentdomain.PublicStageStoryPlanning, Status: agentdomain.StepCompleted},
+		{NodeID: "review", PublicStageID: agentdomain.PublicStageIndependentReview, Status: agentdomain.StepFailed},
+		{NodeID: "review", PublicStageID: agentdomain.PublicStageIndependentReview, Status: agentdomain.StepRunning},
+	}}
+	view := projectCreationRun(run, true)
+	if len(view.Steps) != 2 || view.Steps[0].Status != "completed" || view.Steps[1].Status != "running" {
+		t.Fatalf("步骤或重试投影错误: %+v", view.Steps)
+	}
+	if view.PublicStage != "independent_review" {
+		t.Fatalf("当前阶段错误: %s", view.PublicStage)
+	}
+}

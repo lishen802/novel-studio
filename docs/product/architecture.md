@@ -471,6 +471,8 @@ input_tokens / output_tokens / estimated_cost / actual_cost
 artifact_available / updated_at
 ```
 
+运行区向作者展示中文阶段说明、实际步骤状态和等待时长；步骤可动态追加时使用不定进度，不按 token、时间或出现的节点数推测完成百分比。诊断信息折叠展示，完成、失败、取消与待确认状态均有明确反馈。
+
 React 只把公开阶段映射为作者语言。Workflow 拆分、合并或更换模型不得迫使页面依赖内部 `node_id`；诊断详情可在高级视图中单独展示节点和 attempt。
 
 ### 8.3 命令边界

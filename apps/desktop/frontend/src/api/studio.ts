@@ -330,7 +330,7 @@ export interface CreationWorkbenchView {
     arcs: Array<{ id: string; title: string; summary: string; position: number }>;
     chapters: Array<{ id: string; title: string; summary: string; position: number }>;
   };
-  currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string };
+  currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string; steps?: Array<{stage: string; status: string}>; createdAt?: string; updatedAt?: string };
   assistant: { pendingActionCount: number };
   impact: {
     items: Array<{ candidateId: string; stage: string; severity: string; reason: string; locked: boolean; confirmed: boolean; excepted: boolean }>;

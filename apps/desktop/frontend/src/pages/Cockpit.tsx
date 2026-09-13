@@ -26,6 +26,7 @@ import { Textarea } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { SamplePanel } from '../components/creation/SamplePanel';
+import { CreationProgress } from '../components/creation/CreationProgress';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 
@@ -89,6 +90,7 @@ export default function Cockpit() {
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState<CreationCostPreview | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const awaitingRun = generating && !['queued','pending','running','cancelling'].includes(workbench.currentRun.status);
   const keptIds = workbench.directionSet.keptIds ?? [];
   const [entityId, setEntityId] = useState<string | null>(null);
   const intentRef = useRef(intent);
@@ -498,14 +500,11 @@ export default function Cockpit() {
         </main>
 
         <aside className="w-[280px] shrink-0 border-l border-border bg-surface p-5 overflow-auto">
-          <h3 className="text-sm font-medium text-text mb-3">创作上下文</h3>
-          <p className="text-xs text-text-sub leading-relaxed mb-4">绑定当前阶段的 AI 对话会先形成待确认 Action。锁定字段在重生成时保持。</p>
-          {generating && (
-            <div data-testid="run-panel" className="p-3 border border-border rounded-lg space-y-2">
-              <p className="text-sm text-text">公开阶段：{workbench.currentRun.publicStage || 'story_planning'}</p>
-              <Button variant="danger" size="sm" className="w-full" onClick={() => void cancelRun()}>取消运行</Button>
-            </div>
-          )}
+          {(generating || workbench.currentRun.runId) && <CreationProgress status={awaitingRun ? 'queued' : workbench.currentRun.status} stage={awaitingRun ? undefined : workbench.currentRun.publicStage} steps={awaitingRun ? [] : workbench.currentRun.steps} createdAt={awaitingRun ? undefined : workbench.currentRun.createdAt} updatedAt={workbench.currentRun.updatedAt} onCancel={generating || workbench.currentRun.cancellable ? cancelRun : undefined} />}
+          <div className="mt-5 space-y-2">
+            <h3 className="text-sm font-medium text-text">创作约定</h3>
+            <p className="text-xs text-text-sub leading-relaxed">AI 的修改建议会先交给你确认。已锁定的内容会在重新生成时保留。</p>
+          </div>
         </aside>
       </div>
 
