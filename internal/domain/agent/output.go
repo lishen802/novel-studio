@@ -319,6 +319,8 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 		output = &ReviewBundleOutput{}
 	case TaskReviseDraft:
 		output = &ReviseDraftOutput{}
+	case TaskReviseStoryCandidate:
+		output = &StoryCandidateRevisionOutput{}
 	case TaskReviseBlueprint:
 		output = &ReviseBlueprintOutput{}
 	case TaskVerifyRevision:

@@ -289,7 +289,7 @@ func validateSelectors(node WorkflowNode, nodes map[string]WorkflowNode, adjacen
 			continue
 		}
 		// 作者定向修订节点通过专用选择器绑定修订指令与冻结基线。
-		if (selector == "$directive" || selector == "$base") && node.Capability == CapabilityBoundedRevision {
+		if (selector == "$directive" || selector == "$base") && (node.Capability == CapabilityBoundedRevision || node.Capability == CapabilityContinuityReview || node.Capability == CapabilityContentReview) {
 			continue
 		}
 		if !strings.HasPrefix(selector, "node:") {

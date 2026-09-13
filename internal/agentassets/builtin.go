@@ -141,6 +141,9 @@ var (
 
 // Builtin 构造应用随版本发布的只读资源集合；资产更新必须创建新版本。
 func Builtin() (*Registry, error) {
+	candidateRevisionPromptBinding := BindingForText("story_candidate_revision.prompt", 1, []byte(candidateRevisionPrompt))
+	candidateRevisionReviewBinding := BindingForText("review_candidate_revision.prompt", 1, []byte(candidateRevisionReviewPrompt))
+	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 1, candidateRevisionSchema)
 	materialPromptBinding := BindingForText("author_material.prompt", 1, []byte(authorMaterialPrompt))
 	materialSchemaBinding := BindingForText("author_material.schema", 1, authorMaterialSchema)
 	fillPromptBinding := BindingForText("author_plan_fill.prompt", 1, []byte(authorPlanFillPrompt))
@@ -399,6 +402,7 @@ func Builtin() (*Registry, error) {
 	authorRoadmap := productGenerateAndReview("story.author_roadmap", 1, agentdomain.TaskStoryRoadmap,
 		fillPromptBinding, roadmapSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
 	workflows := []ports.WorkflowAsset{
+		workflowAsset(candidateRevisionWorkflow(candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
 		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
@@ -407,6 +411,8 @@ func Builtin() (*Registry, error) {
 	return New(
 		workflows,
 		[]ports.PromptAsset{
+			{Binding: candidateRevisionPromptBinding, Template: candidateRevisionPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint"}},
+			{Binding: candidateRevisionReviewBinding, Template: candidateRevisionReviewPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint", "Revision"}},
 			{Binding: materialPromptBinding, Template: authorMaterialPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: fillPromptBinding, Template: authorPlanFillPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: baselinePromptBinding, Template: baselinePrompt, Variables: []string{"Task", "Context"}},
@@ -437,6 +443,7 @@ func Builtin() (*Registry, error) {
 			{Binding: integrationPromptBinding, Template: integrateSlotsPrompt, Variables: []string{"Task", "Context", "Skeleton", "MechanicalJoin"}},
 		},
 		[]ports.SchemaAsset{
+			{Binding: candidateRevisionSchemaBinding, JSON: candidateRevisionSchema},
 			{Binding: materialSchemaBinding, JSON: authorMaterialSchema},
 			{Binding: draftSchema, JSON: chapterDraftSchema},
 			{Binding: blueprintSchema, JSON: storyBlueprintSchema},

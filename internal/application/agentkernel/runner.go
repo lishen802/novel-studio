@@ -215,7 +215,12 @@ func (service *Service) CreateRun(ctx context.Context, request CreateRequest) (a
 	run.ContextBudgetUnlimited = request.Profile.ContextBudgetUnlimited
 	run.RetryOf = strings.TrimSpace(request.RetryOf)
 	artifact := newArtifact(service.ids.NewID(), run.ID, "", agentdomain.ArtifactTaskInput, string(encoded), service.clock.Now())
-	if err := service.store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run, Artifacts: []agentdomain.Artifact{artifact}}); err != nil {
+	artifacts := []agentdomain.Artifact{artifact}
+	// 通用候选修订将人工或模型基线与任务输入一起原子保存，使谱系引用可以真实读取。
+	if compiled.TaskKind == agentdomain.TaskReviseStoryCandidate {
+		artifacts = append(artifacts, newArtifact(request.BaseCandidate.ArtifactID, run.ID, "", agentdomain.ArtifactPlan, request.BaseCandidate.Content, service.clock.Now()))
+	}
+	if err := service.store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run, Artifacts: artifacts}); err != nil {
 		return agentdomain.Run{}, fmt.Errorf("%w: persist: %w", ErrCreateRun, err)
 	}
 	service.onJobUpdated(ctx, run.ID)
@@ -504,6 +509,9 @@ func (service *Service) executeNode(
 		}
 	}
 	if validateErr := validateCapabilityOutput(decoded, node, input, latest, artifacts, manifest); validateErr != nil {
+		if compiled.TaskKind == agentdomain.TaskReviseStoryCandidate {
+			produced = append(produced, newArtifact(service.ids.NewID(), run.ID, step.ID, agentdomain.ArtifactStructuredOutput, generated.Text, service.clock.Now()))
+		}
 		code, cause := capabilityValidationError(node.Capability, validateErr)
 		return service.failStep(ctx, run, step, code, cause, produced)
 	}
@@ -560,7 +568,7 @@ func (service *Service) executeNode(
 }
 
 // revisionBaseArtifact 返回修订基线：作者定向运行直接使用冻结的 BaseCandidate
-// （不落库，仅供边界校验与谱系记录），其余工作流沿用 node: 上游产物查找。
+// （通用候选修订另有原子保存的基线工件），其余工作流沿用 node: 上游产物查找。
 func revisionBaseArtifact(input persistedInput, node FrozenNode, latest map[string]agentdomain.RunStep, artifacts []agentdomain.Artifact) (agentdomain.Artifact, error) {
 	if input.BaseCandidate != nil {
 		return agentdomain.Artifact{
@@ -935,7 +943,7 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 	}
 	if request.RevisionDirective != nil {
 		if request.RevisionDirective.Validate() != nil || request.RevisionDirective.Mode != agentdomain.RevisionAuthorDirected ||
-			(compiled.TaskKind != agentdomain.TaskReviseDraft && compiled.TaskKind != agentdomain.TaskReviseBlueprint) {
+			(compiled.TaskKind != agentdomain.TaskReviseDraft && compiled.TaskKind != agentdomain.TaskReviseBlueprint && compiled.TaskKind != agentdomain.TaskReviseStoryCandidate) {
 			return agentdomain.ErrInvalidRevisionDirective
 		}
 		// 作者定向修订必须冻结与指令身份、摘要完全一致的基线候选，杜绝基线漂移。
@@ -944,8 +952,14 @@ func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) err
 			request.BaseCandidate.Digest != request.RevisionDirective.BaseDigest {
 			return agentdomain.ErrInvalidRevisionDirective
 		}
-	} else if compiled.TaskKind == agentdomain.TaskReviseDraft || compiled.TaskKind == agentdomain.TaskReviseBlueprint {
+	} else if compiled.TaskKind == agentdomain.TaskReviseDraft || compiled.TaskKind == agentdomain.TaskReviseBlueprint || compiled.TaskKind == agentdomain.TaskReviseStoryCandidate {
 		return agentdomain.ErrInvalidRevisionDirective
+	}
+	if compiled.TaskKind == agentdomain.TaskReviseStoryCandidate {
+		var base agentdomain.StoryCandidateRevisionOutput
+		if json.Unmarshal([]byte(request.BaseCandidate.Content), &base) != nil || validateStoryCandidateRevision(base, request.BaseCandidate.Content, *request.RevisionDirective) != nil {
+			return agentdomain.ErrInvalidRevisionDirective
+		}
 	}
 	for _, source := range request.Sources {
 		if strings.TrimSpace(source.ID) == "" || strings.TrimSpace(source.Version) == "" ||
@@ -1235,6 +1249,9 @@ func taskKindForNode(workflowKind agentdomain.TaskKind, capability agentdomain.C
 	case agentdomain.CapabilityContinuityReview, agentdomain.CapabilityContentReview, agentdomain.CapabilityStyleReview:
 		return agentdomain.TaskReviewBundle
 	case agentdomain.CapabilityBoundedRevision:
+		if workflowKind == agentdomain.TaskReviseStoryCandidate {
+			return workflowKind
+		}
 		if workflowKind == agentdomain.TaskStoryBlueprint || workflowKind == agentdomain.TaskReviseBlueprint {
 			return agentdomain.TaskReviseBlueprint
 		}
@@ -1913,6 +1930,9 @@ func normalizeResolutionIDs(
 }
 
 func validateAuthorDirectedRevision(output agentdomain.TaskOutput, original string, directive agentdomain.RevisionDirective) error {
+	if value, ok := output.(*agentdomain.StoryCandidateRevisionOutput); ok {
+		return validateStoryCandidateRevision(*value, original, directive)
+	}
 	var revised string
 	var changes []agentdomain.RevisionChange
 	switch value := output.(type) {
