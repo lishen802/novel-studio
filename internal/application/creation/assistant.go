@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -220,6 +221,17 @@ func (service *Service) ConfirmAction(ctx context.Context, request ActionConfirm
 	}
 	result, err := service.executeAction(ctx, executing)
 	if err != nil {
+		// 范围校验在候选写入前失败，与运行结果未知区分记录。
+		if errors.Is(err, creationdomain.ErrRevisionScope) {
+			failed, markErr := executing.Fail("revision_scope_rejected", service.clock.Now())
+			if markErr != nil {
+				return ActionResult{}, errors.Join(err, markErr)
+			}
+			if saveErr := service.store.SaveAction(context.WithoutCancel(ctx), failed); saveErr != nil {
+				return ActionResult{}, errors.Join(err, saveErr)
+			}
+			return ActionResult{}, err
+		}
 		unknown, markErr := executing.MarkOutcomeUnknown("execute_failed", service.clock.Now())
 		if markErr == nil {
 			_ = service.store.SaveAction(ctx, unknown)
@@ -421,6 +433,10 @@ func (service *Service) executeReviseFields(
 	payload, artifactID, err := service.resultPayload(storeCtx, completed, artifacts, authorReviseBinding())
 	if err != nil {
 		return ActionResult{}, err
+	}
+	// 先核对模型原始输出；不能通过恢复锁值掩盖越界修改。
+	if _, err := candidate.ReviewTextRevision(payload, args.Paths); err != nil {
+		return ActionResult{}, fmt.Errorf("%w: %w", creationdomain.ErrRevisionScope, err)
 	}
 	next, err := candidate.Regenerate(service.ids.NewID(), completed.ID, artifactID, payload, service.clock.Now())
 	if err != nil {
