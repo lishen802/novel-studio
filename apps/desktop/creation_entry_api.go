@@ -40,3 +40,16 @@ func (a *DesktopAPI) SaveCreationSample(request creationapp.SaveSampleRequest) (
 	}
 	return safeResult(service.SaveCreationSample(a.ctx, request))
 }
+
+type creationFieldUseCases interface {
+	SaveCreationFields(context.Context, creationapp.SaveFieldsRequest) (creationapp.WorkbenchView, error)
+}
+
+// SaveCreationFields 转发候选字段补丁，完整验证留在应用层。
+func (a *DesktopAPI) SaveCreationFields(request creationapp.SaveFieldsRequest) (creationapp.WorkbenchView, error) {
+	service, ok := a.workspace.(creationFieldUseCases)
+	if !ok {
+		return creationapp.WorkbenchView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(service.SaveCreationFields(a.ctx, request))
+}

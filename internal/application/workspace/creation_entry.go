@@ -49,3 +49,15 @@ func (s *Service) SaveCreationSample(ctx context.Context, request creationapp.Sa
 	}
 	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
 }
+
+// SaveCreationFields 在当前可写项目中保存候选文本字段的新版本。
+func (s *Service) SaveCreationFields(ctx context.Context, request creationapp.SaveFieldsRequest) (creationapp.WorkbenchView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if _, err := runtime.service.SaveFields(ctx, runtime.projectID, request); err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	return runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
+}

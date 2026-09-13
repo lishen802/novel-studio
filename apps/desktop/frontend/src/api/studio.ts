@@ -271,6 +271,7 @@ export interface CreationSampleInput {
  pointOfView: string; tone: string; constraints: string[]; targetRunes: number;
 }
 export interface CreationWorkbenchView {
+ fieldEditor?: { candidateId: string; version: number; fields: Array<{path:string;label:string;group:string;value:string;locked:boolean}> };
  canPrepareSample?: boolean;
  sampleHandoff?: (CreationSampleInput & { id: string; directionCandidateId: string; directionCardId: string; status: string }) | null;
   contentVersion?: number;
@@ -506,6 +507,7 @@ export const studio = {
   acceptCreationCandidate: (candidateId: string) => call<CreationWorkbenchView>('AcceptCreationCandidate', candidateId),
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
+  saveCreationFields: (request: {candidateId:string;changes:Record<string,string>}) => call<CreationWorkbenchView>('SaveCreationFields', request),
   saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>
     call<CreationWorkbenchView>('SaveCreationCandidateDraft', candidateId, payloadJson),
   lockCreationField: (candidateId: string, path: string) => call<CreationWorkbenchView>('LockCreationField', candidateId, path),

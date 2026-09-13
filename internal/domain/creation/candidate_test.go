@@ -143,3 +143,34 @@ func TestRestoreSupersededCandidate(t *testing.T) {
 		t.Fatalf("restore = %#v, err=%v", restored, err)
 	}
 }
+
+func TestNestedLockFollowsEntityIDThroughReordering(t *testing.T) {
+	now := time.Unix(200, 0)
+	c, err := NewCandidate("c", "s", StagePeopleWorld, KindPeopleWorld, 1, "", "", "", `{"characters":[{"id":"a","name":"甲","secret":"守住秘密"},{"id":"b","name":"乙","secret":"旧"}]}`, "story_cast.schema", 2, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = c.LockField("/characters/@a/secret", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := c.Regenerate("new", "run", "art", `{"characters":[{"id":"b","name":"乙","secret":"新"},{"id":"a","name":"甲","secret":"模型改写"}]}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, _ := next.FieldString("/characters/@a/secret"); value != "守住秘密" {
+		t.Fatal("锁跟随了数组位置")
+	}
+	if value, _ := next.FieldString("/characters/@b/secret"); value != "新" {
+		t.Fatal("误覆盖其他实体")
+	}
+	if _, err := c.Regenerate("bad", "run", "art", `{"characters":[{"id":"b","secret":"新"}]}`, now); err == nil {
+		t.Fatal("不能删除锁定实体")
+	}
+	if _, err := c.SaveDraft("draft", `{"characters":[{"id":"a","secret":"改掉秘密"}]}`, now); !errors.Is(err, ErrFieldLocked) {
+		t.Fatalf("绕过嵌套锁: %v", err)
+	}
+	if _, err := c.LockField("/characters/0/secret", now); err == nil {
+		t.Fatal("数组下标不能作为稳定锁路径")
+	}
+}

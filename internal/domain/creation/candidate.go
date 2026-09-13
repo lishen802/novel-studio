@@ -264,11 +264,13 @@ func mergeLockedFields(baseline, incoming string, locks map[string]bool) (string
 		if !locked {
 			continue
 		}
-		key, ok := objectKey(path)
-		if !ok {
-			return "", ErrFieldMissing
+		value, err := pointerValue(baseMap, path)
+		if err != nil {
+			return "", err
 		}
-		nextMap[key] = baseMap[key]
+		if err := setPointerValue(nextMap, path, value); err != nil {
+			return "", err
+		}
 	}
 	encoded, err := json.Marshal(nextMap)
 	if err != nil {
@@ -290,27 +292,7 @@ func readPointer(payload, path string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	key, ok := objectKey(path)
-	if !ok {
-		return nil, ErrFieldMissing
-	}
-	value, exists := object[key]
-	if !exists {
-		return nil, ErrFieldMissing
-	}
-	return value, nil
-}
-
-func objectKey(path string) (string, bool) {
-	path = normalizePointer(path)
-	if !strings.HasPrefix(path, "/") {
-		return "", false
-	}
-	key := strings.TrimPrefix(path, "/")
-	if key == "" || strings.Contains(key, "/") {
-		return "", false
-	}
-	return key, true
+	return pointerValue(object, path)
 }
 
 func normalizePointer(path string) string {

@@ -27,6 +27,7 @@ import { Modal } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { SamplePanel } from '../components/creation/SamplePanel';
 import { CreationProgress } from '../components/creation/CreationProgress';
+import { CandidateFields } from '../components/creation/CandidateFields';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 
@@ -87,6 +88,7 @@ export default function Cockpit() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [materialDirty, setMaterialDirty] = useState(false);
+  const [fieldDirty,setFieldDirty] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState<CreationCostPreview | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -160,6 +162,7 @@ export default function Cockpit() {
   };
 
   const startGenerate = async (requestedStage?: string) => {
+    if (fieldDirty) { setError('请先保存文本修改，再继续生成或进入下一阶段。'); return; }
     if (materialDirty) { setError("请先保存已修改的材料与起点，再开始解析或生成。"); return; }
     if (!modelReady) {
       setError('尚未配置 AI 模型，无法生成方向候选。请先完成模型连接。');
@@ -201,6 +204,7 @@ export default function Cockpit() {
   };
 
   const confirmNext = async (cardId?: string) => {
+    if (fieldDirty) { setError('请先保存文本修改，再继续生成或进入下一阶段。'); return; }
     if (materialDirty) { setError("请先保存材料，再审阅下一阶段。"); return; }
     if (workbench.stage === 'archive_confirm') {
       const archive = await studio.previewCreationArchive();
@@ -335,8 +339,9 @@ export default function Cockpit() {
         )}
 
         <main className="flex-1 overflow-auto p-8">
-          {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={workbench.sessionId} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
-          {workbench.sessionId && <EntryPanel key={workbench.sessionId} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
+          {workbench.fieldEditor?.fields.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
+          {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
+          {workbench.sessionId && <EntryPanel key={`entry:${workbench.sessionId}`} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly || fieldDirty} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
             await run(() => studio.saveCreationEntry({ projectId: workbench.projectId, sessionId: workbench.sessionId, kind, material, expectedVersion, expectedRunSlotVersion }));
           }} />}
           {workbench.entry?.kind === 'author_plan' && <section className="max-w-5xl mx-auto mb-6 space-y-4" aria-label="已有方案分析">
@@ -511,7 +516,7 @@ export default function Cockpit() {
       <footer className="px-8 py-3 border-t border-border bg-surface flex items-center justify-between shrink-0">
         <Button
           variant="ghost"
-          disabled={!previousStage(workbench.stage) || generating}
+          disabled={!previousStage(workbench.stage) || generating || fieldDirty}
           onClick={() => {
             const target = workbench.entry?.kind === 'author_plan' && workbench.stage === 'proposal' ? 'intent' : previousStage(workbench.stage);
             if (target) void run(() => studio.lookBackCreationStage(target));

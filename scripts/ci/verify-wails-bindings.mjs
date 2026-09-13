@@ -26,6 +26,7 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["SaveCreationFields declaration",apiDeclaration,"SaveCreationFields(arg1:creation.SaveFieldsRequest):Promise<creation.WorkbenchView>"],
  ["SaveCreationSample declaration", apiDeclaration, "SaveCreationSample(arg1:creation.SaveSampleRequest):Promise<creation.WorkbenchView>"],
  ["SaveCreationSample runtime", apiRuntime, "export function SaveCreationSample(arg1)"],
   [

@@ -456,6 +456,15 @@ func (service *Service) updateCandidateLock(ctx context.Context, projectID, cand
 	if candidate.SessionID != session.ID {
 		return creationdomain.Candidate{}, ErrSessionNotFound
 	}
+	candidates, err := service.store.ListCandidates(ctx, session.ID)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	current, ok := currentCandidate(candidates, candidate.Stage)
+	if !ok || current.ID != candidate.ID {
+		return creationdomain.Candidate{}, creationdomain.ErrCandidateVersionConflict
+	}
+
 	expected := candidate
 	if lock {
 		candidate, err = candidate.LockField(path, service.clock.Now())

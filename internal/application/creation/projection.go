@@ -11,6 +11,7 @@ import (
 )
 
 type WorkbenchView struct {
+	FieldEditor      FieldEditorView               `json:"fieldEditor"`
 	SampleHandoff    *SampleView                   `json:"sampleHandoff"`
 	CanPrepareSample bool                          `json:"canPrepareSample"`
 	Material         MaterialView                  `json:"material"`
@@ -169,6 +170,11 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 		return WorkbenchView{}, err
 	}
 	view := assembleWorkbench(session, candidates, impact, pending)
+	if session.Stage != creationdomain.StageIntent {
+		if current, ok := currentCandidate(candidates, session.Stage); ok {
+			view.FieldEditor = candidateTextFields(current)
+		}
+	}
 	if err := service.projectSample(ctx, session, candidates, &view); err != nil {
 		return WorkbenchView{}, err
 	}

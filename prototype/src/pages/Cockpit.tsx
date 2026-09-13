@@ -30,6 +30,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
 import { SamplePanel } from '../components/creation/SamplePanel';
 import { CreationProgress } from '../components/creation/CreationProgress';
+import { CandidateFields } from '../components/creation/CandidateFields';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 import { getActiveModel } from '../types';
@@ -175,6 +176,7 @@ const initialContext: CreativeContext = {
 };
 
 export default function Cockpit() {
+ const [fieldDemo,setFieldDemo] = useState({candidateId:'demo-1',version:1,fields:[{path:'/directions/@a/hook',label:'卖点',group:'故事方向 · A',value:'一座雾中灯塔，三任守塔人接连失踪。',locked:false},{path:'/characters/@hero/secret',label:'秘密',group:'人物 · 沈知秋',value:'曾见过一封未寄出的信。',locked:false}]});
  const [sampleCard,setSampleCard] = useState('');
  const [samplePreview,setSamplePreview] = useState<{id:string;status:string;pointOfView:string;tone:string;constraints:string[];targetRunes:number}|null>(null);
   const [progressStarted,setProgressStarted] = useState(() => new Date().toISOString());
@@ -303,6 +305,7 @@ export default function Cockpit() {
         {/* Main creative area */}
         <main className="flex-1 overflow-auto p-8">
           {sampleCard && entryPreview.kind === 'idea' && <SamplePanel preview directionCandidateId="prototype-direction" directionCardId={sampleCard} version={1} runVersion={0} sample={samplePreview} onSave={async (value) => {setSamplePreview({...value,id:String(Date.now()),status:'prepared'});}} />}
+          <CandidateFields editor={fieldDemo} preview onSave={async(_,changes)=>setFieldDemo(old=>({...old,candidateId:`demo-${old.version+1}`,version:old.version+1,fields:old.fields.map(f=>({...f,value:changes[f.path]??f.value}))}))} onLock={async(_,path,locked)=>setFieldDemo(old=>({...old,fields:old.fields.map(f=>f.path===path?{...f,locked}:f)}))}/>
           <EntryPanel entry={entryPreview} contentVersion={1} runSlotVersion={0} onSave={async (kind, material) => { setEntryPreview({ id: String(Date.now()), kind, material }); }} />
           {entryPreview.kind === 'author_plan' && <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-text-sub">已有方案入口预览：方向不适用，保存材料后进入缺口检查与候选复用。此浏览器原型未接模型解析，真实调用未就绪。</div>}
           {entryPreview.kind !== 'author_plan' && <>
