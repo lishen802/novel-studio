@@ -170,7 +170,7 @@ func validateArchiveReadiness(session creationdomain.Session, candidates []creat
 		if err := validateCandidateDependency(session, candidates, current); err != nil {
 			return err
 		}
-		if err := validateCandidatePayload(stage, current.PayloadJSON); err != nil {
+		if err := validateCandidateSchema(stage, current.PayloadJSON, current.PayloadSchemaVersion); err != nil {
 			return err
 		}
 		if current.Status != creationdomain.StatusConfirmed {
@@ -240,7 +240,7 @@ func buildArchivePlan(
 	if err != nil {
 		return archivePlan{}, err
 	}
-	road, err := decodeRoadmap(roadmap.PayloadJSON)
+	road, err := decodeArchivableRoadmap(roadmap)
 	if err != nil {
 		return archivePlan{}, err
 	}
@@ -492,11 +492,15 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		}
 		id := mapper.ids.NewID()
 		arcIDs[strings.TrimSpace(arc.ID)] = id
-		after, err := encodeJSON(map[string]any{
+		afterMap := map[string]any{
 			"parentId": parent, "level": storydomain.LevelArc, "title": arc.Title,
 			"summary": arc.CausalChain, "goal": arc.CausalChain, "conflict": arc.CharacterChange,
 			"outcome": strings.Join(arc.Foreshadowing, "；"), "position": arc.Position,
-		})
+		}
+		if planning := arc.PlanningObject(); planning != nil {
+			afterMap["planning"] = planning
+		}
+		after, err := encodeJSON(afterMap)
 		if err != nil {
 			return err
 		}
@@ -580,6 +584,19 @@ func decodeRoadmap(payload string) (agentdomain.StoryRoadmapOutput, error) {
 		return agentdomain.StoryRoadmapOutput{}, err
 	}
 	return *decoded.(*agentdomain.StoryRoadmapOutput), nil
+}
+
+func decodeArchivableRoadmap(candidate creationdomain.Candidate) (agentdomain.StoryRoadmapOutput, error) {
+	road, err := decodeRoadmap(candidate.PayloadJSON)
+	if err != nil {
+		return agentdomain.StoryRoadmapOutput{}, err
+	}
+	if candidate.PayloadSchemaVersion >= 3 {
+		if err := road.ValidatePlanningGoals(); err != nil {
+			return agentdomain.StoryRoadmapOutput{}, err
+		}
+	}
+	return road, nil
 }
 
 func encodeJSON(value any) (string, error) {

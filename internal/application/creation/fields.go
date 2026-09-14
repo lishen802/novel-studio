@@ -29,7 +29,7 @@ type SaveFieldsRequest struct {
 }
 
 var fieldLabels = map[string]string{
-	"causal_chain": "因果链", "character_change": "人物变化", "label": "关系说明", "outcome": "阶段结果", "proposition": "故事命题", "protagonist_arc": "主角成长", "scope_hint": "适用范围", "sell_point": "作品卖点",
+	"causal_chain": "因果链", "character_change": "人物变化", "reader_expectation": "读者期待", "stage_payoff": "阶段回报", "irreversible_change": "不可逆变化", "ending_contribution": "终局贡献", "fulfillment_range": "兑现范围", "commitments": "待兑现承诺", "commitments_omission": "承诺省略原因", "retained_questions": "保留悬念", "retained_questions_omission": "悬念省略原因", "label": "关系说明", "outcome": "阶段结果", "proposition": "故事命题", "protagonist_arc": "主角成长", "scope_hint": "适用范围", "sell_point": "作品卖点",
 	"directions": "故事方向", "characters": "人物", "relationships": "人物关系", "factions": "势力", "locations": "地点", "items": "物品", "world_rules": "世界规则", "book": "全书", "volumes": "卷", "arcs": "故事弧", "chapters": "章节", "anchors": "锚点", "title": "标题", "name": "名称", "summary": "概要", "description": "描述", "secret": "秘密", "desire": "欲望", "fear": "恐惧", "motivation": "动机", "arc": "人物弧", "role": "角色定位", "hook": "卖点", "genre": "题材", "protagonist": "主角", "core_conflict": "核心冲突", "growth_cost": "成长代价", "pacing": "节奏", "ending": "结局方向", "positioning": "作品定位", "main_conflict": "主线冲突", "character_arc": "人物成长", "setting": "故事背景", "theme": "主题", "goal": "目标", "conflict": "冲突", "turning_point": "转折", "payoff": "回报", "content": "内容", "reason": "理由", "text": "说明", "statement": "叙事承诺", "ending_direction": "结局方向", "narrative_role": "叙事作用", "tone": "语气", "point_of_view": "视角", "value": "内容", "risk": "风险", "omit_reason": "省略原因",
 }
 

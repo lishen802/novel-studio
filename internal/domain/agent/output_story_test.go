@@ -185,3 +185,59 @@ func TestRoadmapChapterUnmarshalAcceptsLegacyStringAnchors(t *testing.T) {
 		t.Fatal("expected legacy string anchors to fail validation until regenerated")
 	}
 }
+
+func TestStoryRoadmapPlanningGoalsAreRequiredForV3(t *testing.T) {
+	valid := StoryRoadmapOutput{
+		Book:    RoadmapBook{ID: "book-1", Title: "潮汐关", Proposition: "守关抉择", Ending: "开城", ProtagonistArc: "承担"},
+		Volumes: []RoadmapVolume{{ID: "vol-1", Title: "第一卷", Goal: "建立危机", Conflict: "敌船压境", Payoff: "作出选择", Position: 1}},
+		Arcs: []RoadmapArc{{
+			ID: "arc-1", VolumeRef: "vol-1", Title: "开关", CausalChain: "敌船靠岸", CharacterChange: "接受代价",
+			ReaderExpectation: "读者应感到守关人将被亲情撕裂", StagePayoff: "开城救人并失去军职",
+			IrreversibleChange: "阿绫不再以军令为最高准则", EndingContribution: "为终局选择救人立下先例",
+			Commitments:       []RoadmapCommitment{{ID: "cmt-1", Statement: "旧令牌兑现身份", FulfillmentRange: "本弧末章", RelatedRefs: []string{"arc-1"}}},
+			RetainedQuestions: []RoadmapRetainedQuestion{{ID: "q-1", Statement: "潮汐神谕是否被篡改", Reason: "留给后续卷"}},
+			Foreshadowing:     []string{"旧令牌"}, Position: 1,
+		}},
+		NearTermChapters: []RoadmapChapter{
+			{ID: "ch-1", ArcRef: "arc-1", Title: "空船", Goal: "发现异常", Conflict: "无人登岸", Outcome: "独自登船", Anchors: []RoadmapAnchor{{Strength: "hard", Statement: "钟楼三响"}}, Position: 1},
+			{ID: "ch-2", ArcRef: "arc-1", Title: "旧识", Goal: "认出仇敌", Conflict: "军令与私情", Outcome: "暂时藏匿", Position: 2},
+			{ID: "ch-3", ArcRef: "arc-1", Title: "开关", Goal: "作出选择", Conflict: "守城与救人", Outcome: "开城", Position: 3},
+		},
+	}
+	if err := valid.ValidatePlanningGoals(); err != nil {
+		t.Fatalf("完整规划目标应通过: %v", err)
+	}
+	legacy := valid
+	legacy.Arcs = append([]RoadmapArc(nil), valid.Arcs...)
+	legacy.Arcs[0].ReaderExpectation = ""
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("缺少规划目标的 v2 载荷仍应通过基础 Validate: %v", err)
+	}
+	if !errors.Is(legacy.ValidatePlanningGoals(), ErrInvalidTaskOutput) {
+		t.Fatal("缺少规划目标不得伪装成 v3 已验证")
+	}
+	bare := valid
+	bare.Arcs = append([]RoadmapArc(nil), valid.Arcs...)
+	bare.Arcs[0].ReaderExpectation = ""
+	bare.Arcs[0].StagePayoff = ""
+	bare.Arcs[0].IrreversibleChange = ""
+	bare.Arcs[0].EndingContribution = ""
+	bare.Arcs[0].Commitments = nil
+	bare.Arcs[0].RetainedQuestions = nil
+	if bare.Arcs[0].PlanningObject() != nil {
+		t.Fatal("旧 v2 弧不能伪造空规划目标")
+	}
+	emptyLists := valid
+	emptyLists.Arcs = append([]RoadmapArc(nil), valid.Arcs...)
+	emptyLists.Arcs[0].Commitments = nil
+	emptyLists.Arcs[0].RetainedQuestions = nil
+	emptyLists.Arcs[0].CommitmentsOmission = "本弧不新立承诺"
+	emptyLists.Arcs[0].RetainedQuestionsOmission = "本弧不保留悬念"
+	if err := emptyLists.ValidatePlanningGoals(); err != nil {
+		t.Fatalf("空列表加省略原因应通过: %v", err)
+	}
+	emptyLists.Arcs[0].CommitmentsOmission = ""
+	if !errors.Is(emptyLists.ValidatePlanningGoals(), ErrInvalidTaskOutput) {
+		t.Fatal("空承诺列表必须说明省略原因")
+	}
+}

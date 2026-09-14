@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -43,16 +44,17 @@ type CreateSceneCardInput struct {
 }
 
 type OutlineNodeView struct {
-	ID        string `json:"id"`
-	ParentID  string `json:"parentId"`
-	Level     string `json:"level"`
-	Title     string `json:"title"`
-	Summary   string `json:"summary"`
-	Goal      string `json:"goal"`
-	Conflict  string `json:"conflict"`
-	Outcome   string `json:"outcome"`
-	Position  int    `json:"position"`
-	ChapterID string `json:"chapterId"`
+	ID        string         `json:"id"`
+	ParentID  string         `json:"parentId"`
+	Level     string         `json:"level"`
+	Title     string         `json:"title"`
+	Summary   string         `json:"summary"`
+	Goal      string         `json:"goal"`
+	Conflict  string         `json:"conflict"`
+	Outcome   string         `json:"outcome"`
+	Position  int            `json:"position"`
+	ChapterID string         `json:"chapterId"`
+	Planning  map[string]any `json:"planning,omitempty"`
 }
 
 type StoryLineView struct {
@@ -422,7 +424,14 @@ func storyStructureView(nodes []storydomain.OutlineNode, lines []storydomain.Sto
 }
 
 func outlineNodeView(node storydomain.OutlineNode) OutlineNodeView {
-	return OutlineNodeView{ID: node.ID, ParentID: node.ParentID, Level: string(node.Level), Title: node.Title, Summary: node.Summary, Goal: node.Goal, Conflict: node.Conflict, Outcome: node.Outcome, Position: node.Position, ChapterID: node.ChapterID}
+	view := OutlineNodeView{ID: node.ID, ParentID: node.ParentID, Level: string(node.Level), Title: node.Title, Summary: node.Summary, Goal: node.Goal, Conflict: node.Conflict, Outcome: node.Outcome, Position: node.Position, ChapterID: node.ChapterID}
+	if strings.TrimSpace(node.PlanningJSON) != "" && node.PlanningJSON != "{}" {
+		var planning map[string]any
+		if json.Unmarshal([]byte(node.PlanningJSON), &planning) == nil && len(planning) > 0 {
+			view.Planning = planning
+		}
+	}
+	return view
 }
 func storyLineView(line storydomain.StoryLine) StoryLineView {
 	return StoryLineView{ID: line.ID, Name: line.Name, Summary: line.Summary, Status: string(line.Status)}

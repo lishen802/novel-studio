@@ -56,7 +56,7 @@ func (service *Service) SaveCandidateDraft(ctx context.Context, projectID, candi
 	if parent.SessionID != session.ID {
 		return creationdomain.Candidate{}, ErrSessionNotFound
 	}
-	if err := validateCandidatePayload(parent.Stage, payloadJSON); err != nil {
+	if err := validateCandidateSchema(parent.Stage, payloadJSON, parent.PayloadSchemaVersion); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	candidates, err := service.store.ListCandidates(ctx, session.ID)
@@ -545,7 +545,7 @@ func stageReady(session creationdomain.Session, candidates []creationdomain.Cand
 		if current.Blocked() {
 			return creationdomain.ErrQualityBlocked
 		}
-		if err := validateCandidatePayload(session.Stage, current.PayloadJSON); err != nil {
+		if err := validateCandidateSchema(session.Stage, current.PayloadJSON, current.PayloadSchemaVersion); err != nil {
 			return err
 		}
 	}
@@ -559,6 +559,10 @@ func stageReady(session creationdomain.Session, candidates []creationdomain.Cand
 }
 
 func validateCandidatePayload(stage creationdomain.Stage, payload string) error {
+	return validateCandidateSchema(stage, payload, 0)
+}
+
+func validateCandidateSchema(stage creationdomain.Stage, payload string, schemaVersion int) error {
 	kind := agentdomain.TaskStoryBlueprint
 	switch stage {
 	case creationdomain.StageDirections:
@@ -574,6 +578,9 @@ func validateCandidatePayload(stage creationdomain.Stage, payload string) error 
 	}
 	if stage == creationdomain.StageProposal {
 		return decoded.(*agentdomain.StoryBlueprintOutput).ValidateProduct()
+	}
+	if stage == creationdomain.StageRoadmap && schemaVersion >= 3 {
+		return decoded.(*agentdomain.StoryRoadmapOutput).ValidatePlanningGoals()
 	}
 	return nil
 }

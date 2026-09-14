@@ -330,6 +330,34 @@ describe('已有方案工作台', () => {
     await user.click(await screen.findByRole('button', { name: '确认生成' }));
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ stage: 'intent', confirmationDigest: 'source-bound' })));
   });
+
+  it('路线图阶段展示故事弧规划目标', async () => {
+    const view = workbench({
+      stage: 'roadmap',
+      roadmap: {
+        candidateId: 'roadmap-1', version: 1, status: 'draft',
+        book: { id: 'book', title: '潮汐关', summary: '守关人必须选择', position: 1 },
+        volumes: [{ id: 'volume:第一卷', title: '第一卷', summary: '建立关隘危机', position: 1 }],
+        arcs: [{
+          id: 'arc:arc-1', title: '开关', summary: '敌船靠岸导致必须抉择', position: 1,
+          readerExpectation: '读者应感到守关人将被亲情撕裂',
+          stagePayoff: '开城救人并失去军职',
+          irreversibleChange: '阿绫不再以军令为最高准则',
+          endingContribution: '为终局选择救人立下先例',
+          commitments: [{ id: 'cmt-1', statement: '旧令牌兑现身份', detail: '本弧末章' }],
+          retainedQuestions: [{ id: 'q-1', statement: '潮汐神谕是否被篡改', detail: '留给后续卷揭示' }],
+        }],
+        chapters: [{ id: 'chapter:空船', title: '空船', summary: '发现异常', position: 1 }],
+      },
+    });
+    window.go = { main: { DesktopAPI: { RecoverCreation: vi.fn().mockResolvedValue(view), CreationWorkbench: vi.fn().mockResolvedValue(view) } } };
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: '开关' })).toBeTruthy();
+    expect(screen.getByText('读者应感到守关人将被亲情撕裂')).toBeTruthy();
+    expect(screen.getByText('待兑现承诺')).toBeTruthy();
+    expect(screen.getByText('旧令牌兑现身份')).toBeTruthy();
+    expect(screen.getByText('潮汐神谕是否被篡改')).toBeTruthy();
+  });
 });
 
 describe('试写准备工作台', () => {

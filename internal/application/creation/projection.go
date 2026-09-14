@@ -109,11 +109,23 @@ type RoadmapView struct {
 	Chapters    []RoadmapNodeView `json:"chapters"`
 }
 
+type RoadmapGoalItemView struct {
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	Detail    string `json:"detail"`
+}
+
 type RoadmapNodeView struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Summary  string `json:"summary"`
-	Position int    `json:"position"`
+	ID                 string                `json:"id"`
+	Title              string                `json:"title"`
+	Summary            string                `json:"summary"`
+	Position           int                   `json:"position"`
+	ReaderExpectation  string                `json:"readerExpectation,omitempty"`
+	StagePayoff        string                `json:"stagePayoff,omitempty"`
+	IrreversibleChange string                `json:"irreversibleChange,omitempty"`
+	EndingContribution string                `json:"endingContribution,omitempty"`
+	Commitments        []RoadmapGoalItemView `json:"commitments,omitempty"`
+	RetainedQuestions  []RoadmapGoalItemView `json:"retainedQuestions,omitempty"`
 }
 
 type RunProgressStep struct {
@@ -441,8 +453,19 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 		})
 	}
 	for _, arc := range road.Arcs {
+		commitments := make([]RoadmapGoalItemView, 0, len(arc.Commitments))
+		for _, item := range arc.Commitments {
+			commitments = append(commitments, RoadmapGoalItemView{ID: item.ID, Statement: item.Statement, Detail: item.FulfillmentRange})
+		}
+		questions := make([]RoadmapGoalItemView, 0, len(arc.RetainedQuestions))
+		for _, item := range arc.RetainedQuestions {
+			questions = append(questions, RoadmapGoalItemView{ID: item.ID, Statement: item.Statement, Detail: item.Reason})
+		}
 		view.Arcs = append(view.Arcs, RoadmapNodeView{
-			ID: "arc:" + arc.Title, Title: arc.Title, Summary: arc.CausalChain, Position: arc.Position,
+			ID: "arc:" + strings.TrimSpace(arc.ID), Title: arc.Title, Summary: arc.CausalChain, Position: arc.Position,
+			ReaderExpectation: arc.ReaderExpectation, StagePayoff: arc.StagePayoff,
+			IrreversibleChange: arc.IrreversibleChange, EndingContribution: arc.EndingContribution,
+			Commitments: commitments, RetainedQuestions: questions,
 		})
 	}
 	for _, chapter := range road.NearTermChapters {

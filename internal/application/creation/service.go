@@ -375,7 +375,7 @@ func (service *Service) AcceptCandidate(ctx context.Context, projectID, candidat
 	if current.Status == creationdomain.StatusConfirmed {
 		return current, nil
 	}
-	if err := validateCandidatePayload(current.Stage, current.PayloadJSON); err != nil {
+	if err := validateCandidateSchema(current.Stage, current.PayloadJSON, current.PayloadSchemaVersion); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	if err := validateCandidateDependency(session, candidates, current); err != nil {
@@ -1290,7 +1290,7 @@ func buildArchivePreview(session creationdomain.Session, candidates []creationdo
 	if err != nil {
 		return ArchivePreview{}, err
 	}
-	road, err := decodeRoadmap(roadmap.PayloadJSON)
+	road, err := decodeArchivableRoadmap(roadmap)
 	if err != nil {
 		return ArchivePreview{}, err
 	}

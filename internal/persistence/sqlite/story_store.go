@@ -5,19 +5,28 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 )
 
+func outlinePlanningJSON(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "{}"
+	}
+	return value
+}
+
 func (s *Store) CreateOutlineNode(ctx context.Context, node storydomain.OutlineNode) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO outline_nodes (
 			id, project_id, parent_id, level, title, summary, goal, conflict,
-			outcome, position, chapter_id, created_at, updated_at, deleted_at
-		) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULL)
+			outcome, position, chapter_id, planning_json, created_at, updated_at, deleted_at
+		) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)
 	`, node.ID, node.ProjectID, node.ParentID, node.Level, node.Title, node.Summary,
-		node.Goal, node.Conflict, node.Outcome, node.Position, node.ChapterID,
+		node.Goal, node.Conflict, node.Outcome, node.Position, node.ChapterID, outlinePlanningJSON(node.PlanningJSON),
 		formatTime(node.CreatedAt), formatTime(node.UpdatedAt))
 	if err != nil {
 		return databaseOperationError("create outline node", err)
@@ -29,7 +38,7 @@ func (s *Store) ListOutlineNodes(ctx context.Context) ([]storydomain.OutlineNode
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, COALESCE(parent_id, ''), level, title, summary,
 			goal, conflict, outcome, position, COALESCE(chapter_id, ''),
-			created_at, updated_at
+			COALESCE(planning_json, '{}'), created_at, updated_at
 		FROM outline_nodes
 		WHERE deleted_at IS NULL
 		ORDER BY CASE level
@@ -275,7 +284,7 @@ func scanOutlineNode(row scanner) (storydomain.OutlineNode, error) {
 	var createdAt, updatedAt string
 	err := row.Scan(&node.ID, &node.ProjectID, &node.ParentID, &node.Level, &node.Title,
 		&node.Summary, &node.Goal, &node.Conflict, &node.Outcome, &node.Position,
-		&node.ChapterID, &createdAt, &updatedAt)
+		&node.ChapterID, &node.PlanningJSON, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storydomain.OutlineNode{}, err
 	}

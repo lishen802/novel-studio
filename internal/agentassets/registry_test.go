@@ -68,6 +68,11 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2, []string{"blueprint", "review"}},
 		{StoryRoadmapWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
 		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
+		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV3, []string{"blueprint", "review"}},
+		{"story.author_roadmap", 1, []string{"blueprint", "review"}},
+		{"story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
+		{StoryCandidateRevisionWorkflowID, 1, []string{"revise", "review"}},
+		{StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersionV2, []string{"revise", "review"}},
 		{StoryAuthorReviseWorkflowID, StoryProductWorkflowVersion, []string{"revise"}},
 		{StoryAuthorReviseWorkflowID, StoryAuthorReviseWorkflowVersion, []string{"revise"}},
 	}
@@ -192,6 +197,61 @@ func TestBuiltinRegistersRoadmapV2AlongsideImmutableV1(t *testing.T) {
 		if !strings.Contains(string(v2Schema.JSON), marker) {
 			t.Fatalf("roadmap v2 schema missing contract marker %s", marker)
 		}
+	}
+}
+
+// TestBuiltinRegistersRoadmapV3AlongsideImmutableV2 验证 v3 与冻结 v1/v2 并存：
+// 新工作流绑定规划目标 Prompt/Schema，不得改写旧定义哈希。
+func TestBuiltinRegistersRoadmapV3AlongsideImmutableV2(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryProductWorkflowVersion)
+	if err != nil {
+		t.Fatalf("roadmap v1: %v", err)
+	}
+	if v1.Definition.DefinitionHash != "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1" {
+		t.Fatalf("roadmap v1 hash = %s, want immutable pre-v2 hash", v1.Definition.DefinitionHash)
+	}
+	v2, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2)
+	if err != nil {
+		t.Fatalf("roadmap v2: %v", err)
+	}
+	v3, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV3)
+	if err != nil {
+		t.Fatalf("roadmap v3: %v", err)
+	}
+	if v2.Definition.DefinitionHash == v1.Definition.DefinitionHash || v3.Definition.DefinitionHash == v2.Definition.DefinitionHash {
+		t.Fatal("roadmap v3 不得复用 v1/v2 定义哈希")
+	}
+	v3Blueprint := v3.Definition.Nodes[0]
+	if v3Blueprint.ID != "blueprint" || v3Blueprint.Prompt.Version != 3 || v3Blueprint.Schema.Version != 3 {
+		t.Fatalf("roadmap v3 必须绑定 v3 prompt/schema: %+v", v3Blueprint)
+	}
+	if v2.Definition.Nodes[0].Prompt.Version != 2 || v2.Definition.Nodes[0].Schema.Version != 2 {
+		t.Fatalf("roadmap v2 bindings changed: %+v", v2.Definition.Nodes[0])
+	}
+	v3Prompt, err := registry.Prompt(context.Background(), "story_roadmap.prompt", 3)
+	if err != nil || !reflect.DeepEqual(v3Prompt.Variables, []string{"Task", "Context"}) {
+		t.Fatalf("roadmap v3 prompt: %+v, %v", v3Prompt, err)
+	}
+	v3Schema, err := registry.Schema(context.Background(), "story_roadmap.schema", 3)
+	if err != nil || len(v3Schema.JSON) == 0 {
+		t.Fatalf("roadmap v3 schema: %v", err)
+	}
+	for _, marker := range []string{`"reader_expectation"`, `"stage_payoff"`, `"irreversible_change"`, `"ending_contribution"`, `"commitments"`, `"retained_questions"`} {
+		if !strings.Contains(string(v3Schema.JSON), marker) {
+			t.Fatalf("roadmap v3 schema missing contract marker %s", marker)
+		}
+	}
+	authorV2, err := registry.Workflow(context.Background(), "story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2)
+	if err != nil || authorV2.Definition.Nodes[0].Schema.Version != 3 {
+		t.Fatalf("author_roadmap@2 必须绑定路线图 v3: %+v, %v", authorV2, err)
+	}
+	revisionV2, err := registry.Workflow(context.Background(), StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersionV2)
+	if err != nil || revisionV2.Definition.Nodes[0].Schema.Version != 2 {
+		t.Fatalf("author_revision@2 必须绑定修订 v2: %+v, %v", revisionV2, err)
 	}
 }
 

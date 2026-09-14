@@ -271,6 +271,25 @@ export interface HarnessCaseView {
 export interface CreationSampleInput {
  pointOfView: string; tone: string; constraints: string[]; targetRunes: number;
 }
+
+export interface RoadmapGoalItemView {
+  id: string;
+  statement: string;
+  detail: string;
+}
+
+export interface RoadmapNodeView {
+  id: string;
+  title: string;
+  summary: string;
+  position: number;
+  readerExpectation?: string;
+  stagePayoff?: string;
+  irreversibleChange?: string;
+  endingContribution?: string;
+  commitments?: RoadmapGoalItemView[];
+  retainedQuestions?: RoadmapGoalItemView[];
+}
 export interface CreationWorkbenchView {
  revisions?: RevisionCard[];
  fieldEditor?: { candidateId: string; version: number; fields: Array<{path:string;label:string;group:string;value:string;locked:boolean}> };
@@ -328,10 +347,10 @@ export interface CreationWorkbenchView {
     candidateId: string;
     version: number;
     status: string;
-    book: { id: string; title: string; summary: string; position: number };
-    volumes: Array<{ id: string; title: string; summary: string; position: number }>;
-    arcs: Array<{ id: string; title: string; summary: string; position: number }>;
-    chapters: Array<{ id: string; title: string; summary: string; position: number }>;
+    book: RoadmapNodeView;
+    volumes: RoadmapNodeView[];
+    arcs: RoadmapNodeView[];
+    chapters: RoadmapNodeView[];
   };
   currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string; steps?: Array<{stage: string; status: string}>; createdAt?: string; updatedAt?: string };
   assistant: { pendingActionCount: number };

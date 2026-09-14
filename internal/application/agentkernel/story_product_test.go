@@ -2,6 +2,7 @@ package agentkernel
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,9 +39,14 @@ func TestStoryProductWorkflowsRunWithFakeProvider(t *testing.T) {
 			generate: `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`,
 			want:     `"near_term_chapters"`,
 		},
+		{
+			id: agentassets.StoryRoadmapWorkflowID, version: agentassets.StoryRoadmapWorkflowVersionV3, budget: 9000,
+			generate: `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","reader_expectation":"读者应感到守关人将被亲情撕裂","stage_payoff":"开城救人并失去军职","irreversible_change":"阿绫不再以军令为最高准则","ending_contribution":"为终局选择救人立下先例","commitments":[{"id":"cmt-1","statement":"旧令牌兑现身份","fulfillment_range":"本弧末章","related_refs":["arc-1"]}],"retained_questions":[{"id":"q-1","statement":"潮汐神谕是否被篡改","reason":"留给后续卷揭示"}],"foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`,
+			want:     `"reader_expectation"`,
+		},
 	}
 	for _, test := range cases {
-		t.Run(test.id, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s@%d", test.id, test.version), func(t *testing.T) {
 			service, store, provider := newRunnerHarness(t, []providerReply{
 				{text: test.generate, inputTokens: 10, outputTokens: 20},
 				{text: passedReview, inputTokens: 8, outputTokens: 12},

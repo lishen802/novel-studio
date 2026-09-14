@@ -40,6 +40,12 @@ const (
 // roadmap v2 要求四层稳定 id、arc_ref 引用与结构化锚点；v1 保留不变，供旧运行按原定义哈希恢复。
 const StoryRoadmapWorkflowVersionV2 = 2
 
+// roadmap v3 补齐故事弧规划目标；v1/v2 定义与哈希保持冻结。
+const StoryRoadmapWorkflowVersionV3 = 3
+
+// story.author_roadmap@2 用 v3 Schema 补缺，不改 @1 的 v2 合同。
+const StoryAuthorRoadmapWorkflowVersionV2 = 2
+
 // StoryPeopleWorldWorkflowVersionV2 要求人物与关系使用稳定 ID；v1 保持冻结供历史运行恢复。
 const StoryPeopleWorldWorkflowVersionV2 = 2
 
@@ -63,6 +69,8 @@ var (
 	storyRoadmapPrompt string
 	//go:embed assets/prompts/story_roadmap_v2.tmpl
 	storyRoadmapPromptV2 string
+	//go:embed assets/prompts/story_roadmap_v3.tmpl
+	storyRoadmapPromptV3 string
 	//go:embed assets/prompts/chapter_plan_v1.tmpl
 	chapterPlanPrompt string
 	//go:embed assets/prompts/chapter_director_v2.tmpl
@@ -115,6 +123,8 @@ var (
 	storyRoadmapSchema []byte
 	//go:embed assets/schemas/story_roadmap_v2.json
 	storyRoadmapSchemaV2 []byte
+	//go:embed assets/schemas/story_roadmap_v3.json
+	storyRoadmapSchemaV3 []byte
 	//go:embed assets/schemas/chapter_plan_v1.json
 	chapterPlanSchema []byte
 	//go:embed assets/schemas/chapter_plan_v2.json
@@ -144,6 +154,7 @@ func Builtin() (*Registry, error) {
 	candidateRevisionPromptBinding := BindingForText("story_candidate_revision.prompt", 1, []byte(candidateRevisionPrompt))
 	candidateRevisionReviewBinding := BindingForText("review_candidate_revision.prompt", 1, []byte(candidateRevisionReviewPrompt))
 	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 1, candidateRevisionSchema)
+	candidateRevisionSchemaBindingV2 := BindingForText("story_candidate_revision.schema", 2, candidateRevisionSchemaV2)
 	materialPromptBinding := BindingForText("author_material.prompt", 1, []byte(authorMaterialPrompt))
 	materialSchemaBinding := BindingForText("author_material.schema", 1, authorMaterialSchema)
 	fillPromptBinding := BindingForText("author_plan_fill.prompt", 1, []byte(authorPlanFillPrompt))
@@ -155,6 +166,7 @@ func Builtin() (*Registry, error) {
 	castPromptBindingV2 := BindingForText("story_cast.prompt", 2, []byte(storyCastPromptV2))
 	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 1, []byte(storyRoadmapPrompt))
 	roadmapPromptBindingV2 := BindingForText("story_roadmap.prompt", 2, []byte(storyRoadmapPromptV2))
+	roadmapPromptBindingV3 := BindingForText("story_roadmap.prompt", 3, []byte(storyRoadmapPromptV3))
 	planPromptBinding := BindingForText("chapter_plan.prompt", 1, []byte(chapterPlanPrompt))
 	directorPromptBinding := BindingForText("chapter_plan.prompt", 2, []byte(chapterDirectorPrompt))
 	writerPromptBinding := BindingForText("prose_writer.prompt", 1, []byte(proseWriterPrompt))
@@ -172,6 +184,7 @@ func Builtin() (*Registry, error) {
 	castSchemaV2 := BindingForText("story_cast.schema", 2, storyCastSchemaV2)
 	roadmapSchema := BindingForText("story_roadmap.schema", 1, storyRoadmapSchema)
 	roadmapSchemaV2 := BindingForText("story_roadmap.schema", 2, storyRoadmapSchemaV2)
+	roadmapSchemaV3 := BindingForText("story_roadmap.schema", 3, storyRoadmapSchemaV3)
 	planSchema := BindingForText("chapter_plan.schema", 1, chapterPlanSchema)
 	directorSchema := BindingForText("chapter_plan.schema", 2, chapterDirectorSchema)
 	reviewSchema := BindingForText("review_bundle.schema", 1, reviewBundleSchema)
@@ -377,6 +390,10 @@ func Builtin() (*Registry, error) {
 		StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2, agentdomain.TaskStoryRoadmap,
 		roadmapPromptBindingV2, roadmapSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
 	)
+	roadmapV3 := productGenerateAndReview(
+		StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV3, agentdomain.TaskStoryRoadmap,
+		roadmapPromptBindingV3, roadmapSchemaV3, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000,
+	)
 	authorRevise := agentdomain.WorkflowDefinition{
 		ID: StoryAuthorReviseWorkflowID, Version: StoryProductWorkflowVersion, TaskKind: agentdomain.TaskReviseBlueprint,
 		EntryNodeID: "revise", ResultNodeID: "revise", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
@@ -401,12 +418,15 @@ func Builtin() (*Registry, error) {
 		fillPromptBinding, castSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
 	authorRoadmap := productGenerateAndReview("story.author_roadmap", 1, agentdomain.TaskStoryRoadmap,
 		fillPromptBinding, roadmapSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
+	authorRoadmapV2 := productGenerateAndReview("story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2, agentdomain.TaskStoryRoadmap,
+		fillPromptBinding, roadmapSchemaV3, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000)
 	workflows := []ports.WorkflowAsset{
-		workflowAsset(candidateRevisionWorkflow(candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
-		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap),
+		workflowAsset(candidateRevisionWorkflow(1, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
+		workflowAsset(candidateRevisionWorkflow(StoryCandidateRevisionWorkflowVersionV2, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBindingV2, reviewSchema, assembler)),
+		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap), workflowAsset(authorRoadmapV2),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
-		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(peopleWorldV2), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
+		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(peopleWorldV2), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(roadmapV3), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
 	}
 	return New(
 		workflows,
@@ -423,6 +443,7 @@ func Builtin() (*Registry, error) {
 			{Binding: castPromptBindingV2, Template: storyCastPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: roadmapPromptBinding, Template: storyRoadmapPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: roadmapPromptBindingV2, Template: storyRoadmapPromptV2, Variables: []string{"Task", "Context"}},
+			{Binding: roadmapPromptBindingV3, Template: storyRoadmapPromptV3, Variables: []string{"Task", "Context"}},
 			{Binding: planPromptBinding, Template: chapterPlanPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: directorPromptBinding, Template: chapterDirectorPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: writerPromptBinding, Template: proseWriterPrompt, Variables: []string{"Task", "Context", "Plan"}},
@@ -444,6 +465,7 @@ func Builtin() (*Registry, error) {
 		},
 		[]ports.SchemaAsset{
 			{Binding: candidateRevisionSchemaBinding, JSON: candidateRevisionSchema},
+			{Binding: candidateRevisionSchemaBindingV2, JSON: candidateRevisionSchemaV2},
 			{Binding: materialSchemaBinding, JSON: authorMaterialSchema},
 			{Binding: draftSchema, JSON: chapterDraftSchema},
 			{Binding: blueprintSchema, JSON: storyBlueprintSchema},
@@ -453,6 +475,7 @@ func Builtin() (*Registry, error) {
 			{Binding: castSchemaV2, JSON: storyCastSchemaV2},
 			{Binding: roadmapSchema, JSON: storyRoadmapSchema},
 			{Binding: roadmapSchemaV2, JSON: storyRoadmapSchemaV2},
+			{Binding: roadmapSchemaV3, JSON: storyRoadmapSchemaV3},
 			{Binding: planSchema, JSON: chapterPlanSchema},
 			{Binding: directorSchema, JSON: chapterDirectorSchema},
 			{Binding: reviewSchema, JSON: reviewBundleSchema},

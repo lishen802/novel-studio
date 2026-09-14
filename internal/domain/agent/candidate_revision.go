@@ -30,7 +30,7 @@ func (output StoryCandidateRevisionOutput) Validate() error {
 		}
 		kind = TaskStoryCast
 	case "roadmap":
-		if output.PayloadSchemaRef != "story_roadmap.schema@2" {
+		if output.PayloadSchemaRef != "story_roadmap.schema@2" && output.PayloadSchemaRef != "story_roadmap.schema@3" {
 			return ErrInvalidTaskOutput
 		}
 		kind = TaskStoryRoadmap
@@ -49,6 +49,9 @@ func (output StoryCandidateRevisionOutput) Validate() error {
 	}
 	if cast, ok := decoded.(*StoryCastOutput); ok {
 		return cast.ValidateStableReferences()
+	}
+	if road, ok := decoded.(*StoryRoadmapOutput); ok && output.PayloadSchemaRef == "story_roadmap.schema@3" {
+		return road.ValidatePlanningGoals()
 	}
 	return decoded.Validate()
 }

@@ -14,6 +14,7 @@ import (
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	"github.com/lishen802/novel-studio/internal/persistence/sqlite"
 )
 
@@ -384,6 +385,120 @@ func TestConfirmArchiveReplaysIdempotentlyDespiteCandidateChange(t *testing.T) {
 	}
 }
 
+func TestConfirmArchiveRejectsV2RoadmapLabeledAsV3(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSessionWithRoadmapSchema(t, bridge, project.ID, peopleWorldPayload, roadmapPayload, 3)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PreviewConfirmArchive(ctx, project.ID); err == nil {
+		t.Fatal("缺少规划目标的 v2 载荷不能按 v3 入档")
+	}
+}
+
+func TestConfirmArchiveDoesNotInventPlanningForV2Arcs(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSession(t, bridge, project.ID)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{
+		ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "v2-no-planning",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := raw.ListOutlineNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range nodes {
+		if node.Level == storydomain.LevelArc && node.PlanningJSON != "" && node.PlanningJSON != "{}" {
+			t.Fatalf("旧 v2 弧被伪造了规划目标: %s", node.PlanningJSON)
+		}
+	}
+}
+
+func TestConfirmArchivePreservesArcPlanningGoals(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	seedArchiveSessionWithRoadmapSchema(t, bridge, project.ID, peopleWorldPayload, roadmapPayloadV3, 3)
+	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
+		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, err := service.LockCandidateField(ctx, project.ID, "roadmap-1", "/arcs/@arc-1/reader_expectation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited, err := service.SaveFields(ctx, project.ID, SaveFieldsRequest{
+		CandidateID: locked.ID, Changes: map[string]string{"/arcs/@arc-1/stage_payoff": "开城救人后公开承担代价"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AcceptCandidate(ctx, project.ID, edited.ID); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmArchive(ctx, ArchiveRequest{
+		ProjectID: project.ID, ConfirmationDigest: preview.ConfirmationDigest, IdempotencyKey: "arc-goals",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := raw.ListOutlineNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var arc storydomain.OutlineNode
+	for _, node := range nodes {
+		if node.Level == storydomain.LevelArc {
+			arc = node
+			break
+		}
+	}
+	if arc.ID == "" || !strings.Contains(arc.PlanningJSON, "读者应感到守关人将被亲情撕裂") || !strings.Contains(arc.PlanningJSON, "开城救人后公开承担代价") ||
+		!strings.Contains(arc.PlanningJSON, "cmt-1") || !strings.Contains(arc.PlanningJSON, "潮汐神谕是否被篡改") {
+		t.Fatalf("故事弧规划目标未无损入档: %+v", arc)
+	}
+	view, err := service.Workbench(ctx, project.ID, "branch-1")
+	if err != nil || len(view.Roadmap.Arcs) != 1 || view.Roadmap.Arcs[0].ReaderExpectation == "" ||
+		view.Roadmap.Arcs[0].StagePayoff != "开城救人后公开承担代价" || len(view.Roadmap.Arcs[0].Commitments) != 1 {
+		t.Fatalf("工作台未投影规划目标: %+v, %v", view.Roadmap, err)
+	}
+}
+
 func TestConfirmArchiveWritesAssetsIdempotently(t *testing.T) {
 	ctx := context.Background()
 	raw, project := sqliteCreateStore(t)
@@ -564,6 +679,13 @@ func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
 		}
 		if node.ParentID != "" {
 			payload["parentId"] = node.ParentID
+		}
+		if node.PlanningJSON != "" && node.PlanningJSON != "{}" {
+			var planning any
+			if err := json.Unmarshal([]byte(node.PlanningJSON), &planning); err != nil {
+				t.Fatal(err)
+			}
+			payload["planning"] = planning
 		}
 		remember(node.ID, payload)
 	}
@@ -874,7 +996,15 @@ func seedArchiveSessionWithAllPayloads(t *testing.T, store Store, projectID, pro
 	return seedArchiveSessionWithCastVersion(t, store, projectID, proposalValue, peoplePayload, roadPayload, 2)
 }
 
+func seedArchiveSessionWithRoadmapSchema(t *testing.T, store Store, projectID, peoplePayload, roadPayload string, roadmapSchemaVersion int) creationdomain.Session {
+	return seedArchiveSessionWithSchemas(t, store, projectID, proposalPayload, peoplePayload, roadPayload, 2, roadmapSchemaVersion)
+}
+
 func seedArchiveSessionWithCastVersion(t *testing.T, store Store, projectID, proposalValue, peoplePayload, roadPayload string, castSchemaVersion int) creationdomain.Session {
+	return seedArchiveSessionWithSchemas(t, store, projectID, proposalValue, peoplePayload, roadPayload, castSchemaVersion, 1)
+}
+
+func seedArchiveSessionWithSchemas(t *testing.T, store Store, projectID, proposalValue, peoplePayload, roadPayload string, castSchemaVersion, roadmapSchemaVersion int) creationdomain.Session {
 	t.Helper()
 	now := testClock{}.Now()
 	session, err := creationdomain.NewSession("session-1", projectID, "branch-1", now)
@@ -908,7 +1038,7 @@ func seedArchiveSessionWithCastVersion(t *testing.T, store Store, projectID, pro
 	}
 	roadmap, err := creationdomain.NewCandidate(
 		"roadmap-1", session.ID, creationdomain.StageRoadmap, creationdomain.KindRoadmap,
-		1, "", "run-map", "art-map", roadPayload, "story_roadmap.schema", 1, now,
+		1, "", "run-map", "art-map", roadPayload, "story_roadmap.schema", roadmapSchemaVersion, now,
 	)
 	if err != nil {
 		t.Fatal(err)

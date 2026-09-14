@@ -32,6 +32,17 @@ type createOutlineNodeValue struct {
 	Conflict string                   `json:"conflict"`
 	Outcome  string                   `json:"outcome"`
 	Position int                      `json:"position"`
+	Planning json.RawMessage          `json:"planning,omitempty"`
+}
+
+func planningJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "{}"
+	}
+	if !json.Valid(raw) {
+		return "{}"
+	}
+	return string(raw)
 }
 
 // createRelationshipValue references characters by their resolved IDs. The
@@ -131,19 +142,20 @@ func prepareCreateOutlineOperation(
 		return preparedOperation{}, storydomain.ErrInvalidHierarchy
 	}
 	node := storydomain.OutlineNode{
-		ID:        operation.TargetID,
-		ProjectID: changeSet.ProjectID,
-		ParentID:  strings.TrimSpace(proposed.ParentID),
-		Level:     proposed.Level,
-		Title:     strings.TrimSpace(proposed.Title),
-		Summary:   strings.TrimSpace(proposed.Summary),
-		Goal:      strings.TrimSpace(proposed.Goal),
-		Conflict:  strings.TrimSpace(proposed.Conflict),
-		Outcome:   strings.TrimSpace(proposed.Outcome),
-		Position:  proposed.Position,
-		ChapterID: "",
-		CreatedAt: appliedAt,
-		UpdatedAt: appliedAt,
+		ID:           operation.TargetID,
+		ProjectID:    changeSet.ProjectID,
+		ParentID:     strings.TrimSpace(proposed.ParentID),
+		Level:        proposed.Level,
+		Title:        strings.TrimSpace(proposed.Title),
+		Summary:      strings.TrimSpace(proposed.Summary),
+		Goal:         strings.TrimSpace(proposed.Goal),
+		Conflict:     strings.TrimSpace(proposed.Conflict),
+		Outcome:      strings.TrimSpace(proposed.Outcome),
+		Position:     proposed.Position,
+		ChapterID:    "",
+		PlanningJSON: planningJSON(proposed.Planning),
+		CreatedAt:    appliedAt,
+		UpdatedAt:    appliedAt,
 	}
 	if node.Title == "" || node.Position < 1 {
 		return preparedOperation{}, storydomain.ErrBlankValue
@@ -152,10 +164,10 @@ func prepareCreateOutlineOperation(
 		result, err := tx.ExecContext(ctx, `
 			INSERT INTO outline_nodes (
 				id, project_id, parent_id, level, title, summary, goal, conflict,
-				outcome, position, chapter_id, created_at, updated_at, deleted_at
-			) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULL)
+				outcome, position, chapter_id, planning_json, created_at, updated_at, deleted_at
+			) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)
 		`, node.ID, node.ProjectID, node.ParentID, node.Level, node.Title, node.Summary,
-			node.Goal, node.Conflict, node.Outcome, node.Position, node.ChapterID,
+			node.Goal, node.Conflict, node.Outcome, node.Position, node.ChapterID, node.PlanningJSON,
 			formatTime(node.CreatedAt), formatTime(node.UpdatedAt))
 		if err != nil {
 			return nil, databaseOperationError("apply create outline node operation", err)

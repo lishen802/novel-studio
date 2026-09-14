@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["book", "volumes", "arcs", "near_term_chapters"],
+  "properties": {
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "proposition", "ending", "protagonist_arc", "inviolable"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "proposition": { "type": "string", "minLength": 1 },
+        "ending": { "type": "string", "minLength": 1 },
+        "protagonist_arc": { "type": "string", "minLength": 1 },
+        "inviolable": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "volumes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "goal", "conflict", "payoff", "position"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "goal": { "type": "string", "minLength": 1 },
+          "conflict": { "type": "string", "minLength": 1 },
+          "payoff": { "type": "string", "minLength": 1 },
+          "position": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "arcs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "volume_ref", "title", "causal_chain", "character_change", "foreshadowing", "position",
+          "reader_expectation", "stage_payoff", "irreversible_change", "ending_contribution",
+          "commitments", "retained_questions"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "volume_ref": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "causal_chain": { "type": "string", "minLength": 1 },
+          "character_change": { "type": "string", "minLength": 1 },
+          "reader_expectation": { "type": "string", "minLength": 1 },
+          "stage_payoff": { "type": "string", "minLength": 1 },
+          "irreversible_change": { "type": "string", "minLength": 1 },
+          "ending_contribution": { "type": "string", "minLength": 1 },
+          "commitments": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "statement", "fulfillment_range", "related_refs"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "statement": { "type": "string", "minLength": 1 },
+                "fulfillment_range": { "type": "string", "minLength": 1 },
+                "related_refs": { "type": "array", "maxItems": 20, "items": { "type": "string", "minLength": 1 } }
+              }
+            }
+          },
+          "commitments_omission": { "type": "string" },
+          "retained_questions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "statement", "reason"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "statement": { "type": "string", "minLength": 1 },
+                "reason": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "retained_questions_omission": { "type": "string" },
+          "foreshadowing": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1 } },
+          "position": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "near_term_chapters": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "arc_ref", "title", "goal", "conflict", "outcome", "anchors", "position"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "arc_ref": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "goal": { "type": "string", "minLength": 1 },
+          "conflict": { "type": "string", "minLength": 1 },
+          "outcome": { "type": "string", "minLength": 1 },
+          "anchors": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["strength", "statement"],
+              "properties": {
+                "strength": { "enum": ["hard", "soft", "forbidden"] },
+                "statement": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "position": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

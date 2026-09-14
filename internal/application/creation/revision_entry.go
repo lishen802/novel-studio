@@ -72,6 +72,16 @@ func revisionBinding() stageBinding {
 	return stageBinding{WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, Version: 1, SchemaID: "story_candidate_revision.schema", SchemaVersion: 1}
 }
 
+// revisionBindingFor 路线图 v3 使用允许规划目标字段的修订合同，旧四类载荷仍走冻结 v1。
+func revisionBindingFor(candidate creationdomain.Candidate) stageBinding {
+	binding := revisionBinding()
+	if candidate.Kind == creationdomain.KindRoadmap && candidate.PayloadSchemaVersion >= 3 {
+		binding.Version = agentassets.StoryCandidateRevisionWorkflowVersionV2
+		binding.SchemaVersion = 2
+	}
+	return binding
+}
+
 // PreviewRevision 冻结作者要求、候选、保持项、模型和费用范围；预览不调用模型。
 func (service *Service) PreviewRevision(ctx context.Context, projectID string, request RevisionRequest, profile agentdomain.ResolvedCreativeProfile) (RevisionView, error) {
 	mutex := service.lockProject(projectID)
@@ -128,14 +138,15 @@ func (service *Service) PreviewRevision(ctx context.Context, projectID string, r
 		}
 		seen[path] = true
 	}
-	compiled, err := service.compile(ctx, revisionBinding())
+	binding := revisionBindingFor(base)
+	compiled, err := service.compile(ctx, binding)
 	if err != nil {
 		return RevisionView{}, err
 	}
 	if !profile.RunBudgetUnlimited && profile.MaxRunTokens < compiled.RequiredTokenBudget() {
 		return RevisionView{}, agentkernel.ErrTokenBudget
 	}
-	cost := CostPreview{Stage: base.Stage, WorkflowID: compiled.Workflow.ID, WorkflowVersion: 1, EstimatedCalls: 2, MaxRunTokens: profile.MaxRunTokens, RunBudgetUnlimited: profile.RunBudgetUnlimited}
+	cost := CostPreview{Stage: base.Stage, WorkflowID: compiled.Workflow.ID, WorkflowVersion: binding.Version, EstimatedCalls: 2, MaxRunTokens: profile.MaxRunTokens, RunBudgetUnlimited: profile.RunBudgetUnlimited}
 	for _, role := range []agentdomain.Role{agentdomain.RolePlanner, agentdomain.RoleContinuityReviewer} {
 		found := false
 		for _, resolved := range profile.Roles {
@@ -279,7 +290,7 @@ func (service *Service) ConfirmRevision(ctx context.Context, projectID string, c
 	}
 	sort.Strings(preserve)
 	directive := agentdomain.RevisionDirective{Version: 1, Mode: agentdomain.RevisionAuthorDirected, BaseArtifactID: base.ArtifactID, BaseDigest: base.Digest, TargetRefs: input.Request.Paths, PreserveRefs: preserve, AuthorInstructionRef: input.Request.Instruction}
-	_, err = service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{RunID: input.RunID, ProjectID: projectID, BranchID: session.BranchID, CanonicalHead: input.ProjectDigest, AuthorInstruction: input.Request.Instruction, WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, WorkflowVersion: 1, Profile: input.Profile, Sources: input.Sources, BaseCandidate: &base, RevisionDirective: &directive, Deadline: now.Add(defaultRunTimeout)})
+	_, err = service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{RunID: input.RunID, ProjectID: projectID, BranchID: session.BranchID, CanonicalHead: input.ProjectDigest, AuthorInstruction: input.Request.Instruction, WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, WorkflowVersion: revisionBindingFor(input.Base).Version, Profile: input.Profile, Sources: input.Sources, BaseCandidate: &base, RevisionDirective: &directive, Deadline: now.Add(defaultRunTimeout)})
 	if err != nil {
 		service.failRevision(lease.Context(), executing, operation, "启动失败")
 		service.clearRunSlot(lease.Context(), projectID, input.RunID)

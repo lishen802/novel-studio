@@ -53,6 +53,27 @@ func TestWorkbenchReadDoesNotRecoverInterruptedRun(t *testing.T) {
 	}
 }
 
+func TestRoadmapProjectionKeepsArcPlanningGoals(t *testing.T) {
+	view := projectRoadmap(creationdomain.Candidate{ID: "roadmap-1", PayloadJSON: roadmapPayloadV3})
+	if view.Book.Title != "潮汐关" || len(view.Arcs) != 1 || view.Arcs[0].ID != "arc:arc-1" {
+		t.Fatalf("路线图基础投影错误: %+v", view)
+	}
+	arc := view.Arcs[0]
+	if arc.ReaderExpectation == "" || arc.StagePayoff == "" || arc.IrreversibleChange == "" ||
+		arc.EndingContribution == "" || len(arc.Commitments) != 1 || len(arc.RetainedQuestions) != 1 {
+		t.Fatalf("故事弧规划目标投影丢失: %+v", arc)
+	}
+	if arc.Commitments[0].ID != "cmt-1" || arc.Commitments[0].Detail == "" ||
+		arc.RetainedQuestions[0].ID != "q-1" || arc.RetainedQuestions[0].Detail == "" {
+		t.Fatalf("承诺或悬念引用丢失: %+v", arc)
+	}
+	legacy := projectRoadmap(creationdomain.Candidate{ID: "roadmap-legacy", PayloadJSON: roadmapPayload})
+	if len(legacy.Arcs) != 1 || legacy.Arcs[0].ReaderExpectation != "" || len(legacy.Arcs[0].Commitments) != 0 ||
+		len(legacy.Arcs[0].RetainedQuestions) != 0 {
+		t.Fatalf("旧 v2 不得伪造规划目标: %+v", legacy.Arcs)
+	}
+}
+
 func TestPeopleWorldProjectionUsesStableCharacterIDs(t *testing.T) {
 	const payload = `{"characters":[{"id":"char-a","name":"无名","role":"protagonist","aliases":[],"summary":"甲","motivation":"守城","fear":"","secret":"","arc":"承担"},{"id":"char-b","name":"无名","role":"antagonist","aliases":[],"summary":"乙","motivation":"破城","fear":"","secret":"","arc":"醒悟"}],"relationships":[{"id":"rel-1","source_character_ref":"char-a","target_character_ref":"char-b","kind":"rival","label":"宿敌","strength":-80}],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路","scope_type":"project"}],"forbidden":[],"omission_reasons":["无需其他分类"]}`
 	view := projectPeopleWorld(creationdomain.Candidate{ID: "people-1", PayloadJSON: payload})

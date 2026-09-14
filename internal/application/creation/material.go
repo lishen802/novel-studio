@@ -203,6 +203,13 @@ func (service *Service) UseMaterialCandidate(ctx context.Context, request UseMat
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
+	if request.Stage == creationdomain.StageRoadmap {
+		if road, decodeErr := decodeRoadmap(payload); decodeErr == nil && road.ValidatePlanningGoals() != nil {
+			binding.WorkflowID = "story.author_roadmap"
+			binding.Version = 1
+			binding.SchemaVersion = 2
+		}
+	}
 	version := 1
 	for _, old := range candidates {
 		if old.Stage == request.Stage && old.Version >= version {

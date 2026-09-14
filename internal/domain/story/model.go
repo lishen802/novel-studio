@@ -29,20 +29,21 @@ var outlineLevelOrder = map[OutlineLevel]int{
 }
 
 type OutlineNode struct {
-	ID        string
-	ProjectID string
-	ParentID  string
-	Level     OutlineLevel
-	Title     string
-	Summary   string
-	Goal      string
-	Conflict  string
-	Outcome   string
-	Position  int
-	ChapterID string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time
+	ID           string
+	ProjectID    string
+	ParentID     string
+	Level        OutlineLevel
+	Title        string
+	Summary      string
+	Goal         string
+	Conflict     string
+	Outcome      string
+	Position     int
+	ChapterID    string
+	PlanningJSON string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
 }
 
 func NewOutlineNode(id, projectID string, parent *OutlineNode, level OutlineLevel, title string, position int, now time.Time) (OutlineNode, error) {
@@ -95,6 +96,17 @@ func (n OutlineNode) UpdateContent(
 	n.Outcome = strings.TrimSpace(outcome)
 	n.UpdatedAt = now.UTC()
 	return n, nil
+}
+
+// WithPlanning 写入版本化规划载荷；空值规范为 JSON 对象，避免把缺失目标伪装成已验证。
+func (n OutlineNode) WithPlanning(planningJSON string, now time.Time) OutlineNode {
+	planningJSON = strings.TrimSpace(planningJSON)
+	if planningJSON == "" {
+		planningJSON = "{}"
+	}
+	n.PlanningJSON = planningJSON
+	n.UpdatedAt = now.UTC()
+	return n
 }
 
 type StoryLineStatus string

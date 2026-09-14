@@ -20,11 +20,12 @@ import (
 )
 
 type outlineNodeValue struct {
-	Title    string `json:"title"`
-	Summary  string `json:"summary"`
-	Goal     string `json:"goal"`
-	Conflict string `json:"conflict"`
-	Outcome  string `json:"outcome"`
+	Title    string          `json:"title"`
+	Summary  string          `json:"summary"`
+	Goal     string          `json:"goal"`
+	Conflict string          `json:"conflict"`
+	Outcome  string          `json:"outcome"`
+	Planning json.RawMessage `json:"planning,omitempty"`
 }
 
 type characterValue struct {
@@ -420,7 +421,7 @@ func prepareOutlineOperation(
 ) (preparedOperation, error) {
 	current, err := scanOutlineNode(tx.QueryRowContext(ctx, `
 		SELECT id, project_id, COALESCE(parent_id, ''), level, title, summary, goal,
-			conflict, outcome, position, COALESCE(chapter_id, ''), created_at, updated_at
+			conflict, outcome, position, COALESCE(chapter_id, ''), COALESCE(planning_json, '{}'), created_at, updated_at
 		FROM outline_nodes WHERE id = ? AND deleted_at IS NULL
 	`, operation.TargetID))
 	if err != nil || current.ProjectID != changeSet.ProjectID ||
@@ -440,11 +441,12 @@ func prepareOutlineOperation(
 	if err != nil {
 		return preparedOperation{}, err
 	}
+	updated = updated.WithPlanning(planningJSON(proposed.Planning), appliedAt)
 	return preparedOperation{apply: func() (*projectdomain.Chapter, error) {
 		result, err := tx.ExecContext(ctx, `
-			UPDATE outline_nodes SET title = ?, summary = ?, goal = ?, conflict = ?, outcome = ?, updated_at = ?
+			UPDATE outline_nodes SET title = ?, summary = ?, goal = ?, conflict = ?, outcome = ?, planning_json = ?, updated_at = ?
 			WHERE id = ? AND project_id = ? AND deleted_at IS NULL
-		`, updated.Title, updated.Summary, updated.Goal, updated.Conflict, updated.Outcome,
+		`, updated.Title, updated.Summary, updated.Goal, updated.Conflict, updated.Outcome, updated.PlanningJSON,
 			formatTime(updated.UpdatedAt), updated.ID, updated.ProjectID)
 		if err != nil {
 			return nil, databaseOperationError("apply outline change operation", err)

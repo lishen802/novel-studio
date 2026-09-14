@@ -266,14 +266,35 @@ type RoadmapVolume struct {
 	Position int    `json:"position"`
 }
 
+type RoadmapCommitment struct {
+	ID               string   `json:"id"`
+	Statement        string   `json:"statement"`
+	FulfillmentRange string   `json:"fulfillment_range"`
+	RelatedRefs      []string `json:"related_refs"`
+}
+
+type RoadmapRetainedQuestion struct {
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	Reason    string `json:"reason"`
+}
+
 type RoadmapArc struct {
-	ID              string   `json:"id"`
-	VolumeRef       string   `json:"volume_ref"`
-	Title           string   `json:"title"`
-	CausalChain     string   `json:"causal_chain"`
-	CharacterChange string   `json:"character_change"`
-	Foreshadowing   []string `json:"foreshadowing"`
-	Position        int      `json:"position"`
+	ID                        string                    `json:"id"`
+	VolumeRef                 string                    `json:"volume_ref"`
+	Title                     string                    `json:"title"`
+	CausalChain               string                    `json:"causal_chain"`
+	CharacterChange           string                    `json:"character_change"`
+	ReaderExpectation         string                    `json:"reader_expectation,omitempty"`
+	StagePayoff               string                    `json:"stage_payoff,omitempty"`
+	IrreversibleChange        string                    `json:"irreversible_change,omitempty"`
+	EndingContribution        string                    `json:"ending_contribution,omitempty"`
+	Commitments               []RoadmapCommitment       `json:"commitments,omitempty"`
+	CommitmentsOmission       string                    `json:"commitments_omission,omitempty"`
+	RetainedQuestions         []RoadmapRetainedQuestion `json:"retained_questions,omitempty"`
+	RetainedQuestionsOmission string                    `json:"retained_questions_omission,omitempty"`
+	Foreshadowing             []string                  `json:"foreshadowing"`
+	Position                  int                       `json:"position"`
 }
 
 // RoadmapAnchor 是带强度与语句的结构化锚点；字符串锚点属于旧载荷，强度为空。
@@ -392,6 +413,75 @@ func (output StoryRoadmapOutput) Validate() error {
 		return ErrInvalidTaskOutput
 	}
 	return nil
+}
+
+// ValidatePlanningGoals 校验故事弧规划目标。这些是待实现目标，不能把空值解释成已兑现。
+// 旧 v2 载荷可解码且通过 Validate，但不得因此被当成 v3 已验证。
+func (output StoryRoadmapOutput) ValidatePlanningGoals() error {
+	if err := output.Validate(); err != nil {
+		return err
+	}
+	for _, arc := range output.Arcs {
+		if blank(arc.ReaderExpectation) || blank(arc.StagePayoff) || blank(arc.IrreversibleChange) || blank(arc.EndingContribution) {
+			return ErrInvalidTaskOutput
+		}
+		if err := validatePlanningList(len(arc.Commitments), arc.CommitmentsOmission); err != nil {
+			return err
+		}
+		seenCommitments := map[string]bool{}
+		for _, item := range arc.Commitments {
+			id := strings.TrimSpace(item.ID)
+			if id == "" || seenCommitments[id] || blank(item.Statement) || blank(item.FulfillmentRange) || hasBlank(item.RelatedRefs) {
+				return ErrInvalidTaskOutput
+			}
+			seenCommitments[id] = true
+		}
+		if err := validatePlanningList(len(arc.RetainedQuestions), arc.RetainedQuestionsOmission); err != nil {
+			return err
+		}
+		seenQuestions := map[string]bool{}
+		for _, item := range arc.RetainedQuestions {
+			id := strings.TrimSpace(item.ID)
+			if id == "" || seenQuestions[id] || blank(item.Statement) || blank(item.Reason) {
+				return ErrInvalidTaskOutput
+			}
+			seenQuestions[id] = true
+		}
+	}
+	return nil
+}
+
+func validatePlanningList(count int, omission string) error {
+	if count == 0 && blank(omission) {
+		return ErrInvalidTaskOutput
+	}
+	if count > 0 && strings.TrimSpace(omission) != "" {
+		return ErrInvalidTaskOutput
+	}
+	return nil
+}
+
+// PlanningObject 返回可入档的故事弧目标载荷；旧 v2 没有目标时返回 nil，不伪造空目标。
+func (arc RoadmapArc) PlanningObject() map[string]any {
+	if blank(arc.ReaderExpectation) && blank(arc.StagePayoff) && blank(arc.IrreversibleChange) &&
+		blank(arc.EndingContribution) && len(arc.Commitments) == 0 && len(arc.RetainedQuestions) == 0 {
+		return nil
+	}
+	object := map[string]any{
+		"reader_expectation":  arc.ReaderExpectation,
+		"stage_payoff":        arc.StagePayoff,
+		"irreversible_change": arc.IrreversibleChange,
+		"ending_contribution": arc.EndingContribution,
+		"commitments":         arc.Commitments,
+		"retained_questions":  arc.RetainedQuestions,
+	}
+	if strings.TrimSpace(arc.CommitmentsOmission) != "" {
+		object["commitments_omission"] = arc.CommitmentsOmission
+	}
+	if strings.TrimSpace(arc.RetainedQuestionsOmission) != "" {
+		object["retained_questions_omission"] = arc.RetainedQuestionsOmission
+	}
+	return object
 }
 
 func hasBlank(values []string) bool {

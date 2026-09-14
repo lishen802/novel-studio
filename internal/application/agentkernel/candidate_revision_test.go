@@ -73,6 +73,55 @@ var candidateRevisionFixtures = []struct{ kind, schema, path, payload string }{
 	{"roadmap", "story_roadmap.schema@2", "/book/title", `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`},
 }
 
+func TestStoryCandidateRevisionKeepsRoadmapV3PlanningGoals(t *testing.T) {
+	payload := `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","reader_expectation":"读者应感到守关人将被亲情撕裂","stage_payoff":"开城救人并失去军职","irreversible_change":"阿绫不再以军令为最高准则","ending_contribution":"为终局选择救人立下先例","commitments":[{"id":"cmt-1","statement":"旧令牌兑现身份","fulfillment_range":"本弧末章","related_refs":["arc-1"]}],"retained_questions":[{"id":"q-1","statement":"潮汐神谕是否被篡改","reason":"留给后续卷揭示"}],"foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`
+	path := "/arcs/@arc-1/reader_expectation"
+	original := agentdomain.StoryCandidateRevisionOutput{CandidateKind: "roadmap", PayloadSchemaRef: "story_roadmap.schema@3", Payload: json.RawMessage(payload)}
+	raw, _ := json.Marshal(original)
+	revised, err := (creationdomain.Candidate{PayloadJSON: payload}).EditTextFields(map[string]string{path: "作者改写后的读者期待"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := original
+	output.Payload = json.RawMessage(revised)
+	reply, _ := json.Marshal(output)
+	base, directive := authorDirectedBase()
+	base.Content = string(raw)
+	base.Digest = agentdomain.SHA256Hex(raw)
+	directive.BaseDigest = base.Digest
+	directive.TargetRefs = []string{path}
+	directive.PreserveRefs = nil
+	req := authorDirectedRequest(base, directive)
+	req.ChapterID = ""
+	req.ChapterBaseRevision = 0
+	req.WorkflowID = agentassets.StoryCandidateRevisionWorkflowID
+	req.WorkflowVersion = agentassets.StoryCandidateRevisionWorkflowVersionV2
+	req.Profile.MaxRunTokens = 100000
+	req.Profile.MaxContextChars = 100000
+	req.Profile.Roles = append(req.Profile.Roles, resolvedRole(agentdomain.RoleContinuityReviewer, "independent-review-model"))
+	registry, err := agentassets.Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &sequenceProvider{replies: []providerReply{{text: string(reply), inputTokens: 10, outputTokens: 30}, {text: `{"quality_status":"passed","summary":"修订符合要求","findings":[]}`, inputTokens: 10, outputTokens: 20}}}
+	store := newMemoryStore()
+	service := NewService(store, credentialStub{}, providerFactoryStub{provider}, Registries{Workflows: registry, Prompts: registry, Schemas: registry, Assemblers: registry}, fixedRunnerClock{}, &sequenceIDs{}, nil)
+	run, err := service.CreateRun(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.ExecuteRun(context.Background(), run.ID, "head-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != agentdomain.RunCompleted || completed.QualityStatus != agentdomain.QualityPassed {
+		t.Fatalf("v3 路线图修订未完成: %+v", completed)
+	}
+	if !strings.Contains(revised, "作者改写后的读者期待") || !strings.Contains(revised, "开城救人并失去军职") || !strings.Contains(revised, "cmt-1") {
+		t.Fatal("规划目标在修订中丢失")
+	}
+}
+
 func TestStoryCandidateRevisionStopsUnsafeOutput(t *testing.T) {
 	for _, scenario := range []string{"越界", "审阅失败", "基线无效", "严重问题"} {
 		t.Run(scenario, func(t *testing.T) {

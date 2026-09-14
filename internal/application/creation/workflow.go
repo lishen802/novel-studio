@@ -44,8 +44,8 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 		}, nil
 	case creationdomain.StageRoadmap:
 		return stageBinding{
-			WorkflowID: agentassets.StoryRoadmapWorkflowID, Version: agentassets.StoryRoadmapWorkflowVersionV2,
-			Kind: creationdomain.KindRoadmap, SchemaID: "story_roadmap.schema", SchemaVersion: 2,
+			WorkflowID: agentassets.StoryRoadmapWorkflowID, Version: agentassets.StoryRoadmapWorkflowVersionV3,
+			Kind: creationdomain.KindRoadmap, SchemaID: "story_roadmap.schema", SchemaVersion: 3,
 			Stage: stage,
 		}, nil
 	default:
@@ -68,6 +68,14 @@ func bindingByWorkflow(workflowID string, version int) (stageBinding, error) {
 	if workflowID == agentassets.StoryRoadmapWorkflowID && version == 1 {
 		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindRoadmap,
 			SchemaID: "story_roadmap.schema", SchemaVersion: 1, Stage: creationdomain.StageRoadmap}, nil
+	}
+	if workflowID == agentassets.StoryRoadmapWorkflowID && version == agentassets.StoryRoadmapWorkflowVersionV2 {
+		return stageBinding{WorkflowID: workflowID, Version: version, Kind: creationdomain.KindRoadmap,
+			SchemaID: "story_roadmap.schema", SchemaVersion: 2, Stage: creationdomain.StageRoadmap}, nil
+	}
+	if workflowID == "story.author_roadmap" && version == 1 {
+		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindRoadmap,
+			SchemaID: "story_roadmap.schema", SchemaVersion: 2, Stage: creationdomain.StageRoadmap}, nil
 	}
 	for _, stage := range generateStages() {
 		binding, err := bindingFor(stage)
@@ -272,7 +280,7 @@ func bindingForEntry(kind creationdomain.EntryKind, stage creationdomain.Stage) 
 		binding.Version = 1
 	case creationdomain.StageRoadmap:
 		binding.WorkflowID = "story.author_roadmap"
-		binding.Version = 1
+		binding.Version = agentassets.StoryAuthorRoadmapWorkflowVersionV2
 	}
 	return binding, nil
 }

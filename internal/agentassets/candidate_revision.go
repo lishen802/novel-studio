@@ -14,12 +14,16 @@ var (
 	candidateRevisionReviewPrompt string
 	//go:embed assets/schemas/story_candidate_revision_v1.json
 	candidateRevisionSchema []byte
+	//go:embed assets/schemas/story_candidate_revision_v2.json
+	candidateRevisionSchemaV2 []byte
 )
 
+const StoryCandidateRevisionWorkflowVersionV2 = 2
+
 // candidateRevisionWorkflow 冻结先修订后独立审阅的流程，结果质量由审阅出口决定。
-func candidateRevisionWorkflow(revise, review, schema, reviewSchema, assembler agentdomain.VersionBinding) agentdomain.WorkflowDefinition {
+func candidateRevisionWorkflow(version int, revise, review, schema, reviewSchema, assembler agentdomain.VersionBinding) agentdomain.WorkflowDefinition {
 	return agentdomain.WorkflowDefinition{
-		ID: StoryCandidateRevisionWorkflowID, Version: 1, TaskKind: agentdomain.TaskReviseStoryCandidate,
+		ID: StoryCandidateRevisionWorkflowID, Version: version, TaskKind: agentdomain.TaskReviseStoryCandidate,
 		EntryNodeID: "revise", ResultNodeID: "review", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
 		MaxRevisionAttempts: 0, MaxRunTokens: 30000, RepairReserve: 1000,
 		Nodes: []agentdomain.WorkflowNode{

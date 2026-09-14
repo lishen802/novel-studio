@@ -19,7 +19,7 @@ import {
   Target,
   User,
 } from 'lucide-react';
-import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView } from '../api/studio';
+import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView, type RoadmapNodeView } from '../api/studio';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
@@ -79,6 +79,52 @@ function previousStage(stage: string): string | null {
   const rail = ['intent', 'directions', 'proposal', 'people_world', 'roadmap', 'archive_confirm'];
   const index = rail.indexOf(stage);
   return index > 0 ? rail[index - 1] : null;
+}
+
+function roadmapNavItems(roadmap: CreationWorkbenchView['roadmap']): Array<{ id: string; title: string; kind: string; depth: number; node: RoadmapNodeView }> {
+  const items: Array<{ id: string; title: string; kind: string; depth: number; node: RoadmapNodeView }> = [];
+  if (roadmap.book.id || roadmap.book.title) {
+    items.push({ id: roadmap.book.id || 'book', title: roadmap.book.title || '全书', kind: 'book', depth: 0, node: roadmap.book });
+  }
+  roadmap.volumes.forEach((node) => items.push({ id: node.id, title: node.title, kind: 'volume', depth: 1, node }));
+  roadmap.arcs.forEach((node) => items.push({ id: node.id, title: node.title, kind: 'arc', depth: 2, node }));
+  roadmap.chapters.forEach((node) => items.push({ id: node.id, title: `近章 ${node.position} · ${node.title}`, kind: 'chapter', depth: 3, node }));
+  return items;
+}
+
+function RoadmapGoalBlock({ node }: { node: RoadmapNodeView }) {
+  const goals: Array<[string, string]> = [
+    ['读者期待', node.readerExpectation ?? ''],
+    ['阶段回报', node.stagePayoff ?? ''],
+    ['不可逆变化', node.irreversibleChange ?? ''],
+    ['终局贡献', node.endingContribution ?? ''],
+  ];
+  const visible = goals.filter(([, value]) => value.trim());
+  if (!visible.length && !node.commitments?.length && !node.retainedQuestions?.length) return null;
+  return (
+    <div className="mt-3 space-y-3">
+      {visible.map(([label, value]) => (
+        <div key={label}>
+          <p className="text-xs text-text-sub">{label}</p>
+          <p className="text-sm text-text leading-relaxed">{value}</p>
+        </div>
+      ))}
+      {(node.commitments ?? []).map((item) => (
+        <div key={`cmt-${item.id}`}>
+          <p className="text-xs text-text-sub">待兑现承诺</p>
+          <p className="text-sm text-text leading-relaxed">{item.statement}</p>
+          {item.detail && <p className="text-xs text-text-muted mt-1">兑现范围：{item.detail}</p>}
+        </div>
+      ))}
+      {(node.retainedQuestions ?? []).map((item) => (
+        <div key={`q-${item.id}`}>
+          <p className="text-xs text-text-sub">保留悬念</p>
+          <p className="text-sm text-text leading-relaxed">{item.statement}</p>
+          {item.detail && <p className="text-xs text-text-muted mt-1">{item.detail}</p>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function Cockpit() {
@@ -245,6 +291,8 @@ export default function Cockpit() {
 
   const cards = workbench.directionSet.cards;
   const selectedEntity = workbench.peopleWorld.entities.find((item) => item.id === entityId) ?? workbench.peopleWorld.entities[0];
+  const roadmapItems = roadmapNavItems(workbench.roadmap);
+  const selectedRoadmap = roadmapItems.find((item) => item.id === entityId) ?? roadmapItems.find((item) => item.kind === 'arc') ?? roadmapItems[0];
 
   return (
     <div className="h-full flex flex-col animate-fade-up -m-6">
@@ -329,13 +377,16 @@ export default function Cockpit() {
                 {entity.title}
               </button>
             ))}
-            {workbench.stage === 'roadmap' && (
-              <div className="space-y-2 text-sm">
-                <p className="font-medium text-text">{workbench.roadmap.book.title || '全书'}</p>
-                {workbench.roadmap.volumes.map((node) => <p key={node.id} className="text-text-sub">{node.title}</p>)}
-                {workbench.roadmap.chapters.map((node) => <p key={node.id} className="text-text-muted pl-2">{node.title}</p>)}
-              </div>
-            )}
+            {workbench.stage === 'roadmap' && roadmapItems.map((item) => (
+              <button
+                key={item.id}
+                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1', selectedRoadmap?.id === item.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
+                style={{ paddingLeft: 8 + item.depth * 12 }}
+                onClick={() => setEntityId(item.id)}
+              >
+                {item.title}
+              </button>
+            ))}
           </aside>
         )}
 
@@ -482,19 +533,13 @@ export default function Cockpit() {
             </Card>
           )}
 
-          {workbench.stage === 'roadmap' && (
-            <div className="max-w-3xl space-y-3">
-              <Card>
-                <h2 className="text-base font-medium text-text">{workbench.roadmap.book.title || '全书'}</h2>
-                <p className="text-sm text-text-sub mt-1">{workbench.roadmap.book.summary}</p>
-              </Card>
-              {workbench.roadmap.volumes.map((node) => (
-                <Card key={node.id}><p className="text-sm font-medium text-text">{node.title}</p><p className="text-sm text-text-sub">{node.summary}</p></Card>
-              ))}
-              {workbench.roadmap.chapters.map((node) => (
-                <Card key={node.id}><p className="text-sm font-medium text-text">近章 {node.position} · {node.title}</p><p className="text-sm text-text-sub">{node.summary}</p></Card>
-              ))}
-            </div>
+          {workbench.stage === 'roadmap' && selectedRoadmap && (
+            <Card className="max-w-3xl">
+              <p className="text-xs text-text-sub mb-1">{selectedRoadmap.kind === 'book' ? '全书' : selectedRoadmap.kind === 'volume' ? '卷' : selectedRoadmap.kind === 'arc' ? '故事弧' : '近期章节'}</p>
+              <h2 className="text-base font-medium text-text">{selectedRoadmap.node.title || selectedRoadmap.title}</h2>
+              <p className="text-sm text-text-sub mt-1">{selectedRoadmap.node.summary}</p>
+              {selectedRoadmap.kind === 'arc' && <RoadmapGoalBlock node={selectedRoadmap.node} />}
+            </Card>
           )}
 
           {workbench.stage === 'archive_confirm' && (
