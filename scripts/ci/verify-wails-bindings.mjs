@@ -26,6 +26,10 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Revision preview", apiDeclaration, "PreviewCreationRevision(arg1:creation.RevisionRequest):Promise<creation.RevisionView>"],
+ ["Revision confirmation", apiDeclaration, "ConfirmCreationRevision(arg1:creation.RevisionCommand):Promise<creation.RevisionView>"],
+ ["Revision adoption", apiDeclaration, "ApplyCreationRevision(arg1:creation.RevisionCommand):Promise<creation.WorkbenchView>"],
+ ["Revision rejection", apiRuntime, "export function RejectCreationRevision(arg1)"],
  ["SaveCreationFields declaration",apiDeclaration,"SaveCreationFields(arg1:creation.SaveFieldsRequest):Promise<creation.WorkbenchView>"],
  ["SaveCreationSample declaration", apiDeclaration, "SaveCreationSample(arg1:creation.SaveSampleRequest):Promise<creation.WorkbenchView>"],
  ["SaveCreationSample runtime", apiRuntime, "export function SaveCreationSample(arg1)"],

@@ -1101,6 +1101,11 @@ func (kernel *fakeKernel) fakeSteps(request agentkernel.CreateRequest, payload s
 		})
 		artifacts = append(artifacts, agentdomain.Artifact{ID: artifactID, RunID: request.RunID, Content: content})
 	}
+	if request.WorkflowID == agentassets.StoryCandidateRevisionWorkflowID {
+		appendStep("revise", agentdomain.CapabilityBoundedRevision, payload)
+		appendStep("review", agentdomain.CapabilityContinuityReview, `{"quality_status":"passed","summary":"独立审阅通过","findings":[]}`)
+		return steps, artifacts
+	}
 	if request.WorkflowID == agentassets.StoryAuthorReviseWorkflowID {
 		appendStep("revise", agentdomain.CapabilityBoundedRevision, payload)
 		return steps, artifacts

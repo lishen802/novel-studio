@@ -214,7 +214,7 @@ func (s *Store) CreateAgentRunBundle(ctx context.Context, bundle agentdomain.Run
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 	`,
-		run.ID, run.ProjectID, run.ChapterID, run.ChapterBaseRevision, run.Prompt, run.Status,
+		run.ID, run.ProjectID, nullString(run.ChapterID), run.ChapterBaseRevision, run.Prompt, run.Status,
 		run.ErrorCode, run.ErrorMessage, run.ChangeSetID, run.RetryOf,
 		formatTime(run.CreatedAt), formatTime(run.UpdatedAt), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
 		run.TokenBudget, run.ContextCharBudget, boolToInt(run.TokenBudgetUnlimited), boolToInt(run.ContextBudgetUnlimited),
@@ -337,7 +337,7 @@ func execUpdateAgentRun(ctx context.Context, exec txExecutor, run agentdomain.Ru
 
 func (s *Store) AgentRun(ctx context.Context, id string) (agentdomain.Run, error) {
 	run, err := scanAgentRun(s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
+		SELECT id, project_id, COALESCE(chapter_id, ''), chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
 			created_at, updated_at, started_at, completed_at,
 			token_budget, context_char_budget, token_budget_unlimited, context_budget_unlimited,
@@ -362,7 +362,7 @@ func (s *Store) ListAgentRuns(ctx context.Context, limit int) ([]agentdomain.Run
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, chapter_id, chapter_base_revision, prompt, status,
+		SELECT id, project_id, COALESCE(chapter_id, ''), chapter_base_revision, prompt, status,
 			error_code, error_message, COALESCE(change_set_id, ''), COALESCE(retry_of, ''),
 			created_at, updated_at, started_at, completed_at,
 			token_budget, context_char_budget, token_budget_unlimited, context_budget_unlimited,

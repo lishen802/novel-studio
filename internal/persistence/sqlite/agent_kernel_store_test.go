@@ -384,3 +384,32 @@ func testAgentFinding(runID, stepID string, now time.Time) agentdomain.ReviewFin
 		RunID: runID, StepID: stepID, Attempt: 1, CreatedAt: now, UpdatedAt: now,
 	}
 }
+
+func TestProjectRevisionRunNeedsNoChapter(t *testing.T) {
+	ctx := context.Background()
+	store, project, chapter := createStoreWithChapter(t)
+	defer store.Close()
+	run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, time.Unix(3000, 0).UTC())
+	run.TaskKind = agentdomain.TaskReviseStoryCandidate
+	run.ChapterID = ""
+	run.ChapterBaseRevision = 0
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err != nil {
+		t.Fatal(err)
+	}
+	// 删除唯一测试章节后，项目级修订仍应独立存在。
+	if _, err := store.db.ExecContext(ctx, "DELETE FROM chapters WHERE id=?", chapter.ID); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ChapterID != "" || loaded.ChapterBaseRevision != 0 {
+		t.Fatal("项目修订不应绑定章节")
+	}
+	run.ID = "invalid-project-prose"
+	run.TaskKind = agentdomain.TaskChapterDraft
+	if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run}); err == nil {
+		t.Fatal("正文任务必须绑定章节")
+	}
+}

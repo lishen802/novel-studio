@@ -930,8 +930,7 @@ func (service *Service) cancelRun(ctx context.Context, run agentdomain.Run) (age
 
 func validateCreateRequest(request CreateRequest, compiled CompiledWorkflow) error {
 	if strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.ProjectID) == "" ||
-		strings.TrimSpace(request.BranchID) == "" || strings.TrimSpace(request.ChapterID) == "" ||
-		request.ChapterBaseRevision < 1 || strings.TrimSpace(request.CanonicalHead) == "" ||
+		strings.TrimSpace(request.BranchID) == "" || !agentdomain.ValidRunTarget(compiled.TaskKind, request.ChapterID, request.ChapterBaseRevision) || strings.TrimSpace(request.CanonicalHead) == "" ||
 		strings.TrimSpace(request.AuthorInstruction) == "" || strings.TrimSpace(request.Profile.ProfileID) == "" ||
 		request.Profile.Version < 1 ||
 		(!request.Profile.RunBudgetUnlimited && request.Profile.MaxRunTokens < 1) ||

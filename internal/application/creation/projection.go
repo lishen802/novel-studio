@@ -11,6 +11,7 @@ import (
 )
 
 type WorkbenchView struct {
+	Revisions        []RevisionView                `json:"revisions"`
 	FieldEditor      FieldEditorView               `json:"fieldEditor"`
 	SampleHandoff    *SampleView                   `json:"sampleHandoff"`
 	CanPrepareSample bool                          `json:"canPrepareSample"`

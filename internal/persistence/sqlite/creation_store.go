@@ -361,12 +361,22 @@ func updateCreationCandidate(ctx context.Context, exec txExecutor, candidate cre
 func (s *Store) ApplyCreationCandidateChanges(
 	ctx context.Context,
 	expected, updates, inserts []creationdomain.Candidate,
+	guards ...creationdomain.CandidateCommitGuard,
 ) error {
 	tx, err := beginImmediate(ctx, s.db)
 	if err != nil {
 		return databaseOperationError("begin creation candidate transaction", err)
 	}
 	defer tx.Rollback()
+	for _, guard := range guards {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM creation_sessions s JOIN projects p ON p.id=s.project_id WHERE s.id=? AND s.content_version=? AND p.id=? AND p.updated_at=?`, guard.SessionID, guard.ContentVersion, guard.ProjectID, formatTime(guard.ProjectUpdatedAt)).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			return creationdomain.ErrSessionVersionConflict
+		}
+	}
 	for _, candidate := range expected {
 		if err := verifyCreationCandidateSnapshot(ctx, tx, candidate); err != nil {
 			return err

@@ -29,6 +29,8 @@ func TestStoryCandidateRevisionWorkflowFourKinds(t *testing.T) {
 			directive.TargetRefs = []string{tc.path}
 			directive.PreserveRefs = nil
 			req := authorDirectedRequest(base, directive)
+			req.ChapterID = ""
+			req.ChapterBaseRevision = 0
 			req.WorkflowID = agentassets.StoryCandidateRevisionWorkflowID
 			req.Profile.MaxRunTokens = 100000
 			req.Profile.MaxContextChars = 100000
@@ -91,6 +93,8 @@ func TestStoryCandidateRevisionStopsUnsafeOutput(t *testing.T) {
 			envelope.Payload = json.RawMessage(payload)
 			reply, _ := json.Marshal(envelope)
 			req := authorDirectedRequest(base, directive)
+			req.ChapterID = ""
+			req.ChapterBaseRevision = 0
 			req.WorkflowID = agentassets.StoryCandidateRevisionWorkflowID
 			req.Profile.MaxRunTokens = 100000
 			req.Profile.MaxContextChars = 100000

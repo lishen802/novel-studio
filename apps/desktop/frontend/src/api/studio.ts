@@ -1,3 +1,4 @@
+import type { RevisionCard } from '../components/creation/RevisionPanel';
 export type ProjectAccessMode = 'editable' | 'read_only';
 
 export interface WorkbenchProjection {
@@ -271,6 +272,7 @@ export interface CreationSampleInput {
  pointOfView: string; tone: string; constraints: string[]; targetRunes: number;
 }
 export interface CreationWorkbenchView {
+ revisions?: RevisionCard[];
  fieldEditor?: { candidateId: string; version: number; fields: Array<{path:string;label:string;group:string;value:string;locked:boolean}> };
  canPrepareSample?: boolean;
  sampleHandoff?: (CreationSampleInput & { id: string; directionCandidateId: string; directionCardId: string; status: string }) | null;
@@ -507,6 +509,10 @@ export const studio = {
   acceptCreationCandidate: (candidateId: string) => call<CreationWorkbenchView>('AcceptCreationCandidate', candidateId),
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
+  previewCreationRevision: (request:{candidateId:string;paths:string[];instruction:string;idempotencyKey:string}) => call<RevisionCard>('PreviewCreationRevision',request),
+ confirmCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<RevisionCard>('ConfirmCreationRevision',command),
+ rejectCreationRevision: (id:string) => call<CreationWorkbenchView>('RejectCreationRevision',id),
+ applyCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<CreationWorkbenchView>('ApplyCreationRevision',command),
   saveCreationFields: (request: {candidateId:string;changes:Record<string,string>}) => call<CreationWorkbenchView>('SaveCreationFields', request),
   saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>
     call<CreationWorkbenchView>('SaveCreationCandidateDraft', candidateId, payloadJson),

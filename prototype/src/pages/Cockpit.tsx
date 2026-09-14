@@ -30,6 +30,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
 import { SamplePanel } from '../components/creation/SamplePanel';
 import { CreationProgress } from '../components/creation/CreationProgress';
+import { RevisionPanel, type RevisionCard } from '../components/creation/RevisionPanel';
 import { CandidateFields } from '../components/creation/CandidateFields';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
@@ -176,6 +177,7 @@ const initialContext: CreativeContext = {
 };
 
 export default function Cockpit() {
+ const [revisionDemo,setRevisionDemo]=useState<RevisionCard[]>([]);
  const [fieldDemo,setFieldDemo] = useState({candidateId:'demo-1',version:1,fields:[{path:'/directions/@a/hook',label:'卖点',group:'故事方向 · A',value:'一座雾中灯塔，三任守塔人接连失踪。',locked:false},{path:'/characters/@hero/secret',label:'秘密',group:'人物 · 沈知秋',value:'曾见过一封未寄出的信。',locked:false}]});
  const [sampleCard,setSampleCard] = useState('');
  const [samplePreview,setSamplePreview] = useState<{id:string;status:string;pointOfView:string;tone:string;constraints:string[];targetRunes:number}|null>(null);
@@ -305,6 +307,7 @@ export default function Cockpit() {
         {/* Main creative area */}
         <main className="flex-1 overflow-auto p-8">
           {sampleCard && entryPreview.kind === 'idea' && <SamplePanel preview directionCandidateId="prototype-direction" directionCardId={sampleCard} version={1} runVersion={0} sample={samplePreview} onSave={async (value) => {setSamplePreview({...value,id:String(Date.now()),status:'prepared'});}} />}
+          <RevisionPanel editor={fieldDemo} actions={revisionDemo} preview onPreview={async(candidateId,path,instruction,key)=>{const field=fieldDemo.fields.find(f=>f.path===path)!;setRevisionDemo([{actionId:key,argumentsHash:key,idempotencyKey:key,candidateId,version:fieldDemo.version,state:'pending_confirmation',instruction,targets:[field],preserved:fieldDemo.fields.filter(f=>f.locked),cost:{estimatedCalls:2,maxRunTokens:30000,runBudgetUnlimited:false,roleModels:[{role:'planner',provider:'示例服务',model:'修订模型'},{role:'continuity_reviewer',provider:'示例服务',model:'审阅模型'}]},runId:'',quality:'',summary:'',stale:false,canApply:false,applied:false,diffs:[]}]);}} onConfirm={async(action)=>setRevisionDemo(old=>old.map(a=>a.actionId===action.actionId?{...a,state:'succeeded',quality:'passed',summary:'本地交互演示，未执行真实模型审阅。',canApply:true,diffs:a.targets.map(f=>({label:f.label,group:f.group,before:f.value,after:f.value+' 一封新信让追查有了明确方向。'}))}:a))} onReject={async(id)=>setRevisionDemo(old=>old.filter(a=>a.actionId!==id))} onApply={async(action)=>{setFieldDemo(old=>({...old,version:old.version+1,candidateId:`demo-${old.version+1}`,fields:old.fields.map(f=>f.path===action.targets[0]?.path?{...f,value:action.diffs[0].after}:f)}));setRevisionDemo(old=>old.map(a=>a.actionId===action.actionId?{...a,applied:true,canApply:false}:a));}}/>
           <CandidateFields editor={fieldDemo} preview onSave={async(_,changes)=>setFieldDemo(old=>({...old,candidateId:`demo-${old.version+1}`,version:old.version+1,fields:old.fields.map(f=>({...f,value:changes[f.path]??f.value}))}))} onLock={async(_,path,locked)=>setFieldDemo(old=>({...old,fields:old.fields.map(f=>f.path===path?{...f,locked}:f)}))}/>
           <EntryPanel entry={entryPreview} contentVersion={1} runSlotVersion={0} onSave={async (kind, material) => { setEntryPreview({ id: String(Date.now()), kind, material }); }} />
           {entryPreview.kind === 'author_plan' && <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-text-sub">已有方案入口预览：方向不适用，保存材料后进入缺口检查与候选复用。此浏览器原型未接模型解析，真实调用未就绪。</div>}

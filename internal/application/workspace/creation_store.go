@@ -50,9 +50,9 @@ func (store creationStore) UpdateCandidate(ctx context.Context, candidate creati
 }
 
 // ApplyCandidateChanges 在同一工作区租约内提交候选换版事务。
-func (store creationStore) ApplyCandidateChanges(ctx context.Context, expected, updates, inserts []creationdomain.Candidate) error {
+func (store creationStore) ApplyCandidateChanges(ctx context.Context, expected, updates, inserts []creationdomain.Candidate, guards ...creationdomain.CandidateCommitGuard) error {
 	return store.guard.access(ctx, true, func() error {
-		return store.inner.ApplyCandidateChanges(ctx, expected, updates, inserts)
+		return store.inner.ApplyCandidateChanges(ctx, expected, updates, inserts, guards...)
 	})
 }
 

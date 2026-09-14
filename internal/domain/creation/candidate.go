@@ -320,3 +320,11 @@ func validKind(kind CandidateKind) bool {
 		return false
 	}
 }
+
+// CandidateCommitGuard 在候选采用事务中核对作者会话和项目版本。
+type CandidateCommitGuard struct {
+	SessionID        string
+	ContentVersion   int64
+	ProjectID        string
+	ProjectUpdatedAt time.Time
+}

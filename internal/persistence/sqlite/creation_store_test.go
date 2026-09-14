@@ -101,8 +101,24 @@ func TestCreationCandidateChangesRollbackAsOneTransaction(t *testing.T) {
 	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER fail_candidate_replacement`); err != nil {
 		t.Fatal(err)
 	}
+	for _, guard := range []creationdomain.CandidateCommitGuard{
+		{SessionID: session.ID, ContentVersion: session.ContentVersion + 1, ProjectID: project.ID, ProjectUpdatedAt: project.UpdatedAt},
+		{SessionID: session.ID, ContentVersion: session.ContentVersion, ProjectID: project.ID, ProjectUpdatedAt: project.UpdatedAt.Add(time.Second)},
+	} {
+		if err := store.ApplyCreationCandidateChanges(ctx, []creationdomain.Candidate{parent}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{replacement}, guard); err == nil {
+			t.Fatal("过期会话或项目快照不应提交候选")
+		}
+		unchanged, err := store.CreationCandidate(ctx, parent.ID)
+		if err != nil || unchanged.Status != parent.Status {
+			t.Fatal("快照冲突写坏基线")
+		}
+		if _, err := store.CreationCandidate(ctx, replacement.ID); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal("快照冲突仍插入候选")
+		}
+	}
 	if err := store.ApplyCreationCandidateChanges(ctx,
 		[]creationdomain.Candidate{parent}, []creationdomain.Candidate{superseded}, []creationdomain.Candidate{replacement},
+		creationdomain.CandidateCommitGuard{SessionID: session.ID, ContentVersion: session.ContentVersion, ProjectID: project.ID, ProjectUpdatedAt: project.UpdatedAt},
 	); err != nil {
 		t.Fatal(err)
 	}

@@ -176,9 +176,21 @@ func (store *memoryStore) UpdateCandidate(_ context.Context, candidate creationd
 	return nil
 }
 
-func (store *memoryStore) ApplyCandidateChanges(_ context.Context, expected, updates, inserts []creationdomain.Candidate) error {
+func (store *memoryStore) ApplyCandidateChanges(_ context.Context, expected, updates, inserts []creationdomain.Candidate, guards ...creationdomain.CandidateCommitGuard) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	for _, guard := range guards {
+		found := false
+		for _, session := range store.sessions {
+			if session.ID == guard.SessionID && session.ContentVersion == guard.ContentVersion {
+				found = true
+			}
+		}
+		project, _ := store.Project(context.Background())
+		if !found || project.ID != guard.ProjectID || !project.UpdatedAt.Equal(guard.ProjectUpdatedAt) {
+			return creationdomain.ErrSessionVersionConflict
+		}
+	}
 	for _, candidate := range expected {
 		current, ok := store.candidates[candidate.ID]
 		if !ok || !reflect.DeepEqual(current, candidate) {

@@ -604,7 +604,7 @@ func NewWorkflowRun(
 	chapterID = strings.TrimSpace(chapterID)
 	authorInstruction = strings.TrimSpace(authorInstruction)
 	canonicalHead = strings.TrimSpace(canonicalHead)
-	if id == "" || projectID == "" || chapterID == "" || chapterBaseRevision < 1 ||
+	if id == "" || projectID == "" || !ValidRunTarget(taskKind, chapterID, chapterBaseRevision) ||
 		authorInstruction == "" || workflow.Validate() != nil || !ValidTaskKind(taskKind) ||
 		canonicalHead == "" || !ValidSHA256(inputDigest) || budgetPolicyVersion < 1 ||
 		qualityPolicyVersion < 1 || maxRevisionAttempts < 0 || tokenBudget < 1 ||
@@ -685,4 +685,12 @@ type Artifact struct {
 	Content   string
 	SHA256    string
 	CreatedAt time.Time
+}
+
+// ValidRunTarget 区分章节运行与项目级候选修订，不用占位章节伪造任务目标。
+func ValidRunTarget(kind TaskKind, chapterID string, revision int64) bool {
+	if strings.TrimSpace(chapterID) != "" {
+		return revision >= 1
+	}
+	return kind == TaskReviseStoryCandidate && revision == 0
 }
