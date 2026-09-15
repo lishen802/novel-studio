@@ -1166,7 +1166,7 @@ func (service *Service) persistCandidate(
 		return creationdomain.Candidate{}, err
 	}
 	if binding.SchemaID == "author_material.schema" {
-		if _, err := decodeMaterialForEntry(session.Entry, payload); err != nil {
+		if _, err := decodeMaterialForEntry(session.Entry, payload, binding.SchemaVersion); err != nil {
 			return creationdomain.Candidate{}, err
 		}
 	}

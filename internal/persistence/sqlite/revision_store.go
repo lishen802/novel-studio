@@ -425,7 +425,7 @@ func prepareOutlineOperation(
 		FROM outline_nodes WHERE id = ? AND deleted_at IS NULL
 	`, operation.TargetID))
 	if err != nil || current.ProjectID != changeSet.ProjectID ||
-		!matchesBaseline(operation, outlineNodeValue{
+		!matchesBaseline(operation, outlineNodeValue{Planning: optionalPlanning(current.PlanningJSON),
 			Title: current.Title, Summary: current.Summary, Goal: current.Goal,
 			Conflict: current.Conflict, Outcome: current.Outcome,
 		}) {
@@ -441,7 +441,13 @@ func prepareOutlineOperation(
 	if err != nil {
 		return preparedOperation{}, err
 	}
-	updated = updated.WithPlanning(planningJSON(proposed.Planning), appliedAt)
+	if len(proposed.Planning) > 0 {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(proposed.Planning, &object) != nil || object == nil {
+			return preparedOperation{}, revisiondomain.ErrInvalidOperation
+		}
+		updated = updated.WithPlanning(string(proposed.Planning), appliedAt)
+	}
 	return preparedOperation{apply: func() (*projectdomain.Chapter, error) {
 		result, err := tx.ExecContext(ctx, `
 			UPDATE outline_nodes SET title = ?, summary = ?, goal = ?, conflict = ?, outcome = ?, planning_json = ?, updated_at = ?
@@ -744,4 +750,12 @@ func loadChangeSet(ctx context.Context, queryer changeSetQueryer, id string) (re
 		return revisiondomain.ChangeSet{}, databaseOperationError("iterate change operations", err)
 	}
 	return changeSet, nil
+}
+
+// optionalPlanning 保留旧空规划基线兼容性，新规划必须参与修改冲突校验。
+func optionalPlanning(value string) json.RawMessage {
+	if value == "" || value == "{}" {
+		return nil
+	}
+	return json.RawMessage(value)
 }

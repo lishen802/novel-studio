@@ -279,6 +279,7 @@ export interface RoadmapGoalItemView {
 }
 
 export interface RoadmapNodeView {
+  parentId?: string;
   id: string;
   title: string;
   summary: string;

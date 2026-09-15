@@ -421,6 +421,10 @@ func (output StoryRoadmapOutput) ValidatePlanningGoals() error {
 	if err := output.Validate(); err != nil {
 		return err
 	}
+	nodeIDs, err := output.planningNodeIDs()
+	if err != nil {
+		return err
+	}
 	for _, arc := range output.Arcs {
 		if blank(arc.ReaderExpectation) || blank(arc.StagePayoff) || blank(arc.IrreversibleChange) || blank(arc.EndingContribution) {
 			return ErrInvalidTaskOutput
@@ -435,6 +439,13 @@ func (output StoryRoadmapOutput) ValidatePlanningGoals() error {
 				return ErrInvalidTaskOutput
 			}
 			seenCommitments[id] = true
+			seenRefs := map[string]bool{}
+			for _, ref := range item.RelatedRefs {
+				if ref != strings.TrimSpace(ref) || seenRefs[ref] || (!nodeIDs[ref] && !externalPlanningRef(ref)) {
+					return ErrInvalidTaskOutput
+				}
+				seenRefs[ref] = true
+			}
 		}
 		if err := validatePlanningList(len(arc.RetainedQuestions), arc.RetainedQuestionsOmission); err != nil {
 			return err

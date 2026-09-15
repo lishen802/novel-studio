@@ -20,6 +20,7 @@ import {
   User,
 } from 'lucide-react';
 import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView, type RoadmapNodeView } from '../api/studio';
+import { roadmapNavItems, RoadmapNavigation } from '../components/creation/RoadmapNavigation';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
@@ -81,16 +82,6 @@ function previousStage(stage: string): string | null {
   return index > 0 ? rail[index - 1] : null;
 }
 
-function roadmapNavItems(roadmap: CreationWorkbenchView['roadmap']): Array<{ id: string; title: string; kind: string; depth: number; node: RoadmapNodeView }> {
-  const items: Array<{ id: string; title: string; kind: string; depth: number; node: RoadmapNodeView }> = [];
-  if (roadmap.book.id || roadmap.book.title) {
-    items.push({ id: roadmap.book.id || 'book', title: roadmap.book.title || '全书', kind: 'book', depth: 0, node: roadmap.book });
-  }
-  roadmap.volumes.forEach((node) => items.push({ id: node.id, title: node.title, kind: 'volume', depth: 1, node }));
-  roadmap.arcs.forEach((node) => items.push({ id: node.id, title: node.title, kind: 'arc', depth: 2, node }));
-  roadmap.chapters.forEach((node) => items.push({ id: node.id, title: `近章 ${node.position} · ${node.title}`, kind: 'chapter', depth: 3, node }));
-  return items;
-}
 
 function RoadmapGoalBlock({ node }: { node: RoadmapNodeView }) {
   const goals: Array<[string, string]> = [
@@ -377,16 +368,7 @@ export default function Cockpit() {
                 {entity.title}
               </button>
             ))}
-            {workbench.stage === 'roadmap' && roadmapItems.map((item) => (
-              <button
-                key={item.id}
-                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1', selectedRoadmap?.id === item.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
-                style={{ paddingLeft: 8 + item.depth * 12 }}
-                onClick={() => setEntityId(item.id)}
-              >
-                {item.title}
-              </button>
-            ))}
+            {workbench.stage === 'roadmap' && <RoadmapNavigation items={roadmapItems} selectedId={selectedRoadmap?.id} onSelect={setEntityId} />}
           </aside>
         )}
 

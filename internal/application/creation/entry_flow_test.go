@@ -183,7 +183,13 @@ func TestAuthorMaterialPaidRunFreezesSourceAndRecoversCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(materialFixture(t, entry))
+	fixture := materialFixture(t, entry)
+	var road agentdomain.StoryRoadmapOutput
+	if err := json.Unmarshal([]byte(roadmapPayloadV3), &road); err != nil {
+		t.Fatal(err)
+	}
+	fixture.Roadmap = &road
+	raw, _ := json.Marshal(fixture)
 	kernel.payloads["story.author_material"] = string(raw)
 	request := generateRequest(creationdomain.StageIntent)
 	request.Profile.MaxRunTokens = 30000
@@ -276,5 +282,41 @@ func TestAuthorMaterialConflictCannotBeResolvedByAcceptingCandidate(t *testing.T
 				t.Fatalf("有效已接受候选应解决必填缺口: %v", err)
 			}
 		})
+	}
+}
+
+func TestMaterialV2RequiresPlanningAndPreservesEmptyLists(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newTestService(t, newFakeKernel(), nil)
+	session := seedIntentSession(t, service)
+	entry, err := service.SaveEntry(ctx, SaveEntryRequest{ProjectID: session.ProjectID, SessionID: session.ID, ExpectedVersion: session.ContentVersion, Kind: creationdomain.EntryAuthorPlan, Material: "作者完整方案原文"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := materialFixture(t, entry)
+	raw, _ := json.Marshal(fixture)
+	if _, err := decodeMaterialForEntry(&entry, string(raw), 2); err == nil {
+		t.Fatal("新解析不应把缺少目标的旧路线图当完整方案")
+	}
+	if _, err := decodeMaterialForEntry(&entry, string(raw), 1); err != nil {
+		t.Fatalf("旧解析应仍可读取: %v", err)
+	}
+	var road agentdomain.StoryRoadmapOutput
+	if err := json.Unmarshal([]byte(roadmapPayloadV3), &road); err != nil {
+		t.Fatal(err)
+	}
+	road.Arcs[0].Commitments = nil
+	road.Arcs[0].CommitmentsOmission = "本弧只回收既有承诺"
+	road.Arcs[0].RetainedQuestions = nil
+	road.Arcs[0].RetainedQuestionsOmission = "本弧独立收束"
+	fixture.Roadmap = &road
+	raw, _ = json.Marshal(fixture)
+	output, err := decodeMaterialForEntry(&entry, string(raw), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := materialPayload(output, creationdomain.StageRoadmap)
+	if !ok || !strings.Contains(payload, `"commitments":[]`) || !strings.Contains(payload, `"retained_questions":[]`) {
+		t.Fatal("复用丢失合法空数组")
 	}
 }

@@ -244,7 +244,12 @@ func buildArchivePlan(
 	if err != nil {
 		return archivePlan{}, err
 	}
-	mapper := archiveMapper{ids: ids}
+	if roadmap.PayloadSchemaVersion >= 3 {
+		if err := road.ValidatePlanningReferences(cast); err != nil {
+			return archivePlan{}, err
+		}
+	}
+	mapper := archiveMapper{ids: ids, planningRefs: map[string]planningReference{}}
 	if err := mapper.addProject(project, blueprint); err != nil {
 		return archivePlan{}, err
 	}
@@ -267,7 +272,13 @@ func buildArchivePlan(
 	}, nil
 }
 
+type planningReference struct {
+	Table string `json:"table"`
+	ID    string `json:"id"`
+}
+
 type archiveMapper struct {
+	planningRefs    map[string]planningReference
 	ids             ports.IDGenerator
 	specs           []revisiondomain.PatchOperationSpec
 	outlines        int
@@ -358,6 +369,10 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 	for _, character := range cast.Characters {
 		id := mapper.ids.NewID()
 		mapper.chars[strings.TrimSpace(character.ID)] = id
+		if mapper.planningRefs == nil {
+			mapper.planningRefs = map[string]planningReference{}
+		}
+		mapper.planningRefs["character:"+strings.TrimSpace(character.ID)] = planningReference{Table: "characters", ID: id}
 		after, err := encodeJSON(map[string]any{
 			"name": character.Name, "aliases": character.Aliases, "role": character.Role,
 			"summary": character.Summary, "motivation": character.Motivation, "fear": character.Fear,
@@ -400,6 +415,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 			return creationdomain.ErrStageIncomplete
 		}
 		id := mapper.ids.NewID()
+		mapper.planningRefs["relationship:"+strings.TrimSpace(relation.ID)] = planningReference{Table: "character_relationships", ID: id}
 		after, err := encodeJSON(map[string]any{
 			"sourceCharacterId": sourceID, "targetCharacterId": targetID,
 			"kind": relation.Kind, "label": relation.Label, "strength": relation.Strength,
@@ -452,7 +468,26 @@ func (mapper *archiveMapper) addTypedAsset(
 // addRoadmap 按 ID 映射四层路线图：卷/弧/章用稳定 ID 挂接父子引用，
 // 近期章必须指向实际弧（arc_ref），章节锚点全部落为锚点操作（P1-11）。
 func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road agentdomain.StoryRoadmapOutput) error {
-	bookID := mapper.ids.NewID()
+	if mapper.planningRefs == nil {
+		mapper.planningRefs = map[string]planningReference{}
+	}
+	nodeIDs := map[string]string{}
+	allocate := func(source string) {
+		id := mapper.ids.NewID()
+		nodeIDs[strings.TrimSpace(source)] = id
+		mapper.planningRefs[strings.TrimSpace(source)] = planningReference{Table: "outline_nodes", ID: id}
+	}
+	allocate(road.Book.ID)
+	for _, n := range road.Volumes {
+		allocate(n.ID)
+	}
+	for _, n := range road.Arcs {
+		allocate(n.ID)
+	}
+	for _, n := range road.NearTermChapters {
+		allocate(n.ID)
+	}
+	bookID := nodeIDs[strings.TrimSpace(road.Book.ID)]
 	bookAfter, err := encodeJSON(map[string]any{
 		"level": storydomain.LevelBook, "title": road.Book.Title, "summary": road.Book.Proposition,
 		"goal": road.Book.ProtagonistArc, "conflict": strings.Join(road.Book.Inviolable, "；"),
@@ -468,7 +503,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 	mapper.outlines++
 	volumeIDs := map[string]string{}
 	for _, volume := range road.Volumes {
-		id := mapper.ids.NewID()
+		id := nodeIDs[strings.TrimSpace(volume.ID)]
 		volumeIDs[strings.TrimSpace(volume.ID)] = id
 		after, err := encodeJSON(map[string]any{
 			"parentId": bookID, "level": storydomain.LevelVolume, "title": volume.Title,
@@ -490,7 +525,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		if parent == "" {
 			return creationdomain.ErrStageIncomplete
 		}
-		id := mapper.ids.NewID()
+		id := nodeIDs[strings.TrimSpace(arc.ID)]
 		arcIDs[strings.TrimSpace(arc.ID)] = id
 		afterMap := map[string]any{
 			"parentId": parent, "level": storydomain.LevelArc, "title": arc.Title,
@@ -498,6 +533,18 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 			"outcome": strings.Join(arc.Foreshadowing, "；"), "position": arc.Position,
 		}
 		if planning := arc.PlanningObject(); planning != nil {
+			bindings := map[string]planningReference{}
+			for _, c := range arc.Commitments {
+				for _, ref := range c.RelatedRefs {
+					target, ok := mapper.planningRefs[ref]
+					if !ok {
+						return creationdomain.ErrStageIncomplete
+					}
+					bindings[ref] = target
+				}
+			}
+			planning["reference_bindings"] = bindings
+			planning["schema_version"] = 1
 			afterMap["planning"] = planning
 		}
 		after, err := encodeJSON(afterMap)
@@ -515,7 +562,7 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 		if parent == "" {
 			return creationdomain.ErrStageIncomplete
 		}
-		id := mapper.ids.NewID()
+		id := nodeIDs[strings.TrimSpace(chapter.ID)]
 		after, err := encodeJSON(map[string]any{
 			"parentId": parent, "level": storydomain.LevelChapter, "title": chapter.Title,
 			"summary": chapter.Goal, "goal": chapter.Goal, "conflict": chapter.Conflict,

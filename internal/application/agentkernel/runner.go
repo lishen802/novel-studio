@@ -1277,13 +1277,18 @@ func decodeNodeOutput(
 	artifacts []agentdomain.Artifact,
 	content string,
 ) (agentdomain.TaskOutput, error) {
-	if node.Schema.ID == "author_material.schema" && node.Schema.Version == 1 {
+	if node.Schema.ID == "author_material.schema" && (node.Schema.Version == 1 || node.Schema.Version == 2) {
 		var output agentdomain.MaterialAnalysisOutput
 		if err := agentdomain.UnmarshalModelJSON([]byte(content), &output); err != nil {
 			return nil, err
 		}
 		if err := output.Validate(); err != nil {
 			return nil, err
+		}
+		if node.Schema.Version == 2 && output.Roadmap != nil {
+			if err := output.Roadmap.ValidatePlanningGoals(); err != nil {
+				return nil, err
+			}
 		}
 		return &output, nil
 	}
@@ -1305,6 +1310,11 @@ func decodeNodeOutput(
 		decoded, err := agentdomain.DecodeTaskOutput(kind, []byte(content))
 		if err != nil {
 			return nil, err
+		}
+		if kind == agentdomain.TaskStoryRoadmap && node.Schema.ID == "story_roadmap.schema" && node.Schema.Version >= 3 {
+			if err := decoded.(*agentdomain.StoryRoadmapOutput).ValidatePlanningGoals(); err != nil {
+				return nil, err
+			}
 		}
 		if kind == agentdomain.TaskStoryBlueprint && node.Schema.Version >= 2 {
 			blueprint, ok := decoded.(*agentdomain.StoryBlueprintOutput)

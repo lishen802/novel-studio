@@ -26,11 +26,12 @@ type ChapterChangeInput struct {
 }
 
 type OutlineContentInput struct {
-	Title    string `json:"title"`
-	Summary  string `json:"summary"`
-	Goal     string `json:"goal"`
-	Conflict string `json:"conflict"`
-	Outcome  string `json:"outcome"`
+	Planning json.RawMessage `json:"planning,omitempty"`
+	Title    string          `json:"title"`
+	Summary  string          `json:"summary"`
+	Goal     string          `json:"goal"`
+	Conflict string          `json:"conflict"`
+	Outcome  string          `json:"outcome"`
 	// Level and Position are only used for create_outline_node operations
 	// produced by manuscript extraction. Update operations leave them empty.
 	Level    string `json:"level,omitempty"`
@@ -384,7 +385,11 @@ func (s *Service) structuredOperationSpecLocked(
 			return revisiondomain.PatchOperationSpec{}, err
 		}
 		spec.BeforeValue = mustJSON(outlineContentFromDomain(current))
-		spec.AfterValue = mustJSON(*input.Outline)
+		after := *input.Outline
+		if len(after.Planning) == 0 {
+			after.Planning = outlineContentFromDomain(current).Planning
+		}
+		spec.AfterValue = mustJSON(after)
 	case revisiondomain.OperationUpdateCharacter:
 		if input.Character == nil {
 			return revisiondomain.PatchOperationSpec{}, revisiondomain.ErrInvalidOperation
@@ -586,7 +591,11 @@ func updateFactFromInput(current canondomain.Fact, input FactInput, now time.Tim
 }
 
 func outlineContentFromDomain(node storydomain.OutlineNode) OutlineContentInput {
-	return OutlineContentInput{
+	var planning json.RawMessage
+	if strings.TrimSpace(node.PlanningJSON) != "" && node.PlanningJSON != "{}" {
+		planning = json.RawMessage(node.PlanningJSON)
+	}
+	return OutlineContentInput{Planning: planning,
 		Title: node.Title, Summary: node.Summary, Goal: node.Goal,
 		Conflict: node.Conflict, Outcome: node.Outcome,
 	}

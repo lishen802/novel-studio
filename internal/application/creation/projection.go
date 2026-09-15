@@ -116,6 +116,7 @@ type RoadmapGoalItemView struct {
 }
 
 type RoadmapNodeView struct {
+	ParentID           string                `json:"parentId"`
 	ID                 string                `json:"id"`
 	Title              string                `json:"title"`
 	Summary            string                `json:"summary"`
@@ -446,10 +447,10 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 	if err != nil {
 		return view
 	}
-	view.Book = RoadmapNodeView{ID: "book", Title: road.Book.Title, Summary: road.Book.Proposition}
+	view.Book = RoadmapNodeView{ID: "book:" + road.Book.ID, Title: road.Book.Title, Summary: road.Book.Proposition}
 	for _, volume := range road.Volumes {
 		view.Volumes = append(view.Volumes, RoadmapNodeView{
-			ID: "volume:" + volume.Title, Title: volume.Title, Summary: volume.Goal, Position: volume.Position,
+			ID: "volume:" + volume.ID, ParentID: "book:" + road.Book.ID, Title: volume.Title, Summary: volume.Goal, Position: volume.Position,
 		})
 	}
 	for _, arc := range road.Arcs {
@@ -462,7 +463,7 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 			questions = append(questions, RoadmapGoalItemView{ID: item.ID, Statement: item.Statement, Detail: item.Reason})
 		}
 		view.Arcs = append(view.Arcs, RoadmapNodeView{
-			ID: "arc:" + strings.TrimSpace(arc.ID), Title: arc.Title, Summary: arc.CausalChain, Position: arc.Position,
+			ID: "arc:" + strings.TrimSpace(arc.ID), ParentID: "volume:" + arc.VolumeRef, Title: arc.Title, Summary: arc.CausalChain, Position: arc.Position,
 			ReaderExpectation: arc.ReaderExpectation, StagePayoff: arc.StagePayoff,
 			IrreversibleChange: arc.IrreversibleChange, EndingContribution: arc.EndingContribution,
 			Commitments: commitments, RetainedQuestions: questions,
@@ -470,7 +471,7 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 	}
 	for _, chapter := range road.NearTermChapters {
 		view.Chapters = append(view.Chapters, RoadmapNodeView{
-			ID: "chapter:" + chapter.Title, Title: chapter.Title, Summary: chapter.Goal, Position: chapter.Position,
+			ID: "chapter:" + chapter.ID, ParentID: "arc:" + chapter.ArcRef, Title: chapter.Title, Summary: chapter.Goal, Position: chapter.Position,
 		})
 	}
 	return view

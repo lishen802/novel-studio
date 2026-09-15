@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +125,7 @@ func TestStructuredChangeProposalKeepsAssetsUntouchedAndCreatesRecoveryPointBefo
 	if err != nil {
 		t.Fatal(err)
 	}
+	outline.PlanningJSON = `{"reader_expectation":"保留规划"}`
 	store.outlineNodes[outline.ID] = outline
 	store.characters[character.ID] = character
 	store.facts[fact.ID] = fact
@@ -156,6 +158,11 @@ func TestStructuredChangeProposalKeepsAssetsUntouchedAndCreatesRecoveryPointBefo
 	if pending.Status != "pending" || len(pending.Operations) != 2 ||
 		pending.Operations[0].BaseFingerprint == "" {
 		t.Fatalf("pending = %#v", pending)
+	}
+	for _, value := range []string{store.changeSets[pending.ID].Operations[0].BeforeValue, store.changeSets[pending.ID].Operations[0].AfterValue} {
+		if !strings.Contains(value, "保留规划") {
+			t.Fatal("普通修改未冻结原规划")
+		}
 	}
 	if store.outlineNodes[outline.ID].Title != outline.Title ||
 		store.characters[character.ID].Summary != character.Summary {

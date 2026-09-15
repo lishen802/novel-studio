@@ -11,7 +11,7 @@ import (
 )
 
 // decodeMaterialForEntry 将模型引用与实际原文核对；模型不能伪造来源或吞掉缺口。
-func decodeMaterialForEntry(entry *creationdomain.EntryRevision, payload string) (agentdomain.MaterialAnalysisOutput, error) {
+func decodeMaterialForEntry(entry *creationdomain.EntryRevision, payload string, versions ...int) (agentdomain.MaterialAnalysisOutput, error) {
 	var output agentdomain.MaterialAnalysisOutput
 	if entry == nil || entry.Kind != creationdomain.EntryAuthorPlan || entry.Validate() != nil {
 		return output, creationdomain.ErrInvalidEntry
@@ -21,6 +21,11 @@ func decodeMaterialForEntry(entry *creationdomain.EntryRevision, payload string)
 	}
 	if err := output.Validate(); err != nil {
 		return output, err
+	}
+	if len(versions) > 0 && versions[0] >= 2 && output.Roadmap != nil {
+		if err := output.Roadmap.ValidatePlanningGoals(); err != nil {
+			return output, err
+		}
 	}
 	if output.EntryID != entry.ID || output.SourceHash != entry.MaterialSHA256 {
 		return output, creationdomain.ErrInvalidSourceSpan
@@ -107,12 +112,16 @@ func materialPayload(output agentdomain.MaterialAnalysisOutput, stage creationdo
 		return "", false
 	}
 	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", false
+	}
+
 	return string(raw), err == nil
 }
 
 func validatedMaterial(session creationdomain.Session, candidates []creationdomain.Candidate) (creationdomain.Candidate, agentdomain.MaterialAnalysisOutput, error) {
 	analysis, ok := currentCandidate(candidates, creationdomain.StageIntent)
-	if !ok || analysis.PayloadSchemaID != "author_material.schema" || analysis.PayloadSchemaVersion != 1 {
+	if !ok || analysis.PayloadSchemaID != "author_material.schema" || (analysis.PayloadSchemaVersion != 1 && analysis.PayloadSchemaVersion != 2) {
 		return analysis, agentdomain.MaterialAnalysisOutput{}, creationdomain.ErrStageIncomplete
 	}
 	if analysis.Blocked() {
@@ -121,7 +130,7 @@ func validatedMaterial(session creationdomain.Session, candidates []creationdoma
 	if err := validateCandidateDependency(session, candidates, analysis); err != nil {
 		return analysis, agentdomain.MaterialAnalysisOutput{}, err
 	}
-	output, err := decodeMaterialForEntry(session.Entry, analysis.PayloadJSON)
+	output, err := decodeMaterialForEntry(session.Entry, analysis.PayloadJSON, analysis.PayloadSchemaVersion)
 	return analysis, output, err
 }
 
@@ -203,7 +212,7 @@ func (service *Service) UseMaterialCandidate(ctx context.Context, request UseMat
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	if request.Stage == creationdomain.StageRoadmap {
+	if request.Stage == creationdomain.StageRoadmap && analysis.PayloadSchemaVersion == 1 {
 		if road, decodeErr := decodeRoadmap(payload); decodeErr == nil && road.ValidatePlanningGoals() != nil {
 			binding.WorkflowID = "story.author_roadmap"
 			binding.Version = 1

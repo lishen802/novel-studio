@@ -23,7 +23,7 @@ type stageBinding struct {
 func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 	switch stage {
 	case creationdomain.StageIntent:
-		return stageBinding{WorkflowID: "story.author_material", Version: 1, Kind: creationdomain.KindProposal, SchemaID: "author_material.schema", SchemaVersion: 1, Stage: stage}, nil
+		return stageBinding{WorkflowID: "story.author_material", Version: 2, Kind: creationdomain.KindProposal, SchemaID: "author_material.schema", SchemaVersion: 2, Stage: stage}, nil
 	case creationdomain.StageDirections:
 		return stageBinding{
 			WorkflowID: agentassets.StoryDirectionsWorkflowID, Version: agentassets.StoryProductWorkflowVersion,
@@ -55,6 +55,9 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 
 // bindingByWorkflow 按冻结运行的 WorkflowBinding 反查阶段绑定，供恢复对账物化结果。
 func bindingByWorkflow(workflowID string, version int) (stageBinding, error) {
+	if workflowID == "story.author_material" && version == 1 {
+		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindProposal, SchemaID: "author_material.schema", SchemaVersion: 1, Stage: creationdomain.StageIntent}, nil
+	}
 	for _, stage := range []creationdomain.Stage{creationdomain.StageIntent, creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap} {
 		binding, err := bindingForEntry(creationdomain.EntryAuthorPlan, stage)
 		if err == nil && binding.WorkflowID == workflowID && binding.Version == version {

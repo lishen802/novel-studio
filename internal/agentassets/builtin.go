@@ -149,6 +149,12 @@ var (
 	jsonAssembler []byte
 )
 
+//go:embed assets/prompts/author_material_v2.tmpl
+var authorMaterialPromptV2 string
+
+//go:embed assets/schemas/author_material_v2.json
+var authorMaterialSchemaV2 []byte
+
 // Builtin 构造应用随版本发布的只读资源集合；资产更新必须创建新版本。
 func Builtin() (*Registry, error) {
 	candidateRevisionPromptBinding := BindingForText("story_candidate_revision.prompt", 1, []byte(candidateRevisionPrompt))
@@ -156,6 +162,8 @@ func Builtin() (*Registry, error) {
 	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 1, candidateRevisionSchema)
 	candidateRevisionSchemaBindingV2 := BindingForText("story_candidate_revision.schema", 2, candidateRevisionSchemaV2)
 	materialPromptBinding := BindingForText("author_material.prompt", 1, []byte(authorMaterialPrompt))
+	materialPromptBindingV2 := BindingForText("author_material.prompt", 2, []byte(authorMaterialPromptV2))
+	materialSchemaBindingV2 := BindingForText("author_material.schema", 2, authorMaterialSchemaV2)
 	materialSchemaBinding := BindingForText("author_material.schema", 1, authorMaterialSchema)
 	fillPromptBinding := BindingForText("author_plan_fill.prompt", 1, []byte(authorPlanFillPrompt))
 	baselinePromptBinding := BindingForText("baseline.chapter.prompt", 1, []byte(baselinePrompt))
@@ -412,6 +420,8 @@ func Builtin() (*Registry, error) {
 	authorReviseV2.Nodes[0].InputSelectors = []string{"$task", "$context", "$base", "$directive"}
 	materialWorkflow := productGenerateAndReview("story.author_material", 1, agentdomain.TaskStoryBlueprint,
 		materialPromptBinding, materialSchemaBinding, assembler, blueprintReviewPromptBinding, reviewSchema, 12000, 30000)
+	materialWorkflowV2 := productGenerateAndReview("story.author_material", 2, agentdomain.TaskStoryBlueprint,
+		materialPromptBindingV2, materialSchemaBindingV2, assembler, blueprintReviewPromptBinding, reviewSchema, 12000, 30000)
 	authorProposal := productGenerateAndReview("story.author_proposal", 1, agentdomain.TaskStoryBlueprint,
 		fillPromptBinding, blueprintSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
 	authorPeople := productGenerateAndReview("story.author_people_world", 1, agentdomain.TaskStoryCast,
@@ -423,7 +433,7 @@ func Builtin() (*Registry, error) {
 	workflows := []ports.WorkflowAsset{
 		workflowAsset(candidateRevisionWorkflow(1, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
 		workflowAsset(candidateRevisionWorkflow(StoryCandidateRevisionWorkflowVersionV2, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBindingV2, reviewSchema, assembler)),
-		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap), workflowAsset(authorRoadmapV2),
+		workflowAsset(materialWorkflowV2), workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap), workflowAsset(authorRoadmapV2),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
 		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(peopleWorldV2), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(roadmapV3), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
@@ -433,6 +443,7 @@ func Builtin() (*Registry, error) {
 		[]ports.PromptAsset{
 			{Binding: candidateRevisionPromptBinding, Template: candidateRevisionPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint"}},
 			{Binding: candidateRevisionReviewBinding, Template: candidateRevisionReviewPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint", "Revision"}},
+			{Binding: materialPromptBindingV2, Template: authorMaterialPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: materialPromptBinding, Template: authorMaterialPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: fillPromptBinding, Template: authorPlanFillPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: baselinePromptBinding, Template: baselinePrompt, Variables: []string{"Task", "Context"}},
@@ -466,6 +477,7 @@ func Builtin() (*Registry, error) {
 		[]ports.SchemaAsset{
 			{Binding: candidateRevisionSchemaBinding, JSON: candidateRevisionSchema},
 			{Binding: candidateRevisionSchemaBindingV2, JSON: candidateRevisionSchemaV2},
+			{Binding: materialSchemaBindingV2, JSON: authorMaterialSchemaV2},
 			{Binding: materialSchemaBinding, JSON: authorMaterialSchema},
 			{Binding: draftSchema, JSON: chapterDraftSchema},
 			{Binding: blueprintSchema, JSON: storyBlueprintSchema},

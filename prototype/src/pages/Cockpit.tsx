@@ -23,6 +23,7 @@ import {
   Ban,
   Target,
 } from 'lucide-react';
+import { RoadmapNavigation, roadmapNavItems } from '../components/creation/RoadmapNavigation';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
@@ -176,7 +177,9 @@ const initialContext: CreativeContext = {
   undecided: ['是否加入真实历史事件', '反派是否最终反转', '是否需要爱情线'],
 };
 
+const roadmapDemo = roadmapNavItems({book:{id:'b',title:'全书',position:1},volumes:[{id:'v1',parentId:'b',title:'归途',position:1},{id:'v2',parentId:'b',title:'归途',position:2}],arcs:[{id:'a1',parentId:'v1',title:'追查旧信',position:1},{id:'a2',parentId:'v2',title:'兑现承诺',position:1}],chapters:[{id:'c1',parentId:'a1',title:'来信',position:1},{id:'c2',parentId:'a2',title:'来信',position:1}]});
 export default function Cockpit() {
+ const [roadmapSelection,setRoadmapSelection]=useState('a1');
  const [revisionDemo,setRevisionDemo]=useState<RevisionCard[]>([]);
  const [fieldDemo,setFieldDemo] = useState({candidateId:'demo-1',version:1,fields:[{path:'/directions/@a/hook',label:'卖点',group:'故事方向 · A',value:'一座雾中灯塔，三任守塔人接连失踪。',locked:false},{path:'/characters/@hero/secret',label:'秘密',group:'人物 · 沈知秋',value:'曾见过一封未寄出的信。',locked:false}]});
  const [sampleCard,setSampleCard] = useState('');
@@ -305,7 +308,7 @@ export default function Cockpit() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Main creative area */}
-        <main className="flex-1 overflow-auto p-8">
+        <main className="flex-1 overflow-auto p-8"><details className="mb-6 rounded-xl border border-border bg-surface p-4"><summary className="text-sm cursor-pointer">路线图导航演示</summary><p className="my-3 text-xs text-text-muted">仅本地演示，不调用模型。相同标题的卷与章节分别保留自己的位置和身份。</p><div className="flex gap-6"><aside className="w-48 shrink-0"><RoadmapNavigation items={roadmapDemo} selectedId={roadmapSelection} onSelect={setRoadmapSelection}/></aside><section className="p-4"><h3>{roadmapDemo.find(n=>n.id===roadmapSelection)?.title}</h3><p className="mt-2 text-sm text-text-sub">{['v2','a2','c2'].includes(roadmapSelection)?'第二卷 · 兑现承诺':'第一卷 · 追查旧信'}</p></section></div></details>
           {sampleCard && entryPreview.kind === 'idea' && <SamplePanel preview directionCandidateId="prototype-direction" directionCardId={sampleCard} version={1} runVersion={0} sample={samplePreview} onSave={async (value) => {setSamplePreview({...value,id:String(Date.now()),status:'prepared'});}} />}
           <RevisionPanel editor={fieldDemo} actions={revisionDemo} preview onPreview={async(candidateId,path,instruction,key)=>{const field=fieldDemo.fields.find(f=>f.path===path)!;setRevisionDemo([{actionId:key,argumentsHash:key,idempotencyKey:key,candidateId,version:fieldDemo.version,state:'pending_confirmation',instruction,targets:[field],preserved:fieldDemo.fields.filter(f=>f.locked),cost:{estimatedCalls:2,maxRunTokens:30000,runBudgetUnlimited:false,roleModels:[{role:'planner',provider:'示例服务',model:'修订模型'},{role:'continuity_reviewer',provider:'示例服务',model:'审阅模型'}]},runId:'',quality:'',summary:'',stale:false,canApply:false,applied:false,diffs:[]}]);}} onConfirm={async(action)=>setRevisionDemo(old=>old.map(a=>a.actionId===action.actionId?{...a,state:'succeeded',quality:'passed',summary:'本地交互演示，未执行真实模型审阅。',canApply:true,diffs:a.targets.map(f=>({label:f.label,group:f.group,before:f.value,after:f.value+' 一封新信让追查有了明确方向。'}))}:a))} onReject={async(id)=>setRevisionDemo(old=>old.filter(a=>a.actionId!==id))} onApply={async(action)=>{setFieldDemo(old=>({...old,version:old.version+1,candidateId:`demo-${old.version+1}`,fields:old.fields.map(f=>f.path===action.targets[0]?.path?{...f,value:action.diffs[0].after}:f)}));setRevisionDemo(old=>old.map(a=>a.actionId===action.actionId?{...a,applied:true,canApply:false}:a));}}/>
           <CandidateFields editor={fieldDemo} preview onSave={async(_,changes)=>setFieldDemo(old=>({...old,candidateId:`demo-${old.version+1}`,version:old.version+1,fields:old.fields.map(f=>({...f,value:changes[f.path]??f.value}))}))} onLock={async(_,path,locked)=>setFieldDemo(old=>({...old,fields:old.fields.map(f=>f.path===path?{...f,locked}:f)}))}/>

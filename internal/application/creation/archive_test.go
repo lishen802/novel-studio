@@ -445,7 +445,7 @@ func TestConfirmArchivePreservesArcPlanningGoals(t *testing.T) {
 	raw, project := sqliteCreateStore(t)
 	defer raw.Close()
 	bridge := NewSQLiteStore(raw)
-	seedArchiveSessionWithRoadmapSchema(t, bridge, project.ID, peopleWorldPayload, roadmapPayloadV3, 3)
+	seedArchiveSessionWithRoadmapSchema(t, bridge, project.ID, peopleWorldPayload, strings.Replace(roadmapPayloadV3, `"related_refs":["arc-1"]`, `"related_refs":["arc-1","ch-3","character:char-1"]`, 1), 3)
 	if err := raw.SaveWorkbenchState(ctx, projectdomain.WorkbenchState{
 		Stage: projectdomain.StageRoadmap, ArchiveStatus: "not_generated", UpdatedAt: testClock{}.Now(),
 	}); err != nil {
@@ -491,6 +491,32 @@ func TestConfirmArchivePreservesArcPlanningGoals(t *testing.T) {
 	if arc.ID == "" || !strings.Contains(arc.PlanningJSON, "读者应感到守关人将被亲情撕裂") || !strings.Contains(arc.PlanningJSON, "开城救人后公开承担代价") ||
 		!strings.Contains(arc.PlanningJSON, "cmt-1") || !strings.Contains(arc.PlanningJSON, "潮汐神谕是否被篡改") {
 		t.Fatalf("故事弧规划目标未无损入档: %+v", arc)
+	}
+	var planning struct {
+		ReferenceBindings map[string]struct {
+			ID    string `json:"id"`
+			Table string `json:"table"`
+		} `json:"reference_bindings"`
+	}
+	if err := json.Unmarshal([]byte(arc.PlanningJSON), &planning); err != nil {
+		t.Fatal(err)
+	}
+	if planning.ReferenceBindings["arc-1"].ID != arc.ID || planning.ReferenceBindings["arc-1"].Table != "outline_nodes" {
+		t.Fatal("承诺缺少正式引用映射")
+	}
+	nodeIDs := map[string]bool{}
+	for _, n := range nodes {
+		nodeIDs[n.ID] = true
+	}
+	if !nodeIDs[planning.ReferenceBindings["ch-3"].ID] {
+		t.Fatal("前向章节引用未落到正式节点")
+	}
+	characters, err := raw.ListCharacters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(characters) == 0 || planning.ReferenceBindings["character:char-1"].ID != characters[0].ID {
+		t.Fatal("人物引用未落到正式人物")
 	}
 	view, err := service.Workbench(ctx, project.ID, "branch-1")
 	if err != nil || len(view.Roadmap.Arcs) != 1 || view.Roadmap.Arcs[0].ReaderExpectation == "" ||
@@ -1064,4 +1090,23 @@ func seedArchiveSessionWithSchemas(t *testing.T, store Store, projectID, proposa
 		}
 	}
 	return session
+}
+
+func TestArchiveRejectsMissingPlanningReferences(t *testing.T) {
+	for _, ref := range []string{"missing-node", "character:missing-character"} {
+		t.Run(ref, func(t *testing.T) {
+			raw, project := sqliteCreateStore(t)
+			defer raw.Close()
+			bridge := NewSQLiteStore(raw)
+			payload := strings.Replace(roadmapPayloadV3, `"related_refs":["arc-1"]`, `"related_refs":["`+ref+`"]`, 1)
+			session := seedArchiveSessionWithRoadmapSchema(t, bridge, project.ID, peopleWorldPayload, payload, 3)
+			candidates, err := bridge.ListCandidates(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := buildArchivePlan(session, candidates, project, &testIDs{}); err == nil {
+				t.Fatal("不存在的承诺目标不应入档")
+			}
+		})
+	}
 }
