@@ -128,6 +128,17 @@ func (store creationStore) AssistantSession(ctx context.Context, projectID, bran
 	return
 }
 
+// SaveAssistantMessage 在项目代次保护下保存公开对话消息。
+func (store creationStore) SaveAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.SaveAssistantMessage(ctx, message) })
+}
+
+// ListAssistantMessages 在项目代次保护下恢复公开对话消息。
+func (store creationStore) ListAssistantMessages(ctx context.Context, sessionID string) (messages []assistantdomain.Message, err error) {
+	err = store.guard.access(ctx, false, func() error { messages, err = store.inner.ListAssistantMessages(ctx, sessionID); return err })
+	return
+}
+
 // SaveAction 在访问创作存储前核对工作区和运行租约。
 func (store creationStore) SaveAction(ctx context.Context, action assistantdomain.Action) error {
 	return store.guard.access(ctx, true, func() error { return store.inner.SaveAction(ctx, action) })

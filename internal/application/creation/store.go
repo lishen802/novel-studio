@@ -48,6 +48,8 @@ type Store interface {
 	UpdateOperation(ctx context.Context, operation creationdomain.Operation) error
 	SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error
 	AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error)
+	SaveAssistantMessage(ctx context.Context, message assistantdomain.Message) error
+	ListAssistantMessages(ctx context.Context, sessionID string) ([]assistantdomain.Message, error)
 	SaveAction(ctx context.Context, action assistantdomain.Action) error
 	Action(ctx context.Context, id string) (assistantdomain.Action, error)
 	ActionByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Action, error)

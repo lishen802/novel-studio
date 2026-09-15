@@ -37,6 +37,8 @@ type SQLBackend interface {
 	UpdateCreationOperation(context.Context, creationdomain.Operation) error
 	SaveAssistantSessionRecord(context.Context, assistantdomain.Session) error
 	AssistantSession(context.Context, string, string) (assistantdomain.Session, error)
+	SaveAssistantMessage(context.Context, assistantdomain.Message) error
+	ListAssistantMessages(context.Context, string) ([]assistantdomain.Message, error)
 	SaveAssistantAction(context.Context, assistantdomain.Action) error
 	AssistantAction(context.Context, string) (assistantdomain.Action, error)
 	AssistantActionByIdempotency(context.Context, string, string) (assistantdomain.Action, error)
@@ -133,6 +135,14 @@ func (store sqliteStore) SaveAssistantSession(ctx context.Context, session assis
 
 func (store sqliteStore) AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error) {
 	return store.inner.AssistantSession(ctx, projectID, branchID)
+}
+
+func (store sqliteStore) SaveAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
+	return store.inner.SaveAssistantMessage(ctx, message)
+}
+
+func (store sqliteStore) ListAssistantMessages(ctx context.Context, sessionID string) ([]assistantdomain.Message, error) {
+	return store.inner.ListAssistantMessages(ctx, sessionID)
 }
 
 func (store sqliteStore) SaveAction(ctx context.Context, action assistantdomain.Action) error {

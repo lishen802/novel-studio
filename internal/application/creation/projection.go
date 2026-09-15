@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
+	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 )
 
@@ -144,7 +145,21 @@ type RunView struct {
 }
 
 type AssistantSummaryView struct {
-	PendingActionCount int `json:"pendingActionCount"`
+	PendingActionCount int                    `json:"pendingActionCount"`
+	Messages           []AssistantMessageView `json:"messages"`
+}
+
+type AssistantMessageView struct {
+	ID          string `json:"id"`
+	Role        string `json:"role"`
+	Text        string `json:"text"`
+	Stage       string `json:"stage"`
+	CandidateID string `json:"candidateId"`
+	EntityRef   string `json:"entityRef"`
+	FieldPath   string `json:"fieldPath"`
+	ActionID    string `json:"actionId"`
+	ActionState string `json:"actionState"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 type CandidateView struct {
@@ -184,6 +199,33 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 		return WorkbenchView{}, err
 	}
 	view := assembleWorkbench(session, candidates, impact, pending)
+	actionStates := map[string]string{}
+	messages := []assistantdomain.Message{}
+	assistantSession, assistantErr := service.store.AssistantSession(ctx, session.ProjectID, session.BranchID)
+	if assistantErr == nil {
+		actions, listErr := service.store.ListActions(ctx, assistantSession.ID)
+		if listErr != nil {
+			return WorkbenchView{}, listErr
+		}
+		for _, action := range actions {
+			actionStates[action.ID] = string(action.State)
+		}
+		messages, listErr = service.store.ListAssistantMessages(ctx, assistantSession.ID)
+		if listErr != nil {
+			return WorkbenchView{}, listErr
+		}
+	} else if !isMissingSession(assistantErr) {
+		return WorkbenchView{}, assistantErr
+	}
+	view.Assistant.Messages = make([]AssistantMessageView, 0, len(messages))
+	for _, message := range messages {
+		view.Assistant.Messages = append(view.Assistant.Messages, AssistantMessageView{
+			ID: message.ID, Role: string(message.Role), Text: message.Text, Stage: message.Stage,
+			CandidateID: message.CandidateID, EntityRef: message.EntityRef, FieldPath: message.FieldPath,
+			ActionID: message.ActionID, ActionState: actionStates[message.ActionID],
+			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
 	if session.Stage != creationdomain.StageIntent {
 		if current, ok := currentCandidate(candidates, session.Stage); ok {
 			view.FieldEditor = candidateTextFields(current)

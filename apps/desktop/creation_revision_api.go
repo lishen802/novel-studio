@@ -12,6 +12,19 @@ type creationRevisionUseCases interface {
 	ApplyCreationRevision(context.Context, creationapp.RevisionCommand) (creationapp.WorkbenchView, error)
 }
 
+type creationConversationUseCases interface {
+	SendCreationMessage(context.Context, creationapp.SendMessageRequest) (creationapp.RevisionView, error)
+}
+
+// SendCreationMessage 保存绑定当前对象的公开消息，并形成待确认修改提案。
+func (a *DesktopAPI) SendCreationMessage(request creationapp.SendMessageRequest) (creationapp.RevisionView, error) {
+	service, ok := a.workspace.(creationConversationUseCases)
+	if !ok {
+		return creationapp.RevisionView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(service.SendCreationMessage(a.ctx, request))
+}
+
 // PreviewCreationRevision 转发修改提案的预览与持久化命令。
 func (a *DesktopAPI) PreviewCreationRevision(request creationapp.RevisionRequest) (creationapp.RevisionView, error) {
 	service, ok := a.workspace.(creationRevisionUseCases)

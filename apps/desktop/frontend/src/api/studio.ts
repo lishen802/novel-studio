@@ -354,7 +354,7 @@ export interface CreationWorkbenchView {
     chapters: RoadmapNodeView[];
   };
   currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string; steps?: Array<{stage: string; status: string}>; createdAt?: string; updatedAt?: string };
-  assistant: { pendingActionCount: number };
+  assistant: { pendingActionCount: number; messages?: AssistantMessageView[] };
   impact: {
     items: Array<{ candidateId: string; stage: string; severity: string; reason: string; locked: boolean; confirmed: boolean; excepted: boolean }>;
     touchesLocked: boolean;
@@ -365,6 +365,12 @@ export interface CreationWorkbenchView {
     evidence: string;
   };
   capabilities: string[];
+}
+
+export interface AssistantMessageView {
+  id: string; role: 'author' | 'assistant'; text: string; stage: string;
+  candidateId: string; entityRef: string; fieldPath: string; actionId: string;
+  actionState: string; createdAt: string;
 }
 
 export interface CreationCostPreview {
@@ -530,6 +536,7 @@ export const studio = {
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
   previewCreationRevision: (request:{candidateId:string;paths:string[];instruction:string;idempotencyKey:string}) => call<RevisionCard>('PreviewCreationRevision',request),
+  sendCreationMessage: (request:{candidateId:string;entityRef:string;fieldPath:string;text:string;idempotencyKey:string}) => call<RevisionCard>('SendCreationMessage',request),
  confirmCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<RevisionCard>('ConfirmCreationRevision',command),
  rejectCreationRevision: (id:string) => call<CreationWorkbenchView>('RejectCreationRevision',id),
  applyCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<CreationWorkbenchView>('ApplyCreationRevision',command),

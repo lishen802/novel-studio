@@ -52,8 +52,17 @@ type ActionResult struct {
 }
 
 type AssistantProjection struct {
-	Session assistantdomain.Session
-	Pending []assistantdomain.Action
+	Session  assistantdomain.Session
+	Messages []assistantdomain.Message
+	Pending  []assistantdomain.Action
+}
+
+type SendMessageRequest struct {
+	CandidateID    string `json:"candidateId"`
+	EntityRef      string `json:"entityRef"`
+	FieldPath      string `json:"fieldPath"`
+	Text           string `json:"text"`
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 type actionArguments struct {
@@ -120,7 +129,56 @@ func (service *Service) AssistantProjection(ctx context.Context, projectID, bran
 			pending = append(pending, action)
 		}
 	}
-	return AssistantProjection{Session: session, Pending: pending}, nil
+	messages, err := service.store.ListAssistantMessages(ctx, session.ID)
+	if err != nil {
+		return AssistantProjection{}, err
+	}
+	return AssistantProjection{Session: session, Messages: messages, Pending: pending}, nil
+}
+
+// RecordRevisionConversation 把当前对象上的作者消息转成现有修订提案，并保存可恢复的公开对话。
+func (service *Service) RecordRevisionConversation(ctx context.Context, projectID string, request SendMessageRequest, profile agentdomain.ResolvedCreativeProfile) (RevisionView, error) {
+	request.Text = strings.TrimSpace(request.Text)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	if request.Text == "" || request.IdempotencyKey == "" || strings.TrimSpace(request.CandidateID) == "" || strings.TrimSpace(request.FieldPath) == "" {
+		return RevisionView{}, creationdomain.ErrBlankValue
+	}
+	view, err := service.PreviewRevision(ctx, projectID, RevisionRequest{
+		CandidateID: request.CandidateID, Paths: []string{request.FieldPath},
+		Instruction: request.Text, IdempotencyKey: request.IdempotencyKey,
+	}, profile)
+	if err != nil {
+		return RevisionView{}, err
+	}
+	session, err := service.loadSession(ctx, projectID)
+	if err != nil {
+		return RevisionView{}, err
+	}
+	assistant, err := service.ensureAssistantSession(ctx, session)
+	if err != nil {
+		return RevisionView{}, err
+	}
+	now := service.clock.Now()
+	author, err := assistantdomain.NewMessage(service.ids.NewID(), assistant.ID, assistantdomain.RoleAuthor,
+		request.Text, string(session.Stage), request.CandidateID, request.EntityRef, request.FieldPath,
+		view.ActionID, request.IdempotencyKey+":author", now)
+	if err != nil {
+		return RevisionView{}, err
+	}
+	reply, err := assistantdomain.NewMessage(service.ids.NewID(), assistant.ID, assistantdomain.RoleAssistant,
+		"已根据当前对象整理修改范围和保持项。请核对提案与费用，确认后才会调用模型。",
+		string(session.Stage), request.CandidateID, request.EntityRef, request.FieldPath,
+		view.ActionID, request.IdempotencyKey+":assistant", now)
+	if err != nil {
+		return RevisionView{}, err
+	}
+	if err := service.store.SaveAssistantMessage(ctx, author); err != nil {
+		return RevisionView{}, err
+	}
+	if err := service.store.SaveAssistantMessage(ctx, reply); err != nil {
+		return RevisionView{}, err
+	}
+	return view, nil
 }
 
 // ProposeAction 把付费、改锁或写入操作冻结为待确认 Action，不调用模型。

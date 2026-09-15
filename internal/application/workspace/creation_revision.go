@@ -18,6 +18,19 @@ func (s *Service) PreviewCreationRevision(ctx context.Context, request creationa
 	return runtime.service.PreviewRevision(ctx, runtime.projectID, request, profile)
 }
 
+// SendCreationMessage 保存绑定当前策划对象的消息，并返回由该消息形成的修改提案。
+func (s *Service) SendCreationMessage(ctx context.Context, request creationapp.SendMessageRequest) (creationapp.RevisionView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.RevisionView{}, err
+	}
+	profile, err := s.creationProfile(ctx)
+	if err != nil {
+		return creationapp.RevisionView{}, err
+	}
+	return runtime.service.RecordRevisionConversation(ctx, runtime.projectID, request, profile)
+}
+
 // ConfirmCreationRevision 异步启动已确认的项目级修订。
 func (s *Service) ConfirmCreationRevision(ctx context.Context, command creationapp.RevisionCommand) (creationapp.RevisionView, error) {
 	runtime, err := s.creationRuntime(ctx, true)

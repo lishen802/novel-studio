@@ -10,8 +10,14 @@ import (
 type revisionWorkspace struct {
 	fakeWorkspace
 	preview        creationapp.RevisionRequest
+	message        creationapp.SendMessageRequest
 	confirm, apply creationapp.RevisionCommand
 	rejected       string
+}
+
+func (w *revisionWorkspace) SendCreationMessage(_ context.Context, r creationapp.SendMessageRequest) (creationapp.RevisionView, error) {
+	w.message = r
+	return creationapp.RevisionView{ActionID: "message-action"}, nil
 }
 
 func (w *revisionWorkspace) PreviewCreationRevision(_ context.Context, r creationapp.RevisionRequest) (creationapp.RevisionView, error) {
@@ -35,6 +41,10 @@ func TestDesktopRevisionPreservesAuthorizationAndText(t *testing.T) {
 	api := newDesktopAPI(w, &fakeDirectoryPicker{})
 	api.startup(context.Background())
 	request := creationapp.RevisionRequest{CandidateID: "c", Paths: []string{"/title"}, Instruction: " 原文😀\n", IdempotencyKey: "k"}
+	message := creationapp.SendMessageRequest{CandidateID: "c", EntityRef: "proposal:main", FieldPath: "/title", Text: "讨论😀\n", IdempotencyKey: "message-key"}
+	if _, err := api.SendCreationMessage(message); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := api.PreviewCreationRevision(request); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +58,7 @@ func TestDesktopRevisionPreservesAuthorizationAndText(t *testing.T) {
 	if _, err := api.RejectCreationRevision("a"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(w.preview, request) || w.confirm != command || w.apply != command || w.rejected != "a" {
+	if !reflect.DeepEqual(w.preview, request) || w.message != message || w.confirm != command || w.apply != command || w.rejected != "a" {
 		t.Fatal("绑定改变了输入或授权参数")
 	}
 }

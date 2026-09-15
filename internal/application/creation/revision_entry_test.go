@@ -26,6 +26,41 @@ func TestRevisionProposalFreezesWithoutCallingModel(t *testing.T) {
 	}
 }
 
+func TestRevisionConversationPersistsBoundMessagesAndRecoversIdempotently(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	base := seedProposalCandidate(t, service, store)
+	profile := generateRequest(base.Stage).Profile
+	profile.Roles = append(profile.Roles, agentdomain.ResolvedRole{Role: agentdomain.RoleContinuityReviewer, ProviderName: "test", Model: "review-model"})
+	request := SendMessageRequest{CandidateID: base.ID, EntityRef: "proposal:positioning", FieldPath: "/title", Text: "保留定位，让标题更含蓄", IdempotencyKey: "chat-1"}
+	first, err := service.RecordRevisionConversation(ctx, "project-1", request, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.RecordRevisionConversation(ctx, "project-1", request, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ActionID != second.ActionID || kernel.createN != 0 {
+		t.Fatalf("action ids %q %q, model calls %d", first.ActionID, second.ActionID, kernel.createN)
+	}
+	projection, err := service.AssistantProjection(ctx, "project-1", "branch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projection.Messages) != 2 || projection.Messages[0].CandidateID != base.ID || projection.Messages[0].FieldPath != "/title" || projection.Messages[0].ActionID != first.ActionID {
+		t.Fatalf("messages = %#v", projection.Messages)
+	}
+	workbench, err := service.Workbench(ctx, "project-1", "branch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workbench.Assistant.Messages) != 2 || workbench.Assistant.Messages[1].ActionState != "pending_confirmation" {
+		t.Fatalf("assistant view = %#v", workbench.Assistant)
+	}
+}
+
 func TestRevisionConfirmIsAsyncAndAdoptionIsExplicit(t *testing.T) {
 	ctx := context.Background()
 	kernel := newFakeKernel()

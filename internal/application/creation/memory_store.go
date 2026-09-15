@@ -20,6 +20,7 @@ type memoryStore struct {
 	candidates map[string]creationdomain.Candidate
 	operations map[string]creationdomain.Operation
 	assistants map[string]assistantdomain.Session
+	messages   []assistantdomain.Message
 	actions    map[string]assistantdomain.Action
 	pending    int
 }
@@ -31,6 +32,7 @@ func newMemoryStore() *memoryStore {
 		candidates: map[string]creationdomain.Candidate{},
 		operations: map[string]creationdomain.Operation{},
 		assistants: map[string]assistantdomain.Session{},
+		messages:   []assistantdomain.Message{},
 		actions:    map[string]assistantdomain.Action{},
 	}
 }
@@ -282,6 +284,30 @@ func (store *memoryStore) AssistantSession(_ context.Context, projectID, branchI
 		return assistantdomain.Session{}, ErrSessionNotFound
 	}
 	return session, nil
+}
+
+func (store *memoryStore) SaveAssistantMessage(_ context.Context, message assistantdomain.Message) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, existing := range store.messages {
+		if existing.SessionID == message.SessionID && existing.IdempotencyKey == message.IdempotencyKey {
+			return nil
+		}
+	}
+	store.messages = append(store.messages, message)
+	return nil
+}
+
+func (store *memoryStore) ListAssistantMessages(_ context.Context, sessionID string) ([]assistantdomain.Message, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	result := make([]assistantdomain.Message, 0)
+	for _, message := range store.messages {
+		if message.SessionID == sessionID {
+			result = append(result, message)
+		}
+	}
+	return result, nil
 }
 
 func (store *memoryStore) SaveAction(_ context.Context, action assistantdomain.Action) error {

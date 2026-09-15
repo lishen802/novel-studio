@@ -450,3 +450,33 @@ func TestAssistantActionPersistsPendingThenExecuting(t *testing.T) {
 		t.Fatalf("action = %#v", loaded)
 	}
 }
+
+func TestAssistantMessagesPersistContextAndDeduplicateRetries(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := time.Unix(700, 0).UTC()
+	if err := store.SaveAssistantSession(ctx, "asst-message", project.ID, "branch-1", formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	message, err := assistantdomain.NewMessage("message-1", "asst-message", assistantdomain.RoleAuthor,
+		"调整人物动机", "people_world", "candidate-2", "character:hero", "/characters/hero/motivation", "", "send-1:author", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAssistantMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	retry := message
+	retry.ID = "message-retry"
+	if err := store.SaveAssistantMessage(ctx, retry); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := store.ListAssistantMessages(ctx, "asst-message")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].EntityRef != "character:hero" || messages[0].FieldPath != "/characters/hero/motivation" {
+		t.Fatalf("messages = %#v", messages)
+	}
+}

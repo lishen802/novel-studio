@@ -814,6 +814,57 @@ func (s *Store) SaveAssistantSessionRecord(ctx context.Context, session assistan
 	return s.SaveAssistantSession(ctx, session.ID, session.ProjectID, session.BranchID, formatTime(session.UpdatedAt))
 }
 
+// SaveAssistantMessage 幂等保存一条作者可见消息，不覆盖已经冻结的目标上下文。
+func (s *Store) SaveAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO assistant_messages (
+			id, session_id, role, text, stage, candidate_id, entity_ref,
+			field_path, action_id, idempotency_key, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+		ON CONFLICT(session_id, idempotency_key) DO NOTHING
+	`, message.ID, message.SessionID, string(message.Role), message.Text, message.Stage,
+		message.CandidateID, message.EntityRef, message.FieldPath, message.ActionID,
+		message.IdempotencyKey, formatTime(message.CreatedAt))
+	if err != nil {
+		return databaseOperationError("save assistant message", err)
+	}
+	return nil
+}
+
+// ListAssistantMessages 按创建顺序恢复当前作品分支的公开对话。
+func (s *Store) ListAssistantMessages(ctx context.Context, sessionID string) ([]assistantdomain.Message, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, session_id, role, text, stage, candidate_id, entity_ref,
+			field_path, COALESCE(action_id, ''), idempotency_key, created_at
+		FROM assistant_messages
+		WHERE session_id = ?
+		ORDER BY created_at, id
+	`, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, databaseOperationError("list assistant messages", err)
+	}
+	defer rows.Close()
+	messages := make([]assistantdomain.Message, 0)
+	for rows.Next() {
+		var message assistantdomain.Message
+		var createdAt string
+		if err := rows.Scan(&message.ID, &message.SessionID, &message.Role, &message.Text,
+			&message.Stage, &message.CandidateID, &message.EntityRef, &message.FieldPath,
+			&message.ActionID, &message.IdempotencyKey, &createdAt); err != nil {
+			return nil, databaseOperationError("scan assistant message", err)
+		}
+		message.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse assistant message created_at: %w", err)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseOperationError("iterate assistant messages", err)
+	}
+	return messages, nil
+}
+
 const assistantActionSelect = `
 		SELECT id, session_id, project_id, branch_id, operation, risk, target_refs_json,
 			base_versions_json, arguments, arguments_hash, idempotency_key, estimated_cost,

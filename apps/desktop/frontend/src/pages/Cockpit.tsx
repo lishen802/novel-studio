@@ -30,6 +30,7 @@ import { SamplePanel } from '../components/creation/SamplePanel';
 import { CreationProgress } from '../components/creation/CreationProgress';
 import { RevisionPanel } from '../components/creation/RevisionPanel';
 import { CandidateFields } from '../components/creation/CandidateFields';
+import { CoCreationPanel } from '../components/creation/CoCreationPanel';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 
@@ -533,12 +534,18 @@ export default function Cockpit() {
           )}
         </main>
 
-        <aside className="w-[280px] shrink-0 border-l border-border bg-surface p-5 overflow-auto">
-          {(generating || workbench.currentRun.runId) && <CreationProgress status={awaitingRun ? 'queued' : workbench.currentRun.status} stage={awaitingRun ? undefined : workbench.currentRun.publicStage} steps={awaitingRun ? [] : workbench.currentRun.steps} createdAt={awaitingRun ? undefined : workbench.currentRun.createdAt} updatedAt={workbench.currentRun.updatedAt} onCancel={generating || workbench.currentRun.cancellable ? cancelRun : undefined} />}
-          <div className="mt-5 space-y-2">
-            <h3 className="text-sm font-medium text-text">创作约定</h3>
-            <p className="text-xs text-text-sub leading-relaxed">AI 的修改建议会先交给你确认。已锁定的内容会在重新生成时保留。</p>
-          </div>
+        <aside className="w-[340px] shrink-0 border-l border-border bg-surface flex flex-col overflow-hidden">
+          {(generating || workbench.currentRun.runId) && <div className="p-4 border-b border-border"><CreationProgress status={awaitingRun ? 'queued' : workbench.currentRun.status} stage={awaitingRun ? undefined : workbench.currentRun.publicStage} steps={awaitingRun ? [] : workbench.currentRun.steps} createdAt={awaitingRun ? undefined : workbench.currentRun.createdAt} updatedAt={workbench.currentRun.updatedAt} onCancel={generating || workbench.currentRun.cancellable ? cancelRun : undefined} /></div>}
+          <CoCreationPanel
+            editor={workbench.fieldEditor}
+            entityRef={selectedEntity?.id ?? selectedRoadmap?.id ?? ''}
+            messages={(workbench.assistant.messages ?? []).map(message => ({
+              ...message,
+              actionState: workbench.revisions?.find(action => action.actionId === message.actionId)?.state ?? message.actionState,
+            }))}
+            disabled={busy || generating || workbench.readOnly || fieldDirty || materialDirty}
+            onSend={async request => { await studio.sendCreationMessage(request); await load(); }}
+          />
         </aside>
       </div>
 
