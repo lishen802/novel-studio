@@ -73,6 +73,7 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{"story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
 		{StoryCandidateRevisionWorkflowID, 1, []string{"revise", "review"}},
 		{StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersionV2, []string{"revise", "review"}},
+		{StoryCandidateDiscussionWorkflowID, StoryCandidateDiscussionWorkflowVersion, []string{"discuss"}},
 		{StoryAuthorReviseWorkflowID, StoryProductWorkflowVersion, []string{"revise"}},
 		{StoryAuthorReviseWorkflowID, StoryAuthorReviseWorkflowVersion, []string{"revise"}},
 	}

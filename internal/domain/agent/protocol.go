@@ -17,20 +17,21 @@ var (
 type TaskKind string
 
 const (
-	TaskStoryBlueprint       TaskKind = "story_blueprint"
-	TaskChapterPlan          TaskKind = "chapter_plan"
-	TaskChapterDraft         TaskKind = "chapter_draft"
-	TaskReviewBundle         TaskKind = "review_bundle"
-	TaskReviseDraft          TaskKind = "revise_draft"
-	TaskReviseBlueprint      TaskKind = "revise_blueprint"
-	TaskReviseStoryCandidate TaskKind = "revise_story_candidate"
-	TaskBaselineDraft        TaskKind = "baseline_draft"
-	TaskVerifyRevision       TaskKind = "verify_revision"
-	TaskChapterSkeleton      TaskKind = "chapter_skeleton"
-	TaskFillSlot             TaskKind = "fill_slot"
-	TaskStoryDirections      TaskKind = "story_directions"
-	TaskStoryCast            TaskKind = "story_cast"
-	TaskStoryRoadmap         TaskKind = "story_roadmap"
+	TaskStoryBlueprint        TaskKind = "story_blueprint"
+	TaskChapterPlan           TaskKind = "chapter_plan"
+	TaskChapterDraft          TaskKind = "chapter_draft"
+	TaskReviewBundle          TaskKind = "review_bundle"
+	TaskReviseDraft           TaskKind = "revise_draft"
+	TaskReviseBlueprint       TaskKind = "revise_blueprint"
+	TaskReviseStoryCandidate  TaskKind = "revise_story_candidate"
+	TaskDiscussStoryCandidate TaskKind = "discuss_story_candidate"
+	TaskBaselineDraft         TaskKind = "baseline_draft"
+	TaskVerifyRevision        TaskKind = "verify_revision"
+	TaskChapterSkeleton       TaskKind = "chapter_skeleton"
+	TaskFillSlot              TaskKind = "fill_slot"
+	TaskStoryDirections       TaskKind = "story_directions"
+	TaskStoryCast             TaskKind = "story_cast"
+	TaskStoryRoadmap          TaskKind = "story_roadmap"
 )
 
 type Capability string
@@ -319,7 +320,7 @@ func ValidSHA256(value string) bool {
 
 func ValidTaskKind(kind TaskKind) bool {
 	switch kind {
-	case TaskReviseStoryCandidate, TaskStoryBlueprint, TaskChapterPlan, TaskChapterDraft, TaskReviewBundle, TaskReviseDraft, TaskReviseBlueprint,
+	case TaskReviseStoryCandidate, TaskDiscussStoryCandidate, TaskStoryBlueprint, TaskChapterPlan, TaskChapterDraft, TaskReviewBundle, TaskReviseDraft, TaskReviseBlueprint,
 		TaskBaselineDraft, TaskVerifyRevision, TaskChapterSkeleton, TaskFillSlot, TaskStoryDirections, TaskStoryCast, TaskStoryRoadmap:
 		return true
 	default:

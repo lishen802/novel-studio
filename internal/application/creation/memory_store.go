@@ -12,28 +12,30 @@ import (
 )
 
 type memoryStore struct {
-	samples    map[string]creationdomain.SampleHandoff
-	entries    map[string]creationdomain.EntryRevision
-	entryHeads map[string]string
-	mu         sync.Mutex
-	sessions   map[string]creationdomain.Session
-	candidates map[string]creationdomain.Candidate
-	operations map[string]creationdomain.Operation
-	assistants map[string]assistantdomain.Session
-	messages   []assistantdomain.Message
-	actions    map[string]assistantdomain.Action
-	pending    int
+	samples        map[string]creationdomain.SampleHandoff
+	entries        map[string]creationdomain.EntryRevision
+	entryHeads     map[string]string
+	mu             sync.Mutex
+	sessions       map[string]creationdomain.Session
+	candidates     map[string]creationdomain.Candidate
+	operations     map[string]creationdomain.Operation
+	assistants     map[string]assistantdomain.Session
+	messages       []assistantdomain.Message
+	authorizations map[string]assistantdomain.Authorization
+	actions        map[string]assistantdomain.Action
+	pending        int
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		entries: map[string]creationdomain.EntryRevision{}, entryHeads: map[string]string{},
-		sessions:   map[string]creationdomain.Session{},
-		candidates: map[string]creationdomain.Candidate{},
-		operations: map[string]creationdomain.Operation{},
-		assistants: map[string]assistantdomain.Session{},
-		messages:   []assistantdomain.Message{},
-		actions:    map[string]assistantdomain.Action{},
+		sessions:       map[string]creationdomain.Session{},
+		candidates:     map[string]creationdomain.Candidate{},
+		operations:     map[string]creationdomain.Operation{},
+		assistants:     map[string]assistantdomain.Session{},
+		messages:       []assistantdomain.Message{},
+		authorizations: map[string]assistantdomain.Authorization{},
+		actions:        map[string]assistantdomain.Action{},
 	}
 }
 
@@ -298,6 +300,18 @@ func (store *memoryStore) SaveAssistantMessage(_ context.Context, message assist
 	return nil
 }
 
+func (store *memoryStore) UpdateAssistantMessage(_ context.Context, message assistantdomain.Message) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for i, existing := range store.messages {
+		if existing.ID == message.ID {
+			store.messages[i] = message
+			return nil
+		}
+	}
+	return ErrSessionNotFound
+}
+
 func (store *memoryStore) ListAssistantMessages(_ context.Context, sessionID string) ([]assistantdomain.Message, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -305,6 +319,60 @@ func (store *memoryStore) ListAssistantMessages(_ context.Context, sessionID str
 	for _, message := range store.messages {
 		if message.SessionID == sessionID {
 			result = append(result, message)
+		}
+	}
+	return result, nil
+}
+
+func (store *memoryStore) AssistantMessageByIdempotency(_ context.Context, sessionID, key string) (assistantdomain.Message, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, message := range store.messages {
+		if message.SessionID == sessionID && message.IdempotencyKey == key {
+			return message, nil
+		}
+	}
+	return assistantdomain.Message{}, ErrSessionNotFound
+}
+
+func (store *memoryStore) SaveAuthorization(_ context.Context, auth assistantdomain.Authorization) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.authorizations == nil {
+		store.authorizations = map[string]assistantdomain.Authorization{}
+	}
+	store.authorizations[auth.ID] = auth
+	return nil
+}
+
+func (store *memoryStore) Authorization(_ context.Context, id string) (assistantdomain.Authorization, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	auth, ok := store.authorizations[id]
+	if !ok {
+		return assistantdomain.Authorization{}, ErrSessionNotFound
+	}
+	return auth, nil
+}
+
+func (store *memoryStore) AuthorizationByAction(_ context.Context, actionID string) (assistantdomain.Authorization, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, auth := range store.authorizations {
+		if auth.ActionID == actionID {
+			return auth, nil
+		}
+	}
+	return assistantdomain.Authorization{}, ErrSessionNotFound
+}
+
+func (store *memoryStore) ListAuthorizations(_ context.Context, sessionID string) ([]assistantdomain.Authorization, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	result := make([]assistantdomain.Authorization, 0)
+	for _, auth := range store.authorizations {
+		if auth.SessionID == sessionID {
+			result = append(result, auth)
 		}
 	}
 	return result, nil

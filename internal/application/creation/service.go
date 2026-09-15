@@ -1068,6 +1068,13 @@ func (service *Service) Recover(ctx context.Context, projectID string) (creation
 	if err != nil {
 		return creationdomain.Session{}, err
 	}
+	if err := service.recoverDiscussionTurns(ctx, session); err != nil {
+		return session, err
+	}
+	session, err = service.loadSession(ctx, projectID)
+	if err != nil {
+		return creationdomain.Session{}, err
+	}
 	if strings.TrimSpace(session.ActiveRunID) == "" {
 		return session, nil
 	}
@@ -1116,6 +1123,9 @@ func (service *Service) markInterrupted(ctx context.Context, session creationdom
 
 // materializeRunResult 结果重放：运行完成但候选未落库时，按运行产物物化一次候选，不调用模型。
 func (service *Service) materializeRunResult(ctx context.Context, session creationdomain.Session, run agentdomain.Run) error {
+	if run.WorkflowBinding.ID == agentassets.StoryCandidateDiscussionWorkflowID {
+		return service.recoverDiscussionTurns(ctx, session)
+	}
 	binding, err := bindingByWorkflow(run.WorkflowBinding.ID, run.WorkflowBinding.Version)
 	if err != nil {
 		return nil

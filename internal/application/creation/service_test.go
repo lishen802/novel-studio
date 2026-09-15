@@ -1076,12 +1076,13 @@ type fakeKernel struct {
 func newFakeKernel() *fakeKernel {
 	return &fakeKernel{
 		payloads: map[string]string{
-			agentassets.StoryDirectionsWorkflowID:   directionPayload,
-			agentassets.StoryProposalWorkflowID:     proposalPayload,
-			agentassets.StoryPeopleWorldWorkflowID:  peopleWorldPayload,
-			agentassets.StoryRoadmapWorkflowID:      roadmapPayloadV3,
-			"story.author_roadmap":                  roadmapPayloadV3,
-			agentassets.StoryAuthorReviseWorkflowID: proposalPayload,
+			agentassets.StoryDirectionsWorkflowID:          directionPayload,
+			agentassets.StoryProposalWorkflowID:            proposalPayload,
+			agentassets.StoryPeopleWorldWorkflowID:         peopleWorldPayload,
+			agentassets.StoryRoadmapWorkflowID:             roadmapPayloadV3,
+			"story.author_roadmap":                         roadmapPayloadV3,
+			agentassets.StoryAuthorReviseWorkflowID:        proposalPayload,
+			agentassets.StoryCandidateDiscussionWorkflowID: discussionPayload,
 		},
 		quality:   agentdomain.QualityPassed,
 		runs:      map[string]agentdomain.Run{},
@@ -1105,6 +1106,10 @@ func (kernel *fakeKernel) fakeSteps(request agentkernel.CreateRequest, payload s
 	if request.WorkflowID == agentassets.StoryCandidateRevisionWorkflowID {
 		appendStep("revise", agentdomain.CapabilityBoundedRevision, payload)
 		appendStep("review", agentdomain.CapabilityContinuityReview, `{"quality_status":"passed","summary":"独立审阅通过","findings":[]}`)
+		return steps, artifacts
+	}
+	if request.WorkflowID == agentassets.StoryCandidateDiscussionWorkflowID {
+		appendStep("discuss", agentdomain.CapabilityStoryArchitect, payload)
 		return steps, artifacts
 	}
 	if request.WorkflowID == agentassets.StoryAuthorReviseWorkflowID {
@@ -1216,6 +1221,7 @@ const (
 	proposalAltEnding      = `{"title":"闭城之冬","positioning":"奇幻抉择","core_conflict":"守城与救人","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["敌船靠岸","认出仇敌","闭城拒敌"],"sell_point":"守关人必须放走仇敌","genre":"奇幻悬疑","growth_cost":"失去军职","pacing":"中速","ending":"闭城拒敌","subplots":["旧令牌来历"],"forbidden":["现代武器"],"anchors":[]}`
 	proposalRevisedPayload = `{"title":"潮汐关·修订","positioning":"奇幻抉择","core_conflict":"守城与救人","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["敌船靠岸","认出仇敌","开城救人"],"sell_point":"守关人必须放走仇敌","genre":"奇幻悬疑","growth_cost":"失去军职","pacing":"中速","ending":"开城救人","subplots":["旧令牌来历"],"forbidden":["现代武器"],"anchors":[]}`
 	peopleWorldPayload     = `{"characters":[{"id":"char-1","name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"放过过仇敌","arc":"学会取舍"}],"relationships":[],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":[],"omission_reasons":["本方向不需要势力和地点"]}`
+	discussionPayload      = `{"answer":"公开动机还缺少不可逆代价，读者很难相信她必须守关。","follow_up_questions":["她为什么不能把城防交给别人？"],"suggestions":[{"id":"s1","operation":"revise_fields","paths":["/protagonist_arc"],"instruction":"让公开成长带上守关失败的代价","preserve_paths":["/title"],"rationale":"标题已经成立，应改人物弧而不是定位"}]}`
 	roadmapPayload         = `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`
 	roadmapPayloadV3       = `{"book":{"id":"book-1","title":"潮汐关","proposition":"守关人必须在亲情与职责间选择","ending":"开城救人","protagonist_arc":"从逃避到承担","inviolable":["潮汐决定航路"]},"volumes":[{"id":"vol-1","title":"第一卷","goal":"建立关隘危机","conflict":"敌船压境","payoff":"阿绫作出选择","position":1}],"arcs":[{"id":"arc-1","volume_ref":"vol-1","title":"开关","causal_chain":"敌船靠岸导致必须抉择","character_change":"阿绫接受代价","reader_expectation":"读者应感到守关人将被亲情撕裂","stage_payoff":"开城救人并失去军职","irreversible_change":"阿绫不再以军令为最高准则","ending_contribution":"为终局选择救人立下先例","commitments":[{"id":"cmt-1","statement":"旧令牌兑现身份","fulfillment_range":"本弧末章","related_refs":["arc-1"]}],"retained_questions":[{"id":"q-1","statement":"潮汐神谕是否被篡改","reason":"留给后续卷揭示"}],"foreshadowing":["旧令牌"],"position":1}],"near_term_chapters":[{"id":"ch-1","arc_ref":"arc-1","title":"空船","goal":"发现异常","conflict":"无人登岸","outcome":"阿绫独自登船","anchors":[{"strength":"hard","statement":"钟楼三响"}],"position":1},{"id":"ch-2","arc_ref":"arc-1","title":"旧识","goal":"认出仇敌","conflict":"军令与私情","outcome":"暂时藏匿","anchors":[],"position":2},{"id":"ch-3","arc_ref":"arc-1","title":"开关","goal":"作出选择","conflict":"守城与救人","outcome":"开城","anchors":[{"strength":"soft","statement":"潮汐律"}],"position":3}]}`
 )

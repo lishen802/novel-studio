@@ -354,7 +354,7 @@ export interface CreationWorkbenchView {
     chapters: RoadmapNodeView[];
   };
   currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string; steps?: Array<{stage: string; status: string}>; createdAt?: string; updatedAt?: string };
-  assistant: { pendingActionCount: number; messages?: AssistantMessageView[] };
+  assistant: { pendingActionCount: number; messages?: AssistantMessageView[]; authorization?: DiscussionAuthorizationView };
   impact: {
     items: Array<{ candidateId: string; stage: string; severity: string; reason: string; locked: boolean; confirmed: boolean; excepted: boolean }>;
     touchesLocked: boolean;
@@ -368,9 +368,26 @@ export interface CreationWorkbenchView {
 }
 
 export interface AssistantMessageView {
-  id: string; role: 'author' | 'assistant'; text: string; stage: string;
+  id: string; role: 'author' | 'assistant'; kind?: string; status?: string; text: string; stage: string;
   candidateId: string; entityRef: string; fieldPath: string; actionId: string;
-  actionState: string; createdAt: string;
+  actionState: string; authorizationId?: string; runId?: string; replyToId?: string; errorCode?: string;
+  suggestions?: DiscussionSuggestionView[]; createdAt: string;
+}
+
+export interface DiscussionSuggestionView {
+  id: string; paths: string[]; instruction: string; preservePaths?: string[]; rationale: string;
+}
+
+export interface DiscussionAuthorizationView {
+  id?: string; actionId: string; state: string; candidateId: string; candidateVersion: number;
+  entityRef?: string; fieldPaths?: string[]; remainingCalls: number; remainingTokens: number;
+  maxCalls: number; maxTotalTokens: number; maxTurnTokens: number; expiresAt: string;
+  provider: string; model: string; cost?: CreationCostPreview; stale?: boolean;
+}
+
+export interface DiscussionTurnView {
+  authorization: DiscussionAuthorizationView;
+  actionId: string; argumentsHash: string; idempotencyKey: string; state: string; runId?: string;
 }
 
 export interface CreationCostPreview {
@@ -537,6 +554,11 @@ export const studio = {
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
   previewCreationRevision: (request:{candidateId:string;paths:string[];instruction:string;idempotencyKey:string}) => call<RevisionCard>('PreviewCreationRevision',request),
   sendCreationMessage: (request:{candidateId:string;entityRef:string;fieldPath:string;text:string;idempotencyKey:string}) => call<RevisionCard>('SendCreationMessage',request),
+  previewCreationDiscussionAuthorization: (request:{candidateId:string;entityRef?:string;fieldPaths:string[];idempotencyKey:string}) => call<DiscussionTurnView>('PreviewCreationDiscussionAuthorization',request),
+  confirmCreationDiscussionAuthorization: (command:{actionId:string;argumentsHash:string;idempotencyKey:string;message:string;messageIdempotencyKey:string}) => call<DiscussionTurnView>('ConfirmCreationDiscussionAuthorization',command),
+  sendCreationDiscussionMessage: (request:{authorizationId:string;candidateId:string;entityRef?:string;fieldPaths:string[];text:string;idempotencyKey:string}) => call<DiscussionTurnView>('SendCreationDiscussionMessage',request),
+  revokeCreationDiscussionAuthorization: (id:string) => call<CreationWorkbenchView>('RevokeCreationDiscussionAuthorization',id),
+  previewCreationDiscussionSuggestion: (request:{messageId:string;suggestionId:string;idempotencyKey?:string}) => call<RevisionCard>('PreviewCreationDiscussionSuggestion',request),
  confirmCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<RevisionCard>('ConfirmCreationRevision',command),
  rejectCreationRevision: (id:string) => call<CreationWorkbenchView>('RejectCreationRevision',id),
  applyCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<CreationWorkbenchView>('ApplyCreationRevision',command),

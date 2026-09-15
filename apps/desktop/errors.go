@@ -15,6 +15,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/workspace"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	appdomain "github.com/lishen802/novel-studio/internal/domain/appsettings"
+	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	importdomain "github.com/lishen802/novel-studio/internal/domain/importing"
@@ -170,6 +171,14 @@ func safeDesktopError(err error) error {
 		code, message = errorFeatureNotAvailable, "当前项目无法打开创作工作台。"
 	case errors.Is(err, creation.ErrRunActive):
 		code, message = errorAgentRunActive, "已有创作运行正在进行，请等待完成或取消后再试。"
+	case errors.Is(err, creation.ErrOperationConflict), errors.Is(err, assistantdomain.ErrArgumentMismatch):
+		code, message = errorCreationConfirmationStale, "讨论或修改授权参数已变化，请重新预览后再确认。"
+	case errors.Is(err, assistantdomain.ErrReplayForbidden), errors.Is(err, assistantdomain.ErrExpired), errors.Is(err, assistantdomain.ErrInvalidTransition):
+		code, message = errorCreationConfirmationStale, "讨论授权已失效、耗尽或已撤销，请重新确认后再发送。"
+	case errors.Is(err, creationdomain.ErrCandidateVersionConflict):
+		code, message = errorCreationVersionConflict, "候选基准版本已变化，当前讨论授权不能继续使用。输入已保留，请核对后重新绑定。"
+	case errors.Is(err, creationdomain.ErrFieldLocked):
+		code, message = errorValidationFailed, "该字段已锁定，不能转为修改提案。"
 	case errors.Is(err, creation.ErrUnavailable):
 		code, message = errorFeatureNotAvailable, "创作编排服务尚未就绪。"
 	case errors.Is(err, creativeharness.ErrRunActive):

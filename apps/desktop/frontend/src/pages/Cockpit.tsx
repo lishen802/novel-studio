@@ -150,7 +150,7 @@ export default function Cockpit() {
     setWorkbench(view);
     if (recover || intentRef.current === savedIntent.current) setIntent(view.intentText);
     savedIntent.current = view.intentText;
-    setGenerating((['queued', 'pending', 'running', 'cancelling'].includes(view.currentRun.status) && !view.recoverable) || !!view.revisions?.some(action => action.state === 'executing'));
+    setGenerating((['queued', 'pending', 'running', 'cancelling'].includes(view.currentRun.status) && !view.recoverable) || !!view.revisions?.some(action => action.state === 'executing') || !!(view.assistant.messages ?? []).some(message => message.kind === 'discussion' && (message.status === 'pending' || message.status === 'running')));
     return view;
   }, [projectId]);
 
@@ -537,14 +537,21 @@ export default function Cockpit() {
         <aside className="w-[340px] shrink-0 border-l border-border bg-surface flex flex-col overflow-hidden">
           {(generating || workbench.currentRun.runId) && <div className="p-4 border-b border-border"><CreationProgress status={awaitingRun ? 'queued' : workbench.currentRun.status} stage={awaitingRun ? undefined : workbench.currentRun.publicStage} steps={awaitingRun ? [] : workbench.currentRun.steps} createdAt={awaitingRun ? undefined : workbench.currentRun.createdAt} updatedAt={workbench.currentRun.updatedAt} onCancel={generating || workbench.currentRun.cancellable ? cancelRun : undefined} /></div>}
           <CoCreationPanel
+            key={`cocreation:${workbench.projectId}:${workbench.sessionId}`}
             editor={workbench.fieldEditor}
             entityRef={selectedEntity?.id ?? selectedRoadmap?.id ?? ''}
             messages={(workbench.assistant.messages ?? []).map(message => ({
               ...message,
               actionState: workbench.revisions?.find(action => action.actionId === message.actionId)?.state ?? message.actionState,
             }))}
+            authorization={workbench.assistant.authorization}
             disabled={busy || generating || workbench.readOnly || fieldDirty || materialDirty}
             onSend={async request => { await studio.sendCreationMessage(request); await load(); }}
+            onPreviewDiscussion={async request => studio.previewCreationDiscussionAuthorization(request)}
+            onConfirmDiscussion={async command => { await studio.confirmCreationDiscussionAuthorization(command); setGenerating(true); await load(); }}
+            onSendDiscussion={async request => { await studio.sendCreationDiscussionMessage(request); setGenerating(true); await load(); }}
+            onRevokeDiscussion={async id => { await studio.revokeCreationDiscussionAuthorization(id); await load(); }}
+            onPreviewSuggestion={async (messageId, suggestionId) => { await studio.previewCreationDiscussionSuggestion({messageId, suggestionId}); await load(); }}
           />
         </aside>
       </div>

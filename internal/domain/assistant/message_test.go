@@ -24,3 +24,31 @@ func TestNewMessageRejectsHiddenOrOversizedPayload(t *testing.T) {
 		t.Fatal("oversized visible text must fail")
 	}
 }
+
+func TestDiscussionMessageTracksRunWithoutPretendingAnswered(t *testing.T) {
+	now := time.Unix(20, 0)
+	author, err := NewDiscussionMessage("msg-2", "session-1", RoleAuthor, MessagePending, "动机哪里不够可信", "people_world", "candidate-1", "character:hero", "/motivation", "", "auth-1", "turn-1:author", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := author.MarkRunning("run-1", "op-1", now.Add(time.Second))
+	if err != nil || running.Status != MessageRunning {
+		t.Fatalf("running = %#v err=%v", running, err)
+	}
+	unknown, err := running.MarkOutcomeUnknown("provider_timeout", now.Add(2*time.Second))
+	if err != nil || unknown.Status != MessageOutcomeUnknown {
+		t.Fatalf("unknown = %#v err=%v", unknown, err)
+	}
+	if _, err := unknown.MarkAnswered(now.Add(3 * time.Second)); err == nil {
+		t.Fatal("unknown message must not become answered")
+	}
+}
+
+func TestAuthorizeDiscussionIsPaidAssistantOperation(t *testing.T) {
+	if !RequiresAction(OpAuthorizeDiscussion) || RiskFor(OpAuthorizeDiscussion) != RiskPaid || !AllowedAsAssistantOperation(OpAuthorizeDiscussion) {
+		t.Fatal("discussion authorization must be a paid assistant action")
+	}
+	if OpAuthorizeDiscussion == OpReviseFields {
+		t.Fatal("discussion authorization must not reuse revise_fields")
+	}
+}

@@ -31,6 +31,70 @@ func (s *Service) SendCreationMessage(ctx context.Context, request creationapp.S
 	return runtime.service.RecordRevisionConversation(ctx, runtime.projectID, request, profile)
 }
 
+// PreviewCreationDiscussionAuthorization 冻结讨论目标与预算，不调用模型。
+func (s *Service) PreviewCreationDiscussionAuthorization(ctx context.Context, request creationapp.DiscussionAuthorizationRequest) (creationapp.DiscussionTurnView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.DiscussionTurnView{}, err
+	}
+	profile, err := s.creationProfile(ctx)
+	if err != nil {
+		return creationapp.DiscussionTurnView{}, err
+	}
+	return runtime.service.PreviewDiscussionAuthorization(ctx, runtime.projectID, request, profile)
+}
+
+// ConfirmCreationDiscussionAuthorization 确认预算后发送第一轮只读讨论。
+func (s *Service) ConfirmCreationDiscussionAuthorization(ctx context.Context, command creationapp.DiscussionAuthorizationCommand) (creationapp.DiscussionTurnView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.DiscussionTurnView{}, err
+	}
+	profile, err := s.creationProfile(ctx)
+	if err != nil {
+		return creationapp.DiscussionTurnView{}, err
+	}
+	return runtime.service.ConfirmDiscussionAuthorization(ctx, runtime.projectID, command, profile)
+}
+
+// SendCreationDiscussionMessage 在已确认授权内续聊，不再次确认费用。
+func (s *Service) SendCreationDiscussionMessage(ctx context.Context, request creationapp.DiscussionMessageRequest) (creationapp.DiscussionTurnView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.DiscussionTurnView{}, err
+	}
+	profile, err := s.creationProfile(ctx)
+	if err != nil {
+		return creationapp.DiscussionTurnView{}, err
+	}
+	return runtime.service.SendDiscussionMessage(ctx, runtime.projectID, request, profile)
+}
+
+// RevokeCreationDiscussionAuthorization 阻止新的讨论消息，不删除历史。
+func (s *Service) RevokeCreationDiscussionAuthorization(ctx context.Context, authorizationID string) (creationapp.WorkbenchView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	if _, err := runtime.service.RevokeDiscussionAuthorization(ctx, runtime.projectID, authorizationID); err != nil {
+		return creationapp.WorkbenchView{}, err
+	}
+	return s.creationWorkbench(ctx, false)
+}
+
+// PreviewCreationDiscussionSuggestion 把讨论建议转成现有修订提案。
+func (s *Service) PreviewCreationDiscussionSuggestion(ctx context.Context, request creationapp.DiscussionSuggestionRequest) (creationapp.RevisionView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.RevisionView{}, err
+	}
+	profile, err := s.creationProfile(ctx)
+	if err != nil {
+		return creationapp.RevisionView{}, err
+	}
+	return runtime.service.PreviewDiscussionSuggestion(ctx, runtime.projectID, request, profile)
+}
+
 // ConfirmCreationRevision 异步启动已确认的项目级修订。
 func (s *Service) ConfirmCreationRevision(ctx context.Context, command creationapp.RevisionCommand) (creationapp.RevisionView, error) {
 	runtime, err := s.creationRuntime(ctx, true)

@@ -38,7 +38,13 @@ type SQLBackend interface {
 	SaveAssistantSessionRecord(context.Context, assistantdomain.Session) error
 	AssistantSession(context.Context, string, string) (assistantdomain.Session, error)
 	SaveAssistantMessage(context.Context, assistantdomain.Message) error
+	UpdateAssistantMessage(context.Context, assistantdomain.Message) error
 	ListAssistantMessages(context.Context, string) ([]assistantdomain.Message, error)
+	AssistantMessageByIdempotency(context.Context, string, string) (assistantdomain.Message, error)
+	SaveAssistantAuthorization(context.Context, assistantdomain.Authorization) error
+	AssistantAuthorization(context.Context, string) (assistantdomain.Authorization, error)
+	AssistantAuthorizationByAction(context.Context, string) (assistantdomain.Authorization, error)
+	ListAssistantAuthorizations(context.Context, string) ([]assistantdomain.Authorization, error)
 	SaveAssistantAction(context.Context, assistantdomain.Action) error
 	AssistantAction(context.Context, string) (assistantdomain.Action, error)
 	AssistantActionByIdempotency(context.Context, string, string) (assistantdomain.Action, error)
@@ -141,8 +147,32 @@ func (store sqliteStore) SaveAssistantMessage(ctx context.Context, message assis
 	return store.inner.SaveAssistantMessage(ctx, message)
 }
 
+func (store sqliteStore) UpdateAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
+	return store.inner.UpdateAssistantMessage(ctx, message)
+}
+
 func (store sqliteStore) ListAssistantMessages(ctx context.Context, sessionID string) ([]assistantdomain.Message, error) {
 	return store.inner.ListAssistantMessages(ctx, sessionID)
+}
+
+func (store sqliteStore) AssistantMessageByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Message, error) {
+	return store.inner.AssistantMessageByIdempotency(ctx, sessionID, key)
+}
+
+func (store sqliteStore) SaveAuthorization(ctx context.Context, auth assistantdomain.Authorization) error {
+	return store.inner.SaveAssistantAuthorization(ctx, auth)
+}
+
+func (store sqliteStore) Authorization(ctx context.Context, id string) (assistantdomain.Authorization, error) {
+	return store.inner.AssistantAuthorization(ctx, id)
+}
+
+func (store sqliteStore) AuthorizationByAction(ctx context.Context, actionID string) (assistantdomain.Authorization, error) {
+	return store.inner.AssistantAuthorizationByAction(ctx, actionID)
+}
+
+func (store sqliteStore) ListAuthorizations(ctx context.Context, sessionID string) ([]assistantdomain.Authorization, error) {
+	return store.inner.ListAssistantAuthorizations(ctx, sessionID)
 }
 
 func (store sqliteStore) SaveAction(ctx context.Context, action assistantdomain.Action) error {

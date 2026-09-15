@@ -133,9 +133,46 @@ func (store creationStore) SaveAssistantMessage(ctx context.Context, message ass
 	return store.guard.access(ctx, true, func() error { return store.inner.SaveAssistantMessage(ctx, message) })
 }
 
+// UpdateAssistantMessage 在项目代次保护下更新讨论运行状态。
+func (store creationStore) UpdateAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.UpdateAssistantMessage(ctx, message) })
+}
+
 // ListAssistantMessages 在项目代次保护下恢复公开对话消息。
 func (store creationStore) ListAssistantMessages(ctx context.Context, sessionID string) (messages []assistantdomain.Message, err error) {
 	err = store.guard.access(ctx, false, func() error { messages, err = store.inner.ListAssistantMessages(ctx, sessionID); return err })
+	return
+}
+
+// AssistantMessageByIdempotency 在项目代次保护下按幂等键读取消息。
+func (store creationStore) AssistantMessageByIdempotency(ctx context.Context, sessionID, key string) (message assistantdomain.Message, err error) {
+	err = store.guard.access(ctx, false, func() error {
+		message, err = store.inner.AssistantMessageByIdempotency(ctx, sessionID, key)
+		return err
+	})
+	return
+}
+
+// SaveAuthorization 在项目代次保护下保存讨论授权。
+func (store creationStore) SaveAuthorization(ctx context.Context, auth assistantdomain.Authorization) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.SaveAuthorization(ctx, auth) })
+}
+
+// Authorization 在项目代次保护下读取讨论授权。
+func (store creationStore) Authorization(ctx context.Context, id string) (auth assistantdomain.Authorization, err error) {
+	err = store.guard.access(ctx, false, func() error { auth, err = store.inner.Authorization(ctx, id); return err })
+	return
+}
+
+// AuthorizationByAction 在项目代次保护下按 Action 读取授权。
+func (store creationStore) AuthorizationByAction(ctx context.Context, actionID string) (auth assistantdomain.Authorization, err error) {
+	err = store.guard.access(ctx, false, func() error { auth, err = store.inner.AuthorizationByAction(ctx, actionID); return err })
+	return
+}
+
+// ListAuthorizations 在项目代次保护下列出讨论授权。
+func (store creationStore) ListAuthorizations(ctx context.Context, sessionID string) (items []assistantdomain.Authorization, err error) {
+	err = store.guard.access(ctx, false, func() error { items, err = store.inner.ListAuthorizations(ctx, sessionID); return err })
 	return
 }
 

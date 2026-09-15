@@ -98,7 +98,11 @@ func TestOpenDatabaseMigratesEmptyDatabaseIdempotently(t *testing.T) {
 	assertSchemaObjectExists(t, db, "table", "story_assets")
 	assertSchemaObjectExists(t, db, "table", "assistant_actions")
 	assertSchemaObjectExists(t, db, "table", "assistant_messages")
+	assertSchemaObjectExists(t, db, "table", "assistant_authorizations")
 	assertSchemaObjectExists(t, db, "index", "idx_assistant_messages_session_created")
+	assertSchemaObjectExists(t, db, "index", "idx_assistant_authorizations_session_state")
+	assertSchemaObjectExists(t, db, "index", "idx_assistant_messages_authorization_created")
+	assertSchemaObjectExists(t, db, "index", "idx_assistant_messages_run")
 
 	var version int64
 	if err := db.QueryRow(`

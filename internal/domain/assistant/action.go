@@ -27,6 +27,7 @@ const (
 	OpExplain             Operation = "explain"
 	OpRegenerateCandidate Operation = "regenerate_candidate"
 	OpReviseFields        Operation = "revise_fields"
+	OpAuthorizeDiscussion Operation = "authorize_discussion"
 	OpCombineDirections   Operation = "combine_directions"
 	OpEditLocks           Operation = "edit_locks"
 	OpConfirmArchive      Operation = "confirm_archive"
@@ -112,7 +113,7 @@ func RiskFor(operation Operation) Risk {
 	switch operation {
 	case OpEditLocks:
 		return RiskLow
-	case OpRegenerateCandidate, OpReviseFields, OpCombineDirections:
+	case OpRegenerateCandidate, OpReviseFields, OpAuthorizeDiscussion, OpCombineDirections:
 		return RiskPaid
 	default:
 		return RiskRead
@@ -145,7 +146,7 @@ func AllowedFieldPath(kind, path string) bool {
 
 func RequiresAction(operation Operation) bool {
 	switch operation {
-	case OpRegenerateCandidate, OpReviseFields, OpCombineDirections, OpEditLocks, OpConfirmArchive:
+	case OpRegenerateCandidate, OpReviseFields, OpAuthorizeDiscussion, OpCombineDirections, OpEditLocks, OpConfirmArchive:
 		return true
 	default:
 		return false
@@ -154,7 +155,7 @@ func RequiresAction(operation Operation) bool {
 
 func AllowedAsAssistantOperation(operation Operation) bool {
 	switch operation {
-	case OpRegenerateCandidate, OpReviseFields, OpCombineDirections, OpEditLocks:
+	case OpRegenerateCandidate, OpReviseFields, OpAuthorizeDiscussion, OpCombineDirections, OpEditLocks:
 		return true
 	default:
 		return false

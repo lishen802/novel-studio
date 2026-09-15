@@ -89,6 +89,9 @@ func bindingByWorkflow(workflowID string, version int) (stageBinding, error) {
 			return binding, nil
 		}
 	}
+	if workflowID == agentassets.StoryCandidateDiscussionWorkflowID && version == agentassets.StoryCandidateDiscussionWorkflowVersion {
+		return discussionBinding(), nil
+	}
 	return stageBinding{}, fmt.Errorf("%w: %s@%d", ErrInvalidStage, workflowID, version)
 }
 
@@ -98,6 +101,13 @@ func authorReviseBinding() stageBinding {
 		WorkflowID: agentassets.StoryAuthorReviseWorkflowID, Version: agentassets.StoryAuthorReviseWorkflowVersion,
 		Kind: creationdomain.KindProposal, SchemaID: "author_revise_blueprint.schema", SchemaVersion: 1,
 		Stage: creationdomain.StageProposal,
+	}
+}
+
+func discussionBinding() stageBinding {
+	return stageBinding{
+		WorkflowID: agentassets.StoryCandidateDiscussionWorkflowID, Version: agentassets.StoryCandidateDiscussionWorkflowVersion,
+		SchemaID: "story_candidate_discussion.schema", SchemaVersion: 1,
 	}
 }
 

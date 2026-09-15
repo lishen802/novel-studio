@@ -692,5 +692,5 @@ func ValidRunTarget(kind TaskKind, chapterID string, revision int64) bool {
 	if strings.TrimSpace(chapterID) != "" {
 		return revision >= 1
 	}
-	return kind == TaskReviseStoryCandidate && revision == 0
+	return (kind == TaskReviseStoryCandidate || kind == TaskDiscussStoryCandidate) && revision == 0
 }

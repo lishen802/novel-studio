@@ -816,17 +816,55 @@ func (s *Store) SaveAssistantSessionRecord(ctx context.Context, session assistan
 
 // SaveAssistantMessage 幂等保存一条作者可见消息，不覆盖已经冻结的目标上下文。
 func (s *Store) SaveAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
-	_, err := s.db.ExecContext(ctx, `
+	suggestions, err := encodeSuggestions(message.Suggestions)
+	if err != nil {
+		return err
+	}
+	kind, status := messageKindOrDefault(message.Kind), messageStatusOrDefault(message.Status)
+	updatedAt := message.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = message.CreatedAt
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO assistant_messages (
 			id, session_id, role, text, stage, candidate_id, entity_ref,
-			field_path, action_id, idempotency_key, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+			field_path, action_id, idempotency_key, created_at,
+			kind, status, reply_to_id, authorization_id, run_id, operation_id,
+			error_code, suggestions_json, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, idempotency_key) DO NOTHING
 	`, message.ID, message.SessionID, string(message.Role), message.Text, message.Stage,
 		message.CandidateID, message.EntityRef, message.FieldPath, message.ActionID,
-		message.IdempotencyKey, formatTime(message.CreatedAt))
+		message.IdempotencyKey, formatTime(message.CreatedAt), string(kind), string(status),
+		message.ReplyToID, message.AuthorizationID, message.RunID, message.OperationID,
+		message.ErrorCode, string(suggestions), formatTime(updatedAt))
 	if err != nil {
 		return databaseOperationError("save assistant message", err)
+	}
+	return nil
+}
+
+// UpdateAssistantMessage 更新同一条消息的运行状态，不改幂等键和发送时目标。
+func (s *Store) UpdateAssistantMessage(ctx context.Context, message assistantdomain.Message) error {
+	suggestions, err := encodeSuggestions(message.Suggestions)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE assistant_messages
+		SET status = ?, reply_to_id = ?, authorization_id = NULLIF(?, ''), run_id = ?,
+			operation_id = ?, error_code = ?, suggestions_json = ?, action_id = NULLIF(?, ''),
+			text = ?, updated_at = ?
+		WHERE id = ?
+	`, string(messageStatusOrDefault(message.Status)), message.ReplyToID, message.AuthorizationID,
+		message.RunID, message.OperationID, message.ErrorCode, string(suggestions), message.ActionID,
+		message.Text, formatTime(message.UpdatedAt), message.ID)
+	if err != nil {
+		return databaseOperationError("update assistant message", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("update assistant message: %w", sql.ErrNoRows)
 	}
 	return nil
 }
@@ -835,7 +873,9 @@ func (s *Store) SaveAssistantMessage(ctx context.Context, message assistantdomai
 func (s *Store) ListAssistantMessages(ctx context.Context, sessionID string) ([]assistantdomain.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, session_id, role, text, stage, candidate_id, entity_ref,
-			field_path, COALESCE(action_id, ''), idempotency_key, created_at
+			field_path, COALESCE(action_id, ''), idempotency_key, created_at,
+			kind, status, reply_to_id, COALESCE(authorization_id, ''), run_id, operation_id,
+			error_code, suggestions_json, updated_at
 		FROM assistant_messages
 		WHERE session_id = ?
 		ORDER BY created_at, id
@@ -846,16 +886,9 @@ func (s *Store) ListAssistantMessages(ctx context.Context, sessionID string) ([]
 	defer rows.Close()
 	messages := make([]assistantdomain.Message, 0)
 	for rows.Next() {
-		var message assistantdomain.Message
-		var createdAt string
-		if err := rows.Scan(&message.ID, &message.SessionID, &message.Role, &message.Text,
-			&message.Stage, &message.CandidateID, &message.EntityRef, &message.FieldPath,
-			&message.ActionID, &message.IdempotencyKey, &createdAt); err != nil {
-			return nil, databaseOperationError("scan assistant message", err)
-		}
-		message.CreatedAt, err = parseTime(createdAt)
+		message, err := scanAssistantMessage(rows)
 		if err != nil {
-			return nil, fmt.Errorf("parse assistant message created_at: %w", err)
+			return nil, err
 		}
 		messages = append(messages, message)
 	}
@@ -863,6 +896,19 @@ func (s *Store) ListAssistantMessages(ctx context.Context, sessionID string) ([]
 		return nil, databaseOperationError("iterate assistant messages", err)
 	}
 	return messages, nil
+}
+
+// AssistantMessageByIdempotency 按会话幂等键读取已冻结的公开消息。
+func (s *Store) AssistantMessageByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Message, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, session_id, role, text, stage, candidate_id, entity_ref,
+			field_path, COALESCE(action_id, ''), idempotency_key, created_at,
+			kind, status, reply_to_id, COALESCE(authorization_id, ''), run_id, operation_id,
+			error_code, suggestions_json, updated_at
+		FROM assistant_messages
+		WHERE session_id = ? AND idempotency_key = ?
+	`, strings.TrimSpace(sessionID), strings.TrimSpace(key))
+	return scanAssistantMessage(row)
 }
 
 const assistantActionSelect = `

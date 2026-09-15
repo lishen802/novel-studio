@@ -161,6 +161,8 @@ func Builtin() (*Registry, error) {
 	candidateRevisionReviewBinding := BindingForText("review_candidate_revision.prompt", 1, []byte(candidateRevisionReviewPrompt))
 	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 1, candidateRevisionSchema)
 	candidateRevisionSchemaBindingV2 := BindingForText("story_candidate_revision.schema", 2, candidateRevisionSchemaV2)
+	candidateDiscussionPromptBinding := BindingForText("story_candidate_discussion.prompt", 1, []byte(candidateDiscussionPrompt))
+	candidateDiscussionSchemaBinding := BindingForText("story_candidate_discussion.schema", 1, candidateDiscussionSchema)
 	materialPromptBinding := BindingForText("author_material.prompt", 1, []byte(authorMaterialPrompt))
 	materialPromptBindingV2 := BindingForText("author_material.prompt", 2, []byte(authorMaterialPromptV2))
 	materialSchemaBindingV2 := BindingForText("author_material.schema", 2, authorMaterialSchemaV2)
@@ -433,6 +435,7 @@ func Builtin() (*Registry, error) {
 	workflows := []ports.WorkflowAsset{
 		workflowAsset(candidateRevisionWorkflow(1, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
 		workflowAsset(candidateRevisionWorkflow(StoryCandidateRevisionWorkflowVersionV2, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBindingV2, reviewSchema, assembler)),
+		workflowAsset(candidateDiscussionWorkflow(candidateDiscussionPromptBinding, candidateDiscussionSchemaBinding, assembler)),
 		workflowAsset(materialWorkflowV2), workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap), workflowAsset(authorRoadmapV2),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
@@ -443,6 +446,7 @@ func Builtin() (*Registry, error) {
 		[]ports.PromptAsset{
 			{Binding: candidateRevisionPromptBinding, Template: candidateRevisionPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint"}},
 			{Binding: candidateRevisionReviewBinding, Template: candidateRevisionReviewPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint", "Revision"}},
+			{Binding: candidateDiscussionPromptBinding, Template: candidateDiscussionPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: materialPromptBindingV2, Template: authorMaterialPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: materialPromptBinding, Template: authorMaterialPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: fillPromptBinding, Template: authorPlanFillPrompt, Variables: []string{"Task", "Context"}},
@@ -477,6 +481,7 @@ func Builtin() (*Registry, error) {
 		[]ports.SchemaAsset{
 			{Binding: candidateRevisionSchemaBinding, JSON: candidateRevisionSchema},
 			{Binding: candidateRevisionSchemaBindingV2, JSON: candidateRevisionSchemaV2},
+			{Binding: candidateDiscussionSchemaBinding, JSON: candidateDiscussionSchema},
 			{Binding: materialSchemaBindingV2, JSON: authorMaterialSchemaV2},
 			{Binding: materialSchemaBinding, JSON: authorMaterialSchema},
 			{Binding: draftSchema, JSON: chapterDraftSchema},

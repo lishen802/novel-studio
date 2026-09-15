@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
+	"github.com/pressly/goose/v3"
 )
 
 func TestCreationOperationPersistsFrozenInputDigest(t *testing.T) {
@@ -478,5 +481,163 @@ func TestAssistantMessagesPersistContextAndDeduplicateRetries(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].EntityRef != "character:hero" || messages[0].FieldPath != "/characters/hero/motivation" {
 		t.Fatalf("messages = %#v", messages)
+	}
+}
+
+func TestAssistantDiscussionAuthorizationAndMessageRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := time.Unix(800, 0).UTC()
+	if err := store.SaveAssistantSession(ctx, "asst-discuss", project.ID, "branch-1", formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	action, err := assistantdomain.NewAction(
+		"act-discuss", "asst-discuss", project.ID, "branch-1",
+		assistantdomain.OpAuthorizeDiscussion, assistantdomain.RiskPaid,
+		[]string{"candidate-1"}, []string{"candidate-1@1"},
+		`{"contract":"story_discussion@1"}`, "hash-discuss", "discuss-1", "金额暂不可估算", now, now.Add(time.Hour),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAssistantAction(ctx, action); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := assistantdomain.NewAuthorization(
+		"auth-1", "asst-discuss", project.ID, "branch-1", action.ID,
+		"candidate-1", "sha-candidate-1", "proposal", "proposal:arc",
+		1, []string{"/title"}, "profile-1@1", "conn-1", "openai", "gpt-test", "low",
+		8, 16000, 4000, now, now.Add(4*time.Hour),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err = auth.Activate(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err = auth.ReserveTurn(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAssistantAuthorization(ctx, auth); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.AssistantAuthorization(ctx, auth.ID)
+	if err != nil || loaded.ReservedCalls != 1 || loaded.Model != "gpt-test" {
+		t.Fatalf("loaded auth = %+v err=%v", loaded, err)
+	}
+	author, err := assistantdomain.NewDiscussionMessage("msg-d1", "asst-discuss", assistantdomain.RoleAuthor,
+		assistantdomain.MessagePending, "动机哪里不够可信", "proposal", "candidate-1", "proposal:arc", "/title",
+		action.ID, auth.ID, "discuss-turn-1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAssistantMessage(ctx, author); err != nil {
+		t.Fatal(err)
+	}
+	running, err := author.MarkRunning("run-d1", "op-d1", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateAssistantMessage(ctx, running); err != nil {
+		t.Fatal(err)
+	}
+	byKey, err := store.AssistantMessageByIdempotency(ctx, "asst-discuss", "discuss-turn-1")
+	if err != nil || byKey.Status != assistantdomain.MessageRunning || byKey.AuthorizationID != auth.ID {
+		t.Fatalf("by key = %+v err=%v", byKey, err)
+	}
+	settled, err := loaded.SettleTurn(120, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAssistantAuthorization(ctx, settled); err != nil {
+		t.Fatal(err)
+	}
+	again, err := store.AssistantAuthorizationByAction(ctx, action.ID)
+	if err != nil || again.UsedCalls != 1 || again.UsedTokens != 120 || again.ReservedCalls != 0 {
+		t.Fatalf("settled auth = %+v err=%v", again, err)
+	}
+}
+
+func TestSchema37AssistantMessagesUpgradeKeepsRevisionDefaults(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "project.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrationFS, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 37); err != nil {
+		t.Fatal(err)
+	}
+	now := formatTime(time.Unix(900, 0))
+	for _, statement := range []string{
+		`INSERT INTO projects(id, title, created_at, updated_at) VALUES ('project-legacy', '旧项目', ?, ?)`,
+		`INSERT INTO assistant_sessions(id, project_id, branch_id, kind, created_at, updated_at) VALUES ('asst-legacy', 'project-legacy', 'main', 'creation', ?, ?)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement, now, now); err != nil {
+			t.Fatalf("seed session: %v", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO assistant_actions(
+			id, session_id, project_id, branch_id, operation, risk, target_refs_json, base_versions_json,
+			arguments, arguments_hash, idempotency_key, estimated_cost, state, error_code, result_refs_json,
+			expires_at, created_at, updated_at
+		) VALUES (
+			'act-legacy', 'asst-legacy', 'project-legacy', 'main', 'revise_fields', 'paid', '[]', '[]',
+			'{}', 'hash-legacy', 'idem-legacy', '', 'pending_confirmation', '', '[]', ?, ?, ?
+		)
+	`, now, now, now); err != nil {
+		t.Fatalf("seed action: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO assistant_messages(
+			id, session_id, role, text, stage, candidate_id, entity_ref, field_path, action_id, idempotency_key, created_at
+		) VALUES (
+			'msg-legacy', 'asst-legacy', 'author', '旧共创消息', 'proposal', 'cand-1', '', '/title', 'act-legacy', 'legacy-key', ?
+		)
+	`, now); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+	var beforeActions int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM assistant_actions`).Scan(&beforeActions); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("upgrade to discussion schema: %v", err)
+	}
+	var kind, status, updatedAt string
+	if err := db.QueryRowContext(ctx, `SELECT kind, status, updated_at FROM assistant_messages WHERE id = 'msg-legacy'`).Scan(&kind, &status, &updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "revision_request" || status != "answered" || updatedAt == "" {
+		t.Fatalf("upgraded message defaults = (%q, %q, %q)", kind, status, updatedAt)
+	}
+	var afterActions int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM assistant_actions`).Scan(&afterActions); err != nil {
+		t.Fatal(err)
+	}
+	if afterActions != beforeActions {
+		t.Fatalf("action rows changed during rebuild: before=%d after=%d", beforeActions, afterActions)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO assistant_authorizations(
+		id, session_id, project_id, branch_id, action_id, candidate_id, candidate_version, candidate_sha256,
+		stage, entity_ref, field_paths_json, profile_version_id, provider_name, model, max_calls, max_total_tokens,
+		max_turn_tokens, state, expires_at, created_at, updated_at
+	) VALUES (
+		'auth-new', 'asst-legacy', 'project-legacy', 'main', 'act-legacy', 'cand-1', 1, 'sha',
+		'proposal', '', '[]', 'profile@1', 'openai', 'gpt-test', 8, 16000, 4000, 'pending_confirmation', ?, ?, ?
+	)`, now, now, now); err != nil {
+		t.Fatalf("new authorization insert: %v", err)
 	}
 }

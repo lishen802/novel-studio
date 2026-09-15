@@ -145,21 +145,37 @@ type RunView struct {
 }
 
 type AssistantSummaryView struct {
-	PendingActionCount int                    `json:"pendingActionCount"`
-	Messages           []AssistantMessageView `json:"messages"`
+	PendingActionCount int                          `json:"pendingActionCount"`
+	Messages           []AssistantMessageView       `json:"messages"`
+	Authorization      *DiscussionAuthorizationView `json:"authorization,omitempty"`
+}
+
+type DiscussionSuggestionView struct {
+	ID            string   `json:"id"`
+	Paths         []string `json:"paths"`
+	Instruction   string   `json:"instruction"`
+	PreservePaths []string `json:"preservePaths"`
+	Rationale     string   `json:"rationale"`
 }
 
 type AssistantMessageView struct {
-	ID          string `json:"id"`
-	Role        string `json:"role"`
-	Text        string `json:"text"`
-	Stage       string `json:"stage"`
-	CandidateID string `json:"candidateId"`
-	EntityRef   string `json:"entityRef"`
-	FieldPath   string `json:"fieldPath"`
-	ActionID    string `json:"actionId"`
-	ActionState string `json:"actionState"`
-	CreatedAt   string `json:"createdAt"`
+	ID              string                     `json:"id"`
+	Role            string                     `json:"role"`
+	Kind            string                     `json:"kind,omitempty"`
+	Status          string                     `json:"status,omitempty"`
+	Text            string                     `json:"text"`
+	Stage           string                     `json:"stage"`
+	CandidateID     string                     `json:"candidateId"`
+	EntityRef       string                     `json:"entityRef"`
+	FieldPath       string                     `json:"fieldPath"`
+	ActionID        string                     `json:"actionId"`
+	ActionState     string                     `json:"actionState"`
+	AuthorizationID string                     `json:"authorizationId,omitempty"`
+	RunID           string                     `json:"runId,omitempty"`
+	ReplyToID       string                     `json:"replyToId,omitempty"`
+	ErrorCode       string                     `json:"errorCode,omitempty"`
+	Suggestions     []DiscussionSuggestionView `json:"suggestions,omitempty"`
+	CreatedAt       string                     `json:"createdAt"`
 }
 
 type CandidateView struct {
@@ -219,12 +235,35 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 	}
 	view.Assistant.Messages = make([]AssistantMessageView, 0, len(messages))
 	for _, message := range messages {
-		view.Assistant.Messages = append(view.Assistant.Messages, AssistantMessageView{
-			ID: message.ID, Role: string(message.Role), Text: message.Text, Stage: message.Stage,
-			CandidateID: message.CandidateID, EntityRef: message.EntityRef, FieldPath: message.FieldPath,
-			ActionID: message.ActionID, ActionState: actionStates[message.ActionID],
-			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
-		})
+		view.Assistant.Messages = append(view.Assistant.Messages, projectAssistantMessage(message, actionStates[message.ActionID]))
+	}
+	if current, ok := currentCandidate(candidates, session.Stage); ok && assistantErr == nil {
+		auths, listErr := service.store.ListAuthorizations(ctx, assistantSession.ID)
+		if listErr != nil {
+			return WorkbenchView{}, listErr
+		}
+		var matched assistantdomain.Authorization
+		for _, auth := range auths {
+			if auth.CandidateID != current.ID {
+				continue
+			}
+			if matched.ID == "" || auth.CreatedAt.After(matched.CreatedAt) || (auth.State == assistantdomain.AuthActive && matched.State != assistantdomain.AuthActive) {
+				matched = auth
+			}
+		}
+		if matched.ID != "" {
+			action, actionErr := service.store.Action(ctx, matched.ActionID)
+			cost := CostPreview{}
+			stale := matched.State == assistantdomain.AuthStale
+			if actionErr == nil {
+				if input, decodeErr := decodeDiscussionInput(action); decodeErr == nil {
+					cost = input.Cost
+					stale = stale || service.discussionCurrent(ctx, session, input) != nil
+				}
+			}
+			viewAuth := projectAuthorization(matched, cost, stale)
+			view.Assistant.Authorization = &viewAuth
+		}
 	}
 	if session.Stage != creationdomain.StageIntent {
 		if current, ok := currentCandidate(candidates, session.Stage); ok {

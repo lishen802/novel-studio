@@ -49,7 +49,13 @@ type Store interface {
 	SaveAssistantSession(ctx context.Context, session assistantdomain.Session) error
 	AssistantSession(ctx context.Context, projectID, branchID string) (assistantdomain.Session, error)
 	SaveAssistantMessage(ctx context.Context, message assistantdomain.Message) error
+	UpdateAssistantMessage(ctx context.Context, message assistantdomain.Message) error
 	ListAssistantMessages(ctx context.Context, sessionID string) ([]assistantdomain.Message, error)
+	AssistantMessageByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Message, error)
+	SaveAuthorization(ctx context.Context, auth assistantdomain.Authorization) error
+	Authorization(ctx context.Context, id string) (assistantdomain.Authorization, error)
+	AuthorizationByAction(ctx context.Context, actionID string) (assistantdomain.Authorization, error)
+	ListAuthorizations(ctx context.Context, sessionID string) ([]assistantdomain.Authorization, error)
 	SaveAction(ctx context.Context, action assistantdomain.Action) error
 	Action(ctx context.Context, id string) (assistantdomain.Action, error)
 	ActionByIdempotency(ctx context.Context, sessionID, key string) (assistantdomain.Action, error)
