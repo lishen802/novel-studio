@@ -39,8 +39,18 @@ func TestDiscussionMessageTracksRunWithoutPretendingAnswered(t *testing.T) {
 	if err != nil || unknown.Status != MessageOutcomeUnknown {
 		t.Fatalf("unknown = %#v err=%v", unknown, err)
 	}
-	if _, err := unknown.MarkAnswered(now.Add(3 * time.Second)); err == nil {
-		t.Fatal("unknown message must not become answered")
+	answered, err := unknown.MarkAnswered(now.Add(3 * time.Second))
+	if err != nil || answered.Status != MessageAnswered {
+		t.Fatalf("reconciled answer = %#v err=%v", answered, err)
+	}
+}
+
+func TestDiscussionAssistantReplyAllowsStructuredAnswerAndQuestions(t *testing.T) {
+	now := time.Unix(300, 0)
+	text := strings.Repeat("答", 4000) + "\n\n还可以继续确认：\n- " + strings.Repeat("问", 400)
+	message, err := NewDiscussionMessage("msg-long", "session-1", RoleAssistant, MessageAnswered, text, "proposal", "candidate-1", "", "/title", "action-1", "auth-1", "reply-1", now)
+	if err != nil || message.Text != text {
+		t.Fatalf("long assistant reply = %#v err=%v", message, err)
 	}
 }
 

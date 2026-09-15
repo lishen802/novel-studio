@@ -145,9 +145,11 @@ type RunView struct {
 }
 
 type AssistantSummaryView struct {
-	PendingActionCount int                          `json:"pendingActionCount"`
-	Messages           []AssistantMessageView       `json:"messages"`
-	Authorization      *DiscussionAuthorizationView `json:"authorization,omitempty"`
+	PendingActionCount int                           `json:"pendingActionCount"`
+	Messages           []AssistantMessageView        `json:"messages"`
+	Authorization      *DiscussionAuthorizationView  `json:"authorization,omitempty"`
+	Authorizations     []DiscussionAuthorizationView `json:"authorizations,omitempty"`
+	PendingDiscussion  *DiscussionTurnView           `json:"pendingDiscussion,omitempty"`
 }
 
 type DiscussionSuggestionView struct {
@@ -225,6 +227,14 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 		}
 		for _, action := range actions {
 			actionStates[action.ID] = string(action.State)
+			if action.Operation == assistantdomain.OpAuthorizeDiscussion && action.State == assistantdomain.StatePendingConfirmation {
+				if input, decodeErr := decodeDiscussionInput(action); decodeErr == nil {
+					pendingView, viewErr := service.discussionPreviewView(ctx, session, action, input)
+					if viewErr == nil {
+						view.Assistant.PendingDiscussion = &pendingView
+					}
+				}
+			}
 		}
 		messages, listErr = service.store.ListAssistantMessages(ctx, assistantSession.ID)
 		if listErr != nil {
@@ -243,11 +253,24 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 			return WorkbenchView{}, listErr
 		}
 		var matched assistantdomain.Authorization
+		view.Assistant.Authorizations = make([]DiscussionAuthorizationView, 0, len(auths))
 		for _, auth := range auths {
 			if auth.CandidateID != current.ID {
 				continue
 			}
-			if matched.ID == "" || auth.CreatedAt.After(matched.CreatedAt) || (auth.State == assistantdomain.AuthActive && matched.State != assistantdomain.AuthActive) {
+			action, actionErr := service.store.Action(ctx, auth.ActionID)
+			cost := CostPreview{}
+			stale := auth.State == assistantdomain.AuthStale
+			if actionErr == nil {
+				if input, decodeErr := decodeDiscussionInput(action); decodeErr == nil {
+					cost = input.Cost
+					stale = stale || service.discussionCurrent(ctx, session, input) != nil
+				}
+			}
+			view.Assistant.Authorizations = append(view.Assistant.Authorizations, projectAuthorization(auth, cost, stale, service.clock.Now()))
+			authActive := auth.State == assistantdomain.AuthActive && (auth.ExpiresAt.IsZero() || service.clock.Now().Before(auth.ExpiresAt))
+			matchedActive := matched.State == assistantdomain.AuthActive && (matched.ExpiresAt.IsZero() || service.clock.Now().Before(matched.ExpiresAt))
+			if matched.ID == "" || (authActive && !matchedActive) || (authActive == matchedActive && auth.CreatedAt.After(matched.CreatedAt)) {
 				matched = auth
 			}
 		}
@@ -261,7 +284,7 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 					stale = stale || service.discussionCurrent(ctx, session, input) != nil
 				}
 			}
-			viewAuth := projectAuthorization(matched, cost, stale)
+			viewAuth := projectAuthorization(matched, cost, stale, service.clock.Now())
 			view.Assistant.Authorization = &viewAuth
 		}
 	}

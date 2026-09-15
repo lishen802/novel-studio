@@ -3,6 +3,7 @@ package creation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -22,7 +23,7 @@ const (
 	discussionContract           = "story_discussion@1"
 	discussionAuthorizationTTL   = 4 * time.Hour
 	defaultDiscussionCalls       = 8
-	defaultDiscussionTurnTokens  = 4000
+	defaultDiscussionTurnTokens  = 8000
 	defaultDiscussionTotalTokens = 16000
 )
 
@@ -30,6 +31,7 @@ type DiscussionAuthorizationRequest struct {
 	CandidateID    string   `json:"candidateId"`
 	EntityRef      string   `json:"entityRef"`
 	FieldPaths     []string `json:"fieldPaths"`
+	Message        string   `json:"message"`
 	MaxCalls       int      `json:"maxCalls"`
 	MaxTotalTokens int      `json:"maxTotalTokens"`
 	MaxTurnTokens  int      `json:"maxTurnTokens"`
@@ -88,6 +90,7 @@ type DiscussionTurnView struct {
 	RunID          string                      `json:"runId"`
 	Author         AssistantMessageView        `json:"author"`
 	Reply          *AssistantMessageView       `json:"reply,omitempty"`
+	DraftMessage   string                      `json:"draftMessage,omitempty"`
 }
 
 type discussionAuthInput struct {
@@ -126,7 +129,8 @@ func (service *Service) PreviewDiscussionAuthorization(ctx context.Context, proj
 	mutex.Lock()
 	defer mutex.Unlock()
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
-	if request.IdempotencyKey == "" || strings.TrimSpace(request.CandidateID) == "" {
+	request.Message = strings.TrimSpace(request.Message)
+	if request.IdempotencyKey == "" || strings.TrimSpace(request.CandidateID) == "" || utf8.RuneCountInString(request.Message) > 4000 {
 		return DiscussionTurnView{}, creationdomain.ErrBlankValue
 	}
 	normalizeDiscussionBudget(&request)
@@ -209,6 +213,9 @@ func (service *Service) discussionPreviewParts(ctx context.Context, session crea
 	if !profile.RunBudgetUnlimited && profile.MaxRunTokens < compiled.RequiredTokenBudget() {
 		return creationdomain.Candidate{}, RoleModelView{}, CostPreview{}, agentkernel.ErrTokenBudget
 	}
+	if request.MaxTurnTokens < compiled.RequiredTokenBudget() || (!profile.RunBudgetUnlimited && request.MaxTurnTokens > profile.MaxRunTokens) {
+		return creationdomain.Candidate{}, RoleModelView{}, CostPreview{}, agentkernel.ErrTokenBudget
+	}
 	cost := CostPreview{
 		Stage: base.Stage, WorkflowID: compiled.Workflow.ID, WorkflowVersion: compiled.Workflow.Version,
 		EstimatedCalls: request.MaxCalls, MaxRunTokens: request.MaxTurnTokens, RunBudgetUnlimited: false,
@@ -242,12 +249,60 @@ func (service *Service) ConfirmDiscussionAuthorization(ctx context.Context, proj
 	if err != nil {
 		return DiscussionTurnView{}, err
 	}
-	if action.State != assistantdomain.StatePendingConfirmation {
-		auth, authErr := service.store.AuthorizationByAction(ctx, action.ID)
+	if existing, existingErr := service.store.AssistantMessageByIdempotency(ctx, action.SessionID, command.MessageIdempotencyKey); existingErr == nil {
+		if existing.Text != command.Message || existing.CandidateID != input.Base.ID || existing.EntityRef != input.Request.EntityRef || !slices.Contains(input.Request.FieldPaths, existing.FieldPath) {
+			return DiscussionTurnView{}, ErrOperationConflict
+		}
+		auth, authErr := service.store.Authorization(ctx, existing.AuthorizationID)
 		if authErr != nil {
 			return DiscussionTurnView{}, authErr
 		}
-		return service.existingDiscussionTurn(ctx, session, action, auth, command.MessageIdempotencyKey, command.Message)
+		if action, authErr = service.completeDiscussionAuthorizationAction(ctx, action, auth.ID, existing.RunID); authErr != nil {
+			return DiscussionTurnView{}, authErr
+		}
+		return service.discussionTurnView(ctx, session, action, auth, existing)
+	} else if !isMissingSession(existingErr) {
+		return DiscussionTurnView{}, existingErr
+	}
+	if action.State != assistantdomain.StatePendingConfirmation {
+		auth, authErr := service.store.AuthorizationByAction(ctx, action.ID)
+		if authErr != nil {
+			if action.State != assistantdomain.StateExecuting || !isMissingSession(authErr) {
+				return DiscussionTurnView{}, authErr
+			}
+			now := service.clock.Now()
+			auth, authErr = assistantdomain.NewAuthorization(
+				input.AuthorizationID, action.SessionID, projectID, session.BranchID, action.ID,
+				input.Base.ID, input.Base.ContentSHA256, string(input.Base.Stage), input.Request.EntityRef,
+				input.Base.Version, input.Request.FieldPaths, discussionProfileID(input.Profile),
+				plannerConnection(input.Profile), input.Planner.Provider, input.Planner.Model, plannerEffort(input.Profile),
+				input.MaxCalls, input.MaxTotalTokens, input.MaxTurnTokens, now, time.Unix(input.ExpiresAtUnix, 0).UTC(),
+			)
+			if authErr != nil {
+				return DiscussionTurnView{}, authErr
+			}
+			auth, authErr = auth.Activate(now)
+			if authErr != nil {
+				return DiscussionTurnView{}, authErr
+			}
+			if authErr = service.store.SaveAuthorization(ctx, auth); authErr != nil {
+				return DiscussionTurnView{}, authErr
+			}
+		}
+		turn, turnErr := service.existingDiscussionTurn(ctx, session, action, auth, command.MessageIdempotencyKey, command.Message)
+		if !errors.Is(turnErr, assistantdomain.ErrReplayForbidden) || auth.State != assistantdomain.AuthActive {
+			return turn, turnErr
+		}
+		if auth.ReservedCalls > 0 {
+			auth, authErr = auth.ReleaseTurn(service.clock.Now())
+			if authErr != nil {
+				return DiscussionTurnView{}, authErr
+			}
+			if authErr = service.store.SaveAuthorization(ctx, auth); authErr != nil {
+				return DiscussionTurnView{}, authErr
+			}
+		}
+		return service.startDiscussionTurn(ctx, session, action, auth, input, command.Message, command.MessageIdempotencyKey)
 	}
 	if !reflect.DeepEqual(profile, input.Profile) {
 		return DiscussionTurnView{}, ErrConfirmationRequired
@@ -258,11 +313,11 @@ func (service *Service) ConfirmDiscussionAuthorization(ctx context.Context, proj
 	if session.ActiveRunID != "" {
 		return DiscussionTurnView{}, ErrRunActive
 	}
+	if input.Request.Message != "" && command.Message != input.Request.Message {
+		return DiscussionTurnView{}, ErrOperationConflict
+	}
 	executing, err := action.Confirm(command.ArgumentsHash, command.IdempotencyKey, service.clock.Now())
 	if err != nil {
-		return DiscussionTurnView{}, err
-	}
-	if err := service.store.SaveAction(ctx, executing); err != nil {
 		return DiscussionTurnView{}, err
 	}
 	now := service.clock.Now()
@@ -283,7 +338,7 @@ func (service *Service) ConfirmDiscussionAuthorization(ctx context.Context, proj
 	if err := service.store.SaveAuthorization(ctx, auth); err != nil {
 		return DiscussionTurnView{}, err
 	}
-	turn, err := service.startDiscussionTurn(ctx, session, executing, auth, input, command.Message, command.MessageIdempotencyKey, true)
+	turn, err := service.startDiscussionTurn(ctx, session, executing, auth, input, command.Message, command.MessageIdempotencyKey)
 	if err != nil {
 		return DiscussionTurnView{}, err
 	}
@@ -320,7 +375,9 @@ func (service *Service) SendDiscussionMessage(ctx context.Context, projectID str
 		return DiscussionTurnView{}, err
 	}
 	if existing, e := service.store.AssistantMessageByIdempotency(ctx, action.SessionID, request.IdempotencyKey); e == nil {
-		if existing.Text != request.Text || existing.CandidateID != request.CandidateID {
+		if existing.Text != request.Text || existing.CandidateID != request.CandidateID ||
+			existing.AuthorizationID != request.AuthorizationID || existing.EntityRef != strings.TrimSpace(request.EntityRef) ||
+			existing.FieldPath != primaryFieldPath(request.FieldPaths) {
 			return DiscussionTurnView{}, ErrOperationConflict
 		}
 		return service.discussionTurnView(ctx, session, action, auth, existing)
@@ -328,6 +385,11 @@ func (service *Service) SendDiscussionMessage(ctx context.Context, projectID str
 		return DiscussionTurnView{}, e
 	}
 	if err := auth.CanStartTurn(service.clock.Now()); err != nil {
+		if errors.Is(err, assistantdomain.ErrExpired) {
+			if expired, expireErr := auth.Expire(service.clock.Now()); expireErr == nil {
+				_ = service.store.SaveAuthorization(ctx, expired)
+			}
+		}
 		return DiscussionTurnView{}, err
 	}
 	if !auth.MatchesTarget(request.CandidateID, auth.CandidateSHA256, auth.CandidateVersion) ||
@@ -352,7 +414,7 @@ func (service *Service) SendDiscussionMessage(ctx context.Context, projectID str
 	if session.ActiveRunID != "" {
 		return DiscussionTurnView{}, ErrRunActive
 	}
-	return service.startDiscussionTurn(ctx, session, action, auth, input, request.Text, request.IdempotencyKey, false)
+	return service.startDiscussionTurn(ctx, session, action, auth, input, request.Text, request.IdempotencyKey)
 }
 
 // RevokeDiscussionAuthorization 阻止新消息，不删除历史，也不宣称 Provider 已停止。
@@ -445,9 +507,12 @@ func (service *Service) startDiscussionTurn(
 	auth assistantdomain.Authorization,
 	input discussionAuthInput,
 	text, messageKey string,
-	succeedAction bool,
 ) (DiscussionTurnView, error) {
 	now := service.clock.Now()
+	sources, err := service.discussionSources(ctx, session, auth, input, text)
+	if err != nil {
+		return DiscussionTurnView{}, err
+	}
 	reserved, err := auth.ReserveTurn(now)
 	if err != nil {
 		return DiscussionTurnView{}, err
@@ -455,9 +520,16 @@ func (service *Service) startDiscussionTurn(
 	if err := service.store.SaveAuthorization(ctx, reserved); err != nil {
 		return DiscussionTurnView{}, err
 	}
+	runID := service.ids.NewID()
 	author, err := assistantdomain.NewDiscussionMessage(service.ids.NewID(), action.SessionID, assistantdomain.RoleAuthor,
 		assistantdomain.MessagePending, text, string(input.Base.Stage), input.Base.ID, input.Request.EntityRef,
 		primaryFieldPath(input.Request.FieldPaths), action.ID, reserved.ID, messageKey, now)
+	if err != nil {
+		released, _ := reserved.ReleaseTurn(now)
+		_ = service.store.SaveAuthorization(ctx, released)
+		return DiscussionTurnView{}, err
+	}
+	author, err = author.MarkRunning(runID, runID, now)
 	if err != nil {
 		released, _ := reserved.ReleaseTurn(now)
 		_ = service.store.SaveAuthorization(ctx, released)
@@ -468,7 +540,6 @@ func (service *Service) startDiscussionTurn(
 		_ = service.store.SaveAuthorization(ctx, released)
 		return DiscussionTurnView{}, err
 	}
-	runID := service.ids.NewID()
 	operation, created, err := service.store.ReserveOperation(ctx, creationdomain.Operation{
 		ID: runID, ProjectID: session.ProjectID, BranchID: session.BranchID, Command: "discuss_candidate",
 		IdempotencyKey: messageKey, ArgumentsHash: hashBytes([]byte(text + "\x00" + reserved.ID)),
@@ -476,15 +547,17 @@ func (service *Service) startDiscussionTurn(
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
+		_ = service.failDiscussionTurn(ctx, author, reserved, creationdomain.Operation{}, "启动记录失败", discussionFailureLocal, 0)
 		return DiscussionTurnView{}, err
 	}
 	if !created {
+		_ = service.failDiscussionTurn(ctx, author, reserved, operation, "重复的运行请求", discussionFailureLocal, 0)
 		return DiscussionTurnView{}, assistantdomain.ErrReplayForbidden
 	}
 	captured := service.generation()
 	lease, release, err := service.coordinator.BeginRun(context.WithoutCancel(ctx), runID)
 	if err != nil {
-		service.failDiscussionTurn(ctx, author, reserved, operation, "启动失败", false)
+		_ = service.failDiscussionTurn(ctx, author, reserved, operation, "启动失败", discussionFailureLocal, 0)
 		return DiscussionTurnView{}, err
 	}
 	launched := false
@@ -496,19 +569,24 @@ func (service *Service) startDiscussionTurn(
 	session.ActiveRunID = runID
 	session.ActiveOperationID = operation.ID
 	if err := service.store.SaveRunSlot(lease.Context(), session); err != nil {
-		service.failDiscussionTurn(lease.Context(), author, reserved, operation, "运行槽冲突", false)
+		_ = service.failDiscussionTurn(lease.Context(), author, reserved, operation, "运行槽冲突", discussionFailureLocal, 0)
 		return DiscussionTurnView{}, err
 	}
-	sources, err := service.discussionSources(ctx, session, reserved, input, text)
+	operation.Status = creationdomain.OperationRunning
+	if err := service.store.UpdateOperation(lease.Context(), operation); err != nil {
+		_ = service.failDiscussionTurn(lease.Context(), author, reserved, operation, "启动记录失败", discussionFailureLocal, 0)
+		_ = service.clearRunSlot(lease.Context(), session.ProjectID, runID)
+		return DiscussionTurnView{}, err
+	}
+	action, err = service.completeDiscussionAuthorizationAction(ctx, action, reserved.ID, runID)
 	if err != nil {
-		service.failDiscussionTurn(lease.Context(), author, reserved, operation, "装配失败", false)
-		service.clearRunSlot(lease.Context(), session.ProjectID, runID)
+		_ = service.failDiscussionTurn(lease.Context(), author, reserved, operation, "授权状态失败", discussionFailureLocal, 0)
+		_ = service.clearRunSlot(lease.Context(), session.ProjectID, runID)
 		return DiscussionTurnView{}, err
 	}
 	turnProfile := input.Profile
-	if !turnProfile.RunBudgetUnlimited && turnProfile.MaxRunTokens > reserved.MaxTurnTokens {
-		turnProfile.MaxRunTokens = reserved.MaxTurnTokens + 2000
-	}
+	turnProfile.RunBudgetUnlimited = false
+	turnProfile.MaxRunTokens = reserved.MaxTurnTokens
 	_, err = service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{
 		RunID: runID, ProjectID: session.ProjectID, BranchID: session.BranchID, CanonicalHead: input.ProjectDigest,
 		AuthorInstruction: text, WorkflowID: agentassets.StoryCandidateDiscussionWorkflowID,
@@ -516,27 +594,9 @@ func (service *Service) startDiscussionTurn(
 		Sources: sources, Deadline: now.Add(defaultRunTimeout),
 	})
 	if err != nil {
-		service.failDiscussionTurn(lease.Context(), author, reserved, operation, "启动失败", false)
-		service.clearRunSlot(lease.Context(), session.ProjectID, runID)
+		_ = service.failDiscussionTurn(lease.Context(), author, reserved, operation, "启动失败", discussionFailureLocal, 0)
+		_ = service.clearRunSlot(lease.Context(), session.ProjectID, runID)
 		return DiscussionTurnView{}, err
-	}
-	running, err := author.MarkRunning(runID, operation.ID, now)
-	if err != nil {
-		return DiscussionTurnView{}, err
-	}
-	if err := service.store.UpdateAssistantMessage(ctx, running); err != nil {
-		return DiscussionTurnView{}, err
-	}
-	operation.Status = creationdomain.OperationRunning
-	if err := service.store.UpdateOperation(lease.Context(), operation); err != nil {
-		return DiscussionTurnView{}, err
-	}
-	if succeedAction && action.State == assistantdomain.StateExecuting {
-		succeeded, succErr := action.Succeed([]string{reserved.ID, runID}, now)
-		if succErr == nil {
-			_ = service.store.SaveAction(ctx, succeeded)
-			action = succeeded
-		}
 	}
 	go func() {
 		defer release()
@@ -545,25 +605,38 @@ func (service *Service) startDiscussionTurn(
 		if lease.Stale() || captured != service.generation() {
 			return
 		}
+		mutex := service.lockProject(session.ProjectID)
+		mutex.Lock()
+		defer mutex.Unlock()
+		if lease.Stale() || captured != service.generation() {
+			return
+		}
 		latestAuth, authErr := service.store.Authorization(storeCtx, reserved.ID)
 		if authErr != nil || latestAuth.ID == "" {
-			latestAuth = reserved
+			return
 		}
-		latestMsg, msgErr := service.store.AssistantMessageByIdempotency(storeCtx, running.SessionID, running.IdempotencyKey)
+		latestMsg, msgErr := service.store.AssistantMessageByIdempotency(storeCtx, author.SessionID, author.IdempotencyKey)
 		if msgErr != nil || latestMsg.ID == "" {
-			latestMsg = running
+			return
 		}
 		if executeErr != nil {
-			providerReached := completed.InputTokens+completed.OutputTokens > 0
-			service.failDiscussionTurn(storeCtx, latestMsg, latestAuth, operation, "运行失败或已取消", providerReached)
+			mode := discussionFailureUnknown
+			if discussionProviderReached(completed) {
+				mode = discussionFailureReached
+			}
+			if err := service.failDiscussionTurn(storeCtx, latestMsg, latestAuth, operation, "运行失败或已取消", mode, completed.InputTokens+completed.OutputTokens); err != nil {
+				return
+			}
 		} else {
-			service.completeDiscussionTurn(storeCtx, latestMsg, latestAuth, operation, input, completed)
+			if err := service.completeDiscussionTurn(storeCtx, latestMsg, latestAuth, operation, input, completed); err != nil {
+				return
+			}
 		}
-		service.clearRunSlot(storeCtx, session.ProjectID, runID)
+		_ = service.clearRunSlot(storeCtx, session.ProjectID, runID)
 	}()
 	launched = true
 	auth, _ = service.store.Authorization(ctx, reserved.ID)
-	return service.discussionTurnView(ctx, session, action, auth, running)
+	return service.discussionTurnView(ctx, session, action, auth, author)
 }
 
 func (service *Service) completeDiscussionTurn(
@@ -573,76 +646,164 @@ func (service *Service) completeDiscussionTurn(
 	operation creationdomain.Operation,
 	input discussionAuthInput,
 	run agentdomain.Run,
-) {
-	if author.Status != assistantdomain.MessageRunning && author.Status != assistantdomain.MessagePending && author.Status != assistantdomain.MessageOutcomeUnknown {
-		return
+) error {
+	if author.Status != assistantdomain.MessageRunning && author.Status != assistantdomain.MessagePending && author.Status != assistantdomain.MessageOutcomeUnknown && author.Status != assistantdomain.MessageAnswered {
+		return assistantdomain.ErrInvalidTransition
 	}
 	artifacts, err := service.kernel.Artifacts(ctx, run.ID)
 	if err != nil {
-		service.failDiscussionTurn(ctx, author, auth, operation, "结果无法读取", true)
-		return
+		return err
 	}
 	payload, _, err := service.resultPayload(ctx, run, artifacts, discussionBinding())
 	if err != nil {
-		service.failDiscussionTurn(ctx, author, auth, operation, "结果无法核验", true)
-		return
+		return service.failDiscussionTurn(ctx, author, auth, operation, "结果无法核验", discussionFailureReached, run.InputTokens+run.OutputTokens)
 	}
-	output, suggestions, err := decodeDiscussionOutput(payload, input.Base)
+	output, suggestions, err := decodeDiscussionOutput(payload, input.Base, auth.FieldPaths)
 	if err != nil {
-		service.failDiscussionTurn(ctx, author, auth, operation, "结果无法核验", true)
-		return
+		return service.failDiscussionTurn(ctx, author, auth, operation, "结果无法核验", discussionFailureReached, run.InputTokens+run.OutputTokens)
 	}
 	now := service.clock.Now()
 	reply, err := assistantdomain.NewDiscussionMessage(service.ids.NewID(), author.SessionID, assistantdomain.RoleAssistant,
 		assistantdomain.MessageAnswered, formatDiscussionReply(output), author.Stage, author.CandidateID, author.EntityRef,
 		author.FieldPath, author.ActionID, auth.ID, author.IdempotencyKey+":assistant", now)
 	if err != nil {
-		service.failDiscussionTurn(ctx, author, auth, operation, "回复无法保存", true)
-		return
+		return service.failDiscussionTurn(ctx, author, auth, operation, "回复无法保存", discussionFailureReached, run.InputTokens+run.OutputTokens)
 	}
 	reply = reply.WithReply(author.ID, auth.ID, run.ID, operation.ID).WithSuggestions(suggestions)
 	if err := service.store.SaveAssistantMessage(ctx, reply); err != nil {
-		service.failDiscussionTurn(ctx, author, auth, operation, "回复无法保存", true)
-		return
+		return err
 	}
-	answered, err := author.MarkAnswered(now)
-	if err == nil {
-		_ = service.store.UpdateAssistantMessage(ctx, answered)
+	if auth.ReservedCalls > 0 {
+		settled, settleErr := auth.SettleTurn(run.InputTokens+run.OutputTokens, now)
+		if settleErr != nil {
+			return settleErr
+		}
+		if err := service.store.SaveAuthorization(ctx, settled); err != nil {
+			return err
+		}
+		auth = settled
 	}
-	actual := run.InputTokens + run.OutputTokens
-	settled, err := auth.SettleTurn(actual, now)
-	if err == nil {
-		_ = service.store.SaveAuthorization(ctx, settled)
+	if author.Status != assistantdomain.MessageAnswered {
+		answered, answerErr := author.MarkAnswered(now)
+		if answerErr != nil {
+			return answerErr
+		}
+		if err := service.store.UpdateAssistantMessage(ctx, answered); err != nil {
+			return err
+		}
 	}
-	service.finishOperation(ctx, operation, creationdomain.OperationSucceeded, "", "")
+	if operation.Status != creationdomain.OperationSucceeded {
+		operation.Status = creationdomain.OperationSucceeded
+		operation.CandidateID = ""
+		operation.ErrorCode = ""
+		operation.UpdatedAt = now
+		if err := service.store.UpdateOperation(ctx, operation); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (service *Service) failDiscussionTurn(ctx context.Context, author assistantdomain.Message, auth assistantdomain.Authorization, operation creationdomain.Operation, code string, providerReached bool) {
+type discussionFailureMode int
+
+const (
+	discussionFailureLocal discussionFailureMode = iota
+	discussionFailureReached
+	discussionFailureUnknown
+)
+
+func (service *Service) failDiscussionTurn(ctx context.Context, author assistantdomain.Message, auth assistantdomain.Authorization, operation creationdomain.Operation, code string, mode discussionFailureMode, actualTokens int) error {
 	now := service.clock.Now()
 	if author.ID != "" {
-		failed, err := author.MarkFailed(code, now)
-		if err != nil {
-			unknown, unknownErr := author.MarkOutcomeUnknown(code, now)
-			if unknownErr == nil {
-				_ = service.store.UpdateAssistantMessage(ctx, unknown)
+		var next assistantdomain.Message
+		var err error
+		if mode == discussionFailureUnknown {
+			if author.Status == assistantdomain.MessageOutcomeUnknown {
+				next = author
+			} else {
+				next, err = author.MarkOutcomeUnknown(code, now)
 			}
+		} else if author.Status == assistantdomain.MessageFailed {
+			next = author
 		} else {
-			_ = service.store.UpdateAssistantMessage(ctx, failed)
+			next, err = author.MarkFailed(code, now)
+		}
+		if err != nil {
+			return err
+		}
+		if next.UpdatedAt != author.UpdatedAt || next.Status != author.Status {
+			if err := service.store.UpdateAssistantMessage(ctx, next); err != nil {
+				return err
+			}
 		}
 	}
 	if auth.ID != "" && auth.ReservedCalls > 0 {
 		var next assistantdomain.Authorization
 		var err error
-		if providerReached {
-			next, err = auth.SettleTurn(auth.MaxTurnTokens, now)
-		} else {
+		switch mode {
+		case discussionFailureLocal:
 			next, err = auth.ReleaseTurn(now)
+		case discussionFailureReached:
+			next, err = auth.SettleTurn(actualTokens, now)
+		default:
+			next, err = auth.KeepReservation(now)
 		}
-		if err == nil {
-			_ = service.store.SaveAuthorization(ctx, next)
+		if err != nil {
+			return err
+		}
+		if err := service.store.SaveAuthorization(ctx, next); err != nil {
+			return err
 		}
 	}
-	service.finishOperation(ctx, operation, creationdomain.OperationFailed, "", code)
+	if operation.ID != "" && mode != discussionFailureUnknown && operation.Status != creationdomain.OperationFailed {
+		operation.Status = creationdomain.OperationFailed
+		operation.ErrorCode = code
+		operation.UpdatedAt = now
+		if err := service.store.UpdateOperation(ctx, operation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// discussionProviderReached 只用持久化请求 ID 或用量证明 Provider 已收到调用。
+func discussionProviderReached(run agentdomain.Run) bool {
+	if run.InputTokens+run.OutputTokens > 0 {
+		return true
+	}
+	for _, step := range run.Steps {
+		if strings.TrimSpace(step.ProviderRequestID) != "" || step.InputTokens+step.OutputTokens > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// completeDiscussionAuthorizationAction 让已落库的授权证据驱动 Action 收敛，供启动和崩溃恢复共用。
+func (service *Service) completeDiscussionAuthorizationAction(ctx context.Context, action assistantdomain.Action, authorizationID, runID string) (assistantdomain.Action, error) {
+	if action.State == assistantdomain.StateSucceeded {
+		return action, nil
+	}
+	var err error
+	if action.State == assistantdomain.StatePendingConfirmation {
+		confirmedAt := service.clock.Now()
+		// 已存在的活动授权或运行消息证明作者在有效期内完成过确认；恢复时不能因当前时间已过期而丢失该事实。
+		if !action.ExpiresAt.IsZero() && !confirmedAt.Before(action.ExpiresAt) {
+			confirmedAt = action.ExpiresAt.Add(-time.Nanosecond)
+		}
+		action, err = action.Confirm(action.ArgumentsHash, action.IdempotencyKey, confirmedAt)
+		if err != nil {
+			return assistantdomain.Action{}, err
+		}
+	}
+	action, err = action.Succeed([]string{authorizationID, runID}, service.clock.Now())
+	if err != nil {
+		return assistantdomain.Action{}, err
+	}
+	if err := service.store.SaveAction(ctx, action); err != nil {
+		return assistantdomain.Action{}, err
+	}
+	return action, nil
 }
 
 func (service *Service) recoverDiscussionTurns(ctx context.Context, session creationdomain.Session) error {
@@ -657,61 +818,98 @@ func (service *Service) recoverDiscussionTurns(ctx context.Context, session crea
 	if err != nil {
 		return err
 	}
+	linkedAuthorizations := map[string]bool{}
 	for _, message := range messages {
-		if message.Kind != assistantdomain.KindDiscussion || message.RunID == "" ||
-			message.Status == assistantdomain.MessageAnswered || message.Status == assistantdomain.MessageFailed {
+		if message.Kind != assistantdomain.KindDiscussion || message.Role != assistantdomain.RoleAuthor || message.RunID == "" {
 			continue
 		}
+		linkedAuthorizations[message.AuthorizationID] = true
 		if service.coordinator.Live(message.RunID) {
 			continue
 		}
 		auth := assistantdomain.Authorization{}
 		if message.AuthorizationID != "" {
-			auth, _ = service.store.Authorization(ctx, message.AuthorizationID)
+			auth, err = service.store.Authorization(ctx, message.AuthorizationID)
+			if err != nil {
+				return err
+			}
 		}
-		operation, _ := service.store.Operation(ctx, message.OperationID)
-		if operation.ID == "" {
-			operation.ID = message.OperationID
-			operation.RunID = message.RunID
+		operation, operationErr := service.store.Operation(ctx, message.OperationID)
+		if operationErr != nil && !errors.Is(operationErr, ErrOperationNotFound) {
+			return operationErr
+		}
+		action, actionErr := service.store.Action(ctx, message.ActionID)
+		if actionErr != nil {
+			return actionErr
+		}
+		if action, actionErr = service.completeDiscussionAuthorizationAction(ctx, action, auth.ID, message.RunID); actionErr != nil {
+			return actionErr
+		}
+		if message.Status == assistantdomain.MessageAnswered && operationErr == nil && operation.Status == creationdomain.OperationSucceeded && auth.ReservedCalls == 0 {
+			continue
+		}
+		if message.Status == assistantdomain.MessageFailed && operationErr == nil && operation.Status == creationdomain.OperationFailed && auth.ReservedCalls == 0 {
+			continue
 		}
 		run, runErr := service.kernel.Run(ctx, message.RunID)
 		if runErr != nil {
-			unknown, err := message.MarkOutcomeUnknown("结果未知", service.clock.Now())
-			if err == nil {
-				_ = service.store.UpdateAssistantMessage(ctx, unknown)
-			}
-			if auth.ID != "" && auth.ReservedCalls > 0 {
-				kept, keepErr := auth.KeepReservation(service.clock.Now())
-				if keepErr == nil {
-					_ = service.store.SaveAuthorization(ctx, kept)
+			if isMissingSession(runErr) {
+				if err := service.failDiscussionTurn(ctx, message, auth, operation, "运行未创建", discussionFailureLocal, 0); err != nil {
+					return err
 				}
+				_ = service.clearRunSlot(ctx, session.ProjectID, message.RunID)
+				continue
 			}
-			continue
+			return runErr
 		}
-		action, _ := service.store.Action(ctx, message.ActionID)
-		input, _ := decodeDiscussionInput(action)
+		if errors.Is(operationErr, ErrOperationNotFound) {
+			return operationErr
+		}
+		input, inputErr := decodeDiscussionInput(action)
+		if inputErr != nil {
+			return inputErr
+		}
 		switch run.Status {
 		case agentdomain.RunCompleted:
-			service.completeDiscussionTurn(ctx, message, auth, operation, input, run)
-			if session.ActiveRunID == run.ID {
-				_ = service.clearRunSlot(ctx, session.ProjectID, run.ID)
+			if err := service.completeDiscussionTurn(ctx, message, auth, operation, input, run); err != nil {
+				return err
 			}
+			_ = service.clearRunSlot(ctx, session.ProjectID, run.ID)
 		case agentdomain.RunFailed, agentdomain.RunCancelled:
-			service.failDiscussionTurn(ctx, message, auth, operation, "运行已中断", run.InputTokens+run.OutputTokens > 0)
-			if session.ActiveRunID == run.ID {
-				_ = service.clearRunSlot(ctx, session.ProjectID, run.ID)
+			mode := discussionFailureUnknown
+			if discussionProviderReached(run) {
+				mode = discussionFailureReached
 			}
+			if err := service.failDiscussionTurn(ctx, message, auth, operation, "运行已中断", mode, run.InputTokens+run.OutputTokens); err != nil {
+				return err
+			}
+			_ = service.clearRunSlot(ctx, session.ProjectID, run.ID)
+		case agentdomain.RunQueued:
+			if err := service.failDiscussionTurn(ctx, message, auth, operation, "运行未开始", discussionFailureLocal, 0); err != nil {
+				return err
+			}
+			_ = service.clearRunSlot(ctx, session.ProjectID, run.ID)
 		default:
-			unknown, err := message.MarkOutcomeUnknown("运行已中断，请核对结果", service.clock.Now())
-			if err == nil {
-				_ = service.store.UpdateAssistantMessage(ctx, unknown)
+			if err := service.failDiscussionTurn(ctx, message, auth, operation, "运行已中断，请核对结果", discussionFailureUnknown, 0); err != nil {
+				return err
 			}
-			if auth.ID != "" && auth.ReservedCalls > 0 {
-				kept, keepErr := auth.KeepReservation(service.clock.Now())
-				if keepErr == nil {
-					_ = service.store.SaveAuthorization(ctx, kept)
-				}
-			}
+			_ = service.clearRunSlot(ctx, session.ProjectID, run.ID)
+		}
+	}
+	auths, err := service.store.ListAuthorizations(ctx, assistant.ID)
+	if err != nil {
+		return err
+	}
+	for _, auth := range auths {
+		if auth.ReservedCalls == 0 || linkedAuthorizations[auth.ID] {
+			continue
+		}
+		released, releaseErr := auth.ReleaseTurn(service.clock.Now())
+		if releaseErr != nil {
+			return releaseErr
+		}
+		if err := service.store.SaveAuthorization(ctx, released); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -727,6 +925,7 @@ func (service *Service) discussionCurrent(ctx context.Context, session creationd
 	}
 	current, ok := currentCandidate(candidates, input.Base.Stage)
 	if !ok || current.ID != input.Base.ID || current.Version != input.Base.Version || current.ContentSHA256 != input.Base.ContentSHA256 ||
+		!reflect.DeepEqual(current.LockMap, input.Base.LockMap) ||
 		liveUpstreamDigest(session, candidates, input.Base.Stage) != input.UpstreamDigest {
 		return creationdomain.ErrCandidateVersionConflict
 	}
@@ -741,36 +940,33 @@ func (service *Service) discussionCurrent(ctx context.Context, session creationd
 	return nil
 }
 
-func (service *Service) discussionSources(ctx context.Context, session creationdomain.Session, auth assistantdomain.Authorization, input discussionAuthInput, authorMessage string) ([]agentkernel.Source, error) {
-	candidates, err := service.store.ListCandidates(ctx, session.ID)
+func (service *Service) discussionSources(ctx context.Context, _ creationdomain.Session, auth assistantdomain.Authorization, input discussionAuthInput, authorMessage string) ([]agentkernel.Source, error) {
+	history, err := service.visibleDiscussionHistory(ctx, auth)
 	if err != nil {
 		return nil, err
 	}
-	sources, err := generateSources(session, candidates, input.Base.Stage)
+	fields, err := authorizedDiscussionFields(input.Base, auth.FieldPaths)
 	if err != nil {
 		return nil, err
 	}
-	history := service.visibleDiscussionHistory(ctx, auth)
 	payload, _ := json.Marshal(map[string]any{
 		"stage": input.Base.Stage, "candidate_id": input.Base.ID, "candidate_kind": input.Base.Kind,
 		"candidate_version": input.Base.Version, "entity_ref": auth.EntityRef, "field_paths": auth.FieldPaths,
-		"locked_fields": lockedPaths(input.Base), "visible_history": history,
-		"constraints":       []string{"只提供分析、追问或字段修改建议", "不得修改候选、锁或正式档案", "不得使用未授权字段"},
-		"candidate_payload": json.RawMessage(input.Base.PayloadJSON),
-		"author_message":    authorMessage,
+		"authorized_fields": fields, "visible_history": history,
+		"constraints":    []string{"只提供分析、追问或字段修改建议", "不得修改候选、锁或正式档案", "不得使用未授权字段"},
+		"author_message": authorMessage,
 	})
-	sources = append(sources, agentkernel.Source{
+	return []agentkernel.Source{{
 		Kind: agentdomain.ManifestStoryAsset, ID: "discussion-target:" + input.Base.ID,
 		Version: fmt.Sprintf("%d", input.Base.Version), Content: string(payload),
 		Priority: 1200, Required: true, SelectionReason: "当前讨论冻结对象与可见历史", Provisional: true,
-	})
-	return sources, nil
+	}}, nil
 }
 
-func (service *Service) visibleDiscussionHistory(ctx context.Context, auth assistantdomain.Authorization) []map[string]string {
+func (service *Service) visibleDiscussionHistory(ctx context.Context, auth assistantdomain.Authorization) ([]map[string]string, error) {
 	messages, err := service.store.ListAssistantMessages(ctx, auth.SessionID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	history := make([]map[string]string, 0)
 	for _, message := range messages {
@@ -779,7 +975,7 @@ func (service *Service) visibleDiscussionHistory(ctx context.Context, auth assis
 		}
 		history = append(history, map[string]string{"role": string(message.Role), "text": message.Text})
 	}
-	return history
+	return history, nil
 }
 
 func (service *Service) existingDiscussionTurn(ctx context.Context, session creationdomain.Session, action assistantdomain.Action, auth assistantdomain.Authorization, messageKey, text string) (DiscussionTurnView, error) {
@@ -799,7 +995,7 @@ func (service *Service) existingDiscussionTurn(ctx context.Context, session crea
 func (service *Service) discussionPreviewView(ctx context.Context, session creationdomain.Session, action assistantdomain.Action, input discussionAuthInput) (DiscussionTurnView, error) {
 	view := DiscussionTurnView{
 		ActionID: action.ID, ArgumentsHash: action.ArgumentsHash, IdempotencyKey: action.IdempotencyKey,
-		State: string(action.State),
+		State: string(action.State), DraftMessage: input.Request.Message,
 		Authorization: DiscussionAuthorizationView{
 			ActionID: action.ID, State: string(action.State), CandidateID: input.Base.ID, CandidateVersion: input.Base.Version,
 			EntityRef: input.Request.EntityRef, FieldPaths: append([]string(nil), input.Request.FieldPaths...),
@@ -818,7 +1014,7 @@ func (service *Service) discussionTurnView(ctx context.Context, session creation
 	view := DiscussionTurnView{
 		ActionID: action.ID, ArgumentsHash: action.ArgumentsHash, IdempotencyKey: action.IdempotencyKey,
 		State: string(auth.State), RunID: author.RunID, Author: projectAssistantMessage(author, string(action.State)),
-		Authorization: projectAuthorization(auth, input.Cost, service.discussionCurrent(ctx, session, input) != nil),
+		Authorization: projectAuthorization(auth, input.Cost, service.discussionCurrent(ctx, session, input) != nil, service.clock.Now()),
 	}
 	messages, err := service.store.ListAssistantMessages(ctx, author.SessionID)
 	if err != nil {
@@ -842,14 +1038,18 @@ func decodeDiscussionInput(action assistantdomain.Action) (discussionAuthInput, 
 	return input, nil
 }
 
-func decodeDiscussionOutput(payload string, base creationdomain.Candidate) (discussionModelOutput, []assistantdomain.Suggestion, error) {
+func decodeDiscussionOutput(payload string, base creationdomain.Candidate, authorizedPaths []string) (discussionModelOutput, []assistantdomain.Suggestion, error) {
 	var output discussionModelOutput
 	if json.Unmarshal([]byte(payload), &output) != nil || strings.TrimSpace(output.Answer) == "" || utf8.RuneCountInString(output.Answer) > 4000 {
 		return output, nil, ErrUnavailable
 	}
-	allowed := map[string]bool{}
+	candidatePaths := map[string]bool{}
 	for _, field := range candidateTextFields(base).Fields {
-		allowed[field.Path] = !field.Locked
+		candidatePaths[field.Path] = true
+	}
+	allowed := map[string]bool{}
+	for _, path := range authorizedPaths {
+		allowed[path] = candidatePaths[path] && !base.Locked(path)
 	}
 	suggestions := make([]assistantdomain.Suggestion, 0, len(output.Suggestions))
 	seen := map[string]bool{}
@@ -860,7 +1060,7 @@ func decodeDiscussionOutput(payload string, base creationdomain.Candidate) (disc
 		if strings.TrimSpace(item.Instruction) == "" || utf8.RuneCountInString(item.Instruction) > 4000 {
 			continue
 		}
-		if err := validateSuggestionPaths(allowed, item.Paths, item.PreservePaths); err != nil {
+		if err := validateSuggestionPaths(allowed, candidatePaths, item.Paths, item.PreservePaths); err != nil {
 			continue
 		}
 		seen[item.ID] = true
@@ -881,7 +1081,7 @@ func sameFieldPaths(left, right []string) bool {
 	return slices.Equal(a, b)
 }
 
-func validateSuggestionPaths(allowed map[string]bool, paths, preserve []string) error {
+func validateSuggestionPaths(allowed, candidatePaths map[string]bool, paths, preserve []string) error {
 	if len(paths) == 0 {
 		return creationdomain.ErrBlankValue
 	}
@@ -893,7 +1093,7 @@ func validateSuggestionPaths(allowed map[string]bool, paths, preserve []string) 
 		used[path] = true
 	}
 	for _, path := range preserve {
-		if used[path] {
+		if used[path] || !candidatePaths[path] {
 			return creationdomain.ErrBlankValue
 		}
 	}
@@ -902,7 +1102,7 @@ func validateSuggestionPaths(allowed map[string]bool, paths, preserve []string) 
 
 func validateDiscussionPaths(base creationdomain.Candidate, paths []string) error {
 	if len(paths) == 0 {
-		return nil
+		return creationdomain.ErrBlankValue
 	}
 	allowed := map[string]bool{}
 	for _, field := range candidateTextFields(base).Fields {
@@ -934,6 +1134,24 @@ func normalizeDiscussionBudget(request *DiscussionAuthorizationRequest) {
 	if request.MaxCalls > 20 {
 		request.MaxCalls = 20
 	}
+}
+
+// authorizedDiscussionFields 只提取授权路径对应的当前文本，避免把候选其余字段送入讨论上下文。
+func authorizedDiscussionFields(base creationdomain.Candidate, paths []string) ([]map[string]any, error) {
+	fields := candidateTextFields(base).Fields
+	byPath := make(map[string]TextFieldView, len(fields))
+	for _, field := range fields {
+		byPath[field.Path] = field
+	}
+	result := make([]map[string]any, 0, len(paths))
+	for _, path := range paths {
+		field, ok := byPath[path]
+		if !ok {
+			return nil, creationdomain.ErrFieldMissing
+		}
+		result = append(result, map[string]any{"path": field.Path, "label": field.Label, "value": field.Value, "locked": field.Locked})
+	}
+	return result, nil
 }
 
 func plannerRole(profile agentdomain.ResolvedCreativeProfile) (RoleModelView, error) {
@@ -1001,9 +1219,13 @@ func formatDiscussionReply(output discussionModelOutput) string {
 	return text + "\n\n还可以继续确认：\n- " + strings.Join(output.FollowUpQuestions, "\n- ")
 }
 
-func projectAuthorization(auth assistantdomain.Authorization, cost CostPreview, stale bool) DiscussionAuthorizationView {
+func projectAuthorization(auth assistantdomain.Authorization, cost CostPreview, stale bool, now time.Time) DiscussionAuthorizationView {
+	state := auth.State
+	if state == assistantdomain.AuthActive && !auth.ExpiresAt.IsZero() && !now.UTC().Before(auth.ExpiresAt) {
+		state = assistantdomain.AuthExpired
+	}
 	return DiscussionAuthorizationView{
-		ID: auth.ID, ActionID: auth.ActionID, State: string(auth.State), CandidateID: auth.CandidateID,
+		ID: auth.ID, ActionID: auth.ActionID, State: string(state), CandidateID: auth.CandidateID,
 		CandidateVersion: auth.CandidateVersion, EntityRef: auth.EntityRef, FieldPaths: append([]string(nil), auth.FieldPaths...),
 		RemainingCalls: auth.RemainingCalls(), RemainingTokens: auth.RemainingTokens(), MaxCalls: auth.MaxCalls,
 		MaxTotalTokens: auth.MaxTotalTokens, MaxTurnTokens: auth.MaxTurnTokens,

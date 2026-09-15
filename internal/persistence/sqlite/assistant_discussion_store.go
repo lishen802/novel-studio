@@ -39,7 +39,11 @@ func (s *Store) SaveAssistantAuthorization(ctx context.Context, auth assistantdo
 			reserved_tokens = excluded.reserved_tokens,
 			used_calls = excluded.used_calls,
 			used_tokens = excluded.used_tokens,
-			state = excluded.state,
+				state = CASE
+					WHEN assistant_authorizations.state IN ('revoked', 'stale', 'expired')
+						THEN assistant_authorizations.state
+					ELSE excluded.state
+				END,
 			updated_at = excluded.updated_at
 	`, auth.ID, auth.SessionID, auth.ProjectID, auth.BranchID, auth.ActionID, auth.CandidateID,
 		auth.CandidateVersion, auth.CandidateSHA256, auth.Stage, auth.EntityRef, string(paths),

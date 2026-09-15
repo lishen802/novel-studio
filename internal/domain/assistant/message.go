@@ -86,7 +86,11 @@ func NewDiscussionMessage(id, sessionID string, role MessageRole, status Message
 
 func newVisibleMessage(id, sessionID string, role MessageRole, kind MessageKind, status MessageStatus, text, stage, candidateID, entityRef, fieldPath, actionID, idempotencyKey string, now time.Time) (Message, error) {
 	id, sessionID, text, idempotencyKey = strings.TrimSpace(id), strings.TrimSpace(sessionID), strings.TrimSpace(text), strings.TrimSpace(idempotencyKey)
-	if id == "" || sessionID == "" || text == "" || idempotencyKey == "" || utf8.RuneCountInString(text) > 4000 {
+	maxTextRunes := 4000
+	if role == RoleAssistant {
+		maxTextRunes = 7000
+	}
+	if id == "" || sessionID == "" || text == "" || idempotencyKey == "" || utf8.RuneCountInString(text) > maxTextRunes {
 		return Message{}, ErrBlankValue
 	}
 	if role != RoleAuthor && role != RoleAssistant {
@@ -136,7 +140,7 @@ func (message Message) MarkRunning(runID, operationID string, now time.Time) (Me
 
 // MarkAnswered 记录对应的公开回复已落库。
 func (message Message) MarkAnswered(now time.Time) (Message, error) {
-	if message.Status != MessageRunning && message.Status != MessagePending {
+	if message.Status != MessageRunning && message.Status != MessagePending && message.Status != MessageOutcomeUnknown {
 		return Message{}, ErrInvalidTransition
 	}
 	message.Status = MessageAnswered
@@ -146,7 +150,7 @@ func (message Message) MarkAnswered(now time.Time) (Message, error) {
 
 // MarkFailed 记录确定失败，不伪造已完成回复。
 func (message Message) MarkFailed(code string, now time.Time) (Message, error) {
-	if message.Status != MessageRunning && message.Status != MessagePending {
+	if message.Status != MessageRunning && message.Status != MessagePending && message.Status != MessageOutcomeUnknown {
 		return Message{}, ErrInvalidTransition
 	}
 	message.Status = MessageFailed

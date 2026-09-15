@@ -354,7 +354,7 @@ export interface CreationWorkbenchView {
     chapters: RoadmapNodeView[];
   };
   currentRun: { runId: string; status: string; cancellable: boolean; publicStage: string; steps?: Array<{stage: string; status: string}>; createdAt?: string; updatedAt?: string };
-  assistant: { pendingActionCount: number; messages?: AssistantMessageView[]; authorization?: DiscussionAuthorizationView };
+  assistant: { pendingActionCount: number; messages?: AssistantMessageView[]; authorization?: DiscussionAuthorizationView; authorizations?: DiscussionAuthorizationView[]; pendingDiscussion?: DiscussionTurnView };
   impact: {
     items: Array<{ candidateId: string; stage: string; severity: string; reason: string; locked: boolean; confirmed: boolean; excepted: boolean }>;
     touchesLocked: boolean;
@@ -388,6 +388,7 @@ export interface DiscussionAuthorizationView {
 export interface DiscussionTurnView {
   authorization: DiscussionAuthorizationView;
   actionId: string; argumentsHash: string; idempotencyKey: string; state: string; runId?: string;
+	draftMessage?: string;
 }
 
 export interface CreationCostPreview {
@@ -554,7 +555,7 @@ export const studio = {
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
   previewCreationRevision: (request:{candidateId:string;paths:string[];instruction:string;idempotencyKey:string}) => call<RevisionCard>('PreviewCreationRevision',request),
   sendCreationMessage: (request:{candidateId:string;entityRef:string;fieldPath:string;text:string;idempotencyKey:string}) => call<RevisionCard>('SendCreationMessage',request),
-  previewCreationDiscussionAuthorization: (request:{candidateId:string;entityRef?:string;fieldPaths:string[];idempotencyKey:string}) => call<DiscussionTurnView>('PreviewCreationDiscussionAuthorization',request),
+  previewCreationDiscussionAuthorization: (request:{candidateId:string;entityRef?:string;fieldPaths:string[];message:string;idempotencyKey:string}) => call<DiscussionTurnView>('PreviewCreationDiscussionAuthorization',request),
   confirmCreationDiscussionAuthorization: (command:{actionId:string;argumentsHash:string;idempotencyKey:string;message:string;messageIdempotencyKey:string}) => call<DiscussionTurnView>('ConfirmCreationDiscussionAuthorization',command),
   sendCreationDiscussionMessage: (request:{authorizationId:string;candidateId:string;entityRef?:string;fieldPaths:string[];text:string;idempotencyKey:string}) => call<DiscussionTurnView>('SendCreationDiscussionMessage',request),
   revokeCreationDiscussionAuthorization: (id:string) => call<CreationWorkbenchView>('RevokeCreationDiscussionAuthorization',id),

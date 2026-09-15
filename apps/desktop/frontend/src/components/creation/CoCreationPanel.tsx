@@ -12,9 +12,11 @@ interface Props {
   entityRef?: string;
   messages: AssistantMessageView[];
   authorization?: DiscussionAuthorizationView;
+	 authorizations?: DiscussionAuthorizationView[];
+	 pendingDiscussion?: DiscussionTurnView;
   disabled?: boolean;
   onSend: (request: {candidateId:string;entityRef:string;fieldPath:string;text:string;idempotencyKey:string}) => Promise<void>;
-  onPreviewDiscussion?: (request: {candidateId:string;entityRef:string;fieldPaths:string[];idempotencyKey:string}) => Promise<DiscussionTurnView>;
+  onPreviewDiscussion?: (request: {candidateId:string;entityRef:string;fieldPaths:string[];message:string;idempotencyKey:string}) => Promise<DiscussionTurnView>;
   onConfirmDiscussion?: (command: {actionId:string;argumentsHash:string;idempotencyKey:string;message:string;messageIdempotencyKey:string}) => Promise<void>;
   onSendDiscussion?: (request: {authorizationId:string;candidateId:string;entityRef:string;fieldPaths:string[];text:string;idempotencyKey:string}) => Promise<void>;
   onRevokeDiscussion?: (id: string) => Promise<void>;
@@ -22,35 +24,38 @@ interface Props {
 }
 
 function boundToCurrent(auth: DiscussionAuthorizationView | undefined, candidateId: string, entityRef: string, fieldPath: string) {
-  if (!auth || auth.stale || auth.state !== 'active' || auth.candidateId !== candidateId) return false;
+	if (!auth || auth.candidateId !== candidateId) return false;
   if ((auth.entityRef ?? '') !== entityRef) return false;
   const paths = auth.fieldPaths ?? [];
   return paths.length === 0 || paths.includes(fieldPath);
 }
 
-export function CoCreationPanel({editor, entityRef = '', messages, authorization, disabled, onSend, onPreviewDiscussion, onConfirmDiscussion, onSendDiscussion, onRevokeDiscussion, onPreviewSuggestion}: Props) {
+export function CoCreationPanel({editor, entityRef = '', messages, authorization, authorizations = [], pendingDiscussion, disabled, onSend, onPreviewDiscussion, onConfirmDiscussion, onSendDiscussion, onRevokeDiscussion, onPreviewSuggestion}: Props) {
   const available = useMemo(() => editor?.fields.filter(field => !field.locked) ?? [], [editor]);
-  const [fieldPath, setFieldPath] = useState(available[0]?.path ?? '');
-  const [text, setText] = useState('');
-  const [draftBase, setDraftBase] = useState(editor?.candidateId ?? '');
+  const pendingFieldPath = pendingDiscussion?.authorization.fieldPaths?.[0] ?? '';
+  const [fieldPath, setFieldPath] = useState(pendingFieldPath || available[0]?.path || '');
+  const [text, setText] = useState(pendingDiscussion?.draftMessage ?? '');
+  const bindingKey = (path: string) => `${editor?.candidateId ?? ''}\u0000${editor?.version ?? 0}\u0000${entityRef}\u0000${path}`;
+  const [draftBase, setDraftBase] = useState(bindingKey(pendingFieldPath || available[0]?.path || ''));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [preview, setPreview] = useState<DiscussionTurnView | null>(null);
+  const [preview, setPreview] = useState<DiscussionTurnView | null>(pendingDiscussion ?? null);
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!available.some(field => field.path === fieldPath)) setFieldPath(available[0]?.path ?? '');
   }, [editor?.candidateId, available, fieldPath]);
 
-  const staleDraft = !!text.trim() && draftBase !== (editor?.candidateId ?? '');
-  const currentAuth = boundToCurrent(authorization, editor?.candidateId ?? '', entityRef, fieldPath) ? authorization : undefined;
-  const staleAuth = authorization && editor && authorization.candidateId === editor.candidateId && (authorization.stale || authorization.state === 'stale');
+  const staleDraft = !!text.trim() && draftBase !== bindingKey(fieldPath);
+	const targetAuth = [...authorizations, ...(authorization ? [authorization] : [])].reverse().find(auth => boundToCurrent(auth, editor?.candidateId ?? '', entityRef, fieldPath));
+	const currentAuth = targetAuth && !targetAuth.stale && targetAuth.state === 'active' ? targetAuth : undefined;
+	const staleAuth = targetAuth && (targetAuth.stale || targetAuth.state === 'stale');
 
   const act = async (work: () => Promise<void>, clear = false) => {
     setBusy(true); setError('');
     try {
       await work();
-      if (clear) { setText(''); setDraftBase(editor?.candidateId ?? ''); }
+      if (clear) { setText(''); setDraftBase(bindingKey(fieldPath)); }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '操作失败，请重试。');
     } finally { setBusy(false); }
@@ -68,7 +73,7 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
       return;
     }
     void act(async () => {
-      const next = await onPreviewDiscussion({candidateId: editor.candidateId, entityRef, fieldPaths: [fieldPath], idempotencyKey: crypto.randomUUID()});
+      const next = await onPreviewDiscussion({candidateId: editor.candidateId, entityRef, fieldPaths: [fieldPath], message: text.trim(), idempotencyKey: crypto.randomUUID()});
       setPreview(next);
     });
   };
@@ -89,8 +94,8 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
       <select aria-label="共创目标字段" className="w-full rounded-md border border-border bg-surface p-2 text-sm" value={fieldPath} disabled={disabled || busy || available.length === 0} onChange={event => setFieldPath(event.target.value)}>
         {available.map(field => <option key={field.path} value={field.path}>{field.group} · {field.label}</option>)}
       </select>
-      <Textarea aria-label="共创消息" placeholder="例如：这个人物的动机哪里不够可信？" maxLength={4000} value={text} disabled={disabled || busy || !editor} onChange={event => { setText(event.target.value); if (!text.trim()) setDraftBase(editor?.candidateId ?? ''); }} />
-      {staleDraft && <p role="alert" className="text-xs text-warning">候选已更新，输入已保留。<Button size="sm" onClick={() => setDraftBase(editor?.candidateId ?? '')}>核对后绑定当前候选</Button></p>}
+      <Textarea aria-label="共创消息" placeholder="例如：这个人物的动机哪里不够可信？" maxLength={4000} value={text} disabled={disabled || busy || !editor} onChange={event => { const next = event.target.value; if (!text.trim() && next.trim()) setDraftBase(bindingKey(fieldPath)); setText(next); }} />
+      {staleDraft && <p role="alert" className="text-xs text-warning">候选、对象或字段已变化，输入已保留。<Button size="sm" onClick={() => setDraftBase(bindingKey(fieldPath))}>核对后绑定当前目标</Button></p>}
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       <div className="grid grid-cols-2 gap-2">
         <Button className="w-full gap-2" disabled={disabled || busy || !editor || !fieldPath || !text.trim() || staleDraft || staleAuth} onClick={() => void discuss()}>

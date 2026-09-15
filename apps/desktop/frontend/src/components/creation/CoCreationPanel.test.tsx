@@ -7,6 +7,7 @@ afterEach(cleanup);
 
 const editor = {candidateId:'candidate-2',version:2,fields:[
   {path:'/title',label:'标题',group:'定位',value:'旧标题',locked:false},
+	{path:'/protagonist_arc',label:'主角成长',group:'结构',value:'成长',locked:false},
   {path:'/ending',label:'结局',group:'结构',value:'结局',locked:true},
 ]};
 
@@ -17,6 +18,29 @@ it('提出修改时冻结当前候选、字段和实体引用', async () => {
   await userEvent.click(screen.getByRole('button',{name:'提出修改'}));
   expect(onSend).toHaveBeenCalledWith(expect.objectContaining({candidateId:'candidate-2',entityRef:'arc:3',fieldPath:'/title',text:'标题更含蓄一些'}));
   expect(screen.queryByRole('option',{name:/结局/})).toBeNull();
+});
+
+it('输入后切换字段必须重新核对草稿目标', async () => {
+  const onSend = vi.fn().mockResolvedValue(undefined);
+  render(<CoCreationPanel editor={editor} messages={[]} onSend={onSend}/>);
+  await userEvent.type(screen.getByRole('textbox',{name:'共创消息'}),'只讨论标题');
+  await userEvent.selectOptions(screen.getByRole('combobox',{name:'共创目标字段'}),'/protagonist_arc');
+  expect(screen.getByRole('alert').textContent).toContain('字段已变化');
+  expect((screen.getByRole('button',{name:'提出修改'}) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('刷新后恢复待确认讨论和原始输入', () => {
+  render(<CoCreationPanel
+    editor={editor}
+    messages={[]}
+    onSend={vi.fn()}
+    pendingDiscussion={{
+      actionId:'pending-a', argumentsHash:'h', idempotencyKey:'k', state:'pending_confirmation', draftMessage:'标题是否准确？',
+      authorization:{actionId:'pending-a',state:'pending_confirmation',candidateId:'candidate-2',candidateVersion:2,remainingCalls:8,remainingTokens:16000,maxCalls:8,maxTotalTokens:16000,maxTurnTokens:4000,expiresAt:'2026-09-15T12:00:00Z',provider:'openai',model:'gpt-test',fieldPaths:['/title']},
+    }}
+  />);
+  expect(screen.getByText(/确认讨论授权/)).toBeTruthy();
+  expect((screen.getByRole('textbox',{name:'共创消息'}) as HTMLTextAreaElement).value).toBe('标题是否准确？');
 });
 
 it('未授权讨论先展示费用预览且关闭后保留输入', async () => {

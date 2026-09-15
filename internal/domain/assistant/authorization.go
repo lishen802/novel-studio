@@ -157,7 +157,7 @@ func (auth Authorization) ReserveTurn(now time.Time) (Authorization, error) {
 	auth.ReservedCalls++
 	auth.ReservedTokens += auth.MaxTurnTokens
 	auth.UpdatedAt = now.UTC()
-	if auth.RemainingCalls() == 0 && auth.RemainingTokens() < auth.MaxTurnTokens {
+	if auth.RemainingCalls() == 0 || auth.RemainingTokens() < auth.MaxTurnTokens {
 		auth.State = AuthExhausted
 	}
 	return auth, nil
@@ -171,16 +171,10 @@ func (auth Authorization) SettleTurn(actualTokens int, now time.Time) (Authoriza
 	if actualTokens < 0 {
 		actualTokens = 0
 	}
-	if actualTokens > auth.MaxTurnTokens {
-		actualTokens = auth.MaxTurnTokens
-	}
 	auth.ReservedCalls--
 	auth.ReservedTokens -= auth.MaxTurnTokens
 	auth.UsedCalls++
 	auth.UsedTokens += actualTokens
-	if auth.UsedTokens > auth.MaxTotalTokens {
-		auth.UsedTokens = auth.MaxTotalTokens
-	}
 	auth.UpdatedAt = now.UTC()
 	if auth.RemainingCalls() < 1 || auth.RemainingTokens() < auth.MaxTurnTokens {
 		auth.State = AuthExhausted

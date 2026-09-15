@@ -3,8 +3,10 @@ package creation
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lishen802/novel-studio/internal/agentassets"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -71,6 +73,12 @@ func TestDiscussionConfirmStartsAsyncAndReusesAuthorization(t *testing.T) {
 	if kernel.createN != 1 || kernel.lastCreate.WorkflowID != agentassets.StoryCandidateDiscussionWorkflowID || kernel.lastCreate.ChapterID != "" {
 		t.Fatalf("unexpected kernel create: %#v n=%d", kernel.lastCreate, kernel.createN)
 	}
+	if kernel.lastCreate.Profile.RunBudgetUnlimited || kernel.lastCreate.Profile.MaxRunTokens != first.Authorization.MaxTurnTokens {
+		t.Fatalf("run budget exceeded authorization: profile=%+v auth=%+v", kernel.lastCreate.Profile, first.Authorization)
+	}
+	if len(kernel.lastCreate.Sources) != 1 || !strings.Contains(kernel.lastCreate.Sources[0].Content, "/protagonist_arc") || strings.Contains(kernel.lastCreate.Sources[0].Content, "core_conflict") {
+		t.Fatalf("discussion sources escaped authorized scope: %#v", kernel.lastCreate.Sources)
+	}
 	auth, err := store.AuthorizationByAction(ctx, preview.ActionID)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +113,62 @@ func TestDiscussionConfirmStartsAsyncAndReusesAuthorization(t *testing.T) {
 	}
 	if workbench.Assistant.Authorization == nil || workbench.Assistant.Authorization.RemainingCalls != 6 {
 		t.Fatalf("workbench authorization = %+v", workbench.Assistant.Authorization)
+	}
+}
+
+func TestDiscussionRejectsSuggestionsOutsideAuthorization(t *testing.T) {
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	base := seedProposalCandidate(t, service, store)
+	_, suggestions, err := decodeDiscussionOutput(discussionPayload, base, []string{"/title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suggestions) != 0 {
+		t.Fatalf("out-of-scope suggestions = %#v", suggestions)
+	}
+}
+
+func TestDiscussionAuthorizationBecomesStaleWhenLocksChange(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	base := seedProposalCandidate(t, service, store)
+	preview, err := service.PreviewDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationRequest{
+		CandidateID: base.ID, FieldPaths: []string{"/title"}, Message: "标题是否准确？", IdempotencyKey: "lock-change",
+	}, discussionProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.LockCandidateField(ctx, "project-1", base.ID, "/protagonist_arc"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationCommand{
+		ActionID: preview.ActionID, ArgumentsHash: preview.ArgumentsHash, IdempotencyKey: preview.IdempotencyKey,
+		Message: "标题是否准确？", MessageIdempotencyKey: "lock-change-message",
+	}, discussionProfile()); !errors.Is(err, creationdomain.ErrCandidateVersionConflict) {
+		t.Fatalf("lock change error = %v", err)
+	}
+	if kernel.createN != 0 {
+		t.Fatalf("lock change started %d runs", kernel.createN)
+	}
+}
+
+func TestDiscussionPendingAuthorizationIsProjectedAfterReload(t *testing.T) {
+	ctx := context.Background()
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	base := seedProposalCandidate(t, service, store)
+	preview, err := service.PreviewDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationRequest{
+		CandidateID: base.ID, FieldPaths: []string{"/title"}, Message: "标题是否准确？", IdempotencyKey: "pending-reload",
+	}, discussionProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbench, err := service.Workbench(ctx, "project-1", "branch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workbench.Assistant.PendingDiscussion == nil || workbench.Assistant.PendingDiscussion.ActionID != preview.ActionID || workbench.Assistant.PendingDiscussion.DraftMessage != "标题是否准确？" {
+		t.Fatalf("pending discussion = %#v", workbench.Assistant.PendingDiscussion)
 	}
 }
 
@@ -319,6 +383,79 @@ func TestDiscussionRevokeStopsNewTurns(t *testing.T) {
 	messages, err := store.ListAssistantMessages(ctx, assistant.ID)
 	if err != nil || len(messages) == 0 {
 		t.Fatalf("revoke deleted history: %v %#v", err, messages)
+	}
+}
+
+func TestDiscussionUnknownProviderResultKeepsReservation(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	kernel.failExecute = true
+	service, store, _ := newTestService(t, kernel, nil)
+	base := seedProposalCandidate(t, service, store)
+	preview, err := service.PreviewDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationRequest{
+		CandidateID: base.ID, FieldPaths: []string{"/title"}, Message: "标题是否准确？", IdempotencyKey: "unknown-provider",
+	}, discussionProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.ConfirmDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationCommand{
+		ActionID: preview.ActionID, ArgumentsHash: preview.ArgumentsHash, IdempotencyKey: preview.IdempotencyKey,
+		Message: "标题是否准确？", MessageIdempotencyKey: "unknown-provider-message",
+	}, discussionProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, func() bool { return !service.coordinator.Live(turn.RunID) }) {
+		t.Fatal("discussion run did not stop")
+	}
+	auth, err := store.Authorization(ctx, turn.Authorization.ID)
+	if err != nil || auth.ReservedCalls != 1 || auth.UsedCalls != 0 {
+		t.Fatalf("unknown provider result budget = %+v err=%v", auth, err)
+	}
+	assistant, err := store.AssistantSession(ctx, "project-1", "branch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := store.AssistantMessageByIdempotency(ctx, assistant.ID, "unknown-provider-message")
+	if err != nil || message.Status != assistantdomain.MessageOutcomeUnknown {
+		t.Fatalf("unknown provider message = %+v err=%v", message, err)
+	}
+}
+
+func TestDiscussionRecoveryReleasesOrphanReservation(t *testing.T) {
+	ctx := context.Background()
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	base := seedProposalCandidate(t, service, store)
+	preview, err := service.PreviewDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationRequest{
+		CandidateID: base.ID, FieldPaths: []string{"/title"}, Message: "标题是否准确？", IdempotencyKey: "orphan-reservation",
+	}, discussionProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := store.Action(ctx, preview.ActionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := decodeDiscussionInput(action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := testClock{}.Now()
+	auth, err := assistantdomain.NewAuthorization(input.AuthorizationID, action.SessionID, "project-1", "branch-1", action.ID, base.ID, base.ContentSHA256, string(base.Stage), "", base.Version, []string{"/title"}, discussionProfileID(input.Profile), plannerConnection(input.Profile), input.Planner.Provider, input.Planner.Model, plannerEffort(input.Profile), 8, 16000, 4000, now, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, _ = auth.Activate(now)
+	auth, _ = auth.ReserveTurn(now)
+	if err := store.SaveAuthorization(ctx, auth); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Recover(ctx, "project-1"); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := store.Authorization(ctx, auth.ID)
+	if err != nil || recovered.ReservedCalls != 0 || recovered.RemainingCalls() != 8 {
+		t.Fatalf("recovered orphan reservation = %+v err=%v", recovered, err)
 	}
 }
 

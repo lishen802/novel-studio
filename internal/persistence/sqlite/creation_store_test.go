@@ -548,7 +548,14 @@ func TestAssistantDiscussionAuthorizationAndMessageRoundTrip(t *testing.T) {
 	if err != nil || byKey.Status != assistantdomain.MessageRunning || byKey.AuthorizationID != auth.ID {
 		t.Fatalf("by key = %+v err=%v", byKey, err)
 	}
-	settled, err := loaded.SettleTurn(120, now.Add(2*time.Second))
+	revoked, err := loaded.Revoke(now.Add(2 * time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAssistantAuthorization(ctx, revoked); err != nil {
+		t.Fatal(err)
+	}
+	settled, err := loaded.SettleTurn(120, now.Add(3*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +563,7 @@ func TestAssistantDiscussionAuthorizationAndMessageRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := store.AssistantAuthorizationByAction(ctx, action.ID)
-	if err != nil || again.UsedCalls != 1 || again.UsedTokens != 120 || again.ReservedCalls != 0 {
+	if err != nil || again.State != assistantdomain.AuthRevoked || again.UsedCalls != 1 || again.UsedTokens != 120 || again.ReservedCalls != 0 {
 		t.Fatalf("settled auth = %+v err=%v", again, err)
 	}
 }

@@ -107,6 +107,37 @@ func TestAuthorizationExhaustsWhenBudgetCannotCoverNextTurn(t *testing.T) {
 	}
 }
 
+func TestAuthorizationExhaustsAsSoonAsCallsAreReserved(t *testing.T) {
+	now := time.Unix(400, 0)
+	auth := mustAuthorization(t, now)
+	auth.MaxCalls = 1
+	auth.MaxTotalTokens = 1000
+	active, err := auth.Activate(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserved, err := active.ReserveTurn(now)
+	if err != nil || reserved.State != AuthExhausted || reserved.RemainingCalls() != 0 {
+		t.Fatalf("reserved authorization = %#v err=%v", reserved, err)
+	}
+}
+
+func TestAuthorizationRecordsProviderOverageTruthfully(t *testing.T) {
+	now := time.Unix(400, 0)
+	active, err := mustAuthorization(t, now).Activate(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserved, err := active.ReserveTurn(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled, err := reserved.SettleTurn(450, now)
+	if err != nil || settled.UsedTokens != 450 {
+		t.Fatalf("settled authorization = %#v err=%v", settled, err)
+	}
+}
+
 func TestAuthorizationMatchesFrozenTargetAndProfile(t *testing.T) {
 	auth := mustAuthorization(t, time.Unix(400, 0))
 	if !auth.MatchesTarget("cand-1", "abc", 2) || auth.MatchesTarget("cand-1", "abc", 3) {

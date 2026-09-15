@@ -545,6 +545,8 @@ export default function Cockpit() {
               actionState: workbench.revisions?.find(action => action.actionId === message.actionId)?.state ?? message.actionState,
             }))}
             authorization={workbench.assistant.authorization}
+			authorizations={workbench.assistant.authorizations}
+			pendingDiscussion={workbench.assistant.pendingDiscussion}
             disabled={busy || generating || workbench.readOnly || fieldDirty || materialDirty}
             onSend={async request => { await studio.sendCreationMessage(request); await load(); }}
             onPreviewDiscussion={async request => studio.previewCreationDiscussionAuthorization(request)}

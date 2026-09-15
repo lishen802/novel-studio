@@ -1064,6 +1064,9 @@ func (service *Service) CancelRun(ctx context.Context, projectID string) error {
 // Recover 恢复会话状态，但绝不自动继续未重新确认的付费运行。
 // 进程内无活跃执行时按持久化运行状态对账：完成的运行物化结果，终结的清理槽位，中断的暂停并释放槽。
 func (service *Service) Recover(ctx context.Context, projectID string) (creationdomain.Session, error) {
+	mutex := service.lockProject(projectID)
+	mutex.Lock()
+	defer mutex.Unlock()
 	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
 		return creationdomain.Session{}, err
