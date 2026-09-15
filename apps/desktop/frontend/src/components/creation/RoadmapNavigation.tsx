@@ -4,11 +4,11 @@ interface Node { id: string; parentId?: string; title: string; position: number 
 export interface RoadmapItem<T extends Node> { id: string; title: string; kind: string; depth: number; node: T }
 
 // 按真实父引用及同父顺序展开，不以标题判断节点身份或归属。
-export function roadmapNavItems<T extends Node>(roadmap: {book:T;volumes:T[];arcs:T[];chapters:T[]}): RoadmapItem<T>[] {
+export function roadmapNavItems<T extends Node>(roadmap: {book:T;volumes?:T[];arcs?:T[];chapters?:T[]}): RoadmapItem<T>[] {
   const items: RoadmapItem<T>[] = [];
-  if (!roadmap.book.id) return items;
+  if (!roadmap?.book?.id) return items;
   const children = new Map<string, Array<{node:T;kind:string}>>();
-  for (const [kind, nodes] of [['volume',roadmap.volumes],['arc',roadmap.arcs],['chapter',roadmap.chapters]] as const) {
+  for (const [kind, nodes] of [['volume',roadmap.volumes ?? []],['arc',roadmap.arcs ?? []],['chapter',roadmap.chapters ?? []]] as const) {
     for (const node of nodes) {
       const parent = node.parentId ?? '';
       children.set(parent,[...(children.get(parent) ?? []),{node,kind}]);

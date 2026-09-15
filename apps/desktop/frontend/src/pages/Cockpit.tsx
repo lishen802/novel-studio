@@ -60,6 +60,7 @@ const emptyWorkbench = (): CreationWorkbenchView => ({
     regenerateStages: [], estimatedCalls: 0, evidence: '',
   },
   capabilities: [],
+  fieldEditor: { candidateId: '', version: 0, fields: [] },
 });
 
 const sectionIcons = {
@@ -281,8 +282,9 @@ export default function Cockpit() {
     return '直接编辑、锁定后确认进入下一步；确认档案前不会写入正式资产。';
   }, [generating, workbench]);
 
-  const cards = workbench.directionSet.cards;
-  const selectedEntity = workbench.peopleWorld.entities.find((item) => item.id === entityId) ?? workbench.peopleWorld.entities[0];
+  const cards = workbench.directionSet?.cards ?? [];
+  const peopleEntities = workbench.peopleWorld?.entities ?? [];
+  const selectedEntity = peopleEntities.find((item) => item.id === entityId) ?? peopleEntities[0];
   const roadmapItems = roadmapNavItems(workbench.roadmap);
   const selectedRoadmap = roadmapItems.find((item) => item.id === entityId) ?? roadmapItems.find((item) => item.kind === 'arc') ?? roadmapItems[0];
 
@@ -310,7 +312,7 @@ export default function Cockpit() {
       </header>
 
       <nav className="px-8 py-3 border-b border-border bg-surface flex gap-2 overflow-x-auto" aria-label="创作阶段轨">
-        {workbench.stageRail.map((stop) => (
+        {(workbench.stageRail ?? []).map((stop) => (
           <div
             key={stop.id}
             data-testid={`rail-${stop.id}`}
@@ -345,7 +347,7 @@ export default function Cockpit() {
         <div role="alert" className="px-8 py-3 bg-danger/5 border-b border-danger/15 text-sm text-danger">{error}</div>
       )}
 
-      {workbench.impact.items.filter((item) => !item.excepted).length > 0 && (
+      {(workbench.impact.items ?? []).filter((item) => !item.excepted).length > 0 && (
         <div className="px-8 py-3 border-b border-border flex items-center gap-2 flex-wrap">
           <p className="text-sm text-text-sub flex-1">{workbench.impact.evidence || '下游候选已过期。'}</p>
           <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('keep_exception').then(() => studio.creationWorkbench()))}>保留为例外</Button>
@@ -360,7 +362,7 @@ export default function Cockpit() {
             <h3 className="text-xs font-medium text-text-sub uppercase tracking-wider mb-3">
               {workbench.stage === 'people_world' ? '人物与世界' : '路线图'}
             </h3>
-            {workbench.stage === 'people_world' && workbench.peopleWorld.entities.map((entity) => (
+            {workbench.stage === 'people_world' && peopleEntities.map((entity) => (
               <button
                 key={entity.id}
                 className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1', selectedEntity?.id === entity.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
@@ -374,8 +376,8 @@ export default function Cockpit() {
         )}
 
         <main className="flex-1 overflow-auto p-8">
-          {(workbench.fieldEditor?.fields.length || workbench.revisions?.length) ? <RevisionPanel key={`revision:${workbench.sessionId}`} editor={workbench.fieldEditor} actions={workbench.revisions ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onPreview={async(candidateId,path,instruction,key)=>{await studio.previewCreationRevision({candidateId,paths:[path],instruction,idempotencyKey:key});await load();}} onConfirm={async(action)=>{await studio.confirmCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey});await load();}} onReject={async(id)=>{await run(()=>studio.rejectCreationRevision(id));}} onApply={async(action)=>{await run(()=>studio.applyCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey}));}}/> : null}
-          {workbench.fieldEditor?.fields.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
+          {(workbench.fieldEditor?.fields?.length || workbench.revisions?.length) ? <RevisionPanel key={`revision:${workbench.sessionId}`} editor={workbench.fieldEditor} actions={workbench.revisions ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onPreview={async(candidateId,path,instruction,key)=>{await studio.previewCreationRevision({candidateId,paths:[path],instruction,idempotencyKey:key});await load();}} onConfirm={async(action)=>{await studio.confirmCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey});await load();}} onReject={async(id)=>{await run(()=>studio.rejectCreationRevision(id));}} onApply={async(action)=>{await run(()=>studio.applyCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey}));}}/> : null}
+          {workbench.fieldEditor?.fields?.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
           {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
           {workbench.sessionId && <EntryPanel key={`entry:${workbench.sessionId}`} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly || fieldDirty} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
             await run(() => studio.saveCreationEntry({ projectId: workbench.projectId, sessionId: workbench.sessionId, kind, material, expectedVersion, expectedRunSlotVersion }));
@@ -387,12 +389,12 @@ export default function Cockpit() {
             {workbench.material?.status === 'needs_review' && <p role="status" className="text-sm text-warning">分析结果已过期、被阻断或来源无法核实，请重新解析。</p>}
             {workbench.material?.status === 'ready' && <>
               <p className="text-sm text-text-sub">已完成结构与来源检查，仍需作者审阅。</p>
-              {workbench.material.gaps.map((gap) => <div key={gap.id} className="rounded-lg border border-border p-3 text-sm">
+              {(workbench.material.gaps ?? []).map((gap) => <div key={gap.id} className="rounded-lg border border-border p-3 text-sm">
                 <p className="font-medium">{gap.kind === 'conflict' ? '冲突' : gap.kind === 'required' ? '必要缺口' : '可选建议'} · {({ proposal: '作品方案', people_world: '人物世界', roadmap: '路线图' } as Record<string, string>)[gap.stage]}</p>
                 <p>{gap.reason}</p><p className="text-text-sub">{gap.suggested_action}</p>
                 {gap.quote && <blockquote className="mt-2 border-l-2 border-border pl-2 text-text-sub">{gap.quote}</blockquote>}
               </div>)}
-              {workbench.material.availableStages.includes(workbench.stage) && !({ proposal: workbench.proposal.candidateId, people_world: workbench.peopleWorld.candidateId, roadmap: workbench.roadmap.candidateId } as Record<string, string>)[workbench.stage] &&
+              {(workbench.material.availableStages ?? []).includes(workbench.stage) && !({ proposal: workbench.proposal.candidateId, people_world: workbench.peopleWorld.candidateId, roadmap: workbench.roadmap.candidateId } as Record<string, string>)[workbench.stage] &&
                 <Button variant="primary" disabled={materialDirty || busy || generating || workbench.readOnly} onClick={() => void run(() => studio.useCreationMaterial({ projectId: workbench.projectId, sessionId: workbench.sessionId, expectedVersion: workbench.contentVersion ?? 0, analysisId: workbench.material!.analysisId, stage: workbench.stage })).catch(() => undefined)}>复用已提供的本阶段内容</Button>}
             </>}
           </section>}
@@ -486,7 +488,7 @@ export default function Cockpit() {
                 <p className="text-sm font-medium text-text">作品方案{workbench.proposal.title ? `：${workbench.proposal.title}` : ''}</p>
                 <p className="text-sm text-text-sub mt-1">确认档案前这些内容不会进入正式资产。</p>
               </div>
-              {workbench.proposal.sections.map((section) => {
+              {(workbench.proposal.sections ?? []).map((section) => {
                 const Icon = sectionIcons[section.id as keyof typeof sectionIcons] ?? Sparkles;
                 return (
                   <Card key={section.id} padding="none">
@@ -545,7 +547,7 @@ export default function Cockpit() {
               actionState: workbench.revisions?.find(action => action.actionId === message.actionId)?.state ?? message.actionState,
             }))}
             authorization={workbench.assistant.authorization}
-			authorizations={workbench.assistant.authorizations}
+			authorizations={workbench.assistant.authorizations ?? []}
 			pendingDiscussion={workbench.assistant.pendingDiscussion}
             disabled={busy || generating || workbench.readOnly || fieldDirty || materialDirty}
             onSend={async request => { await studio.sendCreationMessage(request); await load(); }}

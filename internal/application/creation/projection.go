@@ -392,11 +392,13 @@ func assembleWorkbench(
 		IntentText:       session.IntentText,
 		StageRail:        buildStageRail(session),
 		Impact:           impact,
-		Assistant:        AssistantSummaryView{PendingActionCount: pending},
+		Assistant:        AssistantSummaryView{PendingActionCount: pending, Messages: []AssistantMessageView{}},
 		DirectionSet:     DirectionSetView{Cards: []DirectionCardView{}, KeptIDs: append([]string{}, session.KeptDirectionIDs...)},
 		Proposal:         ProposalView{Sections: []ProposalSectionView{}},
 		PeopleWorld:      PeopleWorldView{Entities: []PeopleWorldNodeView{}},
 		Roadmap:          RoadmapView{Volumes: []RoadmapNodeView{}, Arcs: []RoadmapNodeView{}, Chapters: []RoadmapNodeView{}},
+		FieldEditor:      FieldEditorView{Fields: []TextFieldView{}},
+		Revisions:        []RevisionView{},
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StageDirections); ok {
 		selected := ""

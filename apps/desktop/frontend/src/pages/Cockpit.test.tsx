@@ -266,6 +266,27 @@ describe('创作驾驶舱', () => {
     expect(confirmCreationGenerate).not.toHaveBeenCalled();
     expect(previewCreationGenerate).not.toHaveBeenCalled();
   });
+
+  it('后端灵感阶段零值 fieldEditor 不会把驾驶舱打成白屏', async () => {
+    recoverCreation.mockResolvedValue(JSON.parse(JSON.stringify({
+      ...workbench(),
+      fieldEditor: { candidateId: '', version: 0, fields: null },
+      revisions: null,
+      assistant: { pendingActionCount: 0, messages: null, authorizations: null },
+    })));
+
+    render(
+      <MemoryRouter>
+        <AppContext.Provider value={contextValue({ hasCredential: true })}>
+          <Cockpit />
+        </AppContext.Provider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('作品构建工作台')).toBeTruthy();
+    expect(screen.getByLabelText('AI 共创对话')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '确认进入下一步' })).toBeTruthy();
+  });
 });
 
 describe('档案页确认入口', () => {

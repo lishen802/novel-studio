@@ -11,6 +11,11 @@ const editor = {candidateId:'candidate-2',version:2,fields:[
   {path:'/ending',label:'结局',group:'结构',value:'结局',locked:true},
 ]};
 
+it('字段列表为空或缺失时仍渲染对话区', () => {
+  render(<CoCreationPanel editor={{candidateId:'',version:0,fields:null as unknown as []}} messages={[]} onSend={vi.fn()} authorizations={null as unknown as []}/>);
+  expect(screen.getByLabelText('AI 共创对话')).toBeTruthy();
+});
+
 it('提出修改时冻结当前候选、字段和实体引用', async () => {
   const onSend = vi.fn().mockResolvedValue(undefined);
   render(<CoCreationPanel editor={editor} entityRef="arc:3" messages={[]} onSend={onSend}/>);

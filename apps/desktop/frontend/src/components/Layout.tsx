@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Component, useEffect, type ReactNode } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { TitleBar } from './TitleBar';
 import { Sidebar } from './Sidebar';
@@ -95,6 +95,35 @@ function runNativeMenuAction(command: string, runtime: WailsRuntime): boolean {
   return false;
 }
 
+/** 路由页崩溃时保留标题栏和关闭链路，避免整窗白屏后无法退出。 */
+class RouteErrorBoundary extends Component<{ resetKey: string; children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="h-full flex items-center justify-center p-8" role="alert">
+          <div className="max-w-md space-y-2">
+            <p className="text-sm text-danger">当前页面渲染失败，窗口仍可关闭。</p>
+            <p className="text-xs text-text-sub">请返回其他栏目，或使用菜单退出应用后重试。</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -170,7 +199,9 @@ export function Layout() {
           style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
         >
           <div data-testid="route-viewport" className="h-full min-h-full p-6">
-            <Outlet />
+            <RouteErrorBoundary resetKey={location.pathname}>
+              <Outlet />
+            </RouteErrorBoundary>
           </div>
         </main>
       </div>

@@ -15,7 +15,7 @@ export function DiscussionAuthorizationModal({open, preview, confirming, onClose
     {preview && <div className="space-y-3 p-1">
       <p className="text-sm text-text-sub">确认后才会调用模型。同一目标和预算内可以连续讨论，不必每条消息再确认费用。</p>
       <p className="text-sm">模型：{preview.provider} / {preview.model}</p>
-      <p className="text-sm">最多 {preview.maxCalls} 次调用，单次 {preview.maxTurnTokens.toLocaleString()} Token，累计 {preview.maxTotalTokens.toLocaleString()} Token。</p>
+      <p className="text-sm">最多 {preview.maxCalls} 次调用，单次 {(preview.maxTurnTokens ?? 0).toLocaleString()} Token，累计 {(preview.maxTotalTokens ?? 0).toLocaleString()} Token。</p>
       <p className="text-sm">目标：候选第 {preview.candidateVersion} 版{preview.entityRef ? ` · ${preview.entityRef}` : ''}{(preview.fieldPaths ?? []).length ? ` · ${(preview.fieldPaths ?? []).join('、')}` : ''}</p>
       <p className="text-sm">有效期至 {preview.expiresAt}</p>
       <p className="text-sm text-text-sub">金额暂不可估算，确认后按你的模型服务商实际用量计费。</p>

@@ -31,8 +31,8 @@ function boundToCurrent(auth: DiscussionAuthorizationView | undefined, candidate
 }
 
 export function CoCreationPanel({editor, entityRef = '', messages, authorization, authorizations = [], pendingDiscussion, disabled, onSend, onPreviewDiscussion, onConfirmDiscussion, onSendDiscussion, onRevokeDiscussion, onPreviewSuggestion}: Props) {
-  const available = useMemo(() => editor?.fields.filter(field => !field.locked) ?? [], [editor]);
-  const pendingFieldPath = pendingDiscussion?.authorization.fieldPaths?.[0] ?? '';
+  const available = useMemo(() => editor?.fields?.filter(field => !field.locked) ?? [], [editor]);
+  const pendingFieldPath = pendingDiscussion?.authorization?.fieldPaths?.[0] ?? '';
   const [fieldPath, setFieldPath] = useState(pendingFieldPath || available[0]?.path || '');
   const [text, setText] = useState(pendingDiscussion?.draftMessage ?? '');
   const bindingKey = (path: string) => `${editor?.candidateId ?? ''}\u0000${editor?.version ?? 0}\u0000${entityRef}\u0000${path}`;
@@ -47,7 +47,7 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
   }, [editor?.candidateId, available, fieldPath]);
 
   const staleDraft = !!text.trim() && draftBase !== bindingKey(fieldPath);
-	const targetAuth = [...authorizations, ...(authorization ? [authorization] : [])].reverse().find(auth => boundToCurrent(auth, editor?.candidateId ?? '', entityRef, fieldPath));
+	const targetAuth = [...(authorizations ?? []), ...(authorization ? [authorization] : [])].reverse().find(auth => boundToCurrent(auth, editor?.candidateId ?? '', entityRef, fieldPath));
 	const currentAuth = targetAuth && !targetAuth.stale && targetAuth.state === 'active' ? targetAuth : undefined;
 	const staleAuth = targetAuth && (targetAuth.stale || targetAuth.state === 'stale');
 
@@ -82,7 +82,7 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
     <div className="p-4 border-b border-border">
       <h2 className="text-sm font-medium text-text">AI 共创</h2>
       <p className="mt-1 text-xs text-text-sub">可以先讨论分析，再决定是否形成修改提案。讨论授权绑定当前候选版本，不会随导航换绑。</p>
-      {currentAuth && <p className="mt-2 text-xs text-text-sub">剩余 {currentAuth.remainingCalls} 次调用 / {currentAuth.remainingTokens.toLocaleString()} Token · 到期 {currentAuth.expiresAt} · 绑定 {currentAuth.entityRef || currentAuth.fieldPaths?.[0] || currentAuth.candidateId}</p>}
+      {currentAuth && <p className="mt-2 text-xs text-text-sub">剩余 {currentAuth.remainingCalls ?? 0} 次调用 / {(currentAuth.remainingTokens ?? 0).toLocaleString()} Token · 到期 {currentAuth.expiresAt} · 绑定 {currentAuth.entityRef || currentAuth.fieldPaths?.[0] || currentAuth.candidateId}</p>}
       {staleAuth && <p className="mt-2 text-xs text-warning">基准版本已变化，当前讨论授权不能继续发送。</p>}
       {currentAuth?.id && onRevokeDiscussion && <Button size="sm" className="mt-2" disabled={disabled || busy} onClick={() => void act(async () => { await onRevokeDiscussion(currentAuth.id ?? ''); })}>撤销讨论授权</Button>}
     </div>
