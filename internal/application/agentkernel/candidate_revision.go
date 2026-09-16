@@ -17,6 +17,8 @@ func validateStoryCandidateRevision(output agentdomain.StoryCandidateRevisionOut
 		locks[path] = true
 	}
 	candidate := creationdomain.Candidate{PayloadJSON: string(base.Payload), LockMap: locks}
-	_, err := candidate.ReviewTextRevision(string(output.Payload), directive.TargetRefs)
+	_, err := candidate.ReviewScopedRevision(string(output.Payload), creationdomain.RevisionScope{
+		Paths: directive.TargetRefs, AllowAdd: directive.AllowAdd, AllowRemove: directive.AllowRemove,
+	})
 	return err
 }

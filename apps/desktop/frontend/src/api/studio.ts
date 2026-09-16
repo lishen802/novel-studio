@@ -652,7 +652,8 @@ export const studio = {
   acceptCreationCandidate: (candidateId: string) => call<CreationWorkbenchView>('AcceptCreationCandidate', candidateId),
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),
-  previewCreationRevision: (request:{candidateId:string;paths:string[];instruction:string;idempotencyKey:string}) => call<RevisionCard>('PreviewCreationRevision',request),
+  // 结构授权：allowAdd/allowRemove 里的集合名显式允许 AI 在该次修订内增删实体，未列出的集合一律不允许结构变化。
+  previewCreationRevision: (request:{candidateId:string;paths:string[];instruction:string;idempotencyKey:string;allowAdd?:string[];allowRemove?:string[]}) => call<RevisionCard>('PreviewCreationRevision',request),
   sendCreationMessage: (request:{candidateId:string;entityRef:string;fieldPath:string;text:string;idempotencyKey:string}) => call<RevisionCard>('SendCreationMessage',request),
   previewCreationDiscussionAuthorization: (request:{candidateId:string;entityRef?:string;fieldPaths:string[];message:string;idempotencyKey:string}) => call<DiscussionTurnView>('PreviewCreationDiscussionAuthorization',request),
   confirmCreationDiscussionAuthorization: (command:{actionId:string;argumentsHash:string;idempotencyKey:string;message:string;messageIdempotencyKey:string}) => call<DiscussionTurnView>('ConfirmCreationDiscussionAuthorization',command),

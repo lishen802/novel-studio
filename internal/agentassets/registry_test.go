@@ -242,6 +242,7 @@ func TestBuiltinDoesNotRegisterSupersededPlanningAssets(t *testing.T) {
 		{StoryRoadmapWorkflowID, 2},
 		{"story.author_roadmap", 1},
 		{StoryCandidateRevisionWorkflowID, 1},
+		{StoryCandidateRevisionWorkflowID, 2},
 		{StoryAuthorReviseWorkflowID, 1},
 		{"story.author_material", 1},
 	}

@@ -24,12 +24,18 @@ type RevisionDirective struct {
 	PreserveRefs         []string     `json:"preserve_refs"`
 	FindingIDs           []string     `json:"finding_ids,omitempty"`
 	AuthorInstructionRef string       `json:"author_instruction_ref,omitempty"`
+	// AllowAdd/AllowRemove 显式授权可增删实体的集合；为空时结构变化一律越界。
+	AllowAdd    []string `json:"allow_add,omitempty"`
+	AllowRemove []string `json:"allow_remove,omitempty"`
 }
 
 // Validate 校验修订来源互斥、基线冻结和目标/保持引用边界。
 func (directive RevisionDirective) Validate() error {
-	if directive.Version != 1 || blank(directive.BaseArtifactID) || !ValidSHA256(directive.BaseDigest) || len(directive.TargetRefs) == 0 ||
-		hasBlankOrDuplicate(directive.TargetRefs) || hasBlankOrDuplicate(directive.PreserveRefs) {
+	// 文本目标与结构授权至少需要一项；两者都为空时修订没有可执行范围。
+	if directive.Version != 1 || blank(directive.BaseArtifactID) || !ValidSHA256(directive.BaseDigest) ||
+		(len(directive.TargetRefs) == 0 && len(directive.AllowAdd) == 0 && len(directive.AllowRemove) == 0) ||
+		hasBlankOrDuplicate(directive.TargetRefs) || hasBlankOrDuplicate(directive.PreserveRefs) ||
+		hasBlankOrDuplicate(directive.AllowAdd) || hasBlankOrDuplicate(directive.AllowRemove) {
 		return ErrInvalidRevisionDirective
 	}
 	targets := make(map[string]struct{}, len(directive.TargetRefs))

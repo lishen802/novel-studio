@@ -147,7 +147,7 @@ var authorMaterialSchema []byte
 
 // Builtin 构造应用内置资源集合；开发阶段每种 Prompt、Schema 和 Assembler 只保留当前版本。
 func Builtin() (*Registry, error) {
-	candidateRevisionPromptBinding := BindingForText("story_candidate_revision.prompt", 1, []byte(candidateRevisionPrompt))
+	candidateRevisionPromptBinding := BindingForText("story_candidate_revision.prompt", 2, []byte(candidateRevisionPrompt))
 	candidateRevisionReviewBinding := BindingForText("review_candidate_revision.prompt", 1, []byte(candidateRevisionReviewPrompt))
 	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 2, candidateRevisionSchema)
 	candidateDiscussionPromptBinding := BindingForText("story_candidate_discussion.prompt", 1, []byte(candidateDiscussionPrompt))

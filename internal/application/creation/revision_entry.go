@@ -20,9 +20,13 @@ import (
 )
 
 type RevisionRequest struct {
-	CandidateID    string   `json:"candidateId"`
-	Paths          []string `json:"paths"`
-	Instruction    string   `json:"instruction"`
+	CandidateID string   `json:"candidateId"`
+	Paths       []string `json:"paths"`
+	Instruction string   `json:"instruction"`
+	// AllowAdd/AllowRemove 显式授权可增删实体的集合（如 characters、volumes）。
+	// 为空时任何结构变化都会被范围门禁拒绝。
+	AllowAdd       []string `json:"allowAdd"`
+	AllowRemove    []string `json:"allowRemove"`
 	IdempotencyKey string   `json:"idempotencyKey"`
 }
 type RevisionCommand struct {
@@ -54,7 +58,9 @@ type RevisionView struct {
 }
 type RevisionDiffView struct {
 	// Path 是稳定字段路径，供作者选择部分采纳时原样回传。
-	Path   string `json:"path"`
+	Path string `json:"path"`
+	// Kind 区分文本修改与结构增删；结构差异必须整组采用。
+	Kind   string `json:"kind"`
 	Label  string `json:"label"`
 	Group  string `json:"group"`
 	Before string `json:"before"`
@@ -291,7 +297,11 @@ func (service *Service) ConfirmRevision(ctx context.Context, projectID string, c
 		}
 	}
 	sort.Strings(preserve)
-	directive := agentdomain.RevisionDirective{Version: 1, Mode: agentdomain.RevisionAuthorDirected, BaseArtifactID: base.ArtifactID, BaseDigest: base.Digest, TargetRefs: input.Request.Paths, PreserveRefs: preserve, AuthorInstructionRef: input.Request.Instruction}
+	directive := agentdomain.RevisionDirective{
+		Version: 1, Mode: agentdomain.RevisionAuthorDirected, BaseArtifactID: base.ArtifactID, BaseDigest: base.Digest,
+		TargetRefs: input.Request.Paths, PreserveRefs: preserve, AuthorInstructionRef: input.Request.Instruction,
+		AllowAdd: input.Request.AllowAdd, AllowRemove: input.Request.AllowRemove,
+	}
 	_, err = service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{RunID: input.RunID, ProjectID: projectID, BranchID: session.BranchID, CanonicalHead: input.ProjectDigest, AuthorInstruction: input.Request.Instruction, WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, WorkflowVersion: revisionBindingFor(input.Base).Version, Profile: input.Profile, Sources: input.Sources, BaseCandidate: &base, RevisionDirective: &directive, Deadline: now.Add(defaultRunTimeout)})
 	if err != nil {
 		service.failRevision(lease.Context(), executing, operation, "启动失败")
@@ -367,7 +377,9 @@ func (service *Service) revisionResult(ctx context.Context, input revisionInput)
 	if output.CandidateKind != expected.CandidateKind || output.PayloadSchemaRef != expected.PayloadSchemaRef {
 		return run, "", nil, ErrUnavailable
 	}
-	diffs, err := input.Base.ReviewTextRevision(string(output.Payload), input.Request.Paths)
+	diffs, err := input.Base.ReviewScopedRevision(string(output.Payload), creationdomain.RevisionScope{
+		Paths: input.Request.Paths, AllowAdd: input.Request.AllowAdd, AllowRemove: input.Request.AllowRemove,
+	})
 	return run, string(output.Payload), diffs, err
 }
 
@@ -461,7 +473,7 @@ func (service *Service) revisionView(ctx context.Context, session creationdomain
 		view.Summary += service.revisionReviewSummary(ctx, run)
 		for _, diff := range diffs {
 			label := labels[diff.Path]
-			view.Diffs = append(view.Diffs, RevisionDiffView{Path: diff.Path, Label: label.Label, Group: label.Group, Before: diff.Before, After: diff.After})
+			view.Diffs = append(view.Diffs, RevisionDiffView{Path: diff.Path, Kind: string(diff.Kind), Label: label.Label, Group: label.Group, Before: diff.Before, After: diff.After})
 		}
 		view.CanApply = !view.Stale && !view.Applied && run.QualityStatus == agentdomain.QualityPassed && len(diffs) > 0
 	}
@@ -572,6 +584,12 @@ func (service *Service) adoptPartialRevision(
 	diffs []creationdomain.TextRevisionDiff,
 	paths []string,
 ) (creationdomain.Candidate, error) {
+	for _, diff := range diffs {
+		if diff.Kind != creationdomain.RevisionDiffText {
+			// 结构增删改变实体集合，不能只取其中一部分：必须整组采用。
+			return creationdomain.Candidate{}, fmt.Errorf("%w: 结构增删必须整组采用", creationdomain.ErrRevisionScope)
+		}
+	}
 	selected, err := normalizeRevisionPaths(paths)
 	if err != nil {
 		return creationdomain.Candidate{}, err

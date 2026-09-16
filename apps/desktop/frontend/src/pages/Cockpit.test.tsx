@@ -786,8 +786,8 @@ describe('修订结果的部分采用', () => {
     cost: { estimatedCalls: 2, maxRunTokens: 20000, runBudgetUnlimited: false, roleModels: [] },
     runId: 'run-1', quality: 'passed', summary: '已通过独立审阅', stale: false, canApply: true, applied: false,
     diffs: [
-      { path: '/title', label: '标题', group: '方案', before: '旧标题', after: '新标题' },
-      { path: '/logline', label: '一句话简介', group: '方案', before: '旧简介', after: '新简介' },
+      { path: '/title', label: '标题', group: '方案', kind: 'text', before: '旧标题', after: '新标题' },
+      { path: '/logline', label: '一句话简介', group: '方案', kind: 'text', before: '旧简介', after: '新简介' },
     ],
   };
 
@@ -843,5 +843,54 @@ describe('修订结果的部分采用', () => {
     expect(alerts.some((node) => node.textContent?.includes('基线已变化'))).toBe(true);
     expect((screen.getByLabelText('方案 · 一句话简介') as HTMLInputElement).checked).toBe(false);
     expect((screen.getByLabelText('方案 · 标题') as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+describe('修订的结构授权', () => {
+  // 预览请求的测试替身类型：断言点集中在请求携带的集合白名单上。
+  type PreviewRevision = (request: { candidateId: string; paths: string[]; instruction: string; idempotencyKey: string; allowAdd?: string[]; allowRemove?: string[] }) => Promise<RevisionCard>;
+  const editor = {
+    candidateId: 'people-1', version: 1,
+    fields: [{ path: '/characters/@char-1/summary', label: '简介', group: '人物 · 阿绫', value: '旧简介', locked: false }],
+  };
+  const structure: StructureCollectionView[] = [
+    { collection: 'characters', title: '人物', identityField: 'id', entities: [{ key: 'char-1', title: '阿绫' }] },
+    { collection: 'factions', title: '势力', identityField: 'name', entities: [{ key: '守军', title: '守军' }] },
+  ];
+  const revisionCard: RevisionCard = {
+    actionId: 'rev-1', argumentsHash: 'hash-1', idempotencyKey: 'key-1', candidateId: 'people-1', version: 1,
+    state: 'pending_confirmation', instruction: '补一个守塔人', targets: [], preserved: [],
+    cost: { estimatedCalls: 2, maxRunTokens: 20000, runBudgetUnlimited: false, roleModels: [] },
+    runId: '', quality: '', summary: '', stale: false, canApply: false, applied: false, diffs: [],
+  };
+
+  const mount = (preview: PreviewRevision) => {
+    const view = workbench({ stage: 'people_world', fieldEditor: editor, structure });
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(view),
+      CreationWorkbench: vi.fn().mockResolvedValue(view),
+      PreviewCreationRevision: preview as unknown as (...args: unknown[]) => Promise<unknown>,
+    } } };
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+  };
+
+  afterEach(() => { cleanup(); delete window.go; });
+
+  it('预览把勾选的集合白名单合并进请求，未勾选时请求不带授权字段', async () => {
+    const user = userEvent.setup();
+    const preview = vi.fn<PreviewRevision>().mockResolvedValue(revisionCard);
+    mount(preview);
+
+    await user.type(await screen.findByLabelText('修改要求'), '补一个守塔人');
+    await user.click(screen.getByText('允许 AI 增删实体（可选）'));
+    await user.click(screen.getByLabelText('允许新增 人物'));
+    await user.click(screen.getByRole('button', { name: '查看修改提案与费用' }));
+
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(1));
+    const request = preview.mock.calls[0][0];
+    expect(request.instruction).toBe('补一个守塔人');
+    expect(request.paths).toEqual(['/characters/@char-1/summary']);
+    expect(request.allowAdd).toEqual(['characters']);
+    expect(request.allowRemove).toBeUndefined();
   });
 });

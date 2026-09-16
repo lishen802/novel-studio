@@ -16,7 +16,7 @@ var (
 	candidateRevisionSchema []byte
 )
 
-const StoryCandidateRevisionWorkflowVersion = 2
+const StoryCandidateRevisionWorkflowVersion = 3
 
 // candidateRevisionWorkflow 冻结先修订后独立审阅的流程，结果质量由审阅出口决定。
 func candidateRevisionWorkflow(version int, revise, review, schema, reviewSchema, assembler agentdomain.VersionBinding) agentdomain.WorkflowDefinition {

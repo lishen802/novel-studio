@@ -269,3 +269,107 @@ func TestApplyRevisionAdoptsSelectedSubsetOnly(t *testing.T) {
 		t.Fatal("基线变化后不应再采用其他子集")
 	}
 }
+
+// 授权后 AI 定向修订可以增删实体：差异标注结构变化，整组采用落到新候选；
+// 未授权时同一结果被范围门禁拒绝；结构差异不能部分采用。
+func TestApplyRevisionAcceptsAuthorizedStructuralChange(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	base := seedPeopleWorldWithUpstream(t, store)
+	deputy := `{"id":"char-2","name":"老周","role":"supporting","aliases":[],"summary":"跟随阿绫多年的副将","motivation":"护住守军","fear":"重演旧败","secret":"隐瞒军令","arc":"接受军令之外的判断"}`
+	addedPayload, err := base.ApplyStructure(creationdomain.StructureEdit{
+		Collection: "characters", Operation: creationdomain.StructureAdd, EntityKey: "char-2", Value: deputy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revised := strings.Replace(addedPayload, `"summary":"潮汐关最后的守将"`, `"summary":"潮汐关最后的守将，心里有债"`, 1)
+	envelope := `{"candidate_kind":"people_world","payload_schema_ref":"story_cast.schema@2","payload":` + revised + `}`
+
+	profile := generateRequest(base.Stage).Profile
+	profile.Roles = append(profile.Roles, agentdomain.ResolvedRole{Role: agentdomain.RoleContinuityReviewer, ProviderName: "test", Model: "review-model"})
+	// 未授权时同一结果必须被拒绝。
+	kernel.payloads[agentassets.StoryCandidateRevisionWorkflowID] = envelope
+	unauthorized, err := service.PreviewRevision(ctx, "project-1", RevisionRequest{
+		CandidateID: base.ID, Paths: []string{"/characters/@char-1/summary"}, Instruction: "补一个副将", IdempotencyKey: "structure-unauthorized",
+	}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmRevision(ctx, "project-1", RevisionCommand{
+		ActionID: unauthorized.ActionID, ArgumentsHash: unauthorized.ArgumentsHash, IdempotencyKey: "structure-unauthorized",
+	}, profile); err != nil {
+		t.Fatal(err)
+	}
+	failed := waitRevisionState(t, service, unauthorized.ActionID)
+	if failed.State != "failed" {
+		t.Fatalf("未授权的结构增删必须失败: %#v", failed)
+	}
+
+	// 显式授权后同一结果被接受，并生成结构化差异。
+	preview, err := service.PreviewRevision(ctx, "project-1", RevisionRequest{
+		CandidateID: base.ID, Paths: []string{"/characters/@char-1/summary"}, AllowAdd: []string{"characters"},
+		Instruction: "补一个副将并微调人物概要", IdempotencyKey: "structure-authorized",
+	}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmRevision(ctx, "project-1", RevisionCommand{
+		ActionID: preview.ActionID, ArgumentsHash: preview.ArgumentsHash, IdempotencyKey: "structure-authorized",
+	}, profile); err != nil {
+		t.Fatal(err)
+	}
+	ready := waitRevisionState(t, service, preview.ActionID)
+	if ready.State != "succeeded" || !ready.CanApply {
+		t.Fatalf("授权后修订应可审阅: %#v", ready)
+	}
+	kinds := map[string]int{}
+	for _, diff := range ready.Diffs {
+		kinds[diff.Kind]++
+	}
+	if kinds["add_entity"] != 1 || kinds["text"] != 1 {
+		t.Fatalf("差异种类 = %#v", ready.Diffs)
+	}
+
+	// 结构差异必须整组采用。
+	if _, err := service.ApplyRevision(ctx, "project-1", RevisionCommand{
+		ActionID: ready.ActionID, ArgumentsHash: ready.ArgumentsHash, IdempotencyKey: "structure-authorized",
+		Paths: []string{"/characters/@char-1/summary"},
+	}); !errors.Is(err, creationdomain.ErrRevisionScope) {
+		t.Fatalf("结构差异不应支持部分采用: %v", err)
+	}
+
+	adopted, err := service.ApplyRevision(ctx, "project-1", RevisionCommand{
+		ActionID: ready.ActionID, ArgumentsHash: ready.ArgumentsHash, IdempotencyKey: "structure-authorized",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added, err := adopted.FieldString("/characters/@char-2/name"); err != nil || added != "老周" {
+		t.Fatalf("采用后应包含新增人物: %q %v", added, err)
+	}
+	if summary, err := adopted.FieldString("/characters/@char-1/summary"); err != nil || !strings.Contains(summary, "心里有债") {
+		t.Fatalf("采用后应包含文本修改: %q %v", summary, err)
+	}
+}
+
+// waitRevisionState 等待修订动作进入终态并返回其投影。
+func waitRevisionState(t *testing.T, service *Service, actionID string) RevisionView {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		views, err := service.RevisionActions(context.Background(), "project-1", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, view := range views {
+			if view.ActionID == actionID && (view.State == "succeeded" || view.State == "failed") {
+				return view
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("修订动作未进入终态: %s", actionID)
+	return RevisionView{}
+}

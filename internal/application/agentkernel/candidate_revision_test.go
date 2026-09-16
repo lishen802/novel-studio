@@ -205,3 +205,57 @@ func TestStoryCandidateRevisionStopsUnsafeOutput(t *testing.T) {
 		})
 	}
 }
+
+// 结构增删必须由指令显式授权；未授权的集合变化与保留项改写都被拒绝。
+func TestStoryCandidateRevisionRequiresStructuralAuthorization(t *testing.T) {
+	character := `{"id":"char-1","name":"阿绫","role":"protagonist","aliases":["守关人"],"summary":"潮汐关最后的守将","motivation":"赎罪","fear":"再失一城","secret":"放过过仇敌","arc":"学会取舍"}`
+	deputy := `{"id":"char-2","name":"老周","role":"supporting","aliases":[],"summary":"跟随阿绫多年的副将","motivation":"护住守军","fear":"重演旧败","secret":"隐瞒军令","arc":"接受军令之外的判断"}`
+	tail := `"relationships":[],"factions":[],"locations":[],"world_rules":[{"name":"潮汐律","description":"潮位决定航路开闭","scope_type":"project"}],"forbidden":[],"omission_reasons":["本方向不需要势力和地点"]}`
+	recruit := `{"id":"char-3","name":"新兵小满","role":"minor","aliases":[],"summary":"刚补入守军的新兵","motivation":"活下去","fear":"再失同伴","secret":"偷藏军粮","arc":"学会担责"}`
+	payload := `{"characters":[` + character + `,` + deputy + `],` + tail
+	withDeputy := `{"characters":[` + character + `,` + deputy + `,` + recruit + `],` + tail
+	if !json.Valid([]byte(withDeputy)) {
+		t.Fatal("测试载荷必须是合法 JSON")
+	}
+	original := agentdomain.StoryCandidateRevisionOutput{CandidateKind: "people_world", PayloadSchemaRef: "story_cast.schema@2", Payload: json.RawMessage(payload)}
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := original
+	output.Payload = json.RawMessage(withDeputy)
+	directive := agentdomain.RevisionDirective{
+		Version: 1, Mode: agentdomain.RevisionAuthorDirected, BaseArtifactID: "artifact-1",
+		BaseDigest: agentdomain.SHA256Hex(raw), TargetRefs: []string{"/characters/@char-1/summary"},
+		AuthorInstructionRef: "补一个副将并微调人物概要",
+	}
+	if err := validateStoryCandidateRevision(output, string(raw), directive); err == nil {
+		t.Fatal("未授权的新增必须被拒绝")
+	}
+	directive.AllowAdd = []string{"factions"}
+	if err := validateStoryCandidateRevision(output, string(raw), directive); err == nil {
+		t.Fatal("只授权其他集合时新增仍必须被拒绝")
+	}
+	directive.AllowAdd = []string{"characters"}
+	if err := validateStoryCandidateRevision(output, string(raw), directive); err != nil {
+		t.Fatalf("授权后应接受结构新增: %v", err)
+	}
+
+	// 删除需要授权；即使授权了删除，改写保留实体仍被拒绝。
+	withoutCharacter := `{"characters":[` + character + `],` + tail
+	removed := original
+	removed.Payload = json.RawMessage(withoutCharacter)
+	directive.AllowAdd = nil
+	if err := validateStoryCandidateRevision(removed, string(raw), directive); err == nil {
+		t.Fatal("未授权的删除必须被拒绝")
+	}
+	directive.AllowRemove = []string{"characters"}
+	if err := validateStoryCandidateRevision(removed, string(raw), directive); err != nil {
+		t.Fatalf("授权后应接受结构删除: %v", err)
+	}
+	rewritten := original
+	rewritten.Payload = json.RawMessage(strings.Replace(withoutCharacter, `"name":"阿绫"`, `"name":"阿绫改名"`, 1))
+	if err := validateStoryCandidateRevision(rewritten, string(raw), directive); err == nil {
+		t.Fatal("结构授权不能顺带改写保留实体")
+	}
+}
