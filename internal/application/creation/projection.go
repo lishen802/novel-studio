@@ -3,6 +3,7 @@ package creation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,35 +15,38 @@ import (
 )
 
 type WorkbenchView struct {
-	Revisions        []RevisionView                `json:"revisions"`
-	DirectionActions []DirectionActionView         `json:"directionActions"`
-	FieldEditor      FieldEditorView               `json:"fieldEditor"`
-	SampleHandoff    *SampleView                   `json:"sampleHandoff"`
-	CanPrepareSample bool                          `json:"canPrepareSample"`
-	Material         MaterialView                  `json:"material"`
-	ContentVersion   int64                         `json:"contentVersion"`
-	RunSlotVersion   int64                         `json:"runSlotVersion"`
-	Entry            EntryView                     `json:"entry"`
-	ReadOnly         bool                          `json:"readOnly"`
-	Applicability    string                        `json:"applicability"`
-	SessionID        string                        `json:"sessionId"`
-	ProjectID        string                        `json:"projectId"`
-	BranchID         string                        `json:"branchId"`
-	Stage            creationdomain.Stage          `json:"stage"`
-	AdvanceMode      creationdomain.AdvanceMode    `json:"advanceMode"`
-	BlockingReason   creationdomain.BlockingReason `json:"blockingReason"`
-	Recoverable      bool                          `json:"recoverable"`
-	ArchiveConfirmed bool                          `json:"archiveConfirmed"`
-	IntentText       string                        `json:"intentText"`
-	StageRail        []RailStopView                `json:"stageRail"`
-	DirectionSet     DirectionSetView              `json:"directionSet"`
-	Proposal         ProposalView                  `json:"proposal"`
-	PeopleWorld      PeopleWorldView               `json:"peopleWorld"`
-	Roadmap          RoadmapView                   `json:"roadmap"`
-	CurrentRun       RunView                       `json:"currentRun"`
-	Assistant        AssistantSummaryView          `json:"assistant"`
-	Impact           ImpactProjection              `json:"impact"`
-	Capabilities     []string                      `json:"capabilities"`
+	Revisions         []RevisionView                `json:"revisions"`
+	DirectionActions  []DirectionActionView         `json:"directionActions"`
+	FieldEditor       FieldEditorView               `json:"fieldEditor"`
+	Review            ReviewView                    `json:"review"`
+	ReviewCursor      ReviewCursorView              `json:"reviewCursor"`
+	CandidateVersions []CandidateVersionSummaryView `json:"candidateVersions"`
+	SampleHandoff     *SampleView                   `json:"sampleHandoff"`
+	CanPrepareSample  bool                          `json:"canPrepareSample"`
+	Material          MaterialView                  `json:"material"`
+	ContentVersion    int64                         `json:"contentVersion"`
+	RunSlotVersion    int64                         `json:"runSlotVersion"`
+	Entry             EntryView                     `json:"entry"`
+	ReadOnly          bool                          `json:"readOnly"`
+	Applicability     string                        `json:"applicability"`
+	SessionID         string                        `json:"sessionId"`
+	ProjectID         string                        `json:"projectId"`
+	BranchID          string                        `json:"branchId"`
+	Stage             creationdomain.Stage          `json:"stage"`
+	AdvanceMode       creationdomain.AdvanceMode    `json:"advanceMode"`
+	BlockingReason    creationdomain.BlockingReason `json:"blockingReason"`
+	Recoverable       bool                          `json:"recoverable"`
+	ArchiveConfirmed  bool                          `json:"archiveConfirmed"`
+	IntentText        string                        `json:"intentText"`
+	StageRail         []RailStopView                `json:"stageRail"`
+	DirectionSet      DirectionSetView              `json:"directionSet"`
+	Proposal          ProposalView                  `json:"proposal"`
+	PeopleWorld       PeopleWorldView               `json:"peopleWorld"`
+	Roadmap           RoadmapView                   `json:"roadmap"`
+	CurrentRun        RunView                       `json:"currentRun"`
+	Assistant         AssistantSummaryView          `json:"assistant"`
+	Impact            ImpactProjection              `json:"impact"`
+	Capabilities      []string                      `json:"capabilities"`
 }
 
 type RailStopView struct {
@@ -94,6 +98,8 @@ type ProposalSectionView struct {
 	Content  string `json:"content"`
 	LockPath string `json:"lockPath"`
 	Locked   bool   `json:"locked"`
+	Accepted bool   `json:"accepted"`
+	Rejected bool   `json:"rejected"`
 }
 
 type PeopleWorldView struct {
@@ -109,6 +115,8 @@ type PeopleWorldNodeView struct {
 	Title    string `json:"title"`
 	Summary  string `json:"summary"`
 	Complete bool   `json:"complete"`
+	Accepted bool   `json:"accepted"`
+	Rejected bool   `json:"rejected"`
 }
 
 type RoadmapView struct {
@@ -133,6 +141,8 @@ type RoadmapNodeView struct {
 	Title              string                `json:"title"`
 	Summary            string                `json:"summary"`
 	Position           int                   `json:"position"`
+	Accepted           bool                  `json:"accepted"`
+	Rejected           bool                  `json:"rejected"`
 	ReaderExpectation  string                `json:"readerExpectation,omitempty"`
 	StagePayoff        string                `json:"stagePayoff,omitempty"`
 	IrreversibleChange string                `json:"irreversibleChange,omitempty"`
@@ -207,7 +217,8 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 	if isMissingSession(err) {
 		view := assembleWorkbench(creationdomain.Session{ProjectID: projectID, BranchID: branchID,
 			Stage: creationdomain.StageIntent, AdvanceMode: creationdomain.ModeStepReview}, nil,
-			ImpactProjection{Items: []ImpactItem{}, RegenerateStages: []creationdomain.Stage{}}, 0)
+			ImpactProjection{Items: []ImpactItem{}, RegenerateStages: []creationdomain.Stage{}}, 0,
+			creationdomain.CandidateReview{}, creationdomain.ReviewCursor{})
 		view.Applicability = "not_started"
 		view.Capabilities = []string{}
 		return view, nil
@@ -227,7 +238,27 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 	if err != nil {
 		return WorkbenchView{}, err
 	}
-	view := assembleWorkbench(session, candidates, impact, pending)
+	review := creationdomain.CandidateReview{}
+	if current, ok := currentCandidate(candidates, session.Stage); ok {
+		stored, err := service.store.Review(ctx, current.ID)
+		if err != nil {
+			return WorkbenchView{}, err
+		}
+		if stored.SessionID == "" {
+			stored, err = creationdomain.NewCandidateReview(current, service.clock.Now())
+			if err != nil {
+				return WorkbenchView{}, err
+			}
+		}
+		review = stored
+	}
+	cursor, err := service.store.ReviewCursor(ctx, session.ID)
+	if errors.Is(err, ErrReviewCursorNotFound) {
+		cursor = creationdomain.ReviewCursor{}
+	} else if err != nil {
+		return WorkbenchView{}, err
+	}
+	view := assembleWorkbench(session, candidates, impact, pending, review, cursor)
 	actionStates := map[string]string{}
 	messages := []assistantdomain.Message{}
 	assistantSession, assistantErr := service.store.AssistantSession(ctx, session.ProjectID, session.BranchID)
@@ -388,28 +419,33 @@ func assembleWorkbench(
 	candidates []creationdomain.Candidate,
 	impact ImpactProjection,
 	pending int,
+	review creationdomain.CandidateReview,
+	cursor creationdomain.ReviewCursor,
 ) WorkbenchView {
 	view := WorkbenchView{
 		Applicability:  "active",
 		ContentVersion: session.ContentVersion, RunSlotVersion: session.RunSlotVersion, Entry: EntryView{Kind: session.EntryKind()},
-		SessionID:        session.ID,
-		ProjectID:        session.ProjectID,
-		BranchID:         session.BranchID,
-		Stage:            session.Stage,
-		AdvanceMode:      session.AdvanceMode,
-		BlockingReason:   session.BlockingReason,
-		Recoverable:      session.BlockingReason == creationdomain.BlockCostAuthorization && strings.TrimSpace(session.ActiveRunID) != "",
-		ArchiveConfirmed: strings.TrimSpace(session.ArchiveChangeSetID) != "",
-		IntentText:       session.IntentText,
-		StageRail:        buildStageRail(session),
-		Impact:           impact,
-		Assistant:        AssistantSummaryView{PendingActionCount: pending, Messages: []AssistantMessageView{}},
-		DirectionSet:     DirectionSetView{Cards: []DirectionCardView{}, KeptIDs: append([]string{}, session.KeptDirectionIDs...), Combined: []CombinedDirectionView{}},
-		Proposal:         ProposalView{Sections: []ProposalSectionView{}},
-		PeopleWorld:      PeopleWorldView{Entities: []PeopleWorldNodeView{}},
-		Roadmap:          RoadmapView{Volumes: []RoadmapNodeView{}, Arcs: []RoadmapNodeView{}, Chapters: []RoadmapNodeView{}},
-		FieldEditor:      FieldEditorView{Fields: []TextFieldView{}},
-		Revisions:        []RevisionView{},
+		SessionID:         session.ID,
+		ProjectID:         session.ProjectID,
+		BranchID:          session.BranchID,
+		Stage:             session.Stage,
+		AdvanceMode:       session.AdvanceMode,
+		BlockingReason:    session.BlockingReason,
+		Recoverable:       session.BlockingReason == creationdomain.BlockCostAuthorization && strings.TrimSpace(session.ActiveRunID) != "",
+		ArchiveConfirmed:  strings.TrimSpace(session.ArchiveChangeSetID) != "",
+		IntentText:        session.IntentText,
+		StageRail:         buildStageRail(session),
+		Impact:            impact,
+		Assistant:         AssistantSummaryView{PendingActionCount: pending, Messages: []AssistantMessageView{}},
+		DirectionSet:      DirectionSetView{Cards: []DirectionCardView{}, KeptIDs: append([]string{}, session.KeptDirectionIDs...), Combined: []CombinedDirectionView{}},
+		Proposal:          ProposalView{Sections: []ProposalSectionView{}},
+		PeopleWorld:       PeopleWorldView{Entities: []PeopleWorldNodeView{}},
+		Roadmap:           RoadmapView{Volumes: []RoadmapNodeView{}, Arcs: []RoadmapNodeView{}, Chapters: []RoadmapNodeView{}},
+		FieldEditor:       FieldEditorView{Fields: []TextFieldView{}},
+		Revisions:         []RevisionView{},
+		Review:            projectReview(review, reviewRefsOfStage(candidates, session.Stage)),
+		ReviewCursor:      projectReviewCursor(cursor),
+		CandidateVersions: projectVersionSummaries(candidates, session.Stage),
 	}
 	if current, ok := currentCandidateOfKind(candidates, creationdomain.StageDirections, creationdomain.KindDirectionSet); ok {
 		view.DirectionSet = projectDirectionSet(current, session.SelectedDirectionCardID)
@@ -433,13 +469,13 @@ func assembleWorkbench(
 		return view.DirectionSet.Combined[i].Version > view.DirectionSet.Combined[j].Version
 	})
 	if current, ok := currentCandidate(candidates, creationdomain.StageProposal); ok {
-		view.Proposal = projectProposal(current)
+		view.Proposal = projectProposal(current, review)
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StagePeopleWorld); ok {
-		view.PeopleWorld = projectPeopleWorld(current)
+		view.PeopleWorld = projectPeopleWorld(current, review)
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StageRoadmap); ok {
-		view.Roadmap = projectRoadmap(current)
+		view.Roadmap = projectRoadmap(current, review)
 	}
 	if session.Entry != nil {
 		view.Entry = EntryView{ID: session.Entry.ID, Version: session.Entry.Version, Kind: session.Entry.Kind, Material: session.Entry.Material}
@@ -483,6 +519,20 @@ func buildStageRail(session creationdomain.Session) []RailStopView {
 	return rail
 }
 
+// applyReviewFlags 把逐项审阅决定投影为界面可见的接受/排除标记。
+func applyReviewFlags(accepted, rejected *bool, review creationdomain.CandidateReview, scope creationdomain.ReviewScope, id string) {
+	ref, err := creationdomain.NewReviewRef(scope, id)
+	if err != nil {
+		return
+	}
+	switch review.State(ref) {
+	case creationdomain.DecisionAccept:
+		*accepted = true
+	case creationdomain.DecisionReject:
+		*rejected = true
+	}
+}
+
 func projectDirectionSet(candidate creationdomain.Candidate, selectedID string) DirectionSetView {
 	view := DirectionSetView{
 		CandidateID: candidate.ID, SelectedCandidateID: candidate.ID, Version: candidate.Version, SelectedID: selectedID,
@@ -503,7 +553,7 @@ func projectDirectionSet(candidate creationdomain.Candidate, selectedID string) 
 	return view
 }
 
-func projectProposal(candidate creationdomain.Candidate) ProposalView {
+func projectProposal(candidate creationdomain.Candidate, review creationdomain.CandidateReview) ProposalView {
 	view := ProposalView{
 		CandidateID: candidate.ID, Version: candidate.Version, Status: string(candidate.Status),
 		Sections: []ProposalSectionView{},
@@ -526,12 +576,13 @@ func projectProposal(candidate creationdomain.Candidate) ProposalView {
 		if sections[i].LockPath != "" {
 			sections[i].Locked = candidate.Locked(sections[i].LockPath)
 		}
+		applyReviewFlags(&sections[i].Accepted, &sections[i].Rejected, review, creationdomain.ReviewScopeSection, sections[i].ID)
 	}
 	view.Sections = sections
 	return view
 }
 
-func projectPeopleWorld(candidate creationdomain.Candidate) PeopleWorldView {
+func projectPeopleWorld(candidate creationdomain.Candidate, review creationdomain.CandidateReview) PeopleWorldView {
 	view := PeopleWorldView{
 		CandidateID: candidate.ID, Version: candidate.Version, Status: string(candidate.Status),
 		Entities: []PeopleWorldNodeView{},
@@ -545,30 +596,38 @@ func projectPeopleWorld(candidate creationdomain.Candidate) PeopleWorldView {
 		if entityID == "" {
 			entityID = item.Name
 		}
-		view.Entities = append(view.Entities, PeopleWorldNodeView{
+		node := PeopleWorldNodeView{
 			ID: "character:" + entityID, Kind: "character", Title: item.Name, Summary: item.Summary,
 			Complete: strings.TrimSpace(item.Summary) != "",
-		})
+		}
+		applyReviewFlags(&node.Accepted, &node.Rejected, review, creationdomain.ReviewScopeEntity, node.ID)
+		view.Entities = append(view.Entities, node)
 	}
 	for _, item := range cast.Factions {
-		view.Entities = append(view.Entities, PeopleWorldNodeView{
+		node := PeopleWorldNodeView{
 			ID: "faction:" + item.Name, Kind: "faction", Title: item.Name, Summary: item.Summary, Complete: true,
-		})
+		}
+		applyReviewFlags(&node.Accepted, &node.Rejected, review, creationdomain.ReviewScopeEntity, node.ID)
+		view.Entities = append(view.Entities, node)
 	}
 	for _, item := range cast.Locations {
-		view.Entities = append(view.Entities, PeopleWorldNodeView{
+		node := PeopleWorldNodeView{
 			ID: "location:" + item.Name, Kind: "location", Title: item.Name, Summary: item.Summary, Complete: true,
-		})
+		}
+		applyReviewFlags(&node.Accepted, &node.Rejected, review, creationdomain.ReviewScopeEntity, node.ID)
+		view.Entities = append(view.Entities, node)
 	}
 	for _, item := range cast.WorldRules {
-		view.Entities = append(view.Entities, PeopleWorldNodeView{
+		node := PeopleWorldNodeView{
 			ID: "rule:" + item.Name, Kind: "world_rule", Title: item.Name, Summary: item.Description, Complete: true,
-		})
+		}
+		applyReviewFlags(&node.Accepted, &node.Rejected, review, creationdomain.ReviewScopeEntity, node.ID)
+		view.Entities = append(view.Entities, node)
 	}
 	return view
 }
 
-func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
+func projectRoadmap(candidate creationdomain.Candidate, review creationdomain.CandidateReview) RoadmapView {
 	view := RoadmapView{
 		CandidateID: candidate.ID, Version: candidate.Version, Status: string(candidate.Status),
 		Volumes: []RoadmapNodeView{}, Arcs: []RoadmapNodeView{}, Chapters: []RoadmapNodeView{},
@@ -578,10 +637,13 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 		return view
 	}
 	view.Book = RoadmapNodeView{ID: "book:" + road.Book.ID, Title: road.Book.Title, Summary: road.Book.Proposition}
+	applyReviewFlags(&view.Book.Accepted, &view.Book.Rejected, review, creationdomain.ReviewScopeEntity, view.Book.ID)
 	for _, volume := range road.Volumes {
-		view.Volumes = append(view.Volumes, RoadmapNodeView{
+		node := RoadmapNodeView{
 			ID: "volume:" + volume.ID, ParentID: "book:" + road.Book.ID, Title: volume.Title, Summary: volume.Goal, Position: volume.Position,
-		})
+		}
+		applyReviewFlags(&node.Accepted, &node.Rejected, review, creationdomain.ReviewScopeEntity, node.ID)
+		view.Volumes = append(view.Volumes, node)
 	}
 	for _, arc := range road.Arcs {
 		commitments := make([]RoadmapGoalItemView, 0, len(arc.Commitments))
@@ -592,17 +654,21 @@ func projectRoadmap(candidate creationdomain.Candidate) RoadmapView {
 		for _, item := range arc.RetainedQuestions {
 			questions = append(questions, RoadmapGoalItemView{ID: item.ID, Statement: item.Statement, Detail: item.Reason})
 		}
-		view.Arcs = append(view.Arcs, RoadmapNodeView{
+		arcNode := RoadmapNodeView{
 			ID: "arc:" + strings.TrimSpace(arc.ID), ParentID: "volume:" + arc.VolumeRef, Title: arc.Title, Summary: arc.CausalChain, Position: arc.Position,
 			ReaderExpectation: arc.ReaderExpectation, StagePayoff: arc.StagePayoff,
 			IrreversibleChange: arc.IrreversibleChange, EndingContribution: arc.EndingContribution,
 			Commitments: commitments, RetainedQuestions: questions,
-		})
+		}
+		applyReviewFlags(&arcNode.Accepted, &arcNode.Rejected, review, creationdomain.ReviewScopeEntity, arcNode.ID)
+		view.Arcs = append(view.Arcs, arcNode)
 	}
 	for _, chapter := range road.NearTermChapters {
-		view.Chapters = append(view.Chapters, RoadmapNodeView{
+		node := RoadmapNodeView{
 			ID: "chapter:" + chapter.ID, ParentID: "arc:" + chapter.ArcRef, Title: chapter.Title, Summary: chapter.Goal, Position: chapter.Position,
-		})
+		}
+		applyReviewFlags(&node.Accepted, &node.Rejected, review, creationdomain.ReviewScopeEntity, node.ID)
+		view.Chapters = append(view.Chapters, node)
 	}
 	return view
 }
@@ -625,7 +691,8 @@ func workbenchCapabilities(session creationdomain.Session, view WorkbenchView) [
 			}
 		}
 	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
-		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AcceptCandidate", "AdvanceStage")
+		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AcceptCandidate", "AdvanceStage",
+			"SetReview", "AcceptAllReview", "UseCandidateVersion", "CompareCandidateVersions", "SaveReviewCursor")
 		if session.EntryKind() == creationdomain.EntryAuthorPlan {
 			caps = append(caps, "UseCreationMaterial")
 		}

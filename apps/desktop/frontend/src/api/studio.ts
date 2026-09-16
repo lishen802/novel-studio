@@ -290,7 +290,68 @@ export interface RoadmapNodeView {
   endingContribution?: string;
   commitments?: RoadmapGoalItemView[];
   retainedQuestions?: RoadmapGoalItemView[];
+  // 逐项审阅状态：接受与排除都由后端投影给出，界面只做展示。
+  accepted: boolean;
+  rejected: boolean;
 }
+
+// 逐项审阅单位：方案分节用 section 作用域，人物世界实体与路线图节点用 entity 作用域。
+export interface ReviewRefView {
+  scope: string;
+  id: string;
+}
+
+export interface CreationReviewView {
+  candidateId: string;
+  stage: string;
+  reviewVersion: number;
+  accepted: ReviewRefView[];
+  rejected: ReviewRefView[];
+  unreviewed: ReviewRefView[];
+  complete: boolean;
+  updatedAt: string;
+}
+
+export interface CreationReviewCursorView {
+  stage: string;
+  candidateId: string;
+  entityId: string;
+  sectionId: string;
+  comparisonRef: string;
+  viewVersion: number;
+  updatedAt: string;
+}
+
+export interface CandidateVersionSummaryView {
+  candidateId: string;
+  version: number;
+  kind: string;
+  origin: string;
+  status: string;
+  quality: string;
+  summary: string;
+  createdAt: string;
+  current: boolean;
+}
+
+export interface CandidateReviewDiff {
+  path: string;
+  label: string;
+  group: string;
+  before: string;
+  after: string;
+}
+
+export interface CandidateVersionView extends CandidateVersionSummaryView {
+  diff: CandidateReviewDiff[];
+}
+
+export interface CandidateCompareView {
+  stage: string;
+  baseCandidateId: string;
+  versions: CandidateVersionView[];
+}
+
 export interface CreationWorkbenchView {
  revisions?: RevisionCard[];
  directionActions?: DirectionActionView[];
@@ -329,13 +390,13 @@ export interface CreationWorkbenchView {
     version: number;
     status: string;
     title: string;
-    sections: Array<{ id: string; title: string; content: string; lockPath: string; locked: boolean }>;
+    sections: Array<{ id: string; title: string; content: string; lockPath: string; locked: boolean; accepted: boolean; rejected: boolean }>;
   };
   peopleWorld: {
     candidateId: string;
     version: number;
     status: string;
-    entities: Array<{ id: string; kind: string; title: string; summary: string; complete: boolean }>;
+    entities: Array<{ id: string; kind: string; title: string; summary: string; complete: boolean; accepted: boolean; rejected: boolean }>;
   };
   roadmap: {
     candidateId: string;
@@ -358,6 +419,10 @@ export interface CreationWorkbenchView {
     evidence: string;
   };
   capabilities: string[];
+  // 逐项审阅投影、作者审阅位置与当前阶段候选版本列表。
+  review: CreationReviewView;
+  reviewCursor: CreationReviewCursorView;
+  candidateVersions: CandidateVersionSummaryView[];
 }
 
 export interface CreationDirectionCardView {
@@ -587,4 +652,13 @@ export const studio = {
   confirmCreationArchive: (input: { confirmationDigest: string; idempotencyKey: string }) =>
     call<{ changeSetId: string }>('ConfirmCreationArchive', input),
   resolveCreationImpact: (choice: string) => call<{ projection: CreationWorkbenchView['impact'] }>('ResolveCreationImpact', choice),
+  // 逐项审阅：命令只改审阅元数据，返回的工作台投影才是权威状态。
+  setCreationReview: (request: { candidateId: string; scope: 'entity' | 'section'; refId: string; decision: 'accept' | 'reject' | 'unreviewed' }) =>
+    call<CreationWorkbenchView>('SetCreationReview', request),
+  acceptAllCreationReview: (candidateId: string) => call<CreationWorkbenchView>('AcceptAllCreationReview', candidateId),
+  useCreationCandidateVersion: (candidateId: string) => call<CreationWorkbenchView>('UseCreationCandidateVersion', candidateId),
+  compareCreationCandidateVersions: (stage: string, baseCandidateId: string) =>
+    call<CandidateCompareView>('CompareCreationCandidateVersions', stage, baseCandidateId),
+  saveCreationReviewCursor: (request: { stage: string; candidateId: string; entityId: string; sectionId: string; comparisonRef: string }) =>
+    call<CreationWorkbenchView>('SaveCreationReviewCursor', request),
 };

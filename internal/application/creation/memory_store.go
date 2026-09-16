@@ -18,6 +18,8 @@ type memoryStore struct {
 	mu             sync.Mutex
 	sessions       map[string]creationdomain.Session
 	candidates     map[string]creationdomain.Candidate
+	reviews        map[string]creationdomain.CandidateReview
+	cursors        map[string]creationdomain.ReviewCursor
 	operations     map[string]creationdomain.Operation
 	assistants     map[string]assistantdomain.Session
 	messages       []assistantdomain.Message
@@ -31,6 +33,8 @@ func newMemoryStore() *memoryStore {
 		entries: map[string]creationdomain.EntryRevision{}, entryHeads: map[string]string{},
 		sessions:       map[string]creationdomain.Session{},
 		candidates:     map[string]creationdomain.Candidate{},
+		reviews:        map[string]creationdomain.CandidateReview{},
+		cursors:        map[string]creationdomain.ReviewCursor{},
 		operations:     map[string]creationdomain.Operation{},
 		assistants:     map[string]assistantdomain.Session{},
 		messages:       []assistantdomain.Message{},
@@ -504,4 +508,72 @@ func (store *memoryStore) LatestSample(_ context.Context, id string) (creationdo
 	}
 	h.Constraints = append([]string{}, h.Constraints...)
 	return h, nil
+}
+
+// Review 返回候选逐项审阅关系的副本；未记录时返回空审阅。
+func (store *memoryStore) Review(_ context.Context, candidateID string) (creationdomain.CandidateReview, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	review, ok := store.reviews[candidateID]
+	if !ok {
+		return creationdomain.CandidateReview{}, nil
+	}
+	return cloneReview(review), nil
+}
+
+// SaveReview 与 SQLite 保持相同的 review_version 条件语义。
+func (store *memoryStore) SaveReview(_ context.Context, expected, updated creationdomain.CandidateReview) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, ok := store.reviews[updated.CandidateID]
+	if !ok {
+		if expected.ReviewVersion != 0 {
+			return creationdomain.ErrReviewVersionConflict
+		}
+		updated.ReviewVersion = 1
+		store.reviews[updated.CandidateID] = cloneReview(updated)
+		return nil
+	}
+	if current.ReviewVersion != expected.ReviewVersion {
+		return creationdomain.ErrReviewVersionConflict
+	}
+	updated.ReviewVersion = current.ReviewVersion + 1
+	updated.CreatedAt = current.CreatedAt
+	store.reviews[updated.CandidateID] = cloneReview(updated)
+	return nil
+}
+
+// ReviewCursor 返回作者审阅位置；未记录时返回 ErrReviewCursorNotFound。
+func (store *memoryStore) ReviewCursor(_ context.Context, sessionID string) (creationdomain.ReviewCursor, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	cursor, ok := store.cursors[sessionID]
+	if !ok {
+		return creationdomain.ReviewCursor{}, ErrReviewCursorNotFound
+	}
+	return cursor, nil
+}
+
+// SaveReviewCursor 与 SQLite 保持相同的 view_version 条件语义。
+func (store *memoryStore) SaveReviewCursor(_ context.Context, cursor creationdomain.ReviewCursor) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, ok := store.cursors[cursor.SessionID]
+	if !ok {
+		cursor.ViewVersion = 1
+		store.cursors[cursor.SessionID] = cursor
+		return nil
+	}
+	if current.ViewVersion != cursor.ViewVersion {
+		return creationdomain.ErrReviewVersionConflict
+	}
+	cursor.ViewVersion = current.ViewVersion + 1
+	store.cursors[cursor.SessionID] = cursor
+	return nil
+}
+
+func cloneReview(review creationdomain.CandidateReview) creationdomain.CandidateReview {
+	review.Accepted = append([]creationdomain.ReviewRef{}, review.Accepted...)
+	review.Rejected = append([]creationdomain.ReviewRef{}, review.Rejected...)
+	return review
 }

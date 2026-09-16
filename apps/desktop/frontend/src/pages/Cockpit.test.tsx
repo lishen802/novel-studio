@@ -29,7 +29,7 @@ function workbench(overrides: Partial<CreationWorkbenchView> = {}): CreationWork
     peopleWorld: { candidateId: '', version: 0, status: '', entities: [] },
     roadmap: {
       candidateId: '', version: 0, status: '',
-      book: { id: '', title: '', summary: '', position: 0 },
+      book: { id: '', title: '', summary: '', position: 0, accepted: false, rejected: false },
       volumes: [], arcs: [], chapters: [],
     },
     currentRun: { runId: '', status: '', cancellable: false, publicStage: '' },
@@ -39,6 +39,9 @@ function workbench(overrides: Partial<CreationWorkbenchView> = {}): CreationWork
       regenerateStages: [], estimatedCalls: 0, evidence: '',
     },
     capabilities: [],
+    review: { candidateId: '', stage: '', reviewVersion: 0, accepted: [], rejected: [], unreviewed: [], complete: false, updatedAt: '' },
+    reviewCursor: { stage: '', candidateId: '', entityId: '', sectionId: '', comparisonRef: '', viewVersion: 0, updatedAt: '' },
+    candidateVersions: [],
     ...overrides,
   };
 }
@@ -357,8 +360,8 @@ describe('已有方案工作台', () => {
       stage: 'roadmap',
       roadmap: {
         candidateId: 'roadmap-1', version: 1, status: 'draft',
-        book: { id: 'book', title: '潮汐关', summary: '守关人必须选择', position: 1 },
-        volumes: [{ id: 'volume:第一卷', parentId:'book', title: '第一卷', summary: '建立关隘危机', position: 1 }],
+        book: { id: 'book', title: '潮汐关', summary: '守关人必须选择', position: 1, accepted: false, rejected: false },
+        volumes: [{ id: 'volume:第一卷', parentId:'book', title: '第一卷', summary: '建立关隘危机', position: 1, accepted: false, rejected: false }],
         arcs: [{
           id: 'arc:arc-1', parentId:'volume:第一卷', title: '开关', summary: '敌船靠岸导致必须抉择', position: 1,
           readerExpectation: '读者应感到守关人将被亲情撕裂',
@@ -367,8 +370,9 @@ describe('已有方案工作台', () => {
           endingContribution: '为终局选择救人立下先例',
           commitments: [{ id: 'cmt-1', statement: '旧令牌兑现身份', detail: '本弧末章' }],
           retainedQuestions: [{ id: 'q-1', statement: '潮汐神谕是否被篡改', detail: '留给后续卷揭示' }],
+          accepted: false, rejected: false,
         }],
-        chapters: [{ id: 'chapter:空船', parentId:'arc:arc-1', title: '空船', summary: '发现异常', position: 1 }],
+        chapters: [{ id: 'chapter:空船', parentId:'arc:arc-1', title: '空船', summary: '发现异常', position: 1, accepted: false, rejected: false }],
       },
     });
     window.go = { main: { DesktopAPI: { RecoverCreation: vi.fn().mockResolvedValue(view), CreationWorkbench: vi.fn().mockResolvedValue(view) } } };
@@ -395,4 +399,228 @@ describe('试写准备工作台', () => {
   expect(generate).not.toHaveBeenCalled();expect(advance).not.toHaveBeenCalled();
   expect((screen.getByRole('button',{name:'生成试写（尚未就绪）'}) as HTMLButtonElement).disabled).toBe(true);
  });
+});
+
+describe('作品策划逐项审阅', () => {
+  const reviewCapabilities = ['SetReview', 'AcceptAllReview', 'UseCandidateVersion', 'CompareCandidateVersions', 'SaveReviewCursor'];
+  const peopleEntities = [
+    { id: 'character:char-1', kind: 'character', title: '阿绫', summary: '守关人的女儿', complete: true, accepted: false, rejected: false },
+    { id: 'rule:潮汐律', kind: 'world_rule', title: '潮汐律', summary: '潮水每夜上涨', complete: true, accepted: false, rejected: false },
+  ];
+  const proposalVersions = [
+    { candidateId: 'proposal-2', version: 2, kind: 'proposal', origin: 'author', status: 'draft', quality: 'passed', summary: '作者改写标题', createdAt: '2026-02-01T00:00:00Z', current: true },
+    { candidateId: 'proposal-1', version: 1, kind: 'proposal', origin: 'model', status: 'superseded', quality: 'passed', summary: '模型初稿', createdAt: '2026-01-01T00:00:00Z', current: false },
+  ];
+
+  afterEach(() => { cleanup(); delete window.go; });
+
+  it('接受人物世界实体时按候选、作用域与单位 ID 命令后端，并采用返回投影', async () => {
+    const user = userEvent.setup();
+    const base = workbench({
+      stage: 'people_world',
+      capabilities: reviewCapabilities,
+      peopleWorld: { candidateId: 'people-1', version: 1, status: 'draft', entities: peopleEntities },
+      review: {
+        candidateId: 'people-1', stage: 'people_world', reviewVersion: 1,
+        accepted: [], rejected: [],
+        unreviewed: [{ scope: 'entity', id: 'character:char-1' }, { scope: 'entity', id: 'rule:潮汐律' }],
+        complete: false, updatedAt: '2026-01-01T00:00:00Z',
+      },
+    });
+    const decided = workbench({
+      ...base,
+      peopleWorld: { ...base.peopleWorld, entities: peopleEntities.map((entity) => (entity.id === 'character:char-1' ? { ...entity, accepted: true } : entity)) },
+      review: {
+        ...base.review, reviewVersion: 2,
+        accepted: [{ scope: 'entity', id: 'character:char-1' }],
+        unreviewed: [{ scope: 'entity', id: 'rule:潮汐律' }],
+      },
+    });
+    const setReview = vi.fn().mockResolvedValue(decided);
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+      SetCreationReview: setReview,
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '接受 阿绫' }));
+
+    expect(setReview).toHaveBeenCalledWith({ candidateId: 'people-1', scope: 'entity', refId: 'character:char-1', decision: 'accept' });
+    // 界面状态来自后端返回的投影，而不是本地猜测。
+    await waitFor(() => expect((screen.getByRole('button', { name: '接受 阿绫' }) as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByText(/未审阅 1 项 · 已接受 1 项/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '撤销决定 阿绫' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('全部接受按当前候选 ID 调用显式命令并刷新未审阅数量', async () => {
+    const user = userEvent.setup();
+    const base = workbench({
+      stage: 'people_world',
+      capabilities: reviewCapabilities,
+      peopleWorld: { candidateId: 'people-1', version: 1, status: 'draft', entities: peopleEntities },
+      review: {
+        candidateId: 'people-1', stage: 'people_world', reviewVersion: 1,
+        accepted: [], rejected: [],
+        unreviewed: [{ scope: 'entity', id: 'character:char-1' }, { scope: 'entity', id: 'rule:潮汐律' }],
+        complete: false, updatedAt: '2026-01-01T00:00:00Z',
+      },
+    });
+    const accepted = workbench({
+      ...base,
+      peopleWorld: { ...base.peopleWorld, entities: peopleEntities.map((entity) => ({ ...entity, accepted: true })) },
+      review: {
+        ...base.review, reviewVersion: 2, complete: true, unreviewed: [],
+        accepted: [{ scope: 'entity', id: 'character:char-1' }, { scope: 'entity', id: 'rule:潮汐律' }],
+      },
+    });
+    const acceptAll = vi.fn().mockResolvedValue(accepted);
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+      AcceptAllCreationReview: acceptAll,
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '全部接受（2 项）' }));
+
+    expect(acceptAll).toHaveBeenCalledWith('people-1');
+    expect(await screen.findByText(/未审阅 0 项 · 已接受 2 项/)).toBeTruthy();
+  });
+
+  it('非当前版本才提供用作工作基线，并按候选 ID 调用', async () => {
+    const user = userEvent.setup();
+    const base = workbench({
+      stage: 'proposal',
+      capabilities: reviewCapabilities,
+      proposal: { candidateId: 'proposal-2', version: 2, status: 'draft', title: '潮汐关', sections: [] },
+      candidateVersions: proposalVersions,
+    });
+    const switched = workbench({
+      ...base,
+      proposal: { candidateId: 'proposal-1', version: 1, status: 'draft', title: '初稿', sections: [] },
+      candidateVersions: [
+        { ...proposalVersions[0], current: false, status: 'superseded' },
+        { ...proposalVersions[1], current: true, status: 'draft' },
+      ],
+    });
+    const useVersion = vi.fn().mockResolvedValue(switched);
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+      UseCreationCandidateVersion: useVersion,
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await screen.findByText('候选版本');
+
+    expect(screen.queryByRole('button', { name: '用作工作基线 版本 2' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '用作工作基线 版本 1' }));
+
+    expect(useVersion).toHaveBeenCalledWith('proposal-1');
+  });
+
+  it('比较弹窗以当前工作版本为基线并只读渲染前后差异', async () => {
+    const user = userEvent.setup();
+    const base = workbench({
+      stage: 'proposal',
+      capabilities: reviewCapabilities,
+      proposal: { candidateId: 'proposal-2', version: 2, status: 'draft', title: '潮汐关', sections: [] },
+      candidateVersions: proposalVersions,
+    });
+    const compare = vi.fn().mockResolvedValue({
+      stage: 'proposal',
+      baseCandidateId: 'proposal-2',
+      versions: [
+        { ...proposalVersions[0], diff: [] },
+        { ...proposalVersions[1], diff: [{ path: '/title', label: '作品名', group: '基础设定', before: '雾港灯塔', after: '雾港灯塔·上' }] },
+      ],
+    });
+    const useVersion = vi.fn();
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+      CompareCreationCandidateVersions: compare,
+      UseCreationCandidateVersion: useVersion,
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '比较版本' }));
+
+    expect(compare).toHaveBeenCalledWith('proposal', 'proposal-2');
+    expect(await screen.findByText('基础设定')).toBeTruthy();
+    expect(screen.getByText('作品名')).toBeTruthy();
+    expect(screen.getByText('雾港灯塔')).toBeTruthy();
+    expect(screen.getByText('雾港灯塔·上')).toBeTruthy();
+    expect(screen.getByText('与基线一致')).toBeTruthy();
+    expect(useVersion).not.toHaveBeenCalled();
+  });
+
+  it('选中实体时按实体 ID 保存审阅位置，保存失败只提示错误不打断选择', async () => {
+    const user = userEvent.setup();
+    const base = workbench({
+      stage: 'people_world',
+      capabilities: reviewCapabilities,
+      peopleWorld: { candidateId: 'people-1', version: 1, status: 'draft', entities: peopleEntities },
+    });
+    const saveCursor = vi.fn().mockRejectedValue(new Error('REVIEW_CURSOR_CONFLICT|审阅位置版本冲突，请重试。'));
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+      SaveCreationReviewCursor: saveCursor,
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '潮汐律' }));
+
+    expect(saveCursor).toHaveBeenCalledWith({ stage: 'people_world', candidateId: 'people-1', entityId: 'rule:潮汐律', sectionId: '', comparisonRef: '' });
+    expect((await screen.findByRole('alert')).textContent).toContain('审阅位置版本冲突');
+    expect(screen.getByText('潮水每夜上涨')).toBeTruthy();
+  });
+
+  it('选中方案分节时按分节 ID 保存审阅位置', async () => {
+    const user = userEvent.setup();
+    const base = workbench({
+      stage: 'proposal',
+      capabilities: reviewCapabilities,
+      proposal: {
+        candidateId: 'proposal-2', version: 2, status: 'draft', title: '潮汐关',
+        sections: [{ id: 'position', title: '定位', content: '悬疑 · 守关人视角', lockPath: '/positioning', locked: false, accepted: false, rejected: false }],
+      },
+    });
+    const saveCursor = vi.fn().mockResolvedValue(base);
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+      SaveCreationReviewCursor: saveCursor,
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: '选中分节 定位' }));
+
+    expect(saveCursor).toHaveBeenCalledWith({ stage: 'proposal', candidateId: 'proposal-2', entityId: '', sectionId: 'position', comparisonRef: '' });
+    expect(screen.getByRole('button', { name: '选中分节 定位' }).getAttribute('aria-current')).toBe('true');
+  });
+
+  it('加载工作台时恢复审阅游标指向的实体', async () => {
+    const base = workbench({
+      stage: 'people_world',
+      capabilities: reviewCapabilities,
+      peopleWorld: { candidateId: 'people-1', version: 1, status: 'draft', entities: peopleEntities },
+      reviewCursor: {
+        stage: 'people_world', candidateId: 'people-1', entityId: 'rule:潮汐律', sectionId: '',
+        comparisonRef: '', viewVersion: 3, updatedAt: '2026-01-02T00:00:00Z',
+      },
+    });
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(base),
+      CreationWorkbench: vi.fn().mockResolvedValue(base),
+    } } };
+
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+
+    expect(await screen.findByText('潮水每夜上涨')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '潮汐律' }).getAttribute('aria-current')).toBe('true');
+    expect(screen.queryByText('守关人的女儿')).toBeNull();
+  });
 });

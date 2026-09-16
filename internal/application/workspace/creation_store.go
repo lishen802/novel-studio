@@ -68,6 +68,28 @@ func (store creationStore) ListCandidates(ctx context.Context, sessionID string)
 	return
 }
 
+// Review 在项目代次保护下读取候选逐项审阅关系。
+func (store creationStore) Review(ctx context.Context, candidateID string) (review creationdomain.CandidateReview, err error) {
+	err = store.guard.access(ctx, false, func() error { review, err = store.inner.Review(ctx, candidateID); return err })
+	return
+}
+
+// SaveReview 在可写项目保护下按 review_version 写入逐项审阅关系。
+func (store creationStore) SaveReview(ctx context.Context, expected, updated creationdomain.CandidateReview) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.SaveReview(ctx, expected, updated) })
+}
+
+// ReviewCursor 在项目代次保护下读取作者审阅位置。
+func (store creationStore) ReviewCursor(ctx context.Context, sessionID string) (cursor creationdomain.ReviewCursor, err error) {
+	err = store.guard.access(ctx, false, func() error { cursor, err = store.inner.ReviewCursor(ctx, sessionID); return err })
+	return
+}
+
+// SaveReviewCursor 在可写项目保护下按 view_version 保存作者审阅位置。
+func (store creationStore) SaveReviewCursor(ctx context.Context, cursor creationdomain.ReviewCursor) error {
+	return store.guard.access(ctx, true, func() error { return store.inner.SaveReviewCursor(ctx, cursor) })
+}
+
 // PendingActionCount 在访问创作存储前核对工作区和运行租约。
 func (store creationStore) PendingActionCount(ctx context.Context, projectID string) (count int, err error) {
 	err = store.guard.access(ctx, false, func() error { count, err = store.inner.PendingActionCount(ctx, projectID); return err })

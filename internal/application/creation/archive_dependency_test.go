@@ -48,7 +48,7 @@ func TestArchiveFreshPreviewRejectsUnmarkedDependencyChange(t *testing.T) {
 			return err
 		}
 		// 即使提交按当前数据算出的摘要，也不能绕过确认端的依赖检查。
-		digest, err := archiveDigest(latest, candidates, project)
+		digest, err := archiveDigest(latest, candidates, project, acceptedArchiveSelection(latest, candidates))
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func TestArchiveReadinessValidatesFrozenDependencies(t *testing.T) {
 						candidates[i].UpstreamDigest = digest
 					}
 				}
-				if err := validateArchiveReadiness(session, candidates); !errors.Is(err, creationdomain.ErrImpactUnresolved) {
+				if err := validateArchiveReadiness(session, candidates, acceptedArchiveSelection(session, candidates)); !errors.Is(err, creationdomain.ErrImpactUnresolved) {
 					t.Fatalf("未拒绝未知/过期依赖: %v", err)
 				}
 			})
@@ -217,7 +217,7 @@ func TestArchiveDigestBindsDependencyMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := archiveDigest(session, base, project)
+	original, err := archiveDigest(session, base, project, acceptedArchiveSelection(session, base))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestArchiveDigestBindsDependencyMetadata(t *testing.T) {
 				case "status":
 					changed[i].Status = creationdomain.StatusSelected
 				}
-				digest, err := archiveDigest(session, changed, project)
+				digest, err := archiveDigest(session, changed, project, acceptedArchiveSelection(session, changed))
 				if err != nil || digest == original {
 					t.Fatalf("摘要未绑定依赖字段: %s, %v", digest, err)
 				}

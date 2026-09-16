@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/lishen802/novel-studio/internal/application/ports"
@@ -20,6 +21,18 @@ type ArchivePreview struct {
 	Title              string `json:"title"`
 	CharacterCount     int    `json:"characterCount"`
 	OutlineCount       int    `json:"outlineCount"`
+	AnchorCount        int    `json:"anchorCount"`
+	// Operations 是本次将创建/更新的正式资产；Excluded 是被排除的审阅单位。
+	// 预览同时是引用闭合检查：保留内容引用被排除单位时返回错误而不是空预览。
+	Operations []ArchiveOperationView `json:"operations"`
+	Excluded   []ReviewRefView        `json:"excluded"`
+}
+
+// ArchiveOperationView 描述一条将写入的正式资产操作。
+type ArchiveOperationView struct {
+	Kind    string `json:"kind"`
+	Action  string `json:"action"`
+	Summary string `json:"summary"`
 }
 
 type ArchiveRequest struct {
@@ -40,6 +53,9 @@ type archivePlan struct {
 	Confirmed  []creationdomain.Candidate
 	Characters int
 	Outlines   int
+	Anchors    int
+	Operations []ArchiveOperationView
+	Excluded   []ReviewRefView
 }
 
 // archiveCandidateSnapshot 冻结候选及依赖处理状态；成功重放由会话回执判断，不重算摘要。
@@ -65,7 +81,12 @@ func snapshotArchiveCandidate(candidate creationdomain.Candidate) archiveCandida
 	}
 }
 
-func archiveDigest(session creationdomain.Session, candidates []creationdomain.Candidate, project projectdomain.Project) (string, error) {
+func archiveDigest(
+	session creationdomain.Session,
+	candidates []creationdomain.Candidate,
+	project projectdomain.Project,
+	selection archiveSelection,
+) (string, error) {
 	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
 	if err != nil {
 		return "", err
@@ -79,12 +100,20 @@ func archiveDigest(session creationdomain.Session, candidates []creationdomain.C
 	if err != nil {
 		return "", err
 	}
+	// 审阅决定必须进入摘要：预览后改接受/排除或改版本同样使确认失效。
+	exclusions := make([]string, 0, len(selection.Excluded))
+	for id := range selection.Excluded {
+		exclusions = append(exclusions, id)
+	}
+	sort.Strings(exclusions)
 	payload, err := json.Marshal(struct {
 		Project, Branch, Selected, SelectedCard    string
 		ContentVersion                             int64
 		ProjectTitle, ProjectGenre, ProjectSummary string
 		Direction                                  archiveCandidateSnapshot
 		Proposal, People, Roadmap                  archiveCandidateSnapshot
+		Review                                     map[string]int64
+		Excluded                                   []string
 	}{
 		Project:        session.ProjectID,
 		Branch:         session.BranchID,
@@ -98,6 +127,8 @@ func archiveDigest(session creationdomain.Session, candidates []creationdomain.C
 		Proposal:       snapshotArchiveCandidate(proposal),
 		People:         snapshotArchiveCandidate(people),
 		Roadmap:        snapshotArchiveCandidate(roadmap),
+		Review:         selection.ReviewVersions,
+		Excluded:       exclusions,
 	})
 	if err != nil {
 		return "", err
@@ -148,8 +179,15 @@ func requiredSelectedDirectionCandidate(session creationdomain.Session, candidat
 	return candidate, nil
 }
 
-// validateArchiveReadiness 校验确认前置条件：全链路候选质量未阻断、无未解决 stale、载荷有效。
-func validateArchiveReadiness(session creationdomain.Session, candidates []creationdomain.Candidate) error {
+// validateArchiveReadiness 校验确认前置条件：逐项审阅已完成、全链路候选质量未阻断、无未解决 stale、载荷有效。
+func validateArchiveReadiness(
+	session creationdomain.Session,
+	candidates []creationdomain.Candidate,
+	selection archiveSelection,
+) error {
+	if err := validateArchiveReview(selection); err != nil {
+		return err
+	}
 	if session.EntryKind() == creationdomain.EntryAuthorPlan {
 		if err := validateMaterialGapsForArchive(session, candidates); err != nil {
 			return err
@@ -228,12 +266,13 @@ func buildArchivePlan(
 	candidates []creationdomain.Candidate,
 	project projectdomain.Project,
 	ids ports.IDGenerator,
+	selection archiveSelection,
 ) (archivePlan, error) {
 	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
 	if err != nil {
 		return archivePlan{}, err
 	}
-	digest, err := archiveDigest(session, candidates, project)
+	digest, err := archiveDigest(session, candidates, project, selection)
 	if err != nil {
 		return archivePlan{}, err
 	}
@@ -247,6 +286,13 @@ func buildArchivePlan(
 	}
 	road, err := decodeArchivableRoadmap(roadmap)
 	if err != nil {
+		return archivePlan{}, err
+	}
+	// 被排除的实体不进入正式资产；保留内容仍引用它们时阻断，不静默丢弃。
+	if cast, err = filterArchiveCast(cast, selection.Excluded); err != nil {
+		return archivePlan{}, err
+	}
+	if road, err = filterArchiveRoadmap(road, selection.Excluded); err != nil {
 		return archivePlan{}, err
 	}
 	if roadmap.PayloadSchemaVersion >= 3 {
@@ -273,7 +319,8 @@ func buildArchivePlan(
 	}
 	return archivePlan{
 		Digest: digest, Title: blueprint.Title, Specs: mapper.specs, Confirmed: nowConfirmed,
-		Characters: len(cast.Characters), Outlines: mapper.outlines,
+		Characters: len(cast.Characters), Outlines: mapper.outlines, Anchors: mapper.anchors,
+		Operations: archiveOperationViews(mapper.specs), Excluded: selection.ExcludedRefs,
 	}, nil
 }
 
@@ -287,6 +334,7 @@ type archiveMapper struct {
 	ids             ports.IDGenerator
 	specs           []revisiondomain.PatchOperationSpec
 	outlines        int
+	anchors         int
 	chars           map[string]string
 	proposalAssetID string
 }
@@ -365,6 +413,7 @@ func (mapper *archiveMapper) addAnchor(candidate creationdomain.Candidate, stren
 	if err != nil {
 		return err
 	}
+	mapper.anchors++
 	mapper.add(revisiondomain.OperationCreateAnchor, mapper.ids.NewID(), after, "确认锚点与禁写项")
 	return nil
 }

@@ -1274,43 +1274,38 @@ func (service *Service) PreviewConfirmArchive(ctx context.Context, projectID str
 	if err != nil {
 		return ArchivePreview{}, err
 	}
-	if err := validateArchiveReadiness(session, candidates); err != nil {
+	selection, err := service.resolveArchiveSelection(ctx, candidates)
+	if err != nil {
+		return ArchivePreview{}, err
+	}
+	if err := validateArchiveReadiness(session, candidates, selection); err != nil {
 		return ArchivePreview{}, err
 	}
 	project, err := service.store.Project(ctx)
 	if err != nil {
 		return ArchivePreview{}, err
 	}
-	return buildArchivePreview(session, candidates, project)
+	return buildArchivePreview(session, candidates, project, service.ids, selection)
 }
 
-// buildArchivePreview 从已读取的单一快照（会话 + 候选 + 项目基线）计算确认摘要与预览，不再读库。
-// ConfirmArchive 复用同一份快照，避免“预览摘要来自一次读取、入档计划来自另一次读取”的错位。
-func buildArchivePreview(session creationdomain.Session, candidates []creationdomain.Candidate, project projectdomain.Project) (ArchivePreview, error) {
-	digest, err := archiveDigest(session, candidates, project)
-	if err != nil {
-		return ArchivePreview{}, err
-	}
-	proposal, people, roadmap, err := requiredArchiveCandidates(session, candidates)
-	if err != nil {
-		return ArchivePreview{}, err
-	}
-	blueprint, err := decodeBlueprint(proposal.PayloadJSON)
-	if err != nil {
-		return ArchivePreview{}, err
-	}
-	cast, err := decodeArchivableCast(people)
-	if err != nil {
-		return ArchivePreview{}, err
-	}
-	road, err := decodeArchivableRoadmap(roadmap)
+// buildArchivePreview 从已读取的单一快照（会话 + 候选 + 项目基线 + 审阅选择）计算确认摘要与预览，不再读库。
+// ConfirmArchive 复用同一份快照与同一份选择，避免“预览摘要来自一次读取、入档计划来自另一次读取”的错位。
+func buildArchivePreview(
+	session creationdomain.Session,
+	candidates []creationdomain.Candidate,
+	project projectdomain.Project,
+	ids ports.IDGenerator,
+	selection archiveSelection,
+) (ArchivePreview, error) {
+	// 预览即执行一次完整映射：引用闭合、排除范围与结构校验必须与入档同源。
+	plan, err := buildArchivePlan(session, candidates, project, ids, selection)
 	if err != nil {
 		return ArchivePreview{}, err
 	}
 	return ArchivePreview{
-		ConfirmationDigest: digest, Title: blueprint.Title,
-		CharacterCount: len(cast.Characters),
-		OutlineCount:   1 + len(road.Volumes) + len(road.Arcs) + len(road.NearTermChapters),
+		ConfirmationDigest: plan.Digest, Title: plan.Title,
+		CharacterCount: plan.Characters, OutlineCount: plan.Outlines, AnchorCount: plan.Anchors,
+		Operations: plan.Operations, Excluded: plan.Excluded,
 	}, nil
 }
 
@@ -1340,14 +1335,18 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	if err != nil {
 		return ArchiveResult{}, err
 	}
-	preview, err := buildArchivePreview(session, candidates, project)
+	selection, err := service.resolveArchiveSelection(ctx, candidates)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	preview, err := buildArchivePreview(session, candidates, project, service.ids, selection)
 	if err != nil {
 		return ArchiveResult{}, err
 	}
 	if request.ConfirmationDigest != preview.ConfirmationDigest {
 		return ArchiveResult{}, ErrConfirmationRequired
 	}
-	if err := validateArchiveReadiness(session, candidates); err != nil {
+	if err := validateArchiveReadiness(session, candidates, selection); err != nil {
 		return ArchiveResult{}, err
 	}
 	workbench, err := service.store.WorkbenchState(ctx)
@@ -1364,7 +1363,7 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 	if session.Stage != creationdomain.StageArchiveConfirm {
 		return ArchiveResult{}, ErrInvalidStage
 	}
-	plan, err := buildArchivePlan(session, candidates, project, service.ids)
+	plan, err := buildArchivePlan(session, candidates, project, service.ids, selection)
 	if err != nil {
 		return ArchiveResult{}, err
 	}

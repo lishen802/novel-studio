@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView, type DirectionActionView, type RoadmapNodeView } from '../api/studio';
 import { roadmapNavItems, RoadmapNavigation } from '../components/creation/RoadmapNavigation';
+import { CandidateVersions } from '../components/creation/CandidateVersions';
+import { ReviewDecisionButtons, ReviewStateBadge, reviewNavSuffix, type ReviewDecision } from '../components/creation/ReviewDecision';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
@@ -50,7 +52,7 @@ const emptyWorkbench = (): CreationWorkbenchView => ({
   peopleWorld: { candidateId: '', version: 0, status: '', entities: [] },
   roadmap: {
     candidateId: '', version: 0, status: '',
-    book: { id: '', title: '', summary: '', position: 0 },
+    book: { id: '', title: '', summary: '', position: 0, accepted: false, rejected: false },
     volumes: [], arcs: [], chapters: [],
   },
   currentRun: { runId: '', status: '', cancellable: false, publicStage: '' },
@@ -60,6 +62,9 @@ const emptyWorkbench = (): CreationWorkbenchView => ({
     regenerateStages: [], estimatedCalls: 0, evidence: '',
   },
   capabilities: [],
+  review: { candidateId: '', stage: '', reviewVersion: 0, accepted: [], rejected: [], unreviewed: [], complete: false, updatedAt: '' },
+  reviewCursor: { stage: '', candidateId: '', entityId: '', sectionId: '', comparisonRef: '', viewVersion: 0, updatedAt: '' },
+  candidateVersions: [],
   fieldEditor: { candidateId: '', version: 0, fields: [] },
 });
 
@@ -82,6 +87,20 @@ function previousStage(stage: string): string | null {
   const rail = ['intent', 'directions', 'proposal', 'people_world', 'roadmap', 'archive_confirm'];
   const index = rail.indexOf(stage);
   return index > 0 ? rail[index - 1] : null;
+}
+
+// 当前阶段工作版本的候选 ID：逐项审阅、版本切换与版本比较都以它为目标。
+function stageCandidateId(workbench: CreationWorkbenchView): string {
+  switch (workbench.stage) {
+    case 'proposal':
+      return workbench.proposal.candidateId;
+    case 'people_world':
+      return workbench.peopleWorld.candidateId;
+    case 'roadmap':
+      return workbench.roadmap.candidateId;
+    default:
+      return '';
+  }
 }
 
 
@@ -139,6 +158,7 @@ export default function Cockpit() {
   const awaitingRun = generating && !['queued','pending','running','cancelling'].includes(workbench.currentRun.status);
   const keptIds = workbench.directionSet.keptIds ?? [];
   const [entityId, setEntityId] = useState<string | null>(null);
+  const [sectionId, setSectionId] = useState<string | null>(null);
   const intentRef = useRef(intent);
   intentRef.current = intent;
   const savedIntent = useRef('');
@@ -191,6 +211,24 @@ export default function Cockpit() {
     timer = setTimeout(() => void poll(), 750);
     return () => { stopped = true; clearTimeout(timer); };
   }, [generating, load]);
+
+  // 审阅位置恢复：仅当游标落在当前阶段的当前候选上时套用一次，不覆盖作者随后的新选择。
+  const restoredCursor = useRef('');
+  useEffect(() => {
+    const cursor = workbench.reviewCursor;
+    const candidateId = stageCandidateId(workbench);
+    if (!cursor?.stage || cursor.stage !== workbench.stage || !candidateId || cursor.candidateId !== candidateId) return;
+    const key = `${workbench.sessionId}:${cursor.viewVersion}:${cursor.updatedAt}`;
+    if (restoredCursor.current === key) return;
+    restoredCursor.current = key;
+    if (cursor.entityId) {
+      setEntityId(cursor.entityId);
+      setSectionId(null);
+    } else if (cursor.sectionId) {
+      setSectionId(cursor.sectionId);
+      setEntityId(null);
+    }
+  }, [workbench]);
 
   const run = async (action: () => Promise<CreationWorkbenchView>) => {
     setBusy(true);
@@ -323,15 +361,50 @@ export default function Cockpit() {
       const selectedCandidateId = cardId ? workbench.directionSet.candidateId : (workbench.directionSet.selectedCandidateId || workbench.directionSet.candidateId);
       await run(() => studio.selectCreationDirection(selectedCandidateId, selectedId));
     }
-    const candidateId = workbench.stage === 'proposal'
-      ? workbench.proposal.candidateId
-      : workbench.stage === 'people_world'
-        ? workbench.peopleWorld.candidateId
-        : workbench.stage === 'roadmap'
-          ? workbench.roadmap.candidateId
-          : '';
+    const candidateId = stageCandidateId(workbench);
     if (candidateId) await run(() => studio.acceptCreationCandidate(candidateId));
     await run(() => studio.advanceCreationStage());
+  };
+
+  // 逐项决定只改审阅元数据，接受、锁定与入档互不影响。
+  const capabilities = workbench.capabilities ?? [];
+  const review = workbench.review;
+  const reviewUnits = (review?.accepted?.length ?? 0) + (review?.rejected?.length ?? 0) + (review?.unreviewed?.length ?? 0);
+  const reviewDisabled = busy || generating || workbench.readOnly;
+  const canReview = capabilities.includes('SetReview');
+  const activeCandidateId = stageCandidateId(workbench);
+
+  const decideReview = async (scope: 'entity' | 'section', refId: string, decision: ReviewDecision) => {
+    if (!activeCandidateId) return;
+    await run(() => studio.setCreationReview({ candidateId: activeCandidateId, scope, refId, decision }));
+  };
+
+  const acceptAllReview = async () => {
+    if (!activeCandidateId) return;
+    await run(() => studio.acceptAllCreationReview(activeCandidateId));
+  };
+
+  // 审阅位置只用于重启后恢复，保存失败只提示错误，不打断审阅本身。
+  const moveCursor = async (next: { entityId: string; sectionId: string }) => {
+    if (!capabilities.includes('SaveReviewCursor') || !activeCandidateId) return;
+    try {
+      await studio.saveCreationReviewCursor({
+        stage: workbench.stage, candidateId: activeCandidateId, entityId: next.entityId, sectionId: next.sectionId, comparisonRef: '',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '审阅位置保存失败');
+    }
+  };
+
+  const selectEntity = (id: string) => {
+    setEntityId(id);
+    setSectionId(null);
+    void moveCursor({ entityId: id, sectionId: '' });
+  };
+
+  const selectSection = (id: string) => {
+    setSectionId(id);
+    void moveCursor({ entityId: '', sectionId: id });
   };
 
   const hint = useMemo(() => {
@@ -346,8 +419,14 @@ export default function Cockpit() {
   const cards = workbench.directionSet?.cards ?? [];
   const peopleEntities = workbench.peopleWorld?.entities ?? [];
   const selectedEntity = peopleEntities.find((item) => item.id === entityId) ?? peopleEntities[0];
-  const roadmapItems = roadmapNavItems(workbench.roadmap);
+  // 路线图左侧导航复用既有 RoadmapNavigation，审阅状态以标题后缀呈现。
+  const roadmapItems = roadmapNavItems(workbench.roadmap).map((item) => ({
+    ...item,
+    title: `${item.title}${reviewNavSuffix(item.node.accepted, item.node.rejected)}`,
+  }));
   const selectedRoadmap = roadmapItems.find((item) => item.id === entityId) ?? roadmapItems.find((item) => item.kind === 'arc') ?? roadmapItems[0];
+  const proposalSections = workbench.proposal?.sections ?? [];
+  const selectedSection = proposalSections.find((item) => item.id === sectionId);
 
   return (
     <div className="h-full flex flex-col animate-fade-up -m-6">
@@ -426,17 +505,38 @@ export default function Cockpit() {
             {workbench.stage === 'people_world' && peopleEntities.map((entity) => (
               <button
                 key={entity.id}
-                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1', selectedEntity?.id === entity.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
-                onClick={() => setEntityId(entity.id)}
+                aria-label={entity.title}
+                aria-current={selectedEntity?.id === entity.id ? 'true' : undefined}
+                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1 flex items-center justify-between gap-2', selectedEntity?.id === entity.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
+                onClick={() => selectEntity(entity.id)}
               >
-                {entity.title}
+                <span>{entity.title}</span>
+                <ReviewStateBadge accepted={entity.accepted} rejected={entity.rejected} />
               </button>
             ))}
-            {workbench.stage === 'roadmap' && <RoadmapNavigation items={roadmapItems} selectedId={selectedRoadmap?.id} onSelect={setEntityId} />}
+            {workbench.stage === 'roadmap' && <RoadmapNavigation items={roadmapItems} selectedId={selectedRoadmap?.id} onSelect={selectEntity} />}
           </aside>
         )}
 
         <main className="flex-1 overflow-auto p-8">
+          {canReview && activeCandidateId && (
+            <section aria-label="逐项审阅" className="max-w-4xl mx-auto mb-6 rounded-xl border border-border bg-surface p-4 flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-sm text-text-sub">
+                未审阅 {(review?.unreviewed ?? []).length} 项 · 已接受 {(review?.accepted ?? []).length} 项 · 已排除 {(review?.rejected ?? []).length} 项
+                {review?.complete ? ' · 已全部决定' : ''}
+              </p>
+              {capabilities.includes('AcceptAllReview') && (
+                <Button
+                  size="sm"
+                  aria-label={`全部接受（${reviewUnits} 项）`}
+                  disabled={reviewDisabled || reviewUnits === 0}
+                  onClick={() => void acceptAllReview().catch(() => undefined)}
+                >
+                  全部接受（{reviewUnits} 项）
+                </Button>
+              )}
+            </section>
+          )}
           {(workbench.fieldEditor?.fields?.length || workbench.revisions?.length) ? <RevisionPanel key={`revision:${workbench.sessionId}`} editor={workbench.fieldEditor} actions={workbench.revisions ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onPreview={async(candidateId,path,instruction,key)=>{await studio.previewCreationRevision({candidateId,paths:[path],instruction,idempotencyKey:key});await load();}} onConfirm={async(action)=>{await studio.confirmCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey});await load();}} onReject={async(id)=>{await run(()=>studio.rejectCreationRevision(id));}} onApply={async(action)=>{await run(()=>studio.applyCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey}));}}/> : null}
           {workbench.fieldEditor?.fields?.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
           {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.selectedCandidateId || workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
@@ -568,21 +668,40 @@ export default function Cockpit() {
                 <p className="text-sm font-medium text-text">作品方案{workbench.proposal.title ? `：${workbench.proposal.title}` : ''}</p>
                 <p className="text-sm text-text-sub mt-1">确认档案前这些内容不会进入正式资产。</p>
               </div>
-              {(workbench.proposal.sections ?? []).map((section) => {
+              {proposalSections.map((section) => {
                 const Icon = sectionIcons[section.id as keyof typeof sectionIcons] ?? Sparkles;
                 return (
-                  <Card key={section.id} padding="none">
-                    <div className="px-5 py-3 border-b border-border bg-surface-hover flex items-center justify-between">
+                  <Card key={section.id} padding="none" className={clsx(sectionId === section.id && 'ring-1 ring-primary')}>
+                    <div className="px-5 py-3 border-b border-border bg-surface-hover flex items-center justify-between gap-3 flex-wrap">
                       <div className="flex items-center gap-2">
                         <Icon className="w-4 h-4 text-text-sub" />
-                        <h3 className="text-sm font-medium text-text">{section.title}</h3>
+                        <button
+                          className="text-sm font-medium text-text hover:text-primary"
+                          aria-label={`选中分节 ${section.title}`}
+                          aria-current={sectionId === section.id ? 'true' : undefined}
+                          onClick={() => selectSection(section.id)}
+                        >
+                          {section.title}
+                        </button>
                         {section.locked && <Lock className="w-3.5 h-3.5 text-text-muted" />}
+                        <ReviewStateBadge accepted={section.accepted} rejected={section.rejected} />
                       </div>
-                      {section.lockPath && (
-                        <Button size="sm" variant="ghost" onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath))}>
-                          {section.locked ? '解锁' : '锁定'}
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {canReview && (
+                          <ReviewDecisionButtons
+                            name={section.title}
+                            accepted={section.accepted}
+                            rejected={section.rejected}
+                            disabled={reviewDisabled}
+                            onDecide={(decision) => void decideReview('section', section.id, decision).catch(() => undefined)}
+                          />
+                        )}
+                        {section.lockPath && (
+                          <Button size="sm" variant="ghost" onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath))}>
+                            {section.locked ? '解锁' : '锁定'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <p className="p-5 text-sm text-text leading-relaxed whitespace-pre-wrap">{section.content}</p>
                   </Card>
@@ -593,17 +712,51 @@ export default function Cockpit() {
 
           {workbench.stage === 'people_world' && selectedEntity && (
             <Card className="max-w-3xl">
-              <h2 className="text-base font-medium text-text mb-2">{selectedEntity.title}</h2>
-              <p className="text-sm text-text-sub">{selectedEntity.summary}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-medium text-text mb-2">{selectedEntity.title}</h2>
+                  <p className="text-sm text-text-sub">{selectedEntity.summary}</p>
+                </div>
+                <ReviewStateBadge accepted={selectedEntity.accepted} rejected={selectedEntity.rejected} />
+              </div>
+              {canReview && (
+                <div className="mt-4 pt-3 border-t border-border">
+                  <ReviewDecisionButtons
+                    name={selectedEntity.title}
+                    accepted={selectedEntity.accepted}
+                    rejected={selectedEntity.rejected}
+                    disabled={reviewDisabled}
+                    onDecide={(decision) => void decideReview('entity', selectedEntity.id, decision).catch(() => undefined)}
+                  />
+                  <p className="text-xs text-text-muted mt-2">接受只记录审阅决定；排除表示入档时跳过该单位。两者都不会改写候选内容。</p>
+                </div>
+              )}
             </Card>
           )}
 
           {workbench.stage === 'roadmap' && selectedRoadmap && (
             <Card className="max-w-3xl">
-              <p className="text-xs text-text-sub mb-1">{selectedRoadmap.kind === 'book' ? '全书' : selectedRoadmap.kind === 'volume' ? '卷' : selectedRoadmap.kind === 'arc' ? '故事弧' : '近期章节'}</p>
-              <h2 className="text-base font-medium text-text">{selectedRoadmap.node.title || selectedRoadmap.title}</h2>
-              <p className="text-sm text-text-sub mt-1">{selectedRoadmap.node.summary}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs text-text-sub mb-1">{selectedRoadmap.kind === 'book' ? '全书' : selectedRoadmap.kind === 'volume' ? '卷' : selectedRoadmap.kind === 'arc' ? '故事弧' : '近期章节'}</p>
+                  <h2 className="text-base font-medium text-text">{selectedRoadmap.node.title || selectedRoadmap.title}</h2>
+                  <p className="text-sm text-text-sub mt-1">{selectedRoadmap.node.summary}</p>
+                </div>
+                <ReviewStateBadge accepted={selectedRoadmap.node.accepted} rejected={selectedRoadmap.node.rejected} />
+              </div>
               {selectedRoadmap.kind === 'arc' && <RoadmapGoalBlock node={selectedRoadmap.node} />}
+              {canReview && (
+                <div className="mt-4 pt-3 border-t border-border">
+                  <ReviewDecisionButtons
+                    name={selectedRoadmap.node.title || selectedRoadmap.title}
+                    accepted={selectedRoadmap.node.accepted}
+                    rejected={selectedRoadmap.node.rejected}
+                    disabled={reviewDisabled}
+                    onDecide={(decision) => void decideReview('entity', selectedRoadmap.id, decision).catch(() => undefined)}
+                  />
+                  <p className="text-xs text-text-muted mt-2">接受只记录审阅决定；排除表示入档时跳过该节点。两者都不会改写候选内容。</p>
+                </div>
+              )}
             </Card>
           )}
 
@@ -614,6 +767,21 @@ export default function Cockpit() {
               <Button variant="primary" onClick={() => void confirmNext()}>确认作品档案</Button>
             </Card>
           )}
+
+          {activeCandidateId && (workbench.candidateVersions ?? []).length > 0 && (
+            <div className="max-w-4xl mx-auto mt-8">
+              <CandidateVersions
+                stage={workbench.stage}
+                baseCandidateId={activeCandidateId}
+                versions={workbench.candidateVersions ?? []}
+                disabled={reviewDisabled}
+                canUseVersion={capabilities.includes('UseCandidateVersion')}
+                canCompare={capabilities.includes('CompareCandidateVersions')}
+                onUseVersion={(candidateId) => void run(() => studio.useCreationCandidateVersion(candidateId)).catch(() => undefined)}
+                onCompare={(stage, baseCandidateId) => studio.compareCreationCandidateVersions(stage, baseCandidateId)}
+              />
+            </div>
+          )}
         </main>
 
         <aside className="w-[340px] shrink-0 border-l border-border bg-surface flex flex-col overflow-hidden">
@@ -621,7 +789,7 @@ export default function Cockpit() {
           <CoCreationPanel
             key={`cocreation:${workbench.projectId}:${workbench.sessionId}`}
             editor={workbench.fieldEditor}
-            entityRef={selectedEntity?.id ?? selectedRoadmap?.id ?? ''}
+            entityRef={selectedEntity?.id ?? selectedRoadmap?.id ?? selectedSection?.id ?? ''}
             messages={(workbench.assistant.messages ?? []).map(message => ({
               ...message,
               actionState: workbench.revisions?.find(action => action.actionId === message.actionId)?.state ?? message.actionState,

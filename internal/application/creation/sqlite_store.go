@@ -27,6 +27,14 @@ type SQLBackend interface {
 	ApplyCreationCandidateChanges(context.Context, []creationdomain.Candidate, []creationdomain.Candidate, []creationdomain.Candidate, ...creationdomain.CandidateCommitGuard) error
 	CreationCandidate(context.Context, string) (creationdomain.Candidate, error)
 	ListCreationCandidates(context.Context, string) ([]creationdomain.Candidate, error)
+	// CreationReview 读取候选的逐项审阅关系；未记录时返回零值。
+	CreationReview(context.Context, string) (creationdomain.CandidateReview, error)
+	// SaveCreationReview 以 review_version 为前置条件写入逐项审阅关系。
+	SaveCreationReview(context.Context, creationdomain.CandidateReview, creationdomain.CandidateReview) error
+	// CreationReviewCursor 读取会话审阅位置；未记录时返回 sql.ErrNoRows。
+	CreationReviewCursor(context.Context, string) (creationdomain.ReviewCursor, error)
+	// SaveCreationReviewCursor 以 view_version 为前置条件保存审阅位置。
+	SaveCreationReviewCursor(context.Context, creationdomain.ReviewCursor) error
 	PendingAssistantActionCount(context.Context, string) (int, error)
 	Project(context.Context) (projectdomain.Project, error)
 	WorkbenchState(context.Context) (projectdomain.WorkbenchState, error)
@@ -93,6 +101,30 @@ func (store sqliteStore) Candidate(ctx context.Context, id string) (creationdoma
 
 func (store sqliteStore) ListCandidates(ctx context.Context, sessionID string) ([]creationdomain.Candidate, error) {
 	return store.inner.ListCreationCandidates(ctx, sessionID)
+}
+
+// Review 读取候选的逐项审阅关系。
+func (store sqliteStore) Review(ctx context.Context, candidateID string) (creationdomain.CandidateReview, error) {
+	return store.inner.CreationReview(ctx, candidateID)
+}
+
+// SaveReview 以 review_version 为前置条件写入逐项审阅关系。
+func (store sqliteStore) SaveReview(ctx context.Context, expected, updated creationdomain.CandidateReview) error {
+	return store.inner.SaveCreationReview(ctx, expected, updated)
+}
+
+// ReviewCursor 读取会话审阅位置；未记录时返回 ErrReviewCursorNotFound。
+func (store sqliteStore) ReviewCursor(ctx context.Context, sessionID string) (creationdomain.ReviewCursor, error) {
+	cursor, err := store.inner.CreationReviewCursor(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return creationdomain.ReviewCursor{}, ErrReviewCursorNotFound
+	}
+	return cursor, err
+}
+
+// SaveReviewCursor 以 view_version 为前置条件保存审阅位置。
+func (store sqliteStore) SaveReviewCursor(ctx context.Context, cursor creationdomain.ReviewCursor) error {
+	return store.inner.SaveCreationReviewCursor(ctx, cursor)
 }
 
 func (store sqliteStore) PendingActionCount(ctx context.Context, projectID string) (int, error) {

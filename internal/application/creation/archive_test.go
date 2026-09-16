@@ -468,6 +468,10 @@ func TestConfirmArchivePreservesArcPlanningGoals(t *testing.T) {
 	if _, err := service.AcceptCandidate(ctx, project.ID, edited.ID); err != nil {
 		t.Fatal(err)
 	}
+	// 新版本必须重新完成逐项审阅，旧版本的接受不会继承。
+	if _, err := service.AcceptAllReview(ctx, project.ID, edited.ID); err != nil {
+		t.Fatal(err)
+	}
 	preview, err := service.PreviewConfirmArchive(ctx, project.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1089,7 +1093,54 @@ func seedArchiveSessionWithSchemas(t *testing.T, store Store, projectID, proposa
 			t.Fatal(err)
 		}
 	}
+	if err := seedAcceptedReviews(store, candidates, now); err != nil {
+		t.Fatal(err)
+	}
 	return session
+}
+
+// seedAcceptedReviews 为入档阶段候选写入显式全接受的审阅记录，代表作者已完成逐项审阅。
+func seedAcceptedReviews(store Store, candidates []creationdomain.Candidate, now time.Time) error {
+	for _, candidate := range candidates {
+		switch candidate.Stage {
+		case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
+		default:
+			continue
+		}
+		review, err := creationdomain.NewCandidateReview(candidate, now)
+		if err != nil {
+			return err
+		}
+		refs := reviewRefs(candidate)
+		all := append(append([]creationdomain.ReviewRef{}, refs[creationdomain.ReviewScopeEntity]...),
+			refs[creationdomain.ReviewScopeSection]...)
+		if len(all) == 0 {
+			// 载荷没有可投影的审阅单位（例如旧 Schema 路线图）时不产生审阅要求。
+			continue
+		}
+		review, err = review.AcceptAll(all, now)
+		if err != nil {
+			return err
+		}
+		if err := store.SaveReview(context.Background(), creationdomain.CandidateReview{}, review); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// acceptedArchiveSelection 为已完成逐项审阅的候选集合构造入档选择。
+func acceptedArchiveSelection(session creationdomain.Session, candidates []creationdomain.Candidate) archiveSelection {
+	_ = session
+	selection := archiveSelection{Excluded: map[string]bool{}, ReviewVersions: map[string]int64{}}
+	for _, stage := range []creationdomain.Stage{
+		creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap,
+	} {
+		if current, ok := currentCandidate(candidates, stage); ok {
+			selection.ReviewVersions[current.ID] = 1
+		}
+	}
+	return selection
 }
 
 func TestArchiveRejectsMissingPlanningReferences(t *testing.T) {
@@ -1104,7 +1155,7 @@ func TestArchiveRejectsMissingPlanningReferences(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := buildArchivePlan(session, candidates, project, &testIDs{}); err == nil {
+			if _, err := buildArchivePlan(session, candidates, project, &testIDs{}, acceptedArchiveSelection(session, candidates)); err == nil {
 				t.Fatal("不存在的承诺目标不应入档")
 			}
 		})

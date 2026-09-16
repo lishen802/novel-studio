@@ -95,6 +95,9 @@ func TestAuthorMaterialReusesAllStagesAndArchivesWithoutDirection(t *testing.T) 
 		if _, err := service.AcceptCandidate(ctx, project.ID, candidate.ID); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := service.AcceptAllReview(ctx, project.ID, candidate.ID); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := service.AdvanceStage(ctx, project.ID); err != nil {
 			t.Fatal(err)
 		}

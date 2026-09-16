@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,8 +245,22 @@ func TestWorkspaceOpensLegacyProjectAndPreservesDataAfterMigration(t *testing.T)
 		t.Fatalf("recovery directory missing: %v", err)
 	}
 
-	// Backup created and is independently openable at v9.
-	backupPath := filepath.Join(recoveryDir, "migration-v09-v38.sqlite")
+	// Backup created and is independently openable at v9；文件名带起止版本，不写死当前 Schema 版本。
+	entries, err := os.ReadDir(recoveryDir)
+	if err != nil {
+		t.Fatalf("read recovery directory: %v", err)
+	}
+	backups := make([]string, 0, 1)
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "migration-v09-v") && strings.HasSuffix(name, ".sqlite") {
+			backups = append(backups, name)
+		}
+	}
+	if len(backups) != 1 {
+		t.Fatalf("expected exactly one v09 migration backup, got %v", backups)
+	}
+	backupPath := filepath.Join(recoveryDir, backups[0])
 	if _, err := os.Stat(backupPath); err != nil {
 		t.Fatalf("backup missing: %v", err)
 	}

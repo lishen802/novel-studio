@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	ErrSessionNotFound   = errors.New("creation session not found")
-	ErrStaleStore        = errors.New("creation store generation changed")
-	ErrOperationNotFound = errors.New("creation operation not found")
-	ErrOperationConflict = errors.New("creation operation idempotency conflict")
+	ErrSessionNotFound      = errors.New("creation session not found")
+	ErrStaleStore           = errors.New("creation store generation changed")
+	ErrOperationNotFound    = errors.New("creation operation not found")
+	ErrOperationConflict    = errors.New("creation operation idempotency conflict")
+	ErrReviewCursorNotFound = errors.New("creation review cursor not found")
 )
 
 type Store interface {
@@ -36,6 +37,14 @@ type Store interface {
 	ApplyCandidateChanges(ctx context.Context, expected, updates, inserts []creationdomain.Candidate, guards ...creationdomain.CandidateCommitGuard) error
 	Candidate(ctx context.Context, id string) (creationdomain.Candidate, error)
 	ListCandidates(ctx context.Context, sessionID string) ([]creationdomain.Candidate, error)
+	// Review 读取候选版本的逐项审阅关系；未记录时返回空审阅。
+	Review(ctx context.Context, candidateID string) (creationdomain.CandidateReview, error)
+	// SaveReview 以 review_version 为前置条件写入逐项审阅关系；expected 版本为 0 表示首次建立。
+	SaveReview(ctx context.Context, expected, updated creationdomain.CandidateReview) error
+	// ReviewCursor 读取作者审阅位置；未记录时返回 ErrReviewCursorNotFound。
+	ReviewCursor(ctx context.Context, sessionID string) (creationdomain.ReviewCursor, error)
+	// SaveReviewCursor 以 view_version 为前置条件保存审阅位置。
+	SaveReviewCursor(ctx context.Context, cursor creationdomain.ReviewCursor) error
 	PendingActionCount(ctx context.Context, projectID string) (int, error)
 	Project(ctx context.Context) (projectdomain.Project, error)
 	WorkbenchState(ctx context.Context) (projectdomain.WorkbenchState, error)
