@@ -197,3 +197,88 @@ func TestLateCompletionCannotClearNewRun(t *testing.T) {
 		t.Fatalf("旧回调影响新运行: %+v, %v", latest, err)
 	}
 }
+
+// C06：Provider 阻塞期间作者切换推进模式并锁定字段；运行完成后新编辑与锁都保留，
+// 结果物化但不替作者接受候选、不切换当前阶段。
+func TestBlockedRunKeepsModeSwitchAndFieldLock(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	kernel.block = make(chan struct{})
+	kernel.started = make(chan struct{})
+	service, store, _ := newTestService(t, kernel, nil)
+	people := seedPeopleWorldWithUpstream(t, store)
+	if _, err := service.AcceptCandidate(ctx, "project-1", people.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AdvanceStage(ctx, "project-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	request := generateRequest(creationdomain.StageRoadmap)
+	preview, err := service.PreviewGenerate(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ConfirmationDigest = preview.ConfirmationDigest
+	request.IdempotencyKey = "roadmap-blocked"
+	if _, err := service.ConfirmGenerate(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-kernel.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("execute did not start")
+	}
+	// 运行期间作者切换模式并锁定人物候选字段。
+	if _, err := service.SetAdvanceMode(ctx, "project-1", creationdomain.ModeAutoAdvance); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := service.LockCandidateField(ctx, "project-1", people.ID, "/characters/@char-1/summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(kernel.block)
+	if !waitFor(t, func() bool {
+		session, sessErr := store.Session(ctx, "project-1")
+		return sessErr == nil && session.ActiveRunID == ""
+	}) {
+		t.Fatal("run did not finish")
+	}
+
+	session, err := store.Session(ctx, "project-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.AdvanceMode != creationdomain.ModeAutoAdvance {
+		t.Fatalf("运行覆盖了作者在运行期间切换的模式: %q", session.AdvanceMode)
+	}
+	// 结果物化：路线图候选存在，但作者当前阶段与已接受的人物候选不被抢走。
+	candidates, err := store.ListCandidates(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := currentCandidate(candidates, creationdomain.StageRoadmap); !ok {
+		t.Fatal("运行结果未物化为路线图候选")
+	}
+	if session.Stage != creationdomain.StageRoadmap {
+		t.Fatalf("运行完成不应替作者推进阶段: %q", session.Stage)
+	}
+	stored, err := store.Candidate(ctx, people.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != locked.Status {
+		t.Fatalf("运行改变了作者已接受的人物候选状态: %q", stored.Status)
+	}
+	current, ok := currentCandidate(candidates, creationdomain.StagePeopleWorld)
+	if !ok || !current.Locked("/characters/@char-1/summary") {
+		t.Fatalf("运行期间设置的锁未保留: %#v", current.LockMap)
+	}
+	workbench, err := service.Workbench(ctx, "project-1", "branch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workbench.Stage != creationdomain.StageRoadmap || workbench.PeopleWorld.CandidateID != people.ID {
+		t.Fatalf("工作台当前对象被运行抢走: stage=%q people=%q", workbench.Stage, workbench.PeopleWorld.CandidateID)
+	}
+}
