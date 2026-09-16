@@ -31,6 +31,21 @@ type StoryDirectionsOutput struct {
 	Directions []DirectionCard `json:"directions"`
 }
 
+// StoryDirectionOutput 是单卡重做与方向组合共用的单张方向卡输出。
+type StoryDirectionOutput struct {
+	Direction DirectionCard `json:"direction"`
+}
+
+// Validate 校验单张方向卡包含完整、可采用的方向信息。
+func (output StoryDirectionOutput) Validate() error {
+	card := output.Direction
+	if blank(card.ID) || blank(card.Hook) || blank(card.Genre) || blank(card.Protagonist) ||
+		blank(card.CoreConflict) || blank(card.GrowthCost) || blank(card.Pacing) || blank(card.Ending) {
+		return ErrInvalidTaskOutput
+	}
+	return nil
+}
+
 // Validate 强制三张方向卡可比较：七字段非空、核心四元组不整组重复，且至少两组字段取值不同。
 func (output StoryDirectionsOutput) Validate() error {
 	if len(output.Directions) != MaxStoryDirections {

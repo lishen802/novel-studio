@@ -92,6 +92,15 @@ func discussionBinding() stageBinding {
 	}
 }
 
+// directionOperationBinding 返回单卡重做与方向组合共用的单卡生成合同。
+func directionOperationBinding() stageBinding {
+	return stageBinding{
+		WorkflowID: agentassets.StoryDirectionOperationWorkflowID, Version: 1,
+		Kind: creationdomain.KindDirection, SchemaID: "story_direction.schema", SchemaVersion: 1,
+		Stage: creationdomain.StageDirections,
+	}
+}
+
 func generateStages() []creationdomain.Stage {
 	return []creationdomain.Stage{
 		creationdomain.StageDirections, creationdomain.StageProposal,
@@ -116,6 +125,16 @@ func remainingGenerateStages(stage creationdomain.Stage) []creationdomain.Stage 
 
 // directionCardByID 从方向候选载荷中按稳定卡 ID 取一张卡；卡不存在返回领域错误。
 func directionCardByID(candidate creationdomain.Candidate, cardID string) (agentdomain.DirectionCard, error) {
+	if candidate.Kind == creationdomain.KindDirection {
+		var card agentdomain.DirectionCard
+		if err := json.Unmarshal([]byte(candidate.PayloadJSON), &card); err != nil {
+			return agentdomain.DirectionCard{}, err
+		}
+		if strings.TrimSpace(card.ID) == strings.TrimSpace(cardID) {
+			return card, nil
+		}
+		return agentdomain.DirectionCard{}, creationdomain.ErrDirectionCard
+	}
 	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryDirections, []byte(candidate.PayloadJSON))
 	if err != nil {
 		return agentdomain.DirectionCard{}, err
@@ -143,7 +162,7 @@ func selectedDirectionCard(
 		return agentdomain.DirectionCard{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
 	}
 	if candidate.Status == creationdomain.StatusSuperseded || candidate.Status == creationdomain.StatusDiscarded {
-		current, found := currentCandidate(candidates, creationdomain.StageDirections)
+		current, found := currentCandidateOfKind(candidates, creationdomain.StageDirections, candidate.Kind)
 		if !found {
 			return agentdomain.DirectionCard{}, creationdomain.Candidate{}, creationdomain.ErrStageIncomplete
 		}

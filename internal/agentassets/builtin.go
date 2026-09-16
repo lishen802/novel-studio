@@ -8,24 +8,25 @@ import (
 )
 
 const (
-	BaselineWorkflowID              = "baseline.chapter"
-	BaselineWorkflowVersion         = 1
-	QualityChapterWorkflowID        = "quality.chapter"
-	QualityChapterWorkflowVersion   = 1
-	QualityBlueprintWorkflowID      = "quality.blueprint"
-	QualityBlueprintWorkflowVersion = 1
-	EnhancedChapterWorkflowID       = "quality.chapter.director"
-	EnhancedChapterWorkflowVersion  = 1
-	SplitReviewWorkflowID           = "quality.chapter.split-review"
-	SplitReviewWorkflowVersion      = 1
-	SlotParallelWorkflowID          = "quality.chapter.slot-parallel"
-	SlotParallelWorkflowVersion     = 1
-	StoryDirectionsWorkflowID       = "story.directions"
-	StoryProposalWorkflowID         = "story.proposal"
-	StoryPeopleWorldWorkflowID      = "story.people_world"
-	StoryRoadmapWorkflowID          = "story.roadmap"
-	StoryAuthorReviseWorkflowID     = "story.author_revise"
-	StoryProductWorkflowVersion     = 1
+	BaselineWorkflowID                = "baseline.chapter"
+	BaselineWorkflowVersion           = 1
+	QualityChapterWorkflowID          = "quality.chapter"
+	QualityChapterWorkflowVersion     = 1
+	QualityBlueprintWorkflowID        = "quality.blueprint"
+	QualityBlueprintWorkflowVersion   = 1
+	EnhancedChapterWorkflowID         = "quality.chapter.director"
+	EnhancedChapterWorkflowVersion    = 1
+	SplitReviewWorkflowID             = "quality.chapter.split-review"
+	SplitReviewWorkflowVersion        = 1
+	SlotParallelWorkflowID            = "quality.chapter.slot-parallel"
+	SlotParallelWorkflowVersion       = 1
+	StoryDirectionsWorkflowID         = "story.directions"
+	StoryDirectionOperationWorkflowID = "story.direction_operation"
+	StoryProposalWorkflowID           = "story.proposal"
+	StoryPeopleWorldWorkflowID        = "story.people_world"
+	StoryRoadmapWorkflowID            = "story.roadmap"
+	StoryAuthorReviseWorkflowID       = "story.author_revise"
+	StoryProductWorkflowVersion       = 1
 )
 
 // v2 在既有工作流末尾追加修订复核节点；v1 保留不变，供 Harness 判断复核节点是否值得这次调用。
@@ -56,6 +57,8 @@ var (
 	storyArchitectPrompt string
 	//go:embed assets/prompts/story_directions.tmpl
 	storyDirectionsPrompt string
+	//go:embed assets/prompts/story_direction_operation.tmpl
+	storyDirectionOperationPrompt string
 	//go:embed assets/prompts/story_proposal.tmpl
 	storyProposalPrompt string
 	//go:embed assets/prompts/story_cast.tmpl
@@ -106,6 +109,8 @@ var (
 	storyArchitectSchema []byte
 	//go:embed assets/schemas/story_directions.json
 	storyDirectionsSchema []byte
+	//go:embed assets/schemas/story_direction.json
+	storyDirectionSchema []byte
 	//go:embed assets/schemas/story_cast.json
 	storyCastSchema []byte
 	//go:embed assets/schemas/story_roadmap.json
@@ -153,6 +158,7 @@ func Builtin() (*Registry, error) {
 	baselinePromptBinding := BindingForText("baseline.chapter.prompt", 1, []byte(baselinePrompt))
 	architectPromptBinding := BindingForText("story_architect.prompt", 1, []byte(storyArchitectPrompt))
 	directionsPromptBinding := BindingForText("story_directions.prompt", 1, []byte(storyDirectionsPrompt))
+	directionOperationPromptBinding := BindingForText("story_direction_operation.prompt", 1, []byte(storyDirectionOperationPrompt))
 	proposalPromptBinding := BindingForText("story_proposal.prompt", 2, []byte(storyProposalPrompt))
 	castPromptBinding := BindingForText("story_cast.prompt", 2, []byte(storyCastPrompt))
 	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 3, []byte(storyRoadmapPrompt))
@@ -169,6 +175,7 @@ func Builtin() (*Registry, error) {
 	blueprintSchema := BindingForText("story_blueprint.schema", 2, storyBlueprintSchema)
 	architectSchema := BindingForText("story_architect.schema", 1, storyArchitectSchema)
 	directionsSchema := BindingForText("story_directions.schema", 1, storyDirectionsSchema)
+	directionSchema := BindingForText("story_direction.schema", 1, storyDirectionSchema)
 	castSchema := BindingForText("story_cast.schema", 2, storyCastSchema)
 	roadmapSchema := BindingForText("story_roadmap.schema", 3, storyRoadmapSchema)
 	planSchema := BindingForText("chapter_plan.schema", 1, chapterPlanSchema)
@@ -343,6 +350,17 @@ func Builtin() (*Registry, error) {
 		StoryDirectionsWorkflowID, StoryProductWorkflowVersion, agentdomain.TaskStoryDirections,
 		directionsPromptBinding, directionsSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 3500, 7000,
 	)
+	directionOperation := agentdomain.WorkflowDefinition{
+		ID: StoryDirectionOperationWorkflowID, Version: 1, TaskKind: agentdomain.TaskStoryDirection,
+		EntryNodeID: "direction", ResultNodeID: "direction", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
+		MaxRevisionAttempts: 0, MaxRunTokens: 3500,
+		Nodes: []agentdomain.WorkflowNode{{
+			ID: "direction", Capability: agentdomain.CapabilityStoryArchitect, RoleSlot: agentdomain.RolePlanner,
+			Prompt: directionOperationPromptBinding, Schema: directionSchema, Assembler: assembler,
+			InputSelectors: []string{"$task", "$context"}, OutputKind: agentdomain.OutputStructured,
+			MaxOutputTokens: 2500, FailurePolicy: agentdomain.FailureFailRun,
+		}},
+	}
 	proposal := agentdomain.WorkflowDefinition{
 		ID: StoryProposalWorkflowID, Version: StoryProductWorkflowVersion, TaskKind: agentdomain.TaskStoryBlueprint,
 		EntryNodeID: "blueprint", ResultNodeID: "revision", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
@@ -394,7 +412,7 @@ func Builtin() (*Registry, error) {
 		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
-		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(roadmap), workflowAsset(authorRevise),
+		workflowAsset(directions), workflowAsset(directionOperation), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(roadmap), workflowAsset(authorRevise),
 	}
 	return New(
 		workflows,
@@ -407,6 +425,7 @@ func Builtin() (*Registry, error) {
 			{Binding: baselinePromptBinding, Template: baselinePrompt, Variables: []string{"Task", "Context"}},
 			{Binding: architectPromptBinding, Template: storyArchitectPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: directionsPromptBinding, Template: storyDirectionsPrompt, Variables: []string{"Task", "Context"}},
+			{Binding: directionOperationPromptBinding, Template: storyDirectionOperationPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: proposalPromptBinding, Template: storyProposalPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: castPromptBinding, Template: storyCastPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: roadmapPromptBinding, Template: storyRoadmapPrompt, Variables: []string{"Task", "Context"}},
@@ -437,6 +456,7 @@ func Builtin() (*Registry, error) {
 			{Binding: blueprintSchema, JSON: storyBlueprintSchema},
 			{Binding: architectSchema, JSON: storyArchitectSchema},
 			{Binding: directionsSchema, JSON: storyDirectionsSchema},
+			{Binding: directionSchema, JSON: storyDirectionSchema},
 			{Binding: castSchema, JSON: storyCastSchema},
 			{Binding: roadmapSchema, JSON: storyRoadmapSchema},
 			{Binding: planSchema, JSON: chapterPlanSchema},

@@ -199,7 +199,12 @@ func validateSelectedDirection(session creationdomain.Session, candidates []crea
 	if err := validateCandidateDependency(session, candidates, direction); err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	if err := validateCandidatePayload(creationdomain.StageDirections, direction.PayloadJSON); err != nil {
+	if direction.Kind == creationdomain.KindDirection {
+		card, err := directionCardByID(direction, session.SelectedDirectionCardID)
+		if err != nil || (agentdomain.StoryDirectionOutput{Direction: card}).Validate() != nil {
+			return creationdomain.Candidate{}, creationdomain.ErrDirectionCard
+		}
+	} else if err := validateCandidatePayload(creationdomain.StageDirections, direction.PayloadJSON); err != nil {
 		return creationdomain.Candidate{}, err
 	}
 	return direction, nil

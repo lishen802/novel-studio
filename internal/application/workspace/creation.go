@@ -178,8 +178,13 @@ func (s *Service) creationWorkbench(ctx context.Context, recoverRun bool) (creat
 		return creationapp.WorkbenchView{}, err
 	}
 	var revisions []creationapp.RevisionView
+	var directionActions []creationapp.DirectionActionView
 	if view.SessionID != "" {
 		revisions, err = runtime.service.RevisionActions(ctx, runtime.projectID, recoverRun && !readOnly)
+		if err != nil {
+			return creationapp.WorkbenchView{}, err
+		}
+		directionActions, err = runtime.service.DirectionActions(ctx, runtime.projectID, recoverRun && !readOnly)
 		if err != nil {
 			return creationapp.WorkbenchView{}, err
 		}
@@ -191,6 +196,7 @@ func (s *Service) creationWorkbench(ctx context.Context, recoverRun bool) (creat
 		view, err = runtime.service.Workbench(ctx, runtime.projectID, runtime.branchID)
 	}
 	view.Revisions = revisions
+	view.DirectionActions = directionActions
 	view.ReadOnly = readOnly
 	if readOnly {
 		view.Capabilities = []string{}

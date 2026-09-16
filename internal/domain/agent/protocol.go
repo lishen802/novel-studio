@@ -30,6 +30,7 @@ const (
 	TaskChapterSkeleton       TaskKind = "chapter_skeleton"
 	TaskFillSlot              TaskKind = "fill_slot"
 	TaskStoryDirections       TaskKind = "story_directions"
+	TaskStoryDirection        TaskKind = "story_direction"
 	TaskStoryCast             TaskKind = "story_cast"
 	TaskStoryRoadmap          TaskKind = "story_roadmap"
 )
@@ -321,7 +322,7 @@ func ValidSHA256(value string) bool {
 func ValidTaskKind(kind TaskKind) bool {
 	switch kind {
 	case TaskReviseStoryCandidate, TaskDiscussStoryCandidate, TaskStoryBlueprint, TaskChapterPlan, TaskChapterDraft, TaskReviewBundle, TaskReviseDraft, TaskReviseBlueprint,
-		TaskBaselineDraft, TaskVerifyRevision, TaskChapterSkeleton, TaskFillSlot, TaskStoryDirections, TaskStoryCast, TaskStoryRoadmap:
+		TaskBaselineDraft, TaskVerifyRevision, TaskChapterSkeleton, TaskFillSlot, TaskStoryDirections, TaskStoryDirection, TaskStoryCast, TaskStoryRoadmap:
 		return true
 	default:
 		return false

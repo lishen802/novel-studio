@@ -331,6 +331,8 @@ func DecodeTaskOutput(kind TaskKind, data []byte) (TaskOutput, error) {
 		output = &FillSlotOutput{}
 	case TaskStoryDirections:
 		output = &StoryDirectionsOutput{}
+	case TaskStoryDirection:
+		output = &StoryDirectionOutput{}
 	case TaskStoryCast:
 		output = &StoryCastOutput{}
 	case TaskStoryRoadmap:

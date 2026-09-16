@@ -293,6 +293,7 @@ export interface RoadmapNodeView {
 }
 export interface CreationWorkbenchView {
  revisions?: RevisionCard[];
+ directionActions?: DirectionActionView[];
  fieldEditor?: { candidateId: string; version: number; fields: Array<{path:string;label:string;group:string;value:string;locked:boolean}> };
  canPrepareSample?: boolean;
  sampleHandoff?: (CreationSampleInput & { id: string; directionCandidateId: string; directionCardId: string; status: string }) | null;
@@ -315,21 +316,13 @@ export interface CreationWorkbenchView {
   stageRail: Array<{ id: string; label: string; status: string }>;
   directionSet: {
 	keptIds?: string[];
+	combined?: Array<{ candidateId: string; version: number; card: CreationDirectionCardView }>;
     candidateId: string;
+    selectedCandidateId?: string;
     version: number;
     selectedId: string;
     status: string;
-    cards: Array<{
-      id: string;
-      hook: string;
-      genre: string;
-      protagonist: string;
-      coreConflict: string;
-      growthCost: string;
-      pacing: string;
-      ending: string;
-      selected: boolean;
-    }>;
+    cards: CreationDirectionCardView[];
   };
   proposal: {
     candidateId: string;
@@ -365,6 +358,18 @@ export interface CreationWorkbenchView {
     evidence: string;
   };
   capabilities: string[];
+}
+
+export interface CreationDirectionCardView {
+  id: string; hook: string; genre: string; protagonist: string; coreConflict: string;
+  growthCost: string; pacing: string; ending: string; selected: boolean;
+}
+
+export interface DirectionActionView {
+  actionId: string; argumentsHash: string; idempotencyKey: string; mode: 'regenerate_one' | 'combine';
+  candidateId: string; candidateVersion: number; targetCardId?: string; sourceCardIds?: string[];
+  instruction: string; state: string; cost: CreationCostPreview; runId?: string;
+  resultCandidateId?: string; resultCardId?: string; summary?: string; stale: boolean;
 }
 
 export interface AssistantMessageView {
@@ -550,6 +555,11 @@ export const studio = {
   selectCreationDirection: (candidateId: string, cardId: string) => call<CreationWorkbenchView>('SelectCreationDirection', candidateId, cardId),
   keepCreationDirection: (cardId: string) => call<CreationWorkbenchView>('KeepCreationDirection', cardId),
   unkeepCreationDirection: (cardId: string) => call<CreationWorkbenchView>('UnkeepCreationDirection', cardId),
+  previewRegenerateDirection: (request: {candidateId:string;targetCardId:string;instruction:string;idempotencyKey:string}) => call<DirectionActionView>('PreviewRegenerateDirection', request),
+  confirmRegenerateDirection: (command: {actionId:string;argumentsHash:string;idempotencyKey:string}) => call<DirectionActionView>('ConfirmRegenerateDirection', command),
+  previewCombineDirections: (request: {candidateId:string;sourceCardIds:string[];instruction:string;idempotencyKey:string}) => call<DirectionActionView>('PreviewCombineDirections', request),
+  confirmCombineDirections: (command: {actionId:string;argumentsHash:string;idempotencyKey:string}) => call<DirectionActionView>('ConfirmCombineDirections', command),
+  rejectDirectionAction: (actionId:string) => call<CreationWorkbenchView>('RejectDirectionAction', actionId),
   acceptCreationCandidate: (candidateId: string) => call<CreationWorkbenchView>('AcceptCreationCandidate', candidateId),
   advanceCreationStage: () => call<CreationWorkbenchView>('AdvanceCreationStage'),
   lookBackCreationStage: (stage: string) => call<CreationWorkbenchView>('LookBackCreationStage', stage),

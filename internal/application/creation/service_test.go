@@ -1077,6 +1077,7 @@ func newFakeKernel() *fakeKernel {
 	return &fakeKernel{
 		payloads: map[string]string{
 			agentassets.StoryDirectionsWorkflowID:          directionPayload,
+			agentassets.StoryDirectionOperationWorkflowID:  `{"direction":{"id":"generated","hook":"新的方向","genre":"奇幻悬疑","protagonist":"新主角","core_conflict":"新的冲突","growth_cost":"新的代价","pacing":"快节奏","ending":"新的结局"}}`,
 			agentassets.StoryProposalWorkflowID:            proposalPayload,
 			agentassets.StoryPeopleWorldWorkflowID:         peopleWorldPayload,
 			agentassets.StoryRoadmapWorkflowID:             roadmapPayloadV3,
@@ -1114,6 +1115,10 @@ func (kernel *fakeKernel) fakeSteps(request agentkernel.CreateRequest, payload s
 	}
 	if request.WorkflowID == agentassets.StoryAuthorReviseWorkflowID {
 		appendStep("revise", agentdomain.CapabilityBoundedRevision, payload)
+		return steps, artifacts
+	}
+	if request.WorkflowID == agentassets.StoryDirectionOperationWorkflowID {
+		appendStep("direction", agentdomain.CapabilityStoryArchitect, payload)
 		return steps, artifacts
 	}
 	appendStep("blueprint", agentdomain.CapabilityStoryArchitect, payload)

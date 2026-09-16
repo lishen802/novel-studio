@@ -132,6 +132,20 @@ func (session Session) SelectDirection(candidateID, cardID string, now time.Time
 	return session, nil
 }
 
+// FollowDirectionCandidate 在单卡重做产生新版本后迁移原有选择，卡的逻辑 ID 保持不变。
+func (session Session) FollowDirectionCandidate(fromCandidateID, toCandidateID string, now time.Time) (Session, error) {
+	fromCandidateID, toCandidateID = strings.TrimSpace(fromCandidateID), strings.TrimSpace(toCandidateID)
+	if session.ID == "" || fromCandidateID == "" || toCandidateID == "" {
+		return Session{}, ErrBlankValue
+	}
+	if session.SelectedDirectionCandidateID != fromCandidateID {
+		return session, nil
+	}
+	session.SelectedDirectionCandidateID = toCandidateID
+	session.UpdatedAt = now.UTC()
+	return session, nil
+}
+
 // KeepDirection 把一张方向卡加入保留列表，重启后可恢复；重复保留幂等。
 func (session Session) KeepDirection(cardID string, now time.Time) (Session, error) {
 	cardID = strings.TrimSpace(cardID)

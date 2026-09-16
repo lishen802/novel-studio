@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["direction"],
+  "properties": {
+    "direction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "hook", "genre", "protagonist", "core_conflict", "growth_cost", "pacing", "ending"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "hook": { "type": "string", "minLength": 1 },
+        "genre": { "type": "string", "minLength": 1 },
+        "protagonist": { "type": "string", "minLength": 1 },
+        "core_conflict": { "type": "string", "minLength": 1 },
+        "growth_cost": { "type": "string", "minLength": 1 },
+        "pacing": { "type": "string", "minLength": 1 },
+        "ending": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

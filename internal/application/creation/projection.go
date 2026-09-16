@@ -2,6 +2,8 @@ package creation
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 
 type WorkbenchView struct {
 	Revisions        []RevisionView                `json:"revisions"`
+	DirectionActions []DirectionActionView         `json:"directionActions"`
 	FieldEditor      FieldEditorView               `json:"fieldEditor"`
 	SampleHandoff    *SampleView                   `json:"sampleHandoff"`
 	CanPrepareSample bool                          `json:"canPrepareSample"`
@@ -49,12 +52,20 @@ type RailStopView struct {
 }
 
 type DirectionSetView struct {
-	CandidateID string              `json:"candidateId"`
-	Version     int                 `json:"version"`
-	SelectedID  string              `json:"selectedId"`
-	KeptIDs     []string            `json:"keptIds"`
-	Status      string              `json:"status"`
-	Cards       []DirectionCardView `json:"cards"`
+	CandidateID         string                  `json:"candidateId"`
+	SelectedCandidateID string                  `json:"selectedCandidateId"`
+	Version             int                     `json:"version"`
+	SelectedID          string                  `json:"selectedId"`
+	KeptIDs             []string                `json:"keptIds"`
+	Status              string                  `json:"status"`
+	Cards               []DirectionCardView     `json:"cards"`
+	Combined            []CombinedDirectionView `json:"combined"`
+}
+
+type CombinedDirectionView struct {
+	CandidateID string            `json:"candidateId"`
+	Version     int               `json:"version"`
+	Card        DirectionCardView `json:"card"`
 }
 
 type DirectionCardView struct {
@@ -393,21 +404,34 @@ func assembleWorkbench(
 		StageRail:        buildStageRail(session),
 		Impact:           impact,
 		Assistant:        AssistantSummaryView{PendingActionCount: pending, Messages: []AssistantMessageView{}},
-		DirectionSet:     DirectionSetView{Cards: []DirectionCardView{}, KeptIDs: append([]string{}, session.KeptDirectionIDs...)},
+		DirectionSet:     DirectionSetView{Cards: []DirectionCardView{}, KeptIDs: append([]string{}, session.KeptDirectionIDs...), Combined: []CombinedDirectionView{}},
 		Proposal:         ProposalView{Sections: []ProposalSectionView{}},
 		PeopleWorld:      PeopleWorldView{Entities: []PeopleWorldNodeView{}},
 		Roadmap:          RoadmapView{Volumes: []RoadmapNodeView{}, Arcs: []RoadmapNodeView{}, Chapters: []RoadmapNodeView{}},
 		FieldEditor:      FieldEditorView{Fields: []TextFieldView{}},
 		Revisions:        []RevisionView{},
 	}
-	if current, ok := currentCandidate(candidates, creationdomain.StageDirections); ok {
-		selected := ""
-		if current.ID == session.SelectedDirectionCandidateID {
-			selected = session.SelectedDirectionCardID
-		}
-		view.DirectionSet = projectDirectionSet(current, selected)
+	if current, ok := currentCandidateOfKind(candidates, creationdomain.StageDirections, creationdomain.KindDirectionSet); ok {
+		view.DirectionSet = projectDirectionSet(current, session.SelectedDirectionCardID)
+		view.DirectionSet.SelectedCandidateID = session.SelectedDirectionCandidateID
 		view.DirectionSet.KeptIDs = append([]string{}, session.KeptDirectionIDs...)
 	}
+	for _, candidate := range candidates {
+		if candidate.Stage != creationdomain.StageDirections || candidate.Kind != creationdomain.KindDirection || candidate.Status == creationdomain.StatusDiscarded {
+			continue
+		}
+		var card agentdomain.DirectionCard
+		if json.Unmarshal([]byte(candidate.PayloadJSON), &card) != nil {
+			continue
+		}
+		view.DirectionSet.Combined = append(view.DirectionSet.Combined, CombinedDirectionView{
+			CandidateID: candidate.ID, Version: candidate.Version,
+			Card: DirectionCardView{ID: card.ID, Hook: card.Hook, Genre: card.Genre, Protagonist: card.Protagonist, CoreConflict: card.CoreConflict, GrowthCost: card.GrowthCost, Pacing: card.Pacing, Ending: card.Ending, Selected: candidate.ID == session.SelectedDirectionCandidateID && card.ID == session.SelectedDirectionCardID},
+		})
+	}
+	sort.Slice(view.DirectionSet.Combined, func(i, j int) bool {
+		return view.DirectionSet.Combined[i].Version > view.DirectionSet.Combined[j].Version
+	})
 	if current, ok := currentCandidate(candidates, creationdomain.StageProposal); ok {
 		view.Proposal = projectProposal(current)
 	}
@@ -461,8 +485,8 @@ func buildStageRail(session creationdomain.Session) []RailStopView {
 
 func projectDirectionSet(candidate creationdomain.Candidate, selectedID string) DirectionSetView {
 	view := DirectionSetView{
-		CandidateID: candidate.ID, Version: candidate.Version, SelectedID: selectedID,
-		Status: string(candidate.Status), Cards: []DirectionCardView{},
+		CandidateID: candidate.ID, SelectedCandidateID: candidate.ID, Version: candidate.Version, SelectedID: selectedID,
+		Status: string(candidate.Status), Cards: []DirectionCardView{}, Combined: []CombinedDirectionView{},
 	}
 	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryDirections, []byte(candidate.PayloadJSON))
 	if err != nil {
@@ -595,7 +619,10 @@ func workbenchCapabilities(session creationdomain.Session, view WorkbenchView) [
 		}
 		caps = append(caps, "PreviewGenerateDirections", "ConfirmGenerateDirections")
 		if len(view.DirectionSet.Cards) > 0 {
-			caps = append(caps, "SelectDirection", "SaveCandidateDraft")
+			caps = append(caps, "SelectDirection", "SaveCandidateDraft", "RegenerateDirection")
+			if len(view.DirectionSet.KeptIDs) >= 2 {
+				caps = append(caps, "CombineDirections")
+			}
 		}
 	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
 		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AcceptCandidate", "AdvanceStage")

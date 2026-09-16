@@ -19,7 +19,7 @@ import {
   Target,
   User,
 } from 'lucide-react';
-import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView, type RoadmapNodeView } from '../api/studio';
+import { studio, StudioClientError, type CreationCostPreview, type CreationWorkbenchView, type DirectionActionView, type RoadmapNodeView } from '../api/studio';
 import { roadmapNavItems, RoadmapNavigation } from '../components/creation/RoadmapNavigation';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -45,7 +45,7 @@ const emptyWorkbench = (): CreationWorkbenchView => ({
   archiveConfirmed: false,
   intentText: '',
   stageRail: [],
-  directionSet: { candidateId: '', version: 0, selectedId: '', status: '', cards: [] },
+  directionSet: { candidateId: '', selectedCandidateId: '', version: 0, selectedId: '', status: '', cards: [], combined: [] },
   proposal: { candidateId: '', version: 0, status: '', title: '', sections: [] },
   peopleWorld: { candidateId: '', version: 0, status: '', entities: [] },
   roadmap: {
@@ -132,6 +132,10 @@ export default function Cockpit() {
   const [generating, setGenerating] = useState(false);
   const [preview, setPreview] = useState<CreationCostPreview | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [directionDialog, setDirectionDialog] = useState<{mode:'regenerate_one'|'combine';targetCardId?:string} | null>(null);
+  const [directionInstruction, setDirectionInstruction] = useState('');
+  const [directionPreview, setDirectionPreview] = useState<DirectionActionView | null>(null);
+  const [dismissedDirectionActionId, setDismissedDirectionActionId] = useState('');
   const awaitingRun = generating && !['queued','pending','running','cancelling'].includes(workbench.currentRun.status);
   const keptIds = workbench.directionSet.keptIds ?? [];
   const [entityId, setEntityId] = useState<string | null>(null);
@@ -151,7 +155,7 @@ export default function Cockpit() {
     setWorkbench(view);
     if (recover || intentRef.current === savedIntent.current) setIntent(view.intentText);
     savedIntent.current = view.intentText;
-    setGenerating((['queued', 'pending', 'running', 'cancelling'].includes(view.currentRun.status) && !view.recoverable) || !!view.revisions?.some(action => action.state === 'executing') || !!(view.assistant.messages ?? []).some(message => message.kind === 'discussion' && (message.status === 'pending' || message.status === 'running')));
+    setGenerating((['queued', 'pending', 'running', 'cancelling'].includes(view.currentRun.status) && !view.recoverable) || !!view.revisions?.some(action => action.state === 'executing') || !!view.directionActions?.some(action => action.state === 'executing') || !!(view.assistant.messages ?? []).some(message => message.kind === 'discussion' && (message.status === 'pending' || message.status === 'running')));
     return view;
   }, [projectId]);
 
@@ -169,6 +173,11 @@ export default function Cockpit() {
     })();
     return () => { active = false; };
   }, [load]);
+
+  useEffect(() => {
+    const pending = workbench.directionActions?.find(action => action.state === 'pending_confirmation');
+    if (pending && pending.actionId !== dismissedDirectionActionId && !directionPreview && !directionDialog) setDirectionPreview(pending);
+  }, [workbench.directionActions, directionPreview, directionDialog, dismissedDirectionActionId]);
 
   useEffect(() => {
     if (!generating) return;
@@ -243,6 +252,57 @@ export default function Cockpit() {
     await load(false);
   };
 
+  const previewDirectionAction = async () => {
+    if (!directionDialog) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const idempotencyKey = `direction-${directionDialog.mode}-${Date.now()}`;
+      const next = directionDialog.mode === 'combine'
+        ? await studio.previewCombineDirections({ candidateId: workbench.directionSet.candidateId, sourceCardIds: keptIds, instruction: directionInstruction.trim(), idempotencyKey })
+        : await studio.previewRegenerateDirection({ candidateId: workbench.directionSet.candidateId, targetCardId: directionDialog.targetCardId ?? '', instruction: directionInstruction.trim(), idempotencyKey });
+      setDirectionDialog(null);
+      setDismissedDirectionActionId('');
+      setDirectionPreview(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '方向操作预览失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDirectionAction = async () => {
+    if (!directionPreview) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const command = { actionId: directionPreview.actionId, argumentsHash: directionPreview.argumentsHash, idempotencyKey: directionPreview.idempotencyKey };
+      if (directionPreview.mode === 'combine') await studio.confirmCombineDirections(command);
+      else await studio.confirmRegenerateDirection(command);
+      setDirectionPreview(null);
+      setDirectionInstruction('');
+      setGenerating(true);
+      await load(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '方向操作启动失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectDirectionAction = async () => {
+    const pending = directionPreview;
+    if (pending) setDismissedDirectionActionId(pending.actionId);
+    setDirectionPreview(null);
+    if (!pending || pending.state !== 'pending_confirmation') return;
+    try {
+      const view = await studio.rejectDirectionAction(pending.actionId);
+      setWorkbench(view);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '取消方向操作失败');
+    }
+  };
+
   const confirmNext = async (cardId?: string) => {
     if (fieldDirty) { setError('请先保存文本修改，再继续生成或进入下一阶段。'); return; }
     if (materialDirty) { setError("请先保存材料，再审阅下一阶段。"); return; }
@@ -260,7 +320,8 @@ export default function Cockpit() {
     if (workbench.stage === 'directions' && workbench.directionSet.candidateId) {
       const selectedId = cardId ?? workbench.directionSet.selectedId;
       if (!selectedId) { setError('请先选择一张故事方向卡。'); return; }
-      await run(() => studio.selectCreationDirection(workbench.directionSet.candidateId, selectedId));
+      const selectedCandidateId = cardId ? workbench.directionSet.candidateId : (workbench.directionSet.selectedCandidateId || workbench.directionSet.candidateId);
+      await run(() => studio.selectCreationDirection(selectedCandidateId, selectedId));
     }
     const candidateId = workbench.stage === 'proposal'
       ? workbench.proposal.candidateId
@@ -378,7 +439,7 @@ export default function Cockpit() {
         <main className="flex-1 overflow-auto p-8">
           {(workbench.fieldEditor?.fields?.length || workbench.revisions?.length) ? <RevisionPanel key={`revision:${workbench.sessionId}`} editor={workbench.fieldEditor} actions={workbench.revisions ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onPreview={async(candidateId,path,instruction,key)=>{await studio.previewCreationRevision({candidateId,paths:[path],instruction,idempotencyKey:key});await load();}} onConfirm={async(action)=>{await studio.confirmCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey});await load();}} onReject={async(id)=>{await run(()=>studio.rejectCreationRevision(id));}} onApply={async(action)=>{await run(()=>studio.applyCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey}));}}/> : null}
           {workbench.fieldEditor?.fields?.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
-          {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
+          {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.selectedCandidateId || workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
           {workbench.sessionId && <EntryPanel key={`entry:${workbench.sessionId}`} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly || fieldDirty} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
             await run(() => studio.saveCreationEntry({ projectId: workbench.projectId, sessionId: workbench.sessionId, kind, material, expectedVersion, expectedRunSlotVersion }));
           }} />}
@@ -435,7 +496,7 @@ export default function Cockpit() {
                   <h2 className="text-base font-medium text-text">故事方向候选</h2>
                   <div className="flex items-center gap-2">
                     {keptIds.length >= 2 && (
-                      <Button size="sm" disabled title="组合方向尚未就绪">组合 {keptIds.length} 个保留方向</Button>
+                      <Button size="sm" disabled={busy || generating || workbench.readOnly} onClick={() => { setDirectionInstruction(''); setDirectionDialog({mode:'combine'}); }}>组合 {keptIds.length} 个保留方向</Button>
                     )}
                     <Button variant="ghost" size="sm" onClick={() => setCompareOpen(true)} disabled={cards.length === 0}>比较</Button>
                   </div>
@@ -473,7 +534,26 @@ export default function Cockpit() {
                             选择此方向
                           </Button>
                           <Button size="sm" className="w-full mt-2" disabled={generating || busy || workbench.readOnly || materialDirty} onClick={() => void run(() => studio.selectCreationDirection(workbench.directionSet.candidateId, card.id)).catch(() => undefined)}>选定并准备试写</Button>
+                          <Button variant="ghost" size="sm" className="w-full mt-2" disabled={generating || busy || workbench.readOnly} onClick={() => { setDirectionInstruction(''); setDirectionDialog({mode:'regenerate_one',targetCardId:card.id}); }}>只重做这张</Button>
                         </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+                {(workbench.directionSet.combined ?? []).length > 0 && (
+                  <div className="mt-6 space-y-3">
+                    <h3 className="text-sm font-medium text-text">组合方向</h3>
+                    {(workbench.directionSet.combined ?? []).map(item => (
+                      <Card key={item.candidateId} className={clsx(item.card.selected && 'ring-1 ring-primary')}>
+                        <p className="text-sm font-medium text-text">{item.card.hook}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                          {[
+                            ['类型', item.card.genre], ['主角', item.card.protagonist], ['核心冲突', item.card.coreConflict],
+                            ['成长代价', item.card.growthCost], ['节奏', item.card.pacing], ['结局方向', item.card.ending],
+                          ].map(([label, value]) => <p key={label} className="text-sm text-text-sub"><span className="text-text-muted">{label}：</span>{value}</p>)}
+                        </div>
+                        <p className="text-xs text-text-muted mt-3">来源：{workbench.directionActions?.find(action => action.resultCandidateId === item.candidateId)?.sourceCardIds?.join('、') || '已保留方向'}</p>
+                        <Button variant="primary" size="sm" className="mt-3" disabled={busy || generating || workbench.readOnly} onClick={() => void run(() => studio.selectCreationDirection(item.candidateId, item.card.id)).catch(() => undefined)}>采用这个组合方向</Button>
                       </Card>
                     ))}
                   </div>
@@ -605,6 +685,33 @@ export default function Cockpit() {
             </div>
           ))}
         </div>
+      </Modal>
+
+      <Modal open={Boolean(directionDialog)} onClose={() => setDirectionDialog(null)} title={directionDialog?.mode === 'combine' ? '组合保留方向' : '重做方向卡'}>
+        {directionDialog && (
+          <div className="space-y-4">
+            <p className="text-sm text-text-sub">{directionDialog.mode === 'combine' ? `将 ${keptIds.length} 张已保留方向组合成一个独立候选，原方向卡会继续保留。` : '只更新目标卡，另外两张方向卡保持不变。'}</p>
+            <Textarea value={directionInstruction} onChange={event => setDirectionInstruction(event.target.value)} placeholder={directionDialog.mode === 'combine' ? '说明希望保留的卖点、冲突取舍和组合方式…' : '可选：说明希望调整的方向…'} className="min-h-[110px]" />
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setDirectionDialog(null)}>取消</Button>
+              <Button variant="primary" disabled={busy || (directionDialog.mode === 'combine' && !directionInstruction.trim())} onClick={() => void previewDirectionAction()}>查看费用与影响</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={Boolean(directionPreview)} onClose={() => void rejectDirectionAction()} title="确认方向操作">
+        {directionPreview && (
+          <div className="space-y-4">
+            <p className="text-sm text-text-sub">{directionPreview.mode === 'combine' ? `将精确使用 ${directionPreview.sourceCardIds?.length ?? 0} 张已保留卡。` : `只重做方向卡 ${directionPreview.targetCardId}。`}</p>
+            <p className="text-sm text-text-sub">预计调用 {directionPreview.cost.estimatedCalls} 次；Token 上限：{directionPreview.cost.runBudgetUnlimited ? '未设置' : directionPreview.cost.maxRunTokens}。金额按模型服务商实际用量计算。</p>
+            {(directionPreview.cost.roleModels ?? []).map(model => <p key={model.role} className="text-xs text-text-sub">{model.role}：{model.provider} / {model.model}</p>)}
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => void rejectDirectionAction()}>取消</Button>
+              <Button variant="primary" disabled={busy || directionPreview.stale} onClick={() => void confirmDirectionAction()}>确认执行</Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
