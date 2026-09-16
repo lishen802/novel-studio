@@ -31,9 +31,25 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { Modal } from '../components/ui/Modal';
 import { SamplePanel } from '../components/creation/SamplePanel';
 import { CreationProgress } from '../components/creation/CreationProgress';
-import { RevisionPanel, type RevisionCard } from '../components/creation/RevisionPanel';
+import { RevisionPanel, type RevisionAllow, type RevisionCard } from '../components/creation/RevisionPanel';
 import { CandidateFields } from '../components/creation/CandidateFields';
 import { EntryPanel } from '../components/creation/EntryPanel';
+import { CandidateVersions } from '../components/creation/CandidateVersions';
+import { StructureEditor } from '../components/creation/StructureEditor';
+import { ReviewDecisionButtons, ReviewStateBadge, reviewNavSuffix } from '../components/creation/ReviewDecision';
+import {
+  compareCandidateVersions,
+  demoRevisionAction,
+  initialCandidateVersions,
+  initialReviewUnits,
+  initialStructureCollections,
+  reviewScopeLabels,
+  reviewScopes,
+  structureEntityTitle,
+  type CandidateVersionView,
+  type ReviewUnitView,
+  type StructureCollectionView,
+} from '../mock/creation';
 import { useApp } from '../store/useApp';
 import { getActiveModel } from '../types';
 
@@ -180,7 +196,7 @@ const initialContext: CreativeContext = {
 const roadmapDemo = roadmapNavItems({book:{id:'b',title:'全书',position:1},volumes:[{id:'v1',parentId:'b',title:'归途',position:1},{id:'v2',parentId:'b',title:'归途',position:2}],arcs:[{id:'a1',parentId:'v1',title:'追查旧信',position:1},{id:'a2',parentId:'v2',title:'兑现承诺',position:1}],chapters:[{id:'c1',parentId:'a1',title:'来信',position:1},{id:'c2',parentId:'a2',title:'来信',position:1}]});
 export default function Cockpit() {
  const [roadmapSelection,setRoadmapSelection]=useState('a1');
- const [revisionDemo,setRevisionDemo]=useState<RevisionCard[]>([]);
+ const [revisionDemo,setRevisionDemo]=useState<RevisionCard[]>([demoRevisionAction]);
  const [fieldDemo,setFieldDemo] = useState({candidateId:'demo-1',version:1,fields:[{path:'/directions/@a/hook',label:'卖点',group:'故事方向 · A',value:'一座雾中灯塔，三任守塔人接连失踪。',locked:false},{path:'/characters/@hero/secret',label:'秘密',group:'人物 · 沈知秋',value:'曾见过一封未寄出的信。',locked:false}]});
  const [sampleCard,setSampleCard] = useState('');
  const [samplePreview,setSamplePreview] = useState<{id:string;status:string;pointOfView:string;tone:string;constraints:string[];targetRunes:number}|null>(null);
@@ -198,9 +214,92 @@ export default function Cockpit() {
   const [editingDirection, setEditingDirection] = useState<string | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [nextHint, setNextHint] = useState('输入你的想法，或让 AI 基于当前上下文给出三个不同方向。');
+  // R4 四项交互都只改本地候选：逐项审阅、候选版本、结构增删与修订结果的勾选采用。
+  const [reviewUnits, setReviewUnits] = useState<ReviewUnitView[]>(initialReviewUnits);
+  const [structure, setStructure] = useState<StructureCollectionView[]>(initialStructureCollections);
+  const [versions, setVersions] = useState<CandidateVersionView[]>(initialCandidateVersions);
 
   const keptCount = directions.filter((d) => d.kept).length;
   const acceptedCount = draftSections.filter((s) => s.accepted).length;
+  const acceptedUnits = reviewUnits.filter((u) => u.accepted).length;
+  const rejectedUnits = reviewUnits.filter((u) => u.rejected).length;
+  const unreviewedUnits = reviewUnits.filter((u) => !u.accepted && !u.rejected).length;
+  // 路线图导航只能通过标题后缀呈现审阅状态，节点身份仍由 id 决定。
+  const roadmapItems = roadmapDemo.map((item) => {
+    const unit = reviewUnits.find((u) => u.id === item.id);
+    return { ...item, title: `${item.title}${unit ? reviewNavSuffix(unit.accepted, unit.rejected) : ''}` };
+  });
+
+  // 结构新增按标识去重写入，实体标题取候选载荷里的名称或标题字段。
+  const addStructureEntity = (collection: string, entityKey: string, value: string) => {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    setStructure((prev) =>
+      prev.map((item) =>
+        item.collection === collection && !item.entities.some((entity) => entity.key === entityKey)
+          ? { ...item, entities: [...item.entities, { key: entityKey, title: structureEntityTitle(collection, parsed, entityKey) }] }
+          : item
+      )
+    );
+  };
+
+  const removeStructureEntity = (collection: string, entityKey: string) => {
+    setStructure((prev) =>
+      prev.map((item) =>
+        item.collection === collection
+          ? { ...item, entities: item.entities.filter((entity) => entity.key !== entityKey) }
+          : item
+      )
+    );
+  };
+
+  // 修订演示：提案只记录本次授权；确认后生成本地文本差异；采用时按勾选路径写回，结构差异按实体整组写入。
+  const previewRevision = async (candidateId: string, path: string, instruction: string, key: string, allow: RevisionAllow) => {
+    const field = fieldDemo.fields.find((f) => f.path === path)!;
+    setRevisionDemo([{
+      actionId: key, argumentsHash: key, idempotencyKey: key, candidateId, version: fieldDemo.version, state: 'pending_confirmation',
+      instruction, targets: [field], preserved: fieldDemo.fields.filter((f) => f.locked),
+      cost: { estimatedCalls: 2, maxRunTokens: 30000, runBudgetUnlimited: false, roleModels: [{ role: 'planner', provider: '示例服务', model: '修订模型' }, { role: 'continuity_reviewer', provider: '示例服务', model: '审阅模型' }] },
+      runId: '', quality: '', summary: '', stale: false, canApply: false, applied: false, diffs: [], allow,
+    }]);
+  };
+
+  const confirmRevision = async (action: RevisionCard) => {
+    setRevisionDemo((prev) =>
+      prev.map((a) =>
+        a.actionId === action.actionId
+          ? {
+              ...a, state: 'succeeded', quality: 'needs_review', canApply: true,
+              summary: '本地交互演示，未执行真实模型审阅；采用后按待复核候选处理。',
+              diffs: a.targets.map((field) => ({ path: field.path, label: field.label, group: field.group, kind: 'text' as const, before: field.value, after: `${field.value} 一封新信让追查有了明确方向。` })),
+            }
+          : a
+      )
+    );
+  };
+
+  const applyRevision = async (action: RevisionCard, paths?: string[]) => {
+    const applied = paths ?? action.diffs.map((diff) => diff.path);
+    const textDiffs = action.diffs.filter((diff) => diff.kind === 'text' && applied.includes(diff.path));
+    setFieldDemo((old) => ({
+      ...old,
+      version: old.version + 1,
+      candidateId: `demo-${old.version + 1}`,
+      fields: old.fields.map((field) => {
+        const diff = textDiffs.find((item) => item.path === field.path);
+        return diff ? { ...field, value: diff.after } : field;
+      }),
+    }));
+    for (const diff of action.diffs) {
+      if (diff.kind === 'text' || !applied.includes(diff.path)) continue;
+      const raw = diff.kind === 'add_entity' ? diff.after : diff.before;
+      const entity = JSON.parse(raw) as Record<string, unknown>;
+      const collection = diff.path.split('/')[1] ?? '';
+      const entityKey = String(entity.id ?? entity.name ?? entity.title ?? diff.path);
+      if (diff.kind === 'add_entity') addStructureEntity(collection, entityKey, raw);
+      else removeStructureEntity(collection, entityKey);
+    }
+    setRevisionDemo((prev) => prev.map((a) => (a.actionId === action.actionId ? { ...a, applied: true, canApply: false, appliedPaths: applied } : a)));
+  };
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -308,11 +407,48 @@ export default function Cockpit() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Main creative area */}
-        <main className="flex-1 overflow-auto p-8"><details className="mb-6 rounded-xl border border-border bg-surface p-4"><summary className="text-sm cursor-pointer">路线图导航演示</summary><p className="my-3 text-xs text-text-muted">仅本地演示，不调用模型。相同标题的卷与章节分别保留自己的位置和身份。</p><div className="flex gap-6"><aside className="w-48 shrink-0"><RoadmapNavigation items={roadmapDemo} selectedId={roadmapSelection} onSelect={setRoadmapSelection}/></aside><section className="p-4"><h3>{roadmapDemo.find(n=>n.id===roadmapSelection)?.title}</h3><p className="mt-2 text-sm text-text-sub">{['v2','a2','c2'].includes(roadmapSelection)?'第二卷 · 兑现承诺':'第一卷 · 追查旧信'}</p></section></div></details>
+        <main className="flex-1 overflow-auto p-8">
+          <section aria-label="逐项审阅" className="max-w-5xl mx-auto mb-6 rounded-xl border border-border bg-surface p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-medium text-text">逐项审阅</h2>
+                <p className="mt-1 text-xs text-text-muted">原型演示：仅本地状态，不调用模型。</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <p role="status" className="text-sm text-text-sub">已接受 {acceptedUnits} · 已排除 {rejectedUnits} · 未审阅 {unreviewedUnits}{unreviewedUnits === 0 ? ' · 已全部决定' : ''}</p>
+                <Button size="sm" aria-label={`全部接受（${reviewUnits.length} 项）`} disabled={reviewUnits.length === 0} onClick={() => setReviewUnits((prev) => prev.map((u) => ({ ...u, accepted: true, rejected: false })))}>全部接受（{reviewUnits.length} 项）</Button>
+              </div>
+            </div>
+            <div className="space-y-4">
+              {reviewScopes.map((scope) => (
+                <div key={scope} className="space-y-2">
+                  <h3 className="text-xs font-medium text-text-sub uppercase tracking-wider">{reviewScopeLabels[scope]}</h3>
+                  <ul className="space-y-1.5">
+                    {reviewUnits.filter((unit) => unit.scope === scope).map((unit) => (
+                      <li key={unit.id} aria-label={`${unit.group} · ${unit.title}`} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface-hover px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <ReviewStateBadge accepted={unit.accepted} rejected={unit.rejected} />
+                          <span className="text-sm text-text">{unit.title}</span>
+                          <span className="truncate text-xs text-text-muted">{unit.summary}</span>
+                        </div>
+                        <ReviewDecisionButtons name={unit.title} accepted={unit.accepted} rejected={unit.rejected} onDecide={(decision) => setReviewUnits((prev) => prev.map((u) => (u.id === unit.id ? { ...u, accepted: decision === 'accept', rejected: decision === 'reject' } : u)))} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-text-muted">接受只记录审阅决定；排除表示入档时跳过该单位。两者都不会改写候选内容，也不影响锁定与入档。</p>
+          </section>
+          <div className="max-w-5xl mx-auto">
+            <StructureEditor collections={structure} onAdd={async (collection, entityKey, value) => { addStructureEntity(collection, entityKey, value); }} onDelete={async (collection, entityKey) => { removeStructureEntity(collection, entityKey); }} />
+          </div>
+          <details className="mb-6 rounded-xl border border-border bg-surface p-4"><summary className="text-sm cursor-pointer">路线图导航演示</summary><p className="my-3 text-xs text-text-muted">仅本地演示，不调用模型。相同标题的卷与章节分别保留自己的位置和身份。</p><div className="flex gap-6"><aside className="w-48 shrink-0"><RoadmapNavigation items={roadmapItems} selectedId={roadmapSelection} onSelect={setRoadmapSelection}/></aside><section className="p-4"><h3>{roadmapItems.find(n=>n.id===roadmapSelection)?.title}</h3><p className="mt-2 text-sm text-text-sub">{['v2','a2','c2'].includes(roadmapSelection)?'第二卷 · 兑现承诺':'第一卷 · 追查旧信'}</p></section></div></details>
           {sampleCard && entryPreview.kind === 'idea' && <SamplePanel preview directionCandidateId="prototype-direction" directionCardId={sampleCard} version={1} runVersion={0} sample={samplePreview} onSave={async (value) => {setSamplePreview({...value,id:String(Date.now()),status:'prepared'});}} />}
-          <RevisionPanel editor={fieldDemo} actions={revisionDemo} preview onPreview={async(candidateId,path,instruction,key)=>{const field=fieldDemo.fields.find(f=>f.path===path)!;setRevisionDemo([{actionId:key,argumentsHash:key,idempotencyKey:key,candidateId,version:fieldDemo.version,state:'pending_confirmation',instruction,targets:[field],preserved:fieldDemo.fields.filter(f=>f.locked),cost:{estimatedCalls:2,maxRunTokens:30000,runBudgetUnlimited:false,roleModels:[{role:'planner',provider:'示例服务',model:'修订模型'},{role:'continuity_reviewer',provider:'示例服务',model:'审阅模型'}]},runId:'',quality:'',summary:'',stale:false,canApply:false,applied:false,diffs:[]}]);}} onConfirm={async(action)=>setRevisionDemo(old=>old.map(a=>a.actionId===action.actionId?{...a,state:'succeeded',quality:'passed',summary:'本地交互演示，未执行真实模型审阅。',canApply:true,diffs:a.targets.map(f=>({label:f.label,group:f.group,before:f.value,after:f.value+' 一封新信让追查有了明确方向。'}))}:a))} onReject={async(id)=>setRevisionDemo(old=>old.filter(a=>a.actionId!==id))} onApply={async(action)=>{setFieldDemo(old=>({...old,version:old.version+1,candidateId:`demo-${old.version+1}`,fields:old.fields.map(f=>f.path===action.targets[0]?.path?{...f,value:action.diffs[0].after}:f)}));setRevisionDemo(old=>old.map(a=>a.actionId===action.actionId?{...a,applied:true,canApply:false}:a));}}/>
+          <RevisionPanel editor={fieldDemo} actions={revisionDemo} structure={structure} preview onPreview={previewRevision} onConfirm={confirmRevision} onReject={async(id)=>setRevisionDemo(old=>old.filter(a=>a.actionId!==id))} onApply={applyRevision}/>
           <CandidateFields editor={fieldDemo} preview onSave={async(_,changes)=>setFieldDemo(old=>({...old,candidateId:`demo-${old.version+1}`,version:old.version+1,fields:old.fields.map(f=>({...f,value:changes[f.path]??f.value}))}))} onLock={async(_,path,locked)=>setFieldDemo(old=>({...old,fields:old.fields.map(f=>f.path===path?{...f,locked}:f)}))}/>
           <EntryPanel entry={entryPreview} contentVersion={1} runSlotVersion={0} onSave={async (kind, material) => { setEntryPreview({ id: String(Date.now()), kind, material }); }} />
+          <CandidateVersions stage="proposal" baseCandidateId={versions.find((v) => v.current)?.candidateId ?? ''} versions={versions} onUseVersion={(candidateId) => setVersions((prev) => prev.map((version) => ({ ...version, current: version.candidateId === candidateId })))} onCompare={async (_stage, baseCandidateId) => compareCandidateVersions(baseCandidateId)} />
           {entryPreview.kind === 'author_plan' && <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-text-sub">已有方案入口预览：方向不适用，保存材料后进入缺口检查与候选复用。此浏览器原型未接模型解析，真实调用未就绪。</div>}
           {entryPreview.kind !== 'author_plan' && <>
 
