@@ -274,7 +274,7 @@ func TestCreateRunValidatesAuthorDirectedBaseCandidate(t *testing.T) {
 	base, directive := authorDirectedBase()
 	request := authorDirectedRequest(base, directive)
 	request.WorkflowID = agentassets.StoryAuthorReviseWorkflowID
-	request.WorkflowVersion = agentassets.StoryProductWorkflowVersion
+	request.WorkflowVersion = agentassets.StoryAuthorReviseWorkflowVersion
 
 	valid := request
 	if _, err := service.CreateRun(context.Background(), valid); err != nil {

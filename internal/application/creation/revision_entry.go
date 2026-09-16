@@ -69,17 +69,12 @@ type revisionInput struct {
 }
 
 func revisionBinding() stageBinding {
-	return stageBinding{WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, Version: 1, SchemaID: "story_candidate_revision.schema", SchemaVersion: 1}
+	return stageBinding{WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, Version: agentassets.StoryCandidateRevisionWorkflowVersion, SchemaID: "story_candidate_revision.schema", SchemaVersion: 2}
 }
 
-// revisionBindingFor 路线图 v3 使用允许规划目标字段的修订合同，旧四类载荷仍走冻结 v1。
-func revisionBindingFor(candidate creationdomain.Candidate) stageBinding {
-	binding := revisionBinding()
-	if candidate.Kind == creationdomain.KindRoadmap && candidate.PayloadSchemaVersion >= 3 {
-		binding.Version = agentassets.StoryCandidateRevisionWorkflowVersionV2
-		binding.SchemaVersion = 2
-	}
-	return binding
+// revisionBindingFor 返回当前统一的候选修订合同。
+func revisionBindingFor(_ creationdomain.Candidate) stageBinding {
+	return revisionBinding()
 }
 
 // PreviewRevision 冻结作者要求、候选、保持项、模型和费用范围；预览不调用模型。

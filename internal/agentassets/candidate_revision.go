@@ -8,17 +8,15 @@ import (
 const StoryCandidateRevisionWorkflowID = "story.author_revision"
 
 var (
-	//go:embed assets/prompts/story_candidate_revision_v1.tmpl
+	//go:embed assets/prompts/story_candidate_revision.tmpl
 	candidateRevisionPrompt string
-	//go:embed assets/prompts/review_candidate_revision_v1.tmpl
+	//go:embed assets/prompts/review_candidate_revision.tmpl
 	candidateRevisionReviewPrompt string
-	//go:embed assets/schemas/story_candidate_revision_v1.json
+	//go:embed assets/schemas/story_candidate_revision.json
 	candidateRevisionSchema []byte
-	//go:embed assets/schemas/story_candidate_revision_v2.json
-	candidateRevisionSchemaV2 []byte
 )
 
-const StoryCandidateRevisionWorkflowVersionV2 = 2
+const StoryCandidateRevisionWorkflowVersion = 2
 
 // candidateRevisionWorkflow 冻结先修订后独立审阅的流程，结果质量由审阅出口决定。
 func candidateRevisionWorkflow(version int, revise, review, schema, reviewSchema, assembler agentdomain.VersionBinding) agentdomain.WorkflowDefinition {

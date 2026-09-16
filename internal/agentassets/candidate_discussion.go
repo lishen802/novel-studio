@@ -12,9 +12,9 @@ const (
 )
 
 var (
-	//go:embed assets/prompts/story_candidate_discussion_v1.tmpl
+	//go:embed assets/prompts/story_candidate_discussion.tmpl
 	candidateDiscussionPrompt string
-	//go:embed assets/schemas/story_candidate_discussion_v1.json
+	//go:embed assets/schemas/story_candidate_discussion.json
 	candidateDiscussionSchema []byte
 )
 

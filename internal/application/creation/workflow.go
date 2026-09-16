@@ -38,13 +38,13 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 		}, nil
 	case creationdomain.StagePeopleWorld:
 		return stageBinding{
-			WorkflowID: agentassets.StoryPeopleWorldWorkflowID, Version: agentassets.StoryPeopleWorldWorkflowVersionV2,
+			WorkflowID: agentassets.StoryPeopleWorldWorkflowID, Version: agentassets.StoryPeopleWorldWorkflowVersion,
 			Kind: creationdomain.KindPeopleWorld, SchemaID: "story_cast.schema", SchemaVersion: 2,
 			Stage: stage,
 		}, nil
 	case creationdomain.StageRoadmap:
 		return stageBinding{
-			WorkflowID: agentassets.StoryRoadmapWorkflowID, Version: agentassets.StoryRoadmapWorkflowVersionV3,
+			WorkflowID: agentassets.StoryRoadmapWorkflowID, Version: agentassets.StoryRoadmapWorkflowVersion,
 			Kind: creationdomain.KindRoadmap, SchemaID: "story_roadmap.schema", SchemaVersion: 3,
 			Stage: stage,
 		}, nil
@@ -53,32 +53,13 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 	}
 }
 
-// bindingByWorkflow 按冻结运行的 WorkflowBinding 反查阶段绑定，供恢复对账物化结果。
+// bindingByWorkflow 按当前 WorkflowBinding 反查阶段绑定，供恢复对账物化结果。
 func bindingByWorkflow(workflowID string, version int) (stageBinding, error) {
-	if workflowID == "story.author_material" && version == 1 {
-		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindProposal, SchemaID: "author_material.schema", SchemaVersion: 1, Stage: creationdomain.StageIntent}, nil
-	}
 	for _, stage := range []creationdomain.Stage{creationdomain.StageIntent, creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap} {
 		binding, err := bindingForEntry(creationdomain.EntryAuthorPlan, stage)
 		if err == nil && binding.WorkflowID == workflowID && binding.Version == version {
 			return binding, nil
 		}
-	}
-	if workflowID == agentassets.StoryPeopleWorldWorkflowID && version == 1 {
-		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindPeopleWorld,
-			SchemaID: "story_cast.schema", SchemaVersion: 1, Stage: creationdomain.StagePeopleWorld}, nil
-	}
-	if workflowID == agentassets.StoryRoadmapWorkflowID && version == 1 {
-		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindRoadmap,
-			SchemaID: "story_roadmap.schema", SchemaVersion: 1, Stage: creationdomain.StageRoadmap}, nil
-	}
-	if workflowID == agentassets.StoryRoadmapWorkflowID && version == agentassets.StoryRoadmapWorkflowVersionV2 {
-		return stageBinding{WorkflowID: workflowID, Version: version, Kind: creationdomain.KindRoadmap,
-			SchemaID: "story_roadmap.schema", SchemaVersion: 2, Stage: creationdomain.StageRoadmap}, nil
-	}
-	if workflowID == "story.author_roadmap" && version == 1 {
-		return stageBinding{WorkflowID: workflowID, Version: 1, Kind: creationdomain.KindRoadmap,
-			SchemaID: "story_roadmap.schema", SchemaVersion: 2, Stage: creationdomain.StageRoadmap}, nil
 	}
 	for _, stage := range generateStages() {
 		binding, err := bindingFor(stage)
@@ -275,7 +256,7 @@ func generateSources(session creationdomain.Session, candidates []creationdomain
 	return sources, nil
 }
 
-// bindingForEntry 为已有方案选择新冻结工作流，保留灵感链路的旧版本。
+// bindingForEntry 为已有方案选择当前专用工作流。
 func bindingForEntry(kind creationdomain.EntryKind, stage creationdomain.Stage) (stageBinding, error) {
 	binding, err := bindingFor(stage)
 	if err != nil {
@@ -293,7 +274,7 @@ func bindingForEntry(kind creationdomain.EntryKind, stage creationdomain.Stage) 
 		binding.Version = 1
 	case creationdomain.StageRoadmap:
 		binding.WorkflowID = "story.author_roadmap"
-		binding.Version = agentassets.StoryAuthorRoadmapWorkflowVersionV2
+		binding.Version = agentassets.StoryAuthorRoadmapWorkflowVersion
 	}
 	return binding, nil
 }

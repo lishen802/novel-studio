@@ -3,7 +3,6 @@ package agentassets
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -34,18 +33,45 @@ func TestRegistryRequiresExactVersionAndReturnsCopies(t *testing.T) {
 	}
 }
 
-func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
+func TestBuiltinRegistryKeepsSingleCurrentVersionPerEmbeddedAsset(t *testing.T) {
 	registry, err := Builtin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyHashes := map[string]string{
-		BaselineWorkflowID + "@1":         "d3b99323219a347153d613743dad46e50f5dfe7f060c8b531464b61c845f2b5b",
-		QualityChapterWorkflowID + "@1":   "8cd791a01ce61989c61f4c4f057cb040cd0f6d1e28f06ef116e5022285582a68",
-		QualityBlueprintWorkflowID + "@1": "2ae580fe57ef8ad6960717925b098c545359a419c8b0406d8533d25410fadeba",
-		StoryPeopleWorldWorkflowID + "@1": "c65e4f4e77e021de2f773f0dc0cbc75e92da40afed8f24e2b566894cb1018205",
-		// roadmap v1 哈希在引入 v2 前采集：定义哈希涵盖 Prompt/Schema 绑定哈希，不变即证明 v1 资产未被改动。
-		StoryRoadmapWorkflowID + "@1": "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1",
+
+	assertUnique := func(kind string, bindings []key) {
+		t.Helper()
+		seen := make(map[string]int, len(bindings))
+		for _, binding := range bindings {
+			if previous, ok := seen[binding.id]; ok {
+				t.Errorf("%s %q 同时注册了版本 %d 和 %d", kind, binding.id, previous, binding.version)
+			}
+			seen[binding.id] = binding.version
+		}
+	}
+
+	prompts := make([]key, 0, len(registry.prompts))
+	for binding := range registry.prompts {
+		prompts = append(prompts, binding)
+	}
+	schemas := make([]key, 0, len(registry.schemas))
+	for binding := range registry.schemas {
+		schemas = append(schemas, binding)
+	}
+	assemblers := make([]key, 0, len(registry.assemblers))
+	for binding := range registry.assemblers {
+		assemblers = append(assemblers, binding)
+	}
+
+	assertUnique("Prompt", prompts)
+	assertUnique("Schema", schemas)
+	assertUnique("Assembler", assemblers)
+}
+
+func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
 	}
 	cases := []struct {
 		id      string
@@ -64,17 +90,11 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{SlotParallelWorkflowID, SlotParallelWorkflowVersion, []string{"director", "skeleton", "slots_dialogue", "slots_action", "slots_interiority", "slots_description", "slots_transition", "integrate", "review", "revision"}},
 		{StoryDirectionsWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
 		{StoryProposalWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review", "revision"}},
-		{StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
-		{StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2, []string{"blueprint", "review"}},
-		{StoryRoadmapWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
-		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
-		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV3, []string{"blueprint", "review"}},
-		{"story.author_roadmap", 1, []string{"blueprint", "review"}},
-		{"story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2, []string{"blueprint", "review"}},
-		{StoryCandidateRevisionWorkflowID, 1, []string{"revise", "review"}},
-		{StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersionV2, []string{"revise", "review"}},
+		{StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersion, []string{"blueprint", "review"}},
+		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersion, []string{"blueprint", "review"}},
+		{"story.author_roadmap", StoryAuthorRoadmapWorkflowVersion, []string{"blueprint", "review"}},
+		{StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersion, []string{"revise", "review"}},
 		{StoryCandidateDiscussionWorkflowID, StoryCandidateDiscussionWorkflowVersion, []string{"discuss"}},
-		{StoryAuthorReviseWorkflowID, StoryProductWorkflowVersion, []string{"revise"}},
 		{StoryAuthorReviseWorkflowID, StoryAuthorReviseWorkflowVersion, []string{"revise"}},
 	}
 	for _, test := range cases {
@@ -83,9 +103,6 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		}, test.id, test.version)
 		if compileErr != nil {
 			t.Fatalf("compile %s@%d: %v", test.id, test.version, compileErr)
-		}
-		if want, ok := legacyHashes[fmt.Sprintf("%s@%d", test.id, test.version)]; ok && compiled.Workflow.Hash != want {
-			t.Fatalf("%s hash = %s, want immutable v1 hash %s", test.id, compiled.Workflow.Hash, want)
 		}
 		if len(compiled.Nodes) != len(test.nodes) {
 			t.Fatalf("%s nodes: %#v", test.id, compiled.Nodes)
@@ -157,134 +174,89 @@ func TestSlotParallelKeepsEnhancedDirectorAndDownstreamContract(t *testing.T) {
 	}
 }
 
-// TestBuiltinRegistersRoadmapV2AlongsideImmutableV1 验证 roadmap v2 与 v1 并存注册：
-// v2 生成节点绑定 v2 Prompt/Schema，v1 定义哈希保持引入 v2 之前的原值。
-func TestBuiltinRegistersRoadmapV2AlongsideImmutableV1(t *testing.T) {
+// TestBuiltinRegistersCurrentPlanningAssets 验证规划流程只注册当前资源合同。
+func TestBuiltinRegistersCurrentPlanningAssets(t *testing.T) {
 	registry, err := Builtin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryProductWorkflowVersion)
-	if err != nil {
-		t.Fatalf("roadmap v1: %v", err)
-	}
-	if v1.Definition.DefinitionHash != "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1" {
-		t.Fatalf("roadmap v1 hash = %s, want immutable pre-v2 hash", v1.Definition.DefinitionHash)
-	}
-	v2, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2)
-	if err != nil {
-		t.Fatalf("roadmap v2: %v", err)
-	}
-	if v2.Definition.DefinitionHash == v1.Definition.DefinitionHash {
-		t.Fatal("roadmap v2 must not reuse v1 definition hash")
-	}
-	v2Blueprint := v2.Definition.Nodes[0]
-	if v2Blueprint.ID != "blueprint" || v2Blueprint.Prompt.Version != 2 || v2Blueprint.Schema.Version != 2 {
-		t.Fatalf("roadmap v2 blueprint node must bind v2 prompt/schema: %+v", v2Blueprint)
-	}
-	v1Blueprint := v1.Definition.Nodes[0]
-	if v1Blueprint.Prompt.Version != 1 || v1Blueprint.Schema.Version != 1 {
-		t.Fatalf("roadmap v1 blueprint node must keep v1 bindings: %+v", v1Blueprint)
-	}
-	v2Prompt, err := registry.Prompt(context.Background(), "story_roadmap.prompt", 2)
-	if err != nil || !reflect.DeepEqual(v2Prompt.Variables, []string{"Task", "Context"}) {
-		t.Fatalf("roadmap v2 prompt: %+v, %v", v2Prompt, err)
-	}
-	v2Schema, err := registry.Schema(context.Background(), "story_roadmap.schema", 2)
-	if err != nil || len(v2Schema.JSON) == 0 {
-		t.Fatalf("roadmap v2 schema: %v", err)
-	}
-	for _, marker := range []string{`"id"`, `"arc_ref"`, `"strength"`} {
-		if !strings.Contains(string(v2Schema.JSON), marker) {
-			t.Fatalf("roadmap v2 schema missing contract marker %s", marker)
-		}
-	}
-}
 
-// TestBuiltinRegistersRoadmapV3AlongsideImmutableV2 验证 v3 与冻结 v1/v2 并存：
-// 新工作流绑定规划目标 Prompt/Schema，不得改写旧定义哈希。
-func TestBuiltinRegistersRoadmapV3AlongsideImmutableV2(t *testing.T) {
-	registry, err := Builtin()
+	roadmap, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryProductWorkflowVersion)
+	blueprint := roadmap.Definition.Nodes[0]
+	if blueprint.Prompt.Version != 3 || blueprint.Schema.Version != 3 {
+		t.Fatalf("roadmap current bindings = %+v", blueprint)
+	}
+	roadmapSchema, err := registry.Schema(context.Background(), "story_roadmap.schema", 3)
 	if err != nil {
-		t.Fatalf("roadmap v1: %v", err)
-	}
-	if v1.Definition.DefinitionHash != "e83a2df35196daf7d425d661098bbcad0973029d5982b97963d10522909c51f1" {
-		t.Fatalf("roadmap v1 hash = %s, want immutable pre-v2 hash", v1.Definition.DefinitionHash)
-	}
-	v2, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2)
-	if err != nil {
-		t.Fatalf("roadmap v2: %v", err)
-	}
-	v3, err := registry.Workflow(context.Background(), StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV3)
-	if err != nil {
-		t.Fatalf("roadmap v3: %v", err)
-	}
-	if v2.Definition.DefinitionHash == v1.Definition.DefinitionHash || v3.Definition.DefinitionHash == v2.Definition.DefinitionHash {
-		t.Fatal("roadmap v3 不得复用 v1/v2 定义哈希")
-	}
-	v3Blueprint := v3.Definition.Nodes[0]
-	if v3Blueprint.ID != "blueprint" || v3Blueprint.Prompt.Version != 3 || v3Blueprint.Schema.Version != 3 {
-		t.Fatalf("roadmap v3 必须绑定 v3 prompt/schema: %+v", v3Blueprint)
-	}
-	if v2.Definition.Nodes[0].Prompt.Version != 2 || v2.Definition.Nodes[0].Schema.Version != 2 {
-		t.Fatalf("roadmap v2 bindings changed: %+v", v2.Definition.Nodes[0])
-	}
-	v3Prompt, err := registry.Prompt(context.Background(), "story_roadmap.prompt", 3)
-	if err != nil || !reflect.DeepEqual(v3Prompt.Variables, []string{"Task", "Context"}) {
-		t.Fatalf("roadmap v3 prompt: %+v, %v", v3Prompt, err)
-	}
-	v3Schema, err := registry.Schema(context.Background(), "story_roadmap.schema", 3)
-	if err != nil || len(v3Schema.JSON) == 0 {
-		t.Fatalf("roadmap v3 schema: %v", err)
+		t.Fatal(err)
 	}
 	for _, marker := range []string{`"reader_expectation"`, `"stage_payoff"`, `"irreversible_change"`, `"ending_contribution"`, `"commitments"`, `"retained_questions"`} {
-		if !strings.Contains(string(v3Schema.JSON), marker) {
-			t.Fatalf("roadmap v3 schema missing contract marker %s", marker)
+		if !strings.Contains(string(roadmapSchema.JSON), marker) {
+			t.Fatalf("roadmap schema missing contract marker %s", marker)
 		}
 	}
-	authorV2, err := registry.Workflow(context.Background(), "story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2)
-	if err != nil || authorV2.Definition.Nodes[0].Schema.Version != 3 {
-		t.Fatalf("author_roadmap@2 必须绑定路线图 v3: %+v, %v", authorV2, err)
-	}
-	revisionV2, err := registry.Workflow(context.Background(), StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersionV2)
-	if err != nil || revisionV2.Definition.Nodes[0].Schema.Version != 2 {
-		t.Fatalf("author_revision@2 必须绑定修订 v2: %+v, %v", revisionV2, err)
-	}
-}
 
-func TestBuiltinRegistersPeopleWorldV2WithStableRelationshipReferences(t *testing.T) {
-	registry, err := Builtin()
+	peopleWorld, err := registry.Workflow(context.Background(), StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1, err := registry.Workflow(context.Background(), StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion)
-	if err != nil {
-		t.Fatalf("people/world v1: %v", err)
+	peopleNode := peopleWorld.Definition.Nodes[0]
+	if peopleNode.Prompt.Version != 2 || peopleNode.Schema.Version != 2 {
+		t.Fatalf("people/world current bindings = %+v", peopleNode)
 	}
-	v2, err := registry.Workflow(context.Background(), StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2)
-	if err != nil {
-		t.Fatalf("people/world v2: %v", err)
-	}
-	if v1.Definition.DefinitionHash == v2.Definition.DefinitionHash {
-		t.Fatal("people/world v2 must not reuse v1 definition hash")
-	}
-	if v1.Definition.Nodes[0].Prompt.Version != 1 || v1.Definition.Nodes[0].Schema.Version != 1 {
-		t.Fatalf("people/world v1 bindings changed: %+v", v1.Definition.Nodes[0])
-	}
-	if v2.Definition.Nodes[0].Prompt.Version != 2 || v2.Definition.Nodes[0].Schema.Version != 2 {
-		t.Fatalf("people/world v2 bindings = %+v", v2.Definition.Nodes[0])
-	}
-	schema, err := registry.Schema(context.Background(), "story_cast.schema", 2)
+	castSchema, err := registry.Schema(context.Background(), "story_cast.schema", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, marker := range []string{`"id"`, `"source_character_ref"`, `"target_character_ref"`} {
-		if !strings.Contains(string(schema.JSON), marker) {
-			t.Fatalf("people/world v2 schema missing %s", marker)
+		if !strings.Contains(string(castSchema.JSON), marker) {
+			t.Fatalf("people/world schema missing %s", marker)
+		}
+	}
+
+	authorRoadmap, err := registry.Workflow(context.Background(), "story.author_roadmap", StoryAuthorRoadmapWorkflowVersion)
+	if err != nil || authorRoadmap.Definition.Nodes[0].Schema.Version != 3 {
+		t.Fatalf("author roadmap current contract: %+v, %v", authorRoadmap, err)
+	}
+	revision, err := registry.Workflow(context.Background(), StoryCandidateRevisionWorkflowID, StoryCandidateRevisionWorkflowVersion)
+	if err != nil || revision.Definition.Nodes[0].Schema.Version != 2 {
+		t.Fatalf("author revision current contract: %+v, %v", revision, err)
+	}
+}
+
+func TestBuiltinDoesNotRegisterSupersededPlanningAssets(t *testing.T) {
+	registry, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	obsoleteWorkflows := []struct {
+		id      string
+		version int
+	}{
+		{StoryPeopleWorldWorkflowID, 1},
+		{StoryRoadmapWorkflowID, 1},
+		{StoryRoadmapWorkflowID, 2},
+		{"story.author_roadmap", 1},
+		{StoryCandidateRevisionWorkflowID, 1},
+		{StoryAuthorReviseWorkflowID, 1},
+		{"story.author_material", 1},
+	}
+	for _, obsolete := range obsoleteWorkflows {
+		if _, workflowErr := registry.Workflow(context.Background(), obsolete.id, obsolete.version); !errors.Is(workflowErr, ports.ErrAgentAssetNotFound) {
+			t.Errorf("obsolete workflow %s@%d error = %v", obsolete.id, obsolete.version, workflowErr)
+		}
+	}
+
+	for _, version := range []int{1, 2} {
+		if _, promptErr := registry.Prompt(context.Background(), "story_roadmap.prompt", version); !errors.Is(promptErr, ports.ErrAgentAssetNotFound) {
+			t.Errorf("obsolete roadmap prompt @%d error = %v", version, promptErr)
+		}
+		if _, schemaErr := registry.Schema(context.Background(), "story_roadmap.schema", version); !errors.Is(schemaErr, ports.ErrAgentAssetNotFound) {
+			t.Errorf("obsolete roadmap schema @%d error = %v", version, schemaErr)
 		}
 	}
 }
@@ -300,13 +272,6 @@ func TestAuthorReviseDeclaresBaseAndDirectiveSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"$task", "$context", "$base", "$directive"}
-	legacy, err := registry.Workflow(context.Background(), StoryAuthorReviseWorkflowID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(legacy.Definition.Nodes[0].InputSelectors, []string{"$task", "$context"}) || legacy.Binding.Hash == asset.Binding.Hash {
-		t.Fatal("new revision binding mutated the legacy workflow")
-	}
 	if !reflect.DeepEqual(asset.Definition.Nodes[0].InputSelectors, want) {
 		t.Fatalf("author revise selectors = %#v, want %#v", asset.Definition.Nodes[0].InputSelectors, want)
 	}

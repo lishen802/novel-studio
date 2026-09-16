@@ -32,6 +32,7 @@ func TestStoryCandidateRevisionWorkflowFourKinds(t *testing.T) {
 			req.ChapterID = ""
 			req.ChapterBaseRevision = 0
 			req.WorkflowID = agentassets.StoryCandidateRevisionWorkflowID
+			req.WorkflowVersion = agentassets.StoryCandidateRevisionWorkflowVersion
 			req.Profile.MaxRunTokens = 100000
 			req.Profile.MaxContextChars = 100000
 			req.Profile.Roles = append(req.Profile.Roles, resolvedRole(agentdomain.RoleContinuityReviewer, "independent-review-model"))
@@ -95,7 +96,7 @@ func TestStoryCandidateRevisionKeepsRoadmapV3PlanningGoals(t *testing.T) {
 	req.ChapterID = ""
 	req.ChapterBaseRevision = 0
 	req.WorkflowID = agentassets.StoryCandidateRevisionWorkflowID
-	req.WorkflowVersion = agentassets.StoryCandidateRevisionWorkflowVersionV2
+	req.WorkflowVersion = agentassets.StoryCandidateRevisionWorkflowVersion
 	req.Profile.MaxRunTokens = 100000
 	req.Profile.MaxContextChars = 100000
 	req.Profile.Roles = append(req.Profile.Roles, resolvedRole(agentdomain.RoleContinuityReviewer, "independent-review-model"))
@@ -145,6 +146,7 @@ func TestStoryCandidateRevisionStopsUnsafeOutput(t *testing.T) {
 			req.ChapterID = ""
 			req.ChapterBaseRevision = 0
 			req.WorkflowID = agentassets.StoryCandidateRevisionWorkflowID
+			req.WorkflowVersion = agentassets.StoryCandidateRevisionWorkflowVersion
 			req.Profile.MaxRunTokens = 100000
 			req.Profile.MaxContextChars = 100000
 			req.Profile.Roles = append(req.Profile.Roles, resolvedRole(agentdomain.RoleContinuityReviewer, "independent-review-model"))

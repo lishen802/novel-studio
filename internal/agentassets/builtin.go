@@ -37,148 +37,127 @@ const (
 	verifyMaxOutputTokens              = 2500
 )
 
-// roadmap v2 要求四层稳定 id、arc_ref 引用与结构化锚点；v1 保留不变，供旧运行按原定义哈希恢复。
-const StoryRoadmapWorkflowVersionV2 = 2
+// StoryRoadmapWorkflowVersion 标识当前路线图工作流合同。
+const StoryRoadmapWorkflowVersion = 3
 
-// roadmap v3 补齐故事弧规划目标；v1/v2 定义与哈希保持冻结。
-const StoryRoadmapWorkflowVersionV3 = 3
+// StoryAuthorRoadmapWorkflowVersion 标识当前已有方案路线图工作流合同。
+const StoryAuthorRoadmapWorkflowVersion = 2
 
-// story.author_roadmap@2 用 v3 Schema 补缺，不改 @1 的 v2 合同。
-const StoryAuthorRoadmapWorkflowVersionV2 = 2
+// StoryPeopleWorldWorkflowVersion 标识当前人物世界工作流合同。
+const StoryPeopleWorldWorkflowVersion = 2
 
-// StoryPeopleWorldWorkflowVersionV2 要求人物与关系使用稳定 ID；v1 保持冻结供历史运行恢复。
-const StoryPeopleWorldWorkflowVersionV2 = 2
-
-// StoryAuthorReviseWorkflowVersion 发布显式基线绑定，不修改旧版本的冻结定义。
+// StoryAuthorReviseWorkflowVersion 标识当前显式基线修订合同。
 const StoryAuthorReviseWorkflowVersion = 2
 
 var (
-	//go:embed assets/prompts/baseline_chapter_v1.tmpl
+	//go:embed assets/prompts/baseline_chapter.tmpl
 	baselinePrompt string
-	//go:embed assets/prompts/story_architect_v1.tmpl
+	//go:embed assets/prompts/story_architect.tmpl
 	storyArchitectPrompt string
-	//go:embed assets/prompts/story_directions_v1.tmpl
+	//go:embed assets/prompts/story_directions.tmpl
 	storyDirectionsPrompt string
-	//go:embed assets/prompts/story_proposal_v2.tmpl
+	//go:embed assets/prompts/story_proposal.tmpl
 	storyProposalPrompt string
-	//go:embed assets/prompts/story_cast_v1.tmpl
+	//go:embed assets/prompts/story_cast.tmpl
 	storyCastPrompt string
-	//go:embed assets/prompts/story_cast_v2.tmpl
-	storyCastPromptV2 string
-	//go:embed assets/prompts/story_roadmap_v1.tmpl
+	//go:embed assets/prompts/story_roadmap.tmpl
 	storyRoadmapPrompt string
-	//go:embed assets/prompts/story_roadmap_v2.tmpl
-	storyRoadmapPromptV2 string
-	//go:embed assets/prompts/story_roadmap_v3.tmpl
-	storyRoadmapPromptV3 string
-	//go:embed assets/prompts/chapter_plan_v1.tmpl
+	//go:embed assets/prompts/chapter_plan.tmpl
 	chapterPlanPrompt string
-	//go:embed assets/prompts/chapter_director_v2.tmpl
+	//go:embed assets/prompts/chapter_director.tmpl
 	chapterDirectorPrompt string
-	//go:embed assets/prompts/prose_writer_v1.tmpl
+	//go:embed assets/prompts/prose_writer.tmpl
 	proseWriterPrompt string
-	//go:embed assets/prompts/review_chapter_v1.tmpl
+	//go:embed assets/prompts/review_chapter.tmpl
 	reviewChapterPrompt string
-	//go:embed assets/prompts/review_blueprint_v1.tmpl
+	//go:embed assets/prompts/review_blueprint.tmpl
 	reviewBlueprintPrompt string
-	//go:embed assets/prompts/revise_draft_v1.tmpl
+	//go:embed assets/prompts/revise_draft.tmpl
 	reviseDraftPrompt string
-	//go:embed assets/prompts/revise_blueprint_v1.tmpl
+	//go:embed assets/prompts/revise_blueprint.tmpl
 	reviseBlueprintPrompt string
-	//go:embed assets/prompts/author_revise_draft_v1.tmpl
+	//go:embed assets/prompts/author_revise_draft.tmpl
 	authorReviseDraftPrompt string
-	//go:embed assets/prompts/author_revise_blueprint_v1.tmpl
+	//go:embed assets/prompts/author_revise_blueprint.tmpl
 	authorReviseBlueprintPrompt string
-	//go:embed assets/prompts/verify_revision_v1.tmpl
+	//go:embed assets/prompts/verify_revision.tmpl
 	verifyRevisionPrompt string
-	//go:embed assets/prompts/verify_revision_blueprint_v1.tmpl
+	//go:embed assets/prompts/verify_revision_blueprint.tmpl
 	verifyRevisionBlueprintPrompt string
-	//go:embed assets/prompts/chapter_skeleton_v1.tmpl
+	//go:embed assets/prompts/chapter_skeleton.tmpl
 	chapterSkeletonPrompt string
-	//go:embed assets/prompts/fill_slot_dialogue_v1.tmpl
+	//go:embed assets/prompts/fill_slot_dialogue.tmpl
 	fillSlotDialoguePrompt string
-	//go:embed assets/prompts/fill_slot_action_v1.tmpl
+	//go:embed assets/prompts/fill_slot_action.tmpl
 	fillSlotActionPrompt string
-	//go:embed assets/prompts/fill_slot_interiority_v1.tmpl
+	//go:embed assets/prompts/fill_slot_interiority.tmpl
 	fillSlotInteriorityPrompt string
-	//go:embed assets/prompts/fill_slot_description_v1.tmpl
+	//go:embed assets/prompts/fill_slot_description.tmpl
 	fillSlotDescriptionPrompt string
-	//go:embed assets/prompts/fill_slot_transition_v1.tmpl
+	//go:embed assets/prompts/fill_slot_transition.tmpl
 	fillSlotTransitionPrompt string
-	//go:embed assets/prompts/integrate_slots_v1.tmpl
+	//go:embed assets/prompts/integrate_slots.tmpl
 	integrateSlotsPrompt string
-	//go:embed assets/schemas/chapter_draft_v1.json
+	//go:embed assets/schemas/chapter_draft.json
 	chapterDraftSchema []byte
-	//go:embed assets/schemas/story_blueprint_v1.json
+	//go:embed assets/schemas/story_blueprint.json
 	storyBlueprintSchema []byte
-	//go:embed assets/schemas/story_blueprint_v2.json
-	storyBlueprintSchemaV2 []byte
-	//go:embed assets/schemas/story_directions_v1.json
+	//go:embed assets/schemas/story_architect.json
+	storyArchitectSchema []byte
+	//go:embed assets/schemas/story_directions.json
 	storyDirectionsSchema []byte
-	//go:embed assets/schemas/story_cast_v1.json
+	//go:embed assets/schemas/story_cast.json
 	storyCastSchema []byte
-	//go:embed assets/schemas/story_cast_v2.json
-	storyCastSchemaV2 []byte
-	//go:embed assets/schemas/story_roadmap_v1.json
+	//go:embed assets/schemas/story_roadmap.json
 	storyRoadmapSchema []byte
-	//go:embed assets/schemas/story_roadmap_v2.json
-	storyRoadmapSchemaV2 []byte
-	//go:embed assets/schemas/story_roadmap_v3.json
-	storyRoadmapSchemaV3 []byte
-	//go:embed assets/schemas/chapter_plan_v1.json
+	//go:embed assets/schemas/chapter_plan.json
 	chapterPlanSchema []byte
-	//go:embed assets/schemas/chapter_plan_v2.json
+	//go:embed assets/schemas/chapter_director.json
 	chapterDirectorSchema []byte
-	//go:embed assets/schemas/review_bundle_v1.json
+	//go:embed assets/schemas/review_bundle.json
 	reviewBundleSchema []byte
-	//go:embed assets/schemas/revise_draft_v1.json
+	//go:embed assets/schemas/revise_draft.json
 	reviseDraftSchema []byte
-	//go:embed assets/schemas/revise_blueprint_v1.json
+	//go:embed assets/schemas/revise_blueprint.json
 	reviseBlueprintSchema []byte
-	//go:embed assets/schemas/author_revise_draft_v1.json
+	//go:embed assets/schemas/author_revise_draft.json
 	authorReviseDraftSchema []byte
-	//go:embed assets/schemas/author_revise_blueprint_v1.json
+	//go:embed assets/schemas/author_revise_blueprint.json
 	authorReviseBlueprintSchema []byte
-	//go:embed assets/schemas/verify_revision_v1.json
+	//go:embed assets/schemas/verify_revision.json
 	verifyRevisionSchema []byte
-	//go:embed assets/schemas/chapter_skeleton_v1.json
+	//go:embed assets/schemas/chapter_skeleton.json
 	chapterSkeletonSchema []byte
-	//go:embed assets/schemas/fill_slot_v1.json
+	//go:embed assets/schemas/fill_slot.json
 	fillSlotSchema []byte
-	//go:embed assets/assemblers/json_v1.json
+	//go:embed assets/assemblers/json.json
 	jsonAssembler []byte
 )
 
-//go:embed assets/prompts/author_material_v2.tmpl
-var authorMaterialPromptV2 string
+//go:embed assets/prompts/author_material.tmpl
+var authorMaterialPrompt string
 
-//go:embed assets/schemas/author_material_v2.json
-var authorMaterialSchemaV2 []byte
+//go:embed assets/schemas/author_material.json
+var authorMaterialSchema []byte
 
-// Builtin 构造应用随版本发布的只读资源集合；资产更新必须创建新版本。
+// Builtin 构造应用内置资源集合；开发阶段每种 Prompt、Schema 和 Assembler 只保留当前版本。
 func Builtin() (*Registry, error) {
 	candidateRevisionPromptBinding := BindingForText("story_candidate_revision.prompt", 1, []byte(candidateRevisionPrompt))
 	candidateRevisionReviewBinding := BindingForText("review_candidate_revision.prompt", 1, []byte(candidateRevisionReviewPrompt))
-	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 1, candidateRevisionSchema)
-	candidateRevisionSchemaBindingV2 := BindingForText("story_candidate_revision.schema", 2, candidateRevisionSchemaV2)
+	candidateRevisionSchemaBinding := BindingForText("story_candidate_revision.schema", 2, candidateRevisionSchema)
 	candidateDiscussionPromptBinding := BindingForText("story_candidate_discussion.prompt", 1, []byte(candidateDiscussionPrompt))
 	candidateDiscussionSchemaBinding := BindingForText("story_candidate_discussion.schema", 1, candidateDiscussionSchema)
-	materialPromptBinding := BindingForText("author_material.prompt", 1, []byte(authorMaterialPrompt))
-	materialPromptBindingV2 := BindingForText("author_material.prompt", 2, []byte(authorMaterialPromptV2))
-	materialSchemaBindingV2 := BindingForText("author_material.schema", 2, authorMaterialSchemaV2)
-	materialSchemaBinding := BindingForText("author_material.schema", 1, authorMaterialSchema)
+	materialPromptBinding := BindingForText("author_material.prompt", 2, []byte(authorMaterialPrompt))
+	materialSchemaBinding := BindingForText("author_material.schema", 2, authorMaterialSchema)
 	fillPromptBinding := BindingForText("author_plan_fill.prompt", 1, []byte(authorPlanFillPrompt))
 	baselinePromptBinding := BindingForText("baseline.chapter.prompt", 1, []byte(baselinePrompt))
 	architectPromptBinding := BindingForText("story_architect.prompt", 1, []byte(storyArchitectPrompt))
 	directionsPromptBinding := BindingForText("story_directions.prompt", 1, []byte(storyDirectionsPrompt))
 	proposalPromptBinding := BindingForText("story_proposal.prompt", 2, []byte(storyProposalPrompt))
-	castPromptBinding := BindingForText("story_cast.prompt", 1, []byte(storyCastPrompt))
-	castPromptBindingV2 := BindingForText("story_cast.prompt", 2, []byte(storyCastPromptV2))
-	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 1, []byte(storyRoadmapPrompt))
-	roadmapPromptBindingV2 := BindingForText("story_roadmap.prompt", 2, []byte(storyRoadmapPromptV2))
-	roadmapPromptBindingV3 := BindingForText("story_roadmap.prompt", 3, []byte(storyRoadmapPromptV3))
+	castPromptBinding := BindingForText("story_cast.prompt", 2, []byte(storyCastPrompt))
+	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 3, []byte(storyRoadmapPrompt))
 	planPromptBinding := BindingForText("chapter_plan.prompt", 1, []byte(chapterPlanPrompt))
-	directorPromptBinding := BindingForText("chapter_plan.prompt", 2, []byte(chapterDirectorPrompt))
+	directorPromptBinding := BindingForText("chapter_director.prompt", 1, []byte(chapterDirectorPrompt))
 	writerPromptBinding := BindingForText("prose_writer.prompt", 1, []byte(proseWriterPrompt))
 	chapterReviewPromptBinding := BindingForText("review_chapter.prompt", 1, []byte(reviewChapterPrompt))
 	blueprintReviewPromptBinding := BindingForText("review_blueprint.prompt", 1, []byte(reviewBlueprintPrompt))
@@ -187,16 +166,13 @@ func Builtin() (*Registry, error) {
 	authorDraftPromptBinding := BindingForText("author_revise_draft.prompt", 1, []byte(authorReviseDraftPrompt))
 	authorBlueprintPromptBinding := BindingForText("author_revise_blueprint.prompt", 1, []byte(authorReviseBlueprintPrompt))
 	draftSchema := BindingForText("chapter_draft.schema", 1, chapterDraftSchema)
-	blueprintSchema := BindingForText("story_blueprint.schema", 1, storyBlueprintSchema)
-	blueprintSchemaV2 := BindingForText("story_blueprint.schema", 2, storyBlueprintSchemaV2)
+	blueprintSchema := BindingForText("story_blueprint.schema", 2, storyBlueprintSchema)
+	architectSchema := BindingForText("story_architect.schema", 1, storyArchitectSchema)
 	directionsSchema := BindingForText("story_directions.schema", 1, storyDirectionsSchema)
-	castSchema := BindingForText("story_cast.schema", 1, storyCastSchema)
-	castSchemaV2 := BindingForText("story_cast.schema", 2, storyCastSchemaV2)
-	roadmapSchema := BindingForText("story_roadmap.schema", 1, storyRoadmapSchema)
-	roadmapSchemaV2 := BindingForText("story_roadmap.schema", 2, storyRoadmapSchemaV2)
-	roadmapSchemaV3 := BindingForText("story_roadmap.schema", 3, storyRoadmapSchemaV3)
+	castSchema := BindingForText("story_cast.schema", 2, storyCastSchema)
+	roadmapSchema := BindingForText("story_roadmap.schema", 3, storyRoadmapSchema)
 	planSchema := BindingForText("chapter_plan.schema", 1, chapterPlanSchema)
-	directorSchema := BindingForText("chapter_plan.schema", 2, chapterDirectorSchema)
+	directorSchema := BindingForText("chapter_director.schema", 1, chapterDirectorSchema)
 	reviewSchema := BindingForText("review_bundle.schema", 1, reviewBundleSchema)
 	draftRevisionSchema := BindingForText("revise_draft.schema", 1, reviseDraftSchema)
 	blueprintRevisionSchema := BindingForText("revise_blueprint.schema", 1, reviseBlueprintSchema)
@@ -252,7 +228,7 @@ func Builtin() (*Registry, error) {
 		MaxRevisionAttempts: 1, MaxRunTokens: 11500, RepairReserve: 1000, RevisionReserve: 1000,
 		Nodes: []agentdomain.WorkflowNode{
 			{ID: "blueprint", Capability: agentdomain.CapabilityStoryArchitect, RoleSlot: agentdomain.RolePlanner,
-				Prompt: architectPromptBinding, Schema: blueprintSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context"},
+				Prompt: architectPromptBinding, Schema: architectSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context"},
 				OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
 			{ID: "review", Capability: agentdomain.CapabilityContinuityReview, RoleSlot: agentdomain.RoleContinuityReviewer,
 				Prompt: blueprintReviewPromptBinding, Schema: reviewSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:blueprint"},
@@ -373,7 +349,7 @@ func Builtin() (*Registry, error) {
 		MaxRevisionAttempts: 1, MaxRunTokens: 11500, RepairReserve: 1000, RevisionReserve: 1000,
 		Nodes: []agentdomain.WorkflowNode{
 			{ID: "blueprint", Capability: agentdomain.CapabilityStoryArchitect, RoleSlot: agentdomain.RolePlanner,
-				Prompt: proposalPromptBinding, Schema: blueprintSchemaV2, Assembler: assembler, InputSelectors: []string{"$task", "$context"},
+				Prompt: proposalPromptBinding, Schema: blueprintSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context"},
 				OutputKind: agentdomain.OutputStructured, MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun},
 			{ID: "review", Capability: agentdomain.CapabilityContinuityReview, RoleSlot: agentdomain.RoleContinuityReviewer,
 				Prompt: blueprintReviewPromptBinding, Schema: reviewSchema, Assembler: assembler, InputSelectors: []string{"$task", "$context", "node:blueprint"},
@@ -385,61 +361,40 @@ func Builtin() (*Registry, error) {
 		Edges: []agentdomain.WorkflowEdge{{From: "blueprint", To: "review"}, {From: "review", To: "revision"}},
 	}
 	peopleWorld := productGenerateAndReview(
-		StoryPeopleWorldWorkflowID, StoryProductWorkflowVersion, agentdomain.TaskStoryCast,
+		StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersion, agentdomain.TaskStoryCast,
 		castPromptBinding, castSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
 	)
-	peopleWorldV2 := productGenerateAndReview(
-		StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersionV2, agentdomain.TaskStoryCast,
-		castPromptBindingV2, castSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
-	)
 	roadmap := productGenerateAndReview(
-		StoryRoadmapWorkflowID, StoryProductWorkflowVersion, agentdomain.TaskStoryRoadmap,
-		roadmapPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
-	)
-	roadmapV2 := productGenerateAndReview(
-		StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV2, agentdomain.TaskStoryRoadmap,
-		roadmapPromptBindingV2, roadmapSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 7500,
-	)
-	roadmapV3 := productGenerateAndReview(
-		StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersionV3, agentdomain.TaskStoryRoadmap,
-		roadmapPromptBindingV3, roadmapSchemaV3, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000,
+		StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersion, agentdomain.TaskStoryRoadmap,
+		roadmapPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000,
 	)
 	authorRevise := agentdomain.WorkflowDefinition{
-		ID: StoryAuthorReviseWorkflowID, Version: StoryProductWorkflowVersion, TaskKind: agentdomain.TaskReviseBlueprint,
+		ID: StoryAuthorReviseWorkflowID, Version: StoryAuthorReviseWorkflowVersion, TaskKind: agentdomain.TaskReviseBlueprint,
 		EntryNodeID: "revise", ResultNodeID: "revise", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
 		MaxRevisionAttempts: 0, MaxRunTokens: 4500, RepairReserve: 0, RevisionReserve: 0,
 		Nodes: []agentdomain.WorkflowNode{{
 			ID: "revise", PublicStageID: agentdomain.PublicStageBoundedRevision,
 			Capability: agentdomain.CapabilityBoundedRevision, RoleSlot: agentdomain.RolePlanner,
 			Prompt: authorBlueprintPromptBinding, Schema: authorBlueprintSchemaBinding, Assembler: assembler,
-			InputSelectors: []string{"$task", "$context"}, OutputKind: agentdomain.OutputStructured,
+			InputSelectors: []string{"$task", "$context", "$base", "$directive"}, OutputKind: agentdomain.OutputStructured,
 			MaxOutputTokens: 3500, FailurePolicy: agentdomain.FailureFailRun,
 		}},
 	}
-	authorReviseV2 := authorRevise
-	authorReviseV2.Version = StoryAuthorReviseWorkflowVersion
-	authorReviseV2.Nodes = append([]agentdomain.WorkflowNode(nil), authorRevise.Nodes...)
-	authorReviseV2.Nodes[0].InputSelectors = []string{"$task", "$context", "$base", "$directive"}
-	materialWorkflow := productGenerateAndReview("story.author_material", 1, agentdomain.TaskStoryBlueprint,
+	materialWorkflow := productGenerateAndReview("story.author_material", 2, agentdomain.TaskStoryBlueprint,
 		materialPromptBinding, materialSchemaBinding, assembler, blueprintReviewPromptBinding, reviewSchema, 12000, 30000)
-	materialWorkflowV2 := productGenerateAndReview("story.author_material", 2, agentdomain.TaskStoryBlueprint,
-		materialPromptBindingV2, materialSchemaBindingV2, assembler, blueprintReviewPromptBinding, reviewSchema, 12000, 30000)
 	authorProposal := productGenerateAndReview("story.author_proposal", 1, agentdomain.TaskStoryBlueprint,
-		fillPromptBinding, blueprintSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
+		fillPromptBinding, blueprintSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
 	authorPeople := productGenerateAndReview("story.author_people_world", 1, agentdomain.TaskStoryCast,
-		fillPromptBinding, castSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
-	authorRoadmap := productGenerateAndReview("story.author_roadmap", 1, agentdomain.TaskStoryRoadmap,
-		fillPromptBinding, roadmapSchemaV2, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
-	authorRoadmapV2 := productGenerateAndReview("story.author_roadmap", StoryAuthorRoadmapWorkflowVersionV2, agentdomain.TaskStoryRoadmap,
-		fillPromptBinding, roadmapSchemaV3, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000)
+		fillPromptBinding, castSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 4000, 8000)
+	authorRoadmap := productGenerateAndReview("story.author_roadmap", StoryAuthorRoadmapWorkflowVersion, agentdomain.TaskStoryRoadmap,
+		fillPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000)
 	workflows := []ports.WorkflowAsset{
-		workflowAsset(candidateRevisionWorkflow(1, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
-		workflowAsset(candidateRevisionWorkflow(StoryCandidateRevisionWorkflowVersionV2, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBindingV2, reviewSchema, assembler)),
+		workflowAsset(candidateRevisionWorkflow(StoryCandidateRevisionWorkflowVersion, candidateRevisionPromptBinding, candidateRevisionReviewBinding, candidateRevisionSchemaBinding, reviewSchema, assembler)),
 		workflowAsset(candidateDiscussionWorkflow(candidateDiscussionPromptBinding, candidateDiscussionSchemaBinding, assembler)),
-		workflowAsset(materialWorkflowV2), workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap), workflowAsset(authorRoadmapV2),
+		workflowAsset(materialWorkflow), workflowAsset(authorProposal), workflowAsset(authorPeople), workflowAsset(authorRoadmap),
 		workflowAsset(baseline), workflowAsset(chapter), workflowAsset(blueprint), workflowAsset(enhanced), workflowAsset(split),
 		workflowAsset(verifiedChapter), workflowAsset(verifiedBlueprint), workflowAsset(verifiedEnhanced), workflowAsset(verifiedSplit), workflowAsset(slotParallel),
-		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(peopleWorldV2), workflowAsset(roadmap), workflowAsset(roadmapV2), workflowAsset(roadmapV3), workflowAsset(authorRevise), workflowAsset(authorReviseV2),
+		workflowAsset(directions), workflowAsset(proposal), workflowAsset(peopleWorld), workflowAsset(roadmap), workflowAsset(authorRevise),
 	}
 	return New(
 		workflows,
@@ -447,7 +402,6 @@ func Builtin() (*Registry, error) {
 			{Binding: candidateRevisionPromptBinding, Template: candidateRevisionPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint"}},
 			{Binding: candidateRevisionReviewBinding, Template: candidateRevisionReviewPrompt, Variables: []string{"Task", "Context", "Directive", "Blueprint", "Revision"}},
 			{Binding: candidateDiscussionPromptBinding, Template: candidateDiscussionPrompt, Variables: []string{"Task", "Context"}},
-			{Binding: materialPromptBindingV2, Template: authorMaterialPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: materialPromptBinding, Template: authorMaterialPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: fillPromptBinding, Template: authorPlanFillPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: baselinePromptBinding, Template: baselinePrompt, Variables: []string{"Task", "Context"}},
@@ -455,10 +409,7 @@ func Builtin() (*Registry, error) {
 			{Binding: directionsPromptBinding, Template: storyDirectionsPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: proposalPromptBinding, Template: storyProposalPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: castPromptBinding, Template: storyCastPrompt, Variables: []string{"Task", "Context"}},
-			{Binding: castPromptBindingV2, Template: storyCastPromptV2, Variables: []string{"Task", "Context"}},
 			{Binding: roadmapPromptBinding, Template: storyRoadmapPrompt, Variables: []string{"Task", "Context"}},
-			{Binding: roadmapPromptBindingV2, Template: storyRoadmapPromptV2, Variables: []string{"Task", "Context"}},
-			{Binding: roadmapPromptBindingV3, Template: storyRoadmapPromptV3, Variables: []string{"Task", "Context"}},
 			{Binding: planPromptBinding, Template: chapterPlanPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: directorPromptBinding, Template: chapterDirectorPrompt, Variables: []string{"Task", "Context"}},
 			{Binding: writerPromptBinding, Template: proseWriterPrompt, Variables: []string{"Task", "Context", "Plan"}},
@@ -480,19 +431,14 @@ func Builtin() (*Registry, error) {
 		},
 		[]ports.SchemaAsset{
 			{Binding: candidateRevisionSchemaBinding, JSON: candidateRevisionSchema},
-			{Binding: candidateRevisionSchemaBindingV2, JSON: candidateRevisionSchemaV2},
 			{Binding: candidateDiscussionSchemaBinding, JSON: candidateDiscussionSchema},
-			{Binding: materialSchemaBindingV2, JSON: authorMaterialSchemaV2},
 			{Binding: materialSchemaBinding, JSON: authorMaterialSchema},
 			{Binding: draftSchema, JSON: chapterDraftSchema},
 			{Binding: blueprintSchema, JSON: storyBlueprintSchema},
-			{Binding: blueprintSchemaV2, JSON: storyBlueprintSchemaV2},
+			{Binding: architectSchema, JSON: storyArchitectSchema},
 			{Binding: directionsSchema, JSON: storyDirectionsSchema},
 			{Binding: castSchema, JSON: storyCastSchema},
-			{Binding: castSchemaV2, JSON: storyCastSchemaV2},
 			{Binding: roadmapSchema, JSON: storyRoadmapSchema},
-			{Binding: roadmapSchemaV2, JSON: storyRoadmapSchemaV2},
-			{Binding: roadmapSchemaV3, JSON: storyRoadmapSchemaV3},
 			{Binding: planSchema, JSON: chapterPlanSchema},
 			{Binding: directorSchema, JSON: chapterDirectorSchema},
 			{Binding: reviewSchema, JSON: reviewBundleSchema},
@@ -509,7 +455,7 @@ func Builtin() (*Registry, error) {
 }
 
 // withVerification 在既有工作流末尾追加修订复核节点，并把复核节点定为结果节点。
-// 基础定义按值复制，切片深拷贝，保证已发布的 v1 定义哈希不受影响。
+// 基础定义按值复制并深拷贝切片，避免不同 Harness 变体互相修改。
 func withVerification(base agentdomain.WorkflowDefinition, version int, verify agentdomain.WorkflowNode) agentdomain.WorkflowDefinition {
 	definition := base
 	definition.Version = version
@@ -554,10 +500,6 @@ func workflowAsset(definition agentdomain.WorkflowDefinition) ports.WorkflowAsse
 }
 
 var (
-	//go:embed assets/prompts/author_material_v1.tmpl
-	authorMaterialPrompt string
-	//go:embed assets/prompts/author_plan_fill_v1.tmpl
+	//go:embed assets/prompts/author_plan_fill.tmpl
 	authorPlanFillPrompt string
-	//go:embed assets/schemas/author_material_v1.json
-	authorMaterialSchema []byte
 )
