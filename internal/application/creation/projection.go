@@ -21,6 +21,7 @@ type WorkbenchView struct {
 	Review            ReviewView                    `json:"review"`
 	ReviewCursor      ReviewCursorView              `json:"reviewCursor"`
 	CandidateVersions []CandidateVersionSummaryView `json:"candidateVersions"`
+	Structure         []StructureCollectionView     `json:"structure"`
 	SampleHandoff     *SampleView                   `json:"sampleHandoff"`
 	CanPrepareSample  bool                          `json:"canPrepareSample"`
 	Material          MaterialView                  `json:"material"`
@@ -473,9 +474,11 @@ func assembleWorkbench(
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StagePeopleWorld); ok {
 		view.PeopleWorld = projectPeopleWorld(current, review)
+		view.Structure = projectStructure(current)
 	}
 	if current, ok := currentCandidate(candidates, creationdomain.StageRoadmap); ok {
 		view.Roadmap = projectRoadmap(current, review)
+		view.Structure = projectStructure(current)
 	}
 	if session.Entry != nil {
 		view.Entry = EntryView{ID: session.Entry.ID, Version: session.Entry.Version, Kind: session.Entry.Kind, Material: session.Entry.Material}
@@ -693,6 +696,9 @@ func workbenchCapabilities(session creationdomain.Session, view WorkbenchView) [
 	case creationdomain.StageProposal, creationdomain.StagePeopleWorld, creationdomain.StageRoadmap:
 		caps = append(caps, "PreviewGenerateStage", "ConfirmGenerateStage", "SaveCandidateDraft", "AcceptCandidate", "AdvanceStage",
 			"SetReview", "AcceptAllReview", "UseCandidateVersion", "CompareCandidateVersions", "SaveReviewCursor")
+		if len(view.Structure) > 0 {
+			caps = append(caps, "SaveStructure")
+		}
 		if session.EntryKind() == creationdomain.EntryAuthorPlan {
 			caps = append(caps, "UseCreationMaterial")
 		}

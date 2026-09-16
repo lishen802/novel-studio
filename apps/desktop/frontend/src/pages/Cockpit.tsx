@@ -32,6 +32,7 @@ import { SamplePanel } from '../components/creation/SamplePanel';
 import { CreationProgress } from '../components/creation/CreationProgress';
 import { RevisionPanel } from '../components/creation/RevisionPanel';
 import { CandidateFields } from '../components/creation/CandidateFields';
+import { StructureEditor } from '../components/creation/StructureEditor';
 import { CoCreationPanel } from '../components/creation/CoCreationPanel';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
@@ -62,6 +63,7 @@ const emptyWorkbench = (): CreationWorkbenchView => ({
     regenerateStages: [], estimatedCalls: 0, evidence: '',
   },
   capabilities: [],
+  structure: [],
   review: { candidateId: '', stage: '', reviewVersion: 0, accepted: [], rejected: [], unreviewed: [], complete: false, updatedAt: '' },
   reviewCursor: { stage: '', candidateId: '', entityId: '', sectionId: '', comparisonRef: '', viewVersion: 0, updatedAt: '' },
   candidateVersions: [],
@@ -384,6 +386,12 @@ export default function Cockpit() {
     await run(() => studio.acceptAllCreationReview(activeCandidateId));
   };
 
+  // 结构增删保存为新候选版本：不一致的接受状态与后续审阅由后端投影返回，界面不自行推断。
+  const editStructure = async (collection: string, operation: 'add' | 'remove', entityKey: string, value: string) => {
+    if (!activeCandidateId) return;
+    await run(() => studio.saveCreationStructure({ candidateId: activeCandidateId, collection, operation, entityKey, value }));
+  };
+
   // 审阅位置只用于重启后恢复，保存失败只提示错误，不打断审阅本身。
   const moveCursor = async (next: { entityId: string; sectionId: string }) => {
     if (!capabilities.includes('SaveReviewCursor') || !activeCandidateId) return;
@@ -539,6 +547,7 @@ export default function Cockpit() {
           )}
           {(workbench.fieldEditor?.fields?.length || workbench.revisions?.length) ? <RevisionPanel key={`revision:${workbench.sessionId}`} editor={workbench.fieldEditor} actions={workbench.revisions ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onPreview={async(candidateId,path,instruction,key)=>{await studio.previewCreationRevision({candidateId,paths:[path],instruction,idempotencyKey:key});await load();}} onConfirm={async(action)=>{await studio.confirmCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey});await load();}} onReject={async(id)=>{await run(()=>studio.rejectCreationRevision(id));}} onApply={async(action)=>{await run(()=>studio.applyCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey}));}}/> : null}
           {workbench.fieldEditor?.fields?.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
+          {capabilities.includes('SaveStructure') && (workbench.structure ?? []).length > 0 && <StructureEditor key={`structure:${workbench.sessionId}`} collections={workbench.structure ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onAdd={async(collection,entityKey,value)=>{await editStructure(collection,'add',entityKey,value);}} onDelete={async(collection,entityKey)=>{await editStructure(collection,'remove',entityKey,'');}}/>}
           {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.selectedCandidateId || workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
           {workbench.sessionId && <EntryPanel key={`entry:${workbench.sessionId}`} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly || fieldDirty} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
             await run(() => studio.saveCreationEntry({ projectId: workbench.projectId, sessionId: workbench.sessionId, kind, material, expectedVersion, expectedRunSlotVersion }));

@@ -7,7 +7,10 @@ import ArchiveLayout from './archive/ArchiveLayout';
 import { AppProvider } from '../store/AppContext';
 import { AppContext, type AppCtxValue } from '../store/appContextValue';
 import { defaultSettings } from '../store/defaultSettings';
-import type { CreationWorkbenchView } from '../api/studio';
+import type { CreationWorkbenchView, StructureCollectionView, StructureEditCommand } from '../api/studio';
+
+// 结构增删命令的测试替身类型：断言点集中在命令形状上。
+type SaveStructure = (command: StructureEditCommand) => Promise<CreationWorkbenchView>;
 
 function workbench(overrides: Partial<CreationWorkbenchView> = {}): CreationWorkbenchView {
   return {
@@ -39,6 +42,7 @@ function workbench(overrides: Partial<CreationWorkbenchView> = {}): CreationWork
       regenerateStages: [], estimatedCalls: 0, evidence: '',
     },
     capabilities: [],
+    structure: [],
     review: { candidateId: '', stage: '', reviewVersion: 0, accepted: [], rejected: [], unreviewed: [], complete: false, updatedAt: '' },
     reviewCursor: { stage: '', candidateId: '', entityId: '', sectionId: '', comparisonRef: '', viewVersion: 0, updatedAt: '' },
     candidateVersions: [],
@@ -622,5 +626,152 @@ describe('作品策划逐项审阅', () => {
     expect(await screen.findByText('潮水每夜上涨')).toBeTruthy();
     expect(screen.getByRole('button', { name: '潮汐律' }).getAttribute('aria-current')).toBe('true');
     expect(screen.queryByText('守关人的女儿')).toBeNull();
+  });
+});
+
+describe('候选结构增删', () => {
+  const capabilities = ['SetReview', 'SaveStructure'];
+  const entities = [
+    { id: 'character:char-1', kind: 'character', title: '阿绫', summary: '守关人的女儿', complete: true, accepted: false, rejected: false },
+  ];
+  const characterCollection: StructureCollectionView = {
+    collection: 'characters', title: '人物', identityField: 'id',
+    entities: [{ key: 'char-1', title: '阿绫' }, { key: 'char-2', title: '守塔人' }],
+  };
+  const relationshipCollection: StructureCollectionView = {
+    collection: 'relationships', title: '人物关系', identityField: 'id',
+    entities: [{ key: 'rel-1', title: '阿绫 → 守塔人' }],
+  };
+
+  const base = (overrides: Partial<CreationWorkbenchView> = {}) => workbench({
+    stage: 'people_world',
+    capabilities,
+    structure: [characterCollection, relationshipCollection],
+    peopleWorld: { candidateId: 'people-1', version: 1, status: 'draft', entities },
+    ...overrides,
+  });
+
+  const mount = (view: CreationWorkbenchView, saveStructure: SaveStructure) => {
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(view),
+      CreationWorkbench: vi.fn().mockResolvedValue(view),
+      // 桌面桥按任意参数转发命令，测试里只需要按命令形状断言。
+      SaveCreationStructure: saveStructure as unknown as (...args: unknown[]) => Promise<unknown>,
+    } } };
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+  };
+
+  afterEach(() => { cleanup(); delete window.go; });
+
+  it('删除实体时二次确认后按候选与标识调用命令，并采用返回投影刷新列表', async () => {
+    const user = userEvent.setup();
+    const saved = base({ structure: [{ ...characterCollection, entities: [{ key: 'char-2', title: '守塔人' }] }, relationshipCollection] });
+    const saveStructure = vi.fn<SaveStructure>().mockResolvedValue(saved);
+    mount(base(), saveStructure);
+
+    await user.click(await screen.findByRole('button', { name: '删除 人物 阿绫' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(saveStructure).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '确认删除 人物 阿绫' }));
+
+    await waitFor(() => expect(saveStructure).toHaveBeenCalledWith({
+      candidateId: 'people-1', collection: 'characters', operation: 'remove', entityKey: 'char-1', value: '',
+    }));
+    // 列表来自后端返回的投影，本地不猜删除结果。
+    await waitFor(() => expect(screen.queryByRole('button', { name: '删除 人物 阿绫' })).toBeNull());
+    expect(screen.getByRole('button', { name: '删除 人物 守塔人' })).toBeTruthy();
+  });
+
+  it('新增实体时按集合标识与 JSON 字段调用命令，并用返回投影刷新列表', async () => {
+    const user = userEvent.setup();
+    const saved = base({
+      structure: [
+        { ...characterCollection, entities: [{ key: 'char-2', title: '守塔人' }, { key: 'char-3', title: '阿绫' }] },
+        relationshipCollection,
+      ],
+    });
+    const saveStructure = vi.fn<SaveStructure>().mockResolvedValue(saved);
+    mount(base(), saveStructure);
+
+    await user.click(await screen.findByRole('button', { name: '新增人物' }));
+    await user.type(screen.getByLabelText('姓名 *'), '阿绫');
+    await user.type(screen.getByLabelText('简介 *'), '守关人的女儿');
+    await user.type(screen.getByLabelText('动机 *'), '找回失踪的父亲');
+    await user.type(screen.getByLabelText('人物弧光 *'), '从被守护到守护他人');
+    await user.selectOptions(screen.getByLabelText('角色定位 *'), 'protagonist');
+    await user.click(screen.getByRole('button', { name: '提交新增人物' }));
+
+    await waitFor(() => expect(saveStructure).toHaveBeenCalledTimes(1));
+    const request = saveStructure.mock.calls[0][0];
+    expect(request.candidateId).toBe('people-1');
+    expect(request.collection).toBe('characters');
+    expect(request.operation).toBe('add');
+    expect(request.entityKey).toBe('char-3');
+    expect(JSON.parse(request.value)).toEqual({
+      id: 'char-3', name: '阿绫', role: 'protagonist',
+      summary: '守关人的女儿', motivation: '找回失踪的父亲', arc: '从被守护到守护他人',
+    });
+    // 提交成功后表单收起，列表来自返回投影。
+    expect(screen.queryByLabelText('角色定位 *')).toBeNull();
+    expect(await screen.findByRole('button', { name: '删除 人物 阿绫' })).toBeTruthy();
+  });
+
+  it('必填字段缺失时本地拦截，不发请求并给出中文提示', async () => {
+    const user = userEvent.setup();
+    const saveStructure = vi.fn<SaveStructure>();
+    mount(base(), saveStructure);
+
+    await user.click(await screen.findByRole('button', { name: '新增人物' }));
+    await user.type(screen.getByLabelText('姓名 *'), '阿绫');
+    await user.click(screen.getByRole('button', { name: '提交新增人物' }));
+
+    expect(saveStructure).not.toHaveBeenCalled();
+    expect((await screen.findByRole('alert')).textContent).toContain('请先填写必填字段');
+    expect((screen.getByLabelText('姓名 *') as HTMLInputElement).value).toBe('阿绫');
+  });
+
+  it('后端拒绝时展示错误信息并保留已填内容', async () => {
+    const user = userEvent.setup();
+    const saveStructure = vi.fn<SaveStructure>().mockRejectedValue(new Error('SCHEMA_REQUIRED|角色缺少必填字段 arc。'));
+    mount(base(), saveStructure);
+
+    await user.click(await screen.findByRole('button', { name: '新增人物' }));
+    await user.type(screen.getByLabelText('姓名 *'), '阿绫');
+    await user.type(screen.getByLabelText('简介 *'), '守关人的女儿');
+    await user.type(screen.getByLabelText('动机 *'), '找回失踪的父亲');
+    await user.type(screen.getByLabelText('人物弧光 *'), '从被守护到守护他人');
+    await user.selectOptions(screen.getByLabelText('角色定位 *'), 'protagonist');
+    await user.click(screen.getByRole('button', { name: '提交新增人物' }));
+
+    const alerts = await screen.findAllByRole('alert');
+    // call 包装把 CODE|message 拆成错误码与原始信息，界面展示后端返回的信息本身。
+    expect(alerts.some((node) => node.textContent?.includes('角色缺少必填字段 arc。'))).toBe(true);
+    expect((screen.getByLabelText('姓名 *') as HTMLInputElement).value).toBe('阿绫');
+    expect((screen.getByLabelText('人物弧光 *') as HTMLTextAreaElement).value).toBe('从被守护到守护他人');
+    expect(saveStructure).toHaveBeenCalledTimes(1);
+  });
+
+  it('无 SaveStructure capability 时不渲染结构增删入口', async () => {
+    mount(base({ capabilities: ['SetReview'] }), vi.fn<SaveStructure>());
+
+    await screen.findByText('守关人的女儿');
+    expect(screen.queryByText('结构增删')).toBeNull();
+    expect(screen.queryByRole('button', { name: '删除 人物 阿绫' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新增人物' })).toBeNull();
+  });
+
+  it('有未保存的文本修改时禁用结构增删，避免新候选丢掉未保存输入', async () => {
+    const user = userEvent.setup();
+    const editor = {
+      candidateId: 'people-1', version: 1,
+      fields: [{ path: '/characters/@char-1/secret', label: '秘密', group: '人物 · 阿绫', value: '旧秘密', locked: false }],
+    };
+    mount(base({ fieldEditor: editor }), vi.fn<SaveStructure>());
+
+    expect((await screen.findByRole('button', { name: '删除 人物 阿绫' }) as HTMLButtonElement).disabled).toBe(false);
+    await user.type(screen.getByLabelText('候选字段内容'), '补充后的秘密');
+
+    await waitFor(() => expect((screen.getByRole('button', { name: '删除 人物 阿绫' }) as HTMLButtonElement).disabled).toBe(true));
+    expect((screen.getByRole('button', { name: '新增人物' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -82,8 +82,12 @@ func candidateTextFields(candidate creationdomain.Candidate) FieldEditorView {
 				if !ok {
 					continue
 				}
-				id, ok := entity["id"].(string)
-				if !ok || id == "" {
+				// 集合实体优先用 Schema 的 id 寻址；势力/地点/规则没有 id，按唯一名称寻址。
+				id, _ := entity["id"].(string)
+				if strings.TrimSpace(id) == "" {
+					id, _ = entity["name"].(string)
+				}
+				if strings.TrimSpace(id) == "" {
 					continue
 				}
 				name, _ := entity["name"].(string)

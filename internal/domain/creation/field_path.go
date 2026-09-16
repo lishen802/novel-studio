@@ -45,7 +45,7 @@ func pointerChild(value any, key string) (any, error) {
 		var found any
 		count := 0
 		for _, child := range v {
-			if object, ok := child.(map[string]any); ok && object["id"] == key[1:] {
+			if object, ok := child.(map[string]any); ok && matchEntityIdentity(object, key[1:]) {
 				found = object
 				count++
 			}
@@ -56,6 +56,17 @@ func pointerChild(value any, key string) (any, error) {
 	}
 	return nil, ErrFieldMissing
 }
+
+// matchEntityIdentity 按稳定标识匹配数组实体：优先 Schema 的 id，
+// 没有 id 的集合（势力/地点/世界规则）按唯一名称匹配；id 存在时不回落到名称。
+func matchEntityIdentity(object map[string]any, identity string) bool {
+	if id, ok := object["id"].(string); ok {
+		return strings.TrimSpace(id) == identity
+	}
+	name, ok := object["name"].(string)
+	return ok && strings.TrimSpace(name) == identity
+}
+
 func pointerValue(root any, path string) (any, error) {
 	parts, err := pointerParts(path)
 	if err != nil {

@@ -20,7 +20,7 @@ export function CandidateFields({editor,disabled,preview,onSave,onLock,onDirtyCh
  return <details open={dirty || undefined} className="mb-6 rounded-xl border border-border bg-surface p-4">
   <summary className="cursor-pointer text-sm font-medium text-text">编辑本阶段文本 · 第 {base.version} 版{dirty?' · 有未保存修改':''}</summary>
   <div className="mt-4 space-y-3">
-   <p className="text-xs leading-relaxed text-text-sub">修改会保存为新候选，仍需重新确认。锁定与接受独立；已锁定内容需先解锁才能修改。结构增删与数量调整暂未开放。</p>
+   <p className="text-xs leading-relaxed text-text-sub">修改会保存为新候选，仍需重新确认。锁定与接受独立；已锁定内容需先解锁才能修改。实体增删见下方「结构增删」区块，数组内数量调整暂未开放。</p>
    {preview&&<p className="text-xs text-text-muted">原型演示：修改仅保存在当前页面。</p>}
    <label className="block text-sm text-text">选择文本字段<select aria-label="选择文本字段" className="mt-2 w-full rounded-md border border-border bg-surface p-2" value={path} disabled={disabled||busy} onChange={e=>setPath(e.target.value)}>{fields.map(f=><option key={f.path} value={f.path}>{f.group} · {f.label}{f.locked?'（已锁定）':''}</option>)}</select></label>
    {field&&<><label className="block text-sm text-text">{field.label}<Textarea aria-label="候选字段内容" className="mt-2 min-h-40" value={changes[field.path] ?? field.value} disabled={disabled||busy||field.locked} onChange={e=>setChanges(old=>({...old,[field.path]:e.target.value}))}/></label>

@@ -37,6 +37,8 @@ const expected = [
  ["Use candidate version declaration", apiDeclaration, "UseCreationCandidateVersion(arg1:string):Promise<creation.WorkbenchView>"],
  ["Compare candidate versions declaration", apiDeclaration, "CompareCreationCandidateVersions(arg1:string,arg2:string):Promise<creation.CandidateCompareView>"],
  ["Save review cursor declaration", apiDeclaration, "SaveCreationReviewCursor(arg1:creation.ReviewCursorRequest):Promise<creation.WorkbenchView>"],
+ ["Save structure declaration", apiDeclaration, "SaveCreationStructure(arg1:creation.StructureEditRequest):Promise<creation.WorkbenchView>"],
+ ["StructureEditRequest model", models, "export class StructureEditRequest"],
  ["ReviewRequest model", models, "export class ReviewRequest"],
  ["ReviewCursorRequest model", models, "export class ReviewCursorRequest"],
  ["CandidateCompareView model", models, "export class CandidateCompareView"],

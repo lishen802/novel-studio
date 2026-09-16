@@ -352,6 +352,28 @@ export interface CandidateCompareView {
   versions: CandidateVersionView[];
 }
 
+// 结构增删入口的投影：集合用顶层字段名寻址，实体的 key 是稳定标识（id 或唯一名称）。
+export interface StructureEntityView {
+  key: string;
+  title: string;
+}
+
+export interface StructureCollectionView {
+  collection: string;
+  title: string;
+  identityField: string;
+  entities: StructureEntityView[];
+}
+
+// 结构增删命令：entityKey 必须等于 value 内标识字段（identityField）的值，删除时 value 为空串。
+export interface StructureEditCommand {
+  candidateId: string;
+  collection: string;
+  operation: 'add' | 'remove';
+  entityKey: string;
+  value: string;
+}
+
 export interface CreationWorkbenchView {
  revisions?: RevisionCard[];
  directionActions?: DirectionActionView[];
@@ -419,6 +441,8 @@ export interface CreationWorkbenchView {
     evidence: string;
   };
   capabilities: string[];
+  // 可增删集合的投影；空集合只出现在该阶段支持的集合上，未支持的集合不出现。
+  structure: StructureCollectionView[];
   // 逐项审阅投影、作者审阅位置与当前阶段候选版本列表。
   review: CreationReviewView;
   reviewCursor: CreationReviewCursorView;
@@ -639,6 +663,8 @@ export const studio = {
  rejectCreationRevision: (id:string) => call<CreationWorkbenchView>('RejectCreationRevision',id),
  applyCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<CreationWorkbenchView>('ApplyCreationRevision',command),
   saveCreationFields: (request: {candidateId:string;changes:Record<string,string>}) => call<CreationWorkbenchView>('SaveCreationFields', request),
+  // 结构增删：value 是新增实体的 JSON 对象字符串，删除时传空串；成功后返回新的候选版本投影。
+  saveCreationStructure: (request: StructureEditCommand) => call<CreationWorkbenchView>('SaveCreationStructure', request),
   saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>
     call<CreationWorkbenchView>('SaveCreationCandidateDraft', candidateId, payloadJson),
   lockCreationField: (candidateId: string, path: string) => call<CreationWorkbenchView>('LockCreationField', candidateId, path),
