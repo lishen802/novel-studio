@@ -91,3 +91,28 @@ func revisionObject(payload string) (map[string]any, error) {
 	}
 	return object, nil
 }
+
+// AdoptTextRevisionDiffs 把作者选中的差异子集转换为字段修改集合，供确定性合成新候选使用。
+// 只能选择范围门禁已经确认的差异路径；未选择的路径保持基线原文。
+func AdoptTextRevisionDiffs(diffs []TextRevisionDiff, selected []string) (map[string]string, error) {
+	if len(selected) == 0 || len(selected) > 1000 {
+		return nil, ErrRevisionScope
+	}
+	available := make(map[string]string, len(diffs))
+	for _, diff := range diffs {
+		available[diff.Path] = diff.After
+	}
+	changes := make(map[string]string, len(selected))
+	for i, path := range selected {
+		path = strings.TrimSpace(path)
+		if path == "" || path != selected[i] || (i > 0 && path == selected[i-1]) {
+			return nil, ErrRevisionScope
+		}
+		after, ok := available[path]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", ErrRevisionScope, path)
+		}
+		changes[path] = after
+	}
+	return changes, nil
+}

@@ -2,6 +2,8 @@ package creation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,9 @@ type RevisionCommand struct {
 	ActionID       string `json:"actionId"`
 	ArgumentsHash  string `json:"argumentsHash"`
 	IdempotencyKey string `json:"idempotencyKey"`
+	// Paths 为空表示采用整组差异；非空时只采用给定路径，其余保持基线原文，
+	// 结果作为新的作者候选并标记待复核，不冒充已通过独立审阅的整组结果。
+	Paths []string `json:"paths"`
 }
 type RevisionView struct {
 	ActionID       string             `json:"actionId"`
@@ -48,6 +53,8 @@ type RevisionView struct {
 	Diffs          []RevisionDiffView `json:"diffs"`
 }
 type RevisionDiffView struct {
+	// Path 是稳定字段路径，供作者选择部分采纳时原样回传。
+	Path   string `json:"path"`
 	Label  string `json:"label"`
 	Group  string `json:"group"`
 	Before string `json:"before"`
@@ -454,14 +461,15 @@ func (service *Service) revisionView(ctx context.Context, session creationdomain
 		view.Summary += service.revisionReviewSummary(ctx, run)
 		for _, diff := range diffs {
 			label := labels[diff.Path]
-			view.Diffs = append(view.Diffs, RevisionDiffView{Label: label.Label, Group: label.Group, Before: diff.Before, After: diff.After})
+			view.Diffs = append(view.Diffs, RevisionDiffView{Path: diff.Path, Label: label.Label, Group: label.Group, Before: diff.Before, After: diff.After})
 		}
 		view.CanApply = !view.Stale && !view.Applied && run.QualityStatus == agentdomain.QualityPassed && len(diffs) > 0
 	}
 	return view, nil
 }
 
-// ApplyRevision 显式采用已经审阅的整组文本差异，生成新候选而非写入正式资产。
+// ApplyRevision 显式采用已经审阅的文本差异，生成新候选而非写入正式资产。
+// 命令携带 Paths 时只采用选中的差异子集：未选路径保持基线原文，结果标记待复核。
 func (service *Service) ApplyRevision(ctx context.Context, projectID string, command RevisionCommand) (creationdomain.Candidate, error) {
 	mutex := service.lockProject(projectID)
 	mutex.Lock()
@@ -477,8 +485,21 @@ func (service *Service) ApplyRevision(ctx context.Context, projectID string, com
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	if existing, e := service.store.Candidate(ctx, input.ResultID); e == nil && existing.RunID == input.RunID {
-		return existing, nil
+	if len(command.Paths) == 0 {
+		// 整组采用按结果工件重放。
+		if existing, e := service.store.Candidate(ctx, input.ResultID); e == nil && existing.RunID == input.RunID {
+			return existing, nil
+		}
+	} else {
+		// 部分采用按派生子集 ID 重放：同一子集在基线被替代后仍返回同一候选，
+		// 不同子集走后续校验而不是被当成同一次采用。
+		selected, e := normalizeRevisionPaths(command.Paths)
+		if e != nil {
+			return creationdomain.Candidate{}, e
+		}
+		if existing, e := service.store.Candidate(ctx, partialRevisionResultID(input.ResultID, selected)); e == nil {
+			return existing, nil
+		}
 	}
 	session, err := service.loadSession(ctx, projectID)
 	if err != nil {
@@ -505,12 +526,19 @@ func (service *Service) ApplyRevision(ctx context.Context, projectID string, com
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
-	next, err := input.Base.Regenerate(input.ResultID, run.ID, artifactID, payload, service.clock.Now())
-	if err != nil {
-		return next, err
+	var next creationdomain.Candidate
+	if len(command.Paths) > 0 {
+		next, err = service.adoptPartialRevision(ctx, input, diffs, command.Paths)
+	} else {
+		next, err = input.Base.Regenerate(input.ResultID, run.ID, artifactID, payload, service.clock.Now())
+		if err == nil {
+			next.QualityStatus = creationdomain.QualityPassed
+			next.UpstreamDigest = input.UpstreamDigest
+		}
 	}
-	next.QualityStatus = creationdomain.QualityPassed
-	next.UpstreamDigest = input.UpstreamDigest
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
 	superseded, err := input.Base.MarkSuperseded(service.clock.Now())
 	if err != nil {
 		return next, err
@@ -534,6 +562,63 @@ func (service *Service) ApplyRevision(ctx context.Context, projectID string, com
 		return next, err
 	}
 	return next, service.refreshImpact(ctx, session)
+}
+
+// adoptPartialRevision 只把作者选中的差异合入基线，确定性合成新的作者候选。
+// 结果未经过对应整组结果的独立审阅，因此标记待复核而不是复用整组通过的结论。
+func (service *Service) adoptPartialRevision(
+	ctx context.Context,
+	input revisionInput,
+	diffs []creationdomain.TextRevisionDiff,
+	paths []string,
+) (creationdomain.Candidate, error) {
+	selected, err := normalizeRevisionPaths(paths)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	changes, err := creationdomain.AdoptTextRevisionDiffs(diffs, selected)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	// 以冻结基线为准应用选中的差异，未选路径保持基线原文。
+	synthesized, err := input.Base.EditTextFields(changes)
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	resultID := partialRevisionResultID(input.ResultID, selected)
+	if existing, e := service.store.Candidate(ctx, resultID); e == nil {
+		return existing, nil
+	}
+	next, err := input.Base.SaveDraft(resultID, synthesized, service.clock.Now())
+	if err != nil {
+		return creationdomain.Candidate{}, err
+	}
+	next.QualityStatus = creationdomain.QualityNeedsReview
+	next.UpstreamDigest = input.UpstreamDigest
+	return next, nil
+}
+
+// partialRevisionResultID 按采用子集派生稳定的结果 ID：同一子集重放返回同一候选，
+// 不同子集产生不同候选，不会把参数不同的请求当成同一次采用。
+func partialRevisionResultID(resultID string, selected []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(selected, "\n")))
+	return resultID + "-partial-" + hex.EncodeToString(sum[:])[:8]
+}
+
+// normalizeRevisionPaths 校验部分采纳的路径集合：非空、无空白歧义、无重复，并按路径排序。
+// 排序保证同一子集无论界面顺序如何都派生同一个结果 ID。
+func normalizeRevisionPaths(paths []string) ([]string, error) {
+	if len(paths) == 0 || len(paths) > 1000 {
+		return nil, creationdomain.ErrRevisionScope
+	}
+	normalized := append([]string(nil), paths...)
+	sort.Strings(normalized)
+	for i, path := range normalized {
+		if path == "" || path != strings.TrimSpace(path) || (i > 0 && path == normalized[i-1]) {
+			return nil, creationdomain.ErrRevisionScope
+		}
+	}
+	return normalized, nil
 }
 
 // revisionReviewSummary 只展示完成的独立审阅工件中的可读结论。

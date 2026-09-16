@@ -83,7 +83,8 @@ func TestDesktopRevisionPreservesAuthorizationAndText(t *testing.T) {
 	if _, err := api.RejectCreationRevision("a"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(w.preview, request) || w.message != message || w.confirm != command || w.apply != command || w.rejected != "a" {
+	if !reflect.DeepEqual(w.preview, request) || w.message != message || !reflect.DeepEqual(w.confirm, command) ||
+		!reflect.DeepEqual(w.apply, command) || w.rejected != "a" {
 		t.Fatal("绑定改变了输入或授权参数")
 	}
 }

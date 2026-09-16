@@ -8,9 +8,12 @@ import { AppProvider } from '../store/AppContext';
 import { AppContext, type AppCtxValue } from '../store/appContextValue';
 import { defaultSettings } from '../store/defaultSettings';
 import type { CreationWorkbenchView, StructureCollectionView, StructureEditCommand } from '../api/studio';
+import type { RevisionCard } from '../components/creation/RevisionPanel';
 
 // 结构增删命令的测试替身类型：断言点集中在命令形状上。
 type SaveStructure = (command: StructureEditCommand) => Promise<CreationWorkbenchView>;
+// 部分采用命令的测试替身类型：断言点集中在命令携带的差异路径上。
+type ApplyRevision = (command: { actionId: string; argumentsHash: string; idempotencyKey: string; paths?: string[] }) => Promise<CreationWorkbenchView>;
 
 function workbench(overrides: Partial<CreationWorkbenchView> = {}): CreationWorkbenchView {
   return {
@@ -773,5 +776,72 @@ describe('候选结构增删', () => {
 
     await waitFor(() => expect((screen.getByRole('button', { name: '删除 人物 阿绫' }) as HTMLButtonElement).disabled).toBe(true));
     expect((screen.getByRole('button', { name: '新增人物' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('修订结果的部分采用', () => {
+  const revisionCard: RevisionCard = {
+    actionId: 'rev-1', argumentsHash: 'hash-1', idempotencyKey: 'key-1', candidateId: 'proposal-1', version: 1,
+    state: 'succeeded', instruction: '让标题与基调更克制', targets: [], preserved: [],
+    cost: { estimatedCalls: 2, maxRunTokens: 20000, runBudgetUnlimited: false, roleModels: [] },
+    runId: 'run-1', quality: 'passed', summary: '已通过独立审阅', stale: false, canApply: true, applied: false,
+    diffs: [
+      { path: '/title', label: '标题', group: '方案', before: '旧标题', after: '新标题' },
+      { path: '/logline', label: '一句话简介', group: '方案', before: '旧简介', after: '新简介' },
+    ],
+  };
+
+  const mount = (view: CreationWorkbenchView, apply: ApplyRevision) => {
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(view),
+      CreationWorkbench: vi.fn().mockResolvedValue(view),
+      ApplyCreationRevision: apply as unknown as (...args: unknown[]) => Promise<unknown>,
+    } } };
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+  };
+
+  afterEach(() => { cleanup(); delete window.go; });
+
+  it('部分采用只把勾选的差异路径交给后端命令', async () => {
+    const user = userEvent.setup();
+    const view = workbench({ revisions: [revisionCard] });
+    const apply = vi.fn<ApplyRevision>().mockResolvedValue(workbench({ revisions: [{ ...revisionCard, applied: true, canApply: false }] }));
+    mount(view, apply);
+
+    await user.click(await screen.findByLabelText('方案 · 一句话简介'));
+    await user.click(screen.getByRole('button', { name: '采用选中的 1 项修改' }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledWith({
+      actionId: 'rev-1', argumentsHash: 'hash-1', idempotencyKey: 'key-1', paths: ['/title'],
+    }));
+  });
+
+  it('全部采用不携带路径，未勾选的差异也按整组提交', async () => {
+    const user = userEvent.setup();
+    const view = workbench({ revisions: [revisionCard] });
+    const apply = vi.fn<ApplyRevision>().mockResolvedValue(workbench({ revisions: [{ ...revisionCard, applied: true, canApply: false }] }));
+    mount(view, apply);
+
+    await user.click(await screen.findByLabelText('方案 · 一句话简介'));
+    await user.click(screen.getByRole('button', { name: '全部采用' }));
+
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply.mock.calls[0][0]).toEqual({ actionId: 'rev-1', argumentsHash: 'hash-1', idempotencyKey: 'key-1' });
+    expect(apply.mock.calls[0][0].paths).toBeUndefined();
+  });
+
+  it('后端拒绝部分采用时展示错误并保留勾选状态', async () => {
+    const user = userEvent.setup();
+    const view = workbench({ revisions: [revisionCard] });
+    const apply = vi.fn<ApplyRevision>().mockRejectedValue(new Error('基线已变化，无法采用这组修改。'));
+    mount(view, apply);
+
+    await user.click(await screen.findByLabelText('方案 · 一句话简介'));
+    await user.click(screen.getByRole('button', { name: '采用选中的 1 项修改' }));
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.some((node) => node.textContent?.includes('基线已变化'))).toBe(true);
+    expect((screen.getByLabelText('方案 · 一句话简介') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText('方案 · 标题') as HTMLInputElement).checked).toBe(true);
   });
 });

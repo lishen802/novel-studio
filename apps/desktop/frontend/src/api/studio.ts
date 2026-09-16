@@ -661,7 +661,8 @@ export const studio = {
   previewCreationDiscussionSuggestion: (request:{messageId:string;suggestionId:string;idempotencyKey?:string}) => call<RevisionCard>('PreviewCreationDiscussionSuggestion',request),
  confirmCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<RevisionCard>('ConfirmCreationRevision',command),
  rejectCreationRevision: (id:string) => call<CreationWorkbenchView>('RejectCreationRevision',id),
- applyCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string}) => call<CreationWorkbenchView>('ApplyCreationRevision',command),
+ // 部分采用：paths 省略或为空表示采用整组差异；非空时只采用给定路径，其余保持基线原文。
+ applyCreationRevision: (command:{actionId:string;argumentsHash:string;idempotencyKey:string;paths?:string[]}) => call<CreationWorkbenchView>('ApplyCreationRevision',command),
   saveCreationFields: (request: {candidateId:string;changes:Record<string,string>}) => call<CreationWorkbenchView>('SaveCreationFields', request),
   // 结构增删：value 是新增实体的 JSON 对象字符串，删除时传空串；成功后返回新的候选版本投影。
   saveCreationStructure: (request: StructureEditCommand) => call<CreationWorkbenchView>('SaveCreationStructure', request),

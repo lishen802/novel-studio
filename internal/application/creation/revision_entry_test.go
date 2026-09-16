@@ -3,6 +3,9 @@ package creation
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
+
 	"github.com/lishen802/novel-studio/internal/agentassets"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
@@ -174,5 +177,95 @@ func TestRevisionChangedSessionRejectsBeforePayment(t *testing.T) {
 	_, err = service.ConfirmRevision(ctx, "project-1", RevisionCommand{ActionID: view.ActionID, ArgumentsHash: view.ArgumentsHash, IdempotencyKey: view.IdempotencyKey}, profile)
 	if err == nil || kernel.createN != 0 {
 		t.Fatal("变化的基线不应启动付费调用")
+	}
+}
+
+// 部分采纳只合入作者选中的差异，其余保持基线原文，并标记待复核。
+func TestApplyRevisionAdoptsSelectedSubsetOnly(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	revised := strings.Replace(proposalPayload, `"title":"潮汐关"`, `"title":"潮汐关·修订"`, 1)
+	revised = strings.Replace(revised, `"ending":"开城救人"`, `"ending":"闭城拒敌"`, 1)
+	service, store, _ := newTestService(t, kernel, nil)
+	base := seedProposalCandidate(t, service, store)
+	// 通用修订工作流返回带信封的结果，payload_schema_ref 必须与候选 Schema 一致。
+	kernel.payloads[agentassets.StoryCandidateRevisionWorkflowID] = `{"candidate_kind":"proposal","payload_schema_ref":"story_blueprint.schema@2","payload":` + revised + `}`
+	profile := generateRequest(base.Stage).Profile
+	profile.Roles = append(profile.Roles, agentdomain.ResolvedRole{Role: agentdomain.RoleContinuityReviewer, ProviderName: "test", Model: "review-model"})
+	preview, err := service.PreviewRevision(ctx, "project-1", RevisionRequest{
+		CandidateID: base.ID, Paths: []string{"/title", "/ending"}, Instruction: "标题更冷，结局更决绝", IdempotencyKey: "partial-preview",
+	}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmRevision(ctx, "project-1", RevisionCommand{
+		ActionID: preview.ActionID, ArgumentsHash: preview.ArgumentsHash, IdempotencyKey: "partial-preview",
+	}, profile); err != nil {
+		t.Fatal(err)
+	}
+	var ready RevisionView
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		views, e := service.RevisionActions(ctx, "project-1", true)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(views) > 0 && views[0].State == "succeeded" {
+			ready = views[0]
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(ready.Diffs) != 2 {
+		views, _ := service.RevisionActions(ctx, "project-1", true)
+		t.Fatalf("修订结果不完整: state=%v summary=%v", views[0].State, views[0].Summary)
+	}
+	paths := map[string]bool{}
+	for _, diff := range ready.Diffs {
+		paths[diff.Path] = true
+	}
+	if !paths["/title"] || !paths["/ending"] {
+		t.Fatalf("diff paths = %#v", ready.Diffs)
+	}
+
+	// 未经授权的路径即使属于候选字段也不能被部分采纳。
+	if _, err := service.ApplyRevision(ctx, "project-1", RevisionCommand{
+		ActionID: ready.ActionID, ArgumentsHash: ready.ArgumentsHash, IdempotencyKey: "partial-preview",
+		Paths: []string{"/positioning"},
+	}); !errors.Is(err, creationdomain.ErrRevisionScope) {
+		t.Fatalf("未授权路径错误 = %v", err)
+	}
+	if current, e := store.Candidate(ctx, base.ID); e != nil || current.Status == creationdomain.StatusSuperseded {
+		t.Fatalf("拒绝后基线不应被替代: %#v %v", current.Status, e)
+	}
+	command := RevisionCommand{
+		ActionID: ready.ActionID, ArgumentsHash: ready.ArgumentsHash, IdempotencyKey: "partial-preview",
+		Paths: []string{"/title"},
+	}
+	adopted, err := service.ApplyRevision(ctx, "project-1", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted.Origin != creationdomain.OriginAuthor || adopted.QualityStatus != creationdomain.QualityNeedsReview {
+		t.Fatalf("部分采纳来源/质量 = %q/%q", adopted.Origin, adopted.QualityStatus)
+	}
+	title, err := adopted.FieldString("/title")
+	if err != nil || title != "潮汐关·修订" {
+		t.Fatalf("选中路径 = %q, %v", title, err)
+	}
+	ending, err := adopted.FieldString("/ending")
+	if err != nil || ending != "开城救人" {
+		t.Fatalf("未选中路径必须保持基线原文: %q, %v", ending, err)
+	}
+	replay, err := service.ApplyRevision(ctx, "project-1", command)
+	if err != nil || replay.ID != adopted.ID {
+		t.Fatalf("重复部分采纳创建了额外版本: %#v %v", replay, err)
+	}
+	// 基线已被采用替代后，同一动作不能再用另一个子集重复采用。
+	if _, err := service.ApplyRevision(ctx, "project-1", RevisionCommand{
+		ActionID: ready.ActionID, ArgumentsHash: ready.ArgumentsHash, IdempotencyKey: "partial-preview",
+		Paths: []string{"/ending"},
+	}); err == nil {
+		t.Fatal("基线变化后不应再采用其他子集")
 	}
 }

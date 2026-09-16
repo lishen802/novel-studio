@@ -58,3 +58,27 @@ func TestTextRevisionRejectsStructuralAndAmbiguousTargets(t *testing.T) {
 		})
 	}
 }
+
+// 部分采纳只转换已确认的差异路径，未选择与未知路径分别处理。
+func TestAdoptTextRevisionDiffsSelectsSubset(t *testing.T) {
+	diffs := []TextRevisionDiff{
+		{Path: "/title", Before: "旧", After: "新"},
+		{Path: "/ending", Before: "开城", After: "闭城"},
+	}
+	changes, err := AdoptTextRevisionDiffs(diffs, []string{"/title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes["/title"] != "新" {
+		t.Fatalf("changes = %#v", changes)
+	}
+	if _, err := AdoptTextRevisionDiffs(diffs, nil); !errors.Is(err, ErrRevisionScope) {
+		t.Fatalf("空选择错误 = %v", err)
+	}
+	if _, err := AdoptTextRevisionDiffs(diffs, []string{"/positioning"}); !errors.Is(err, ErrRevisionScope) {
+		t.Fatalf("未授权路径错误 = %v", err)
+	}
+	if _, err := AdoptTextRevisionDiffs(diffs, []string{" /title"}); !errors.Is(err, ErrRevisionScope) {
+		t.Fatalf("未规范化路径错误 = %v", err)
+	}
+}

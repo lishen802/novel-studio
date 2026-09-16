@@ -3,17 +3,22 @@ import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import type { FieldEditor } from './CandidateFields';
 
+// 单条差异：path 是稳定字段路径，部分采用时按界面顺序原样回传；界面只允许从展示的差异里勾选。
+export interface RevisionDiff {path:string;label:string;group:string;before:string;after:string}
 export interface RevisionCard {
  actionId:string;argumentsHash:string;idempotencyKey:string;candidateId:string;version:number;state:string;instruction:string;
  targets:FieldEditor['fields'];preserved:FieldEditor['fields'];cost:{estimatedCalls:number;maxRunTokens:number;runBudgetUnlimited:boolean;roleModels:{role:string;provider:string;model:string}[]};
  runId:string;quality:string;summary:string;stale:boolean;canApply:boolean;applied:boolean;
- diffs:{label:string;group:string;before:string;after:string}[];
+ diffs:RevisionDiff[];
 }
-interface Props {editor?:FieldEditor;actions:RevisionCard[];disabled?:boolean;preview?:boolean;onPreview:(candidateId:string,path:string,instruction:string,key:string)=>Promise<void>;onConfirm:(action:RevisionCard)=>Promise<void>;onReject:(id:string)=>Promise<void>;onApply:(action:RevisionCard)=>Promise<void>}
+interface Props {editor?:FieldEditor;actions:RevisionCard[];disabled?:boolean;preview?:boolean;onPreview:(candidateId:string,path:string,instruction:string,key:string)=>Promise<void>;onConfirm:(action:RevisionCard)=>Promise<void>;onReject:(id:string)=>Promise<void>;onApply:(action:RevisionCard,paths?:string[])=>Promise<void>}
 const labels:Record<string,string>={pending_confirmation:'待你确认',executing:'正在修订与审阅',succeeded:'修订结果',failed:'运行已停止',expired:'提案已过期',rejected:'已放弃',conflict:'内容已变化',outcome_unknown:'需要核对运行结果'};
 export function RevisionPanel({editor,actions,disabled,preview,onPreview,onConfirm,onReject,onApply}:Props){
  const [draft,setDraft]=useState({base:editor?.candidateId??'',path:editor?.fields?.find(f=>!f.locked)?.path??'',text:'',key:crypto.randomUUID()});
  const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+ // 勾选按「被取消勾选的路径」记录：默认全部勾选，刷新后新出现的差异仍默认勾选，采用失败也不清空勾选。
+ const [deselected,setDeselected]=useState<Record<string,string[]>>({});
+ const toggleDiff=(actionId:string,path:string)=>setDeselected(old=>{const current=old[actionId]??[];return {...old,[actionId]:current.includes(path)?current.filter(p=>p!==path):[...current,path]};});
  const act=async(work:()=>Promise<void>)=>{setBusy(true);setError('');try{await work();}catch(e){setError(e instanceof Error?e.message:'操作失败，请重试。');}finally{setBusy(false);}};
  const visible=actions.filter(a=>a.state!=='rejected');
  const staleDraft=!!draft.text&&draft.base!==editor?.candidateId;
@@ -35,8 +40,8 @@ export function RevisionPanel({editor,actions,disabled,preview,onPreview,onConfi
    {action.state==='pending_confirmation'&&<><div className="rounded-md bg-bg p-3 text-xs leading-relaxed space-y-1">{action.cost.roleModels.map((m,i)=><p key={i}>{m.role==='planner'?'修订':'独立审阅'}：{m.provider} / {m.model}</p>)}<p>预计 {action.cost.estimatedCalls} 次调用，格式修复可能增加调用。{action.cost.runBudgetUnlimited?'当前方案未设置总用量上限。':`本次预算上限 ${action.cost.maxRunTokens.toLocaleString()} Token。`}</p><p>金额暂不可估算，确认后按你的模型服务商实际用量计费。</p></div><div className="flex gap-2"><Button variant="primary" disabled={disabled||busy||action.stale} onClick={()=>void act(()=>onConfirm(action))}>确认费用并开始修改</Button><Button disabled={busy||disabled} onClick={()=>void act(()=>onReject(action.actionId))}>放弃此提案</Button></div></>}
    {action.state==='expired'&&<Button disabled={disabled||busy} onClick={()=>void act(()=>onReject(action.actionId))}>关闭过期提案</Button>}
    {action.summary&&<p className="text-xs text-text-sub whitespace-pre-wrap">{action.summary}</p>}
-   {action.diffs.map((diff,i)=><div key={i} className="space-y-2"><h5 className="text-xs font-medium">{diff.group} · {diff.label}</h5><div className="grid gap-2 md:grid-cols-2 text-sm"><div className="rounded-md bg-bg p-3 whitespace-pre-wrap"><span className="block text-xs text-text-muted mb-1">修改前</span>{diff.before}</div><div className="rounded-md bg-primary-subtle p-3 whitespace-pre-wrap"><span className="block text-xs text-text-muted mb-1">修改后</span>{diff.after}</div></div></div>)}
-   {action.state==='succeeded'&&!action.applied&&<Button variant="primary" disabled={disabled||busy||!action.canApply} onClick={()=>void act(()=>onApply(action))}>{action.quality!=='passed'?'审阅未通过，暂不可采用':'采用修改为新候选'}</Button>}
+   {action.diffs.map(diff=>{const selectable=action.state==='succeeded'&&!action.applied;return <div key={diff.path} className="space-y-2">{selectable?<label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" className="h-4 w-4 accent-primary" checked={!(deselected[action.actionId]??[]).includes(diff.path)} disabled={disabled||busy||!action.canApply} onChange={()=>toggleDiff(action.actionId,diff.path)}/><span className="text-xs font-medium">{diff.group} · {diff.label}</span></label>:<h5 className="text-xs font-medium">{diff.group} · {diff.label}</h5>}<div className="grid gap-2 md:grid-cols-2 text-sm"><div className="rounded-md bg-bg p-3 whitespace-pre-wrap"><span className="block text-xs text-text-muted mb-1">修改前</span>{diff.before}</div><div className="rounded-md bg-primary-subtle p-3 whitespace-pre-wrap"><span className="block text-xs text-text-muted mb-1">修改后</span>{diff.after}</div></div></div>;})}
+   {action.state==='succeeded'&&!action.applied&&(action.canApply?(()=>{const paths=action.diffs.filter(d=>!(deselected[action.actionId]??[]).includes(d.path)).map(d=>d.path);return <div className="space-y-2">{paths.length<action.diffs.length&&<p className="text-xs text-text-sub">只采用选中的修改会生成待复核的新候选，其余字段保持基线原文。</p>}<div className="flex flex-wrap gap-2"><Button variant="primary" aria-label="全部采用" disabled={disabled||busy} onClick={()=>void act(()=>onApply(action))}>全部采用</Button><Button aria-label={`采用选中的 ${paths.length} 项修改`} disabled={disabled||busy||paths.length===0} onClick={()=>void act(()=>onApply(action,paths))}>采用选中的 {paths.length} 项修改</Button></div></div>;})():<Button variant="primary" disabled={disabled||busy||!action.canApply}>{action.quality!=='passed'?'审阅未通过，暂不可采用':'采用修改为新候选'}</Button>)}
   </article>)}
   {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
  </section>;
