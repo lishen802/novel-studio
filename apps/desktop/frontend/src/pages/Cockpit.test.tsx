@@ -365,6 +365,8 @@ describe('已有方案工作台', () => {
   it('路线图阶段展示故事弧规划目标', async () => {
     const view = workbench({
       stage: 'roadmap',
+      peopleWorld: {candidateId:'old-people',version:1,status:'draft',entities:[{id:'character:old',kind:'character',title:'上阶段人物',summary:'旧人物',complete:true,accepted:false,rejected:false}]},
+      fieldEditor: {candidateId:'roadmap-1',version:1,fields:[{path:'/arcs/@arc-1/summary',ownerRef:'arc:arc-1',label:'概要',group:'开关',value:'本弧内容',locked:false},{path:'/near_term_chapters/@空船/summary',ownerRef:'chapter:空船',label:'概要',group:'空船',value:'本章内容',locked:false}]},
       roadmap: {
         candidateId: 'roadmap-1', version: 1, status: 'draft',
         book: { id: 'book', title: '潮汐关', summary: '守关人必须选择', position: 1, accepted: false, rejected: false },
@@ -389,6 +391,12 @@ describe('已有方案工作台', () => {
     expect(screen.getByText('待兑现承诺')).toBeTruthy();
     expect(screen.getByText('旧令牌兑现身份')).toBeTruthy();
     expect(screen.getByText('潮汐神谕是否被篡改')).toBeTruthy();
+    expect(screen.getByText('当前对象：开关')).toBeTruthy();
+    expect((screen.getByLabelText('候选字段内容') as HTMLTextAreaElement).value).toBe('本弧内容');
+    await userEvent.click(screen.getByRole('button',{name:/近章 1 · 空船/}));
+    expect(screen.getByText('当前对象：空船')).toBeTruthy();
+    expect((screen.getByLabelText('候选字段内容') as HTMLTextAreaElement).value).toBe('本章内容');
+    expect(Array.from((screen.getByLabelText('共创目标字段') as HTMLSelectElement).options).some(option => option.value === '/arcs/@arc-1/summary')).toBe(false);
   });
 });
 

@@ -380,7 +380,7 @@ export interface StructureEditCommand {
 export interface CreationWorkbenchView {
  revisions?: RevisionCard[];
  directionActions?: DirectionActionView[];
- fieldEditor?: { candidateId: string; version: number; fields: Array<{path:string;label:string;group:string;value:string;locked:boolean}> };
+ fieldEditor?: { candidateId: string; version: number; fields: Array<{path:string;ownerRef?:string;label:string;group:string;value:string;locked:boolean}> };
  canPrepareSample?: boolean;
  sampleHandoff?: (CreationSampleInput & { id: string; directionCandidateId: string; directionCardId: string; status: string }) | null;
   contentVersion?: number;

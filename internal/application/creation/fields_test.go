@@ -90,3 +90,29 @@ func TestTextFieldEditsAcrossFourCandidateKinds(t *testing.T) {
 		})
 	}
 }
+
+func TestTextFieldsBindStableNavigationOwners(t *testing.T) {
+	tests := []struct {
+		stage   creationdomain.Stage
+		payload string
+		owners  map[string]string
+	}{
+		{creationdomain.StagePeopleWorld, `{"characters":[{"id":"a/~","name":"同名","secret":"甲"},{"id":"b","name":"同名","secret":"乙"}],"locations":[{"name":"渡口/北","summary":"码头"}]}`, map[string]string{"/characters/@a~1~0/secret": "character:a/~", "/characters/@b/secret": "character:b", "/locations/@渡口~1北/summary": "location:渡口/北"}},
+		{creationdomain.StageRoadmap, `{"book":{"id":"book-1","title":"书"},"arcs":[{"id":"arc-1","title":"弧","commitments":[{"id":"promise-1","statement":"承诺"}]}],"near_term_chapters":[{"id":"c1","title":"章"}]}`, map[string]string{"/book/title": "book:book-1", "/arcs/@arc-1/commitments/@promise-1/statement": "arc:arc-1", "/near_term_chapters/@c1/title": "chapter:c1"}},
+		{creationdomain.StageProposal, `{"title":"书名","positioning":"定位","protagonist_arc":"人物弧","core_conflict":"冲突","ending":"终局","tone":"冷峻"}`, map[string]string{"/title": "position", "/positioning": "position", "/protagonist_arc": "character", "/core_conflict": "mainplot", "/ending": "ending", "/tone": "candidate"}},
+	}
+	for _, test := range tests {
+		t.Run(string(test.stage), func(t *testing.T) {
+			fields := candidateTextFields(creationdomain.Candidate{Stage: test.stage, PayloadJSON: test.payload})
+			got := map[string]string{}
+			for _, field := range fields.Fields {
+				got[field.Path] = field.OwnerRef
+			}
+			for path, owner := range test.owners {
+				if got[path] != owner {
+					t.Fatalf("%s owner = %q, want %q", path, got[path], owner)
+				}
+			}
+		})
+	}
+}

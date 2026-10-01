@@ -37,6 +37,7 @@ import { CoCreationPanel } from '../components/creation/CoCreationPanel';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
 
+const emptyFieldEditor = {candidateId:'',version:0,fields:[]};
 const emptyWorkbench = (): CreationWorkbenchView => ({
   sessionId: '',
   projectId: '',
@@ -143,7 +144,7 @@ function RoadmapGoalBlock({ node }: { node: RoadmapNodeView }) {
 
 export default function Cockpit() {
   const navigate = useNavigate();
-  const { state, dispatch } = useApp();
+  const { state, dispatch, registerBeforeClose } = useApp();
   const [workbench, setWorkbench] = useState<CreationWorkbenchView>(emptyWorkbench);
   const [intent, setIntent] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -216,11 +217,18 @@ export default function Cockpit() {
 
   // 审阅位置恢复：仅当游标落在当前阶段的当前候选上时套用一次，不覆盖作者随后的新选择。
   const restoredCursor = useRef('');
+  const selectionContext = useRef('');
   useEffect(() => {
+    const context = `${workbench.sessionId}:${workbench.stage}`;
+    if (selectionContext.current !== context) {
+      selectionContext.current = context;
+      restoredCursor.current = '';
+      setEntityId(null); setSectionId(null);
+    }
     const cursor = workbench.reviewCursor;
     const candidateId = stageCandidateId(workbench);
     if (!cursor?.stage || cursor.stage !== workbench.stage || !candidateId || cursor.candidateId !== candidateId) return;
-    const key = `${workbench.sessionId}:${cursor.viewVersion}:${cursor.updatedAt}`;
+    const key = `${workbench.sessionId}:${workbench.stage}`;
     if (restoredCursor.current === key) return;
     restoredCursor.current = key;
     if (cursor.entityId) {
@@ -382,7 +390,7 @@ export default function Cockpit() {
   const capabilities = workbench.capabilities ?? [];
   const review = workbench.review;
   const reviewUnits = (review?.accepted?.length ?? 0) + (review?.rejected?.length ?? 0) + (review?.unreviewed?.length ?? 0);
-  const reviewDisabled = busy || generating || workbench.readOnly;
+  const reviewDisabled = busy || generating || workbench.readOnly || fieldDirty || materialDirty;
   const canReview = capabilities.includes('SetReview');
   const activeCandidateId = stageCandidateId(workbench);
 
@@ -415,12 +423,15 @@ export default function Cockpit() {
   };
 
   const selectEntity = (id: string) => {
+    restoredCursor.current = `${workbench.sessionId}:${workbench.stage}`;
     setEntityId(id);
     setSectionId(null);
     void moveCursor({ entityId: id, sectionId: '' });
   };
 
   const selectSection = (id: string) => {
+    restoredCursor.current = `${workbench.sessionId}:${workbench.stage}`;
+    setEntityId(null);
     setSectionId(id);
     void moveCursor({ entityId: '', sectionId: id });
   };
@@ -444,7 +455,13 @@ export default function Cockpit() {
   }));
   const selectedRoadmap = roadmapItems.find((item) => item.id === entityId) ?? roadmapItems.find((item) => item.kind === 'arc') ?? roadmapItems[0];
   const proposalSections = workbench.proposal?.sections ?? [];
-  const selectedSection = proposalSections.find((item) => item.id === sectionId);
+  const selectedSection = proposalSections.find((item) => item.id === sectionId) ?? proposalSections[0];
+  // 编辑和共创使用当前阶段的同一个稳定对象标识，不能借用上个阶段的实体。
+  const contextualTarget = entityId === 'candidate' ? {id:'candidate',title:'其他策划文本'}
+    : workbench.stage === 'people_world' ? selectedEntity
+    : workbench.stage === 'roadmap' ? selectedRoadmap?.node
+    : workbench.stage === 'proposal' ? selectedSection : undefined;
+  const hasOtherFields = workbench.fieldEditor?.fields?.some(field => field.ownerRef === 'candidate');
 
   return (
     <div className="h-full flex flex-col animate-fade-up -m-6">
@@ -515,24 +532,26 @@ export default function Cockpit() {
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        {(workbench.stage === 'people_world' || workbench.stage === 'roadmap') && (
+        {(workbench.stage === 'people_world' || workbench.stage === 'roadmap' || workbench.stage === 'proposal') && (
           <aside className="w-[220px] shrink-0 border-r border-border bg-surface p-4 overflow-auto">
             <h3 className="text-xs font-medium text-text-sub uppercase tracking-wider mb-3">
-              {workbench.stage === 'people_world' ? '人物与世界' : '路线图'}
+              {workbench.stage === 'people_world' ? '人物与世界' : workbench.stage === 'proposal' ? '作品方案' : '路线图'}
             </h3>
             {workbench.stage === 'people_world' && peopleEntities.map((entity) => (
               <button
                 key={entity.id}
                 aria-label={entity.title}
-                aria-current={selectedEntity?.id === entity.id ? 'true' : undefined}
-                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1 flex items-center justify-between gap-2', selectedEntity?.id === entity.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
+                aria-current={contextualTarget?.id === entity.id ? 'true' : undefined}
+                className={clsx('w-full text-left px-2 py-1.5 rounded-md text-sm mb-1 flex items-center justify-between gap-2', contextualTarget?.id === entity.id ? 'bg-primary-subtle text-primary' : 'text-text-sub hover:bg-surface-hover')}
                 onClick={() => selectEntity(entity.id)}
               >
                 <span>{entity.title}</span>
                 <ReviewStateBadge accepted={entity.accepted} rejected={entity.rejected} />
               </button>
             ))}
-            {workbench.stage === 'roadmap' && <RoadmapNavigation items={roadmapItems} selectedId={selectedRoadmap?.id} onSelect={selectEntity} />}
+            {workbench.stage === 'proposal' && proposalSections.map(section => <button key={section.id} aria-label={`编辑${section.title}`} aria-current={contextualTarget?.id === section.id ? 'true' : undefined} className="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-surface-hover" onClick={() => selectSection(section.id)}>{section.title}</button>)}
+            {hasOtherFields && <button className="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-surface-hover" aria-current={entityId === 'candidate' ? 'true' : undefined} onClick={() => { setEntityId('candidate'); setSectionId(null); restoredCursor.current = `${workbench.sessionId}:${workbench.stage}`; }}>其他策划文本</button>}
+            {workbench.stage === 'roadmap' && <RoadmapNavigation items={roadmapItems} selectedId={contextualTarget?.id} onSelect={selectEntity} />}
           </aside>
         )}
 
@@ -556,7 +575,7 @@ export default function Cockpit() {
             </section>
           )}
           {(workbench.fieldEditor?.fields?.length || workbench.revisions?.length) ? <RevisionPanel key={`revision:${workbench.sessionId}`} editor={workbench.fieldEditor} actions={workbench.revisions ?? []} structure={workbench.structure ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onPreview={async(candidateId,path,instruction,key,allow)=>{await studio.previewCreationRevision({candidateId,paths:[path],instruction,idempotencyKey:key,...allow});await load();}} onConfirm={async(action)=>{await studio.confirmCreationRevision({actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey});await load();}} onReject={async(id)=>{await run(()=>studio.rejectCreationRevision(id));}} onApply={async(action,paths)=>{const command={actionId:action.actionId,argumentsHash:action.argumentsHash,idempotencyKey:action.idempotencyKey,...(paths?.length?{paths}:{})};await run(()=>studio.applyCreationRevision(command));}}/> : null}
-          {workbench.fieldEditor?.fields?.length ? <CandidateFields onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
+          {(workbench.fieldEditor?.fields?.length || fieldDirty) ? <CandidateFields ownerRef={contextualTarget?.id} targetLabel={contextualTarget?.title} registerBeforeLeave={registerBeforeClose} onDirtyChange={setFieldDirty} key={`fields:${workbench.sessionId}`} editor={workbench.fieldEditor ?? emptyFieldEditor} disabled={busy||generating||workbench.readOnly||materialDirty} onSave={async(candidateId,changes)=>{await run(()=>studio.saveCreationFields({candidateId,changes}));}} onLock={async(candidateId,path,locked)=>{await run(()=>(locked?studio.lockCreationField:studio.unlockCreationField)(candidateId,path));}}/> : null}
           {capabilities.includes('SaveStructure') && (workbench.structure ?? []).length > 0 && <StructureEditor key={`structure:${workbench.sessionId}`} collections={workbench.structure ?? []} disabled={busy||generating||workbench.readOnly||fieldDirty||materialDirty} onAdd={async(collection,entityKey,value)=>{await editStructure(collection,'add',entityKey,value);}} onDelete={async(collection,entityKey)=>{await editStructure(collection,'remove',entityKey,'');}}/>}
           {(workbench.canPrepareSample || workbench.sampleHandoff) && <SamplePanel key={`sample:${workbench.sessionId}`} sample={workbench.sampleHandoff} version={workbench.contentVersion ?? 0} runVersion={workbench.runSlotVersion ?? 0} directionCandidateId={workbench.directionSet.selectedCandidateId || workbench.directionSet.candidateId} directionCardId={workbench.directionSet.selectedId} disabled={!workbench.canPrepareSample || busy || generating || workbench.readOnly || materialDirty} onSave={async (value) => { await run(() => studio.saveCreationSample({ ...value, projectId: workbench.projectId, sessionId: workbench.sessionId })); }} />}
           {workbench.sessionId && <EntryPanel key={`entry:${workbench.sessionId}`} onDirtyChange={setMaterialDirty} entry={workbench.entry} contentVersion={workbench.contentVersion ?? 0} runSlotVersion={workbench.runSlotVersion ?? 0} disabled={busy || generating || workbench.readOnly || fieldDirty} onSave={async (kind, material, expectedVersion, expectedRunSlotVersion) => {
@@ -716,7 +735,7 @@ export default function Cockpit() {
                           />
                         )}
                         {section.lockPath && (
-                          <Button size="sm" variant="ghost" onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath))}>
+                          <Button size="sm" variant="ghost" disabled={reviewDisabled} onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath))}>
                             {section.locked ? '解锁' : '锁定'}
                           </Button>
                         )}
@@ -808,7 +827,8 @@ export default function Cockpit() {
           <CoCreationPanel
             key={`cocreation:${workbench.projectId}:${workbench.sessionId}`}
             editor={workbench.fieldEditor}
-            entityRef={selectedEntity?.id ?? selectedRoadmap?.id ?? selectedSection?.id ?? ''}
+            entityRef={contextualTarget?.id ?? ''}
+            targetLabel={contextualTarget?.title}
             messages={(workbench.assistant.messages ?? []).map(message => ({
               ...message,
               actionState: workbench.revisions?.find(action => action.actionId === message.actionId)?.state ?? message.actionState,

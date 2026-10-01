@@ -10,6 +10,7 @@ import { DiscussionMessage } from './DiscussionMessage';
 interface Props {
   editor?: FieldEditor;
   entityRef?: string;
+  targetLabel?: string;
   messages: AssistantMessageView[];
   authorization?: DiscussionAuthorizationView;
 	 authorizations?: DiscussionAuthorizationView[];
@@ -30,8 +31,9 @@ function boundToCurrent(auth: DiscussionAuthorizationView | undefined, candidate
   return paths.length === 0 || requestedPaths.every(path => paths.includes(path));
 }
 
-export function CoCreationPanel({editor, entityRef = '', messages, authorization, authorizations = [], pendingDiscussion, disabled, onSend, onPreviewDiscussion, onConfirmDiscussion, onSendDiscussion, onRevokeDiscussion, onPreviewSuggestion}: Props) {
-  const available = useMemo(() => editor?.fields ?? [], [editor]);
+export function CoCreationPanel({editor, entityRef = '', targetLabel, messages, authorization, authorizations = [], pendingDiscussion, disabled, onSend, onPreviewDiscussion, onConfirmDiscussion, onSendDiscussion, onRevokeDiscussion, onPreviewSuggestion}: Props) {
+  const allFields = useMemo(() => editor?.fields ?? [], [editor]);
+  const available = useMemo(() => entityRef && allFields.some(field => field.ownerRef) ? allFields.filter(field => field.ownerRef === entityRef) : allFields, [allFields, entityRef]);
   const pendingPaths = pendingDiscussion?.authorization?.fieldPaths ?? [];
   const pendingFieldPath = pendingPaths.length > 1 ? '*' : pendingPaths[0] ?? '';
   const [fieldPath, setFieldPath] = useState(pendingFieldPath || available[0]?.path || '');
@@ -44,10 +46,10 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (fieldPath !== '*' && !available.some(field => field.path === fieldPath)) setFieldPath(available[0]?.path ?? '');
-  }, [editor?.candidateId, available, fieldPath]);
+    if (fieldPath !== '*' && !available.some(field => field.path === fieldPath)) setFieldPath(available[0]?.path ?? (allFields.length ? '*' : ''));
+  }, [editor?.candidateId, available, allFields, fieldPath]);
 
-  const fieldPaths = fieldPath === '*' ? available.map(field => field.path) : [fieldPath];
+  const fieldPaths = fieldPath === '*' ? allFields.map(field => field.path) : [fieldPath];
   const discussionEntity = fieldPath === '*' ? '' : entityRef;
   const staleDraft = !!text.trim() && draftBase !== bindingKey(fieldPath);
 	const targetAuth = [...(authorizations ?? []), ...(authorization ? [authorization] : [])].reverse().find(auth => boundToCurrent(auth, editor?.candidateId ?? '', discussionEntity, fieldPaths));
@@ -84,6 +86,7 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
   return <section className="min-h-0 flex-1 bg-surface flex flex-col" aria-label="AI 共创对话">
     <div className="p-4 border-b border-border">
       <h2 className="text-sm font-medium text-text">AI 共创</h2>
+      {targetLabel && <p className="mt-1 text-sm text-primary">当前对象：{targetLabel}</p>}
       <p className="mt-1 text-xs text-text-sub">可以先讨论分析，再决定是否形成修改提案。讨论授权绑定当前候选版本，不会随导航换绑。</p>
       {currentAuth && <p className="mt-2 text-xs text-text-sub">剩余 {currentAuth.remainingCalls ?? 0} 次调用 / {(currentAuth.remainingTokens ?? 0).toLocaleString()} Token · 到期 {currentAuth.expiresAt} · 绑定 {currentAuth.entityRef || currentAuth.fieldPaths?.[0] || currentAuth.candidateId}</p>}
       {staleAuth && <p className="mt-2 text-xs text-warning">基准版本已变化，当前讨论授权不能继续发送。</p>}
@@ -94,7 +97,7 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
       {messages.map(message => <DiscussionMessage key={message.id} message={message} ignored={ignored} disabled={disabled || busy} onPreviewSuggestion={onPreviewSuggestion} onIgnore={id => setIgnored(old => new Set(old).add(id))} />)}
     </div>
     <div className="p-4 border-t border-border space-y-3">
-      <select aria-label="共创目标字段" className="w-full rounded-md border border-border bg-surface p-2 text-sm" value={fieldPath} disabled={disabled || busy || available.length === 0} onChange={event => setFieldPath(event.target.value)}>
+      <select aria-label="共创目标字段" className="w-full rounded-md border border-border bg-surface p-2 text-sm" value={fieldPath} disabled={disabled || busy || allFields.length === 0} onChange={event => setFieldPath(event.target.value)}>
         <option value="*">当前候选整体（仅讨论）</option>
         {available.map(field => <option key={field.path} value={field.path}>{field.group} · {field.label}{field.locked ? "（已锁定，可讨论）" : ""}</option>)}
       </select>

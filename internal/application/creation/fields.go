@@ -12,11 +12,12 @@ import (
 )
 
 type TextFieldView struct {
-	Path   string `json:"path"`
-	Label  string `json:"label"`
-	Group  string `json:"group"`
-	Value  string `json:"value"`
-	Locked bool   `json:"locked"`
+	OwnerRef string `json:"ownerRef"`
+	Path     string `json:"path"`
+	Label    string `json:"label"`
+	Group    string `json:"group"`
+	Value    string `json:"value"`
+	Locked   bool   `json:"locked"`
 }
 type FieldEditorView struct {
 	CandidateID string          `json:"candidateId"`
@@ -70,7 +71,7 @@ func candidateTextFields(candidate creationdomain.Candidate) FieldEditorView {
 				next := path + "/" + escapeField(key)
 				if text, ok := child.(string); ok {
 					if _, err := candidate.FieldString(next); err == nil {
-						view.Fields = append(view.Fields, TextFieldView{Path: next, Label: fieldLabel(key), Group: group, Value: text, Locked: candidate.Locked(next)})
+						view.Fields = append(view.Fields, TextFieldView{OwnerRef: textFieldOwner(candidate.Stage, root, next), Path: next, Label: fieldLabel(key), Group: group, Value: text, Locked: candidate.Locked(next)})
 					}
 					continue
 				}
@@ -128,4 +129,42 @@ func (service *Service) SaveFields(ctx context.Context, projectID string, r Save
 		return candidate, err
 	}
 	return service.SaveCandidateDraft(ctx, projectID, candidate.ID, payload)
+}
+
+// textFieldOwner 将字段绑定到稳定导航对象，嵌套字段继承所属实体，名称只用于无 ID 的既有合同。
+func textFieldOwner(stage creationdomain.Stage, root any, path string) string {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) == 0 {
+		return "candidate"
+	}
+	if stage == creationdomain.StageProposal {
+		sections := map[string]string{"title": "position", "positioning": "position", "sell_point": "position", "genre": "position", "protagonist_arc": "character", "world_rules": "world", "core_conflict": "mainplot", "major_milestones": "mainplot", "subplots": "subplot", "ending": "ending", "forbidden": "forbidden"}
+		if section := sections[parts[0]]; section != "" {
+			return section
+		}
+	}
+	if stage == creationdomain.StageRoadmap && parts[0] == "book" {
+		if object, ok := root.(map[string]any); ok {
+			if book, ok := object["book"].(map[string]any); ok {
+				if id, ok := book["id"].(string); ok && id != "" {
+					return "book:" + id
+				}
+			}
+		}
+	}
+	prefixes := map[string]string{}
+	switch stage {
+	case creationdomain.StagePeopleWorld:
+		prefixes = map[string]string{"characters": "character:", "factions": "faction:", "locations": "location:", "world_rules": "rule:"}
+	case creationdomain.StageRoadmap:
+		prefixes = map[string]string{"volumes": "volume:", "arcs": "arc:", "near_term_chapters": "chapter:", "chapters": "chapter:"}
+	case creationdomain.StageDirections:
+		prefixes = map[string]string{"directions": "direction:"}
+	}
+	if prefix := prefixes[parts[0]]; prefix != "" && len(parts) > 1 && strings.HasPrefix(parts[1], "@") {
+		id := strings.TrimPrefix(parts[1], "@")
+		id = strings.ReplaceAll(strings.ReplaceAll(id, "~1", "/"), "~0", "~")
+		return prefix + id
+	}
+	return "candidate"
 }

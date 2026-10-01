@@ -89,3 +89,14 @@ it('整个候选讨论冻结全部读取路径，不扩展为修改授权',async
  expect(preview).toHaveBeenCalledWith(expect.objectContaining({entityRef:'',fieldPaths:['/title','/protagonist_arc','/ending']}));
  expect((screen.getByRole('button',{name:'提出修改'}) as HTMLButtonElement).disabled).toBe(true);
 });
+it('只列出当前对象字段，显式整体讨论仍包含所有对象',async()=>{
+ const fields=[{path:'/characters/@a/secret',ownerRef:'character:a',label:'甲秘密',group:'同名',value:'甲',locked:false},{path:'/characters/@b/secret',ownerRef:'character:b',label:'乙秘密',group:'同名',value:'乙',locked:false}];
+ const preview=vi.fn().mockResolvedValue({actionId:'a',authorization:{}});
+ render(<CoCreationPanel editor={{candidateId:'c',version:1,fields}} entityRef="character:b" targetLabel="同名人物乙" messages={[]} onSend={vi.fn()} onPreviewDiscussion={preview}/>);
+ expect(screen.queryByRole('option',{name:/甲秘密/})).toBeNull();
+ expect(screen.getByRole('option',{name:/乙秘密/})).toBeTruthy();
+ await userEvent.selectOptions(screen.getByRole('combobox',{name:'共创目标字段'}),'*');
+ await userEvent.type(screen.getByRole('textbox',{name:'共创消息'}),'比较两人的动机');
+ await userEvent.click(screen.getByRole('button',{name:'讨论这个问题'}));
+ expect(preview).toHaveBeenCalledWith(expect.objectContaining({entityRef:'',fieldPaths:fields.map(f=>f.path)}));
+});
