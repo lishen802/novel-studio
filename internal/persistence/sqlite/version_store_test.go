@@ -67,7 +67,7 @@ func TestRestoreChapterRevisionCreatesNewRevisionAndPreservesHistory(t *testing.
 	if err := store.CommitChapter(ctx, second, first); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveDraft(ctx, chapter.ID, "不应保留的恢复草稿", second.Revision); err != nil {
+	if err := store.SaveDraft(ctx, chapter.ID, second.Body, second.Revision); err != nil {
 		t.Fatal(err)
 	}
 

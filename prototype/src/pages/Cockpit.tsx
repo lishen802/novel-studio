@@ -213,6 +213,7 @@ export default function Cockpit() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [editingDirection, setEditingDirection] = useState<string | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [archiveOpen,setArchiveOpen] = useState(false);
   const [nextHint, setNextHint] = useState('输入你的想法，或让 AI 基于当前上下文给出三个不同方向。');
   // R4 四项交互都只改本地候选：逐项审阅、候选版本、结构增删与修订结果的勾选采用。
   const [reviewUnits, setReviewUnits] = useState<ReviewUnitView[]>(initialReviewUnits);
@@ -683,7 +684,7 @@ export default function Cockpit() {
 
               {acceptedCount === draftSections.length && (
                 <div className="flex justify-center pb-8">
-                  <Button variant="primary" size="lg" onClick={() => navigate('/archive/outline')} className="gap-2">
+                  <Button variant="primary" size="lg" onClick={() => setArchiveOpen(true)} className="gap-2">
                     进入作品档案
                     <ChevronRight className="w-4 h-4" />
                   </Button>
@@ -731,6 +732,9 @@ export default function Cockpit() {
       </div>
 
       {/* Compare modal */}
+      <Modal open={archiveOpen} onClose={() => setArchiveOpen(false)} title="核对正式入档内容">
+        <div className="space-y-4"><p className="text-sm">本次将入档以下已审阅内容：</p><ul className="max-h-[40vh] overflow-auto space-y-2 text-sm">{draftSections.map(item => <li key={item.id}>{item.title}</li>)}</ul><p className="text-xs text-text-sub">原型演示：确认仅切换页面，不写入正式档案。</p><div className="flex justify-end gap-2"><Button onClick={() => setArchiveOpen(false)}>返回审阅</Button><Button variant="primary" onClick={() => navigate('/archive/outline')}>确认写入正式档案</Button></div></div>
+      </Modal>
       <Modal open={compareOpen} onClose={() => setCompareOpen(false)} title="比较故事方向">
         <div className="space-y-4 max-h-[70vh] overflow-auto pr-1">
           {directions.map((dir, idx) => (

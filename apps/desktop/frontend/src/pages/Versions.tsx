@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useApp } from '../store/useApp';
 import {
   GitBranch,
   Plus,
@@ -36,6 +37,10 @@ const checklistItems = [
 
 export default function Versions() {
   const navigate = useNavigate();
+  const {dispatch} = useApp();
+  const [restoreTarget,setRestoreTarget] = useState<Version|null>(null);
+  const [error,setError] = useState('');
+  const [exportResult,setExportResult] = useState<Awaited<ReturnType<typeof studio.exportManuscript>>|null>(null);
   const [versions, setVersions] = useState<Version[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -44,7 +49,7 @@ export default function Versions() {
   const [exporting, setExporting] = useState<{ key: string; label: string } | null>(null);
   const [checks, setChecks] = useState<Record<string, boolean>>({
     candidates: false,
-    characters: true,
+    characters: false,
     timeline: false,
   });
 
@@ -60,7 +65,7 @@ export default function Versions() {
         note: snapshot.kind === 'manual' ? '手动项目快照' : snapshot.kind,
         isTagged: true,
       })));
-    });
+    }).catch(reason => {if(mounted)setError(reason instanceof Error ? reason.message : '快照读取失败');});
     return () => {
       mounted = false;
     };
@@ -88,13 +93,14 @@ export default function Versions() {
       };
       setVersions((prev) => [v, ...prev]);
       setModalOpen(false);
-    } finally {
+    } catch(reason) {setError(reason instanceof Error ? reason.message : '创建快照失败');}
+    finally {
       setLoading(false);
     }
   };
 
   const handleExport = (format: (typeof exportFormats)[number]) => {
-    setExporting({ key: format.key, label: format.label });
+    setExportResult(null);setError('');setExporting({ key: format.key, label: format.label });
   };
 
   const toggleCheck = (id: string) => {
@@ -118,6 +124,7 @@ export default function Versions() {
         </Button>
       </header>
 
+      {error && <p role="alert" className="text-sm text-danger mb-3">{error}</p>}
       <div className="flex-1 overflow-auto">
         <div className="grid grid-cols-12 gap-6">
           <div className="col-span-8 space-y-6">
@@ -151,11 +158,11 @@ export default function Versions() {
                             <p className="text-xs text-text-muted mb-2">{v.createdAt}</p>
                             {v.note && <p className="text-sm text-text-sub mb-3">{v.note}</p>}
                             <div className="flex items-center gap-4 text-xs text-text-sub">
-                              <span>约 {v.wordCount.toLocaleString()} 字</span>
+                              <span>完整项目快照</span>
                             </div>
                           </div>
-                          <Button variant="ghost" size="sm" onClick={() => navigate('/chapters')}>
-                            查看
+                          <Button variant="ghost" size="sm" onClick={() => setRestoreTarget(v)}>
+                            恢复快照
                           </Button>
                         </div>
                       </Card>
@@ -175,7 +182,7 @@ export default function Versions() {
                     className="flex items-center gap-3 p-4 bg-surface-elevated border border-border rounded-lg hover:border-primary/40 hover:bg-surface-hover transition-colors text-left"
                   >
                     <fmt.icon className="w-5 h-5 text-primary" />
-                    <span className="text-sm text-text">{fmt.label}（尚未就绪）</span>
+                    <span className="text-sm text-text">{fmt.label}{['plain','markdown'].includes(fmt.key) ? '' : '（尚未就绪）'}</span>
                   </button>
                 ))}
               </div>
@@ -184,7 +191,8 @@ export default function Versions() {
 
           <div className="col-span-4">
             <Card className="sticky top-0">
-              <h2 className="text-sm font-medium text-text mb-4">交付清单</h2>
+              <h2 className="text-sm font-medium text-text mb-4">交付自查</h2>
+              <p className="text-xs text-text-sub mb-3">以下为本次人工自查，不代表系统已自动校验。</p>
               <div className="space-y-3">
                 {checklistItems.map((item) => {
                   const checked = !!checks[item.id];
@@ -216,6 +224,14 @@ export default function Versions() {
         </div>
       </div>
 
+      <Modal open={Boolean(restoreTarget)} onClose={()=>{if(!loading)setRestoreTarget(null);}} title="恢复项目快照">
+        <div className="space-y-4"><p className="text-sm">恢复「{restoreTarget?.label}」将替换当前项目内容。恢复前系统会自动建立安全快照，可从版本列表恢复。</p>
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        <div className="flex justify-end gap-2"><Button disabled={loading} onClick={()=>setRestoreTarget(null)}>取消</Button><Button variant="primary" disabled={loading} onClick={()=>{
+          if(!restoreTarget)return;setLoading(true);setError('');
+          void studio.restoreSnapshot(restoreTarget.id).then(result=>{dispatch({type:'SET_BACKEND_PROJECT',payload:result.project});setRestoreTarget(null);navigate('/chapters');}).catch(reason=>setError(reason instanceof Error?reason.message:'恢复失败')).finally(()=>setLoading(false));
+        }}>确认恢复快照</Button></div></div>
+      </Modal>
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="创建新版本">
         <div className="space-y-4">
           <div>
@@ -244,14 +260,16 @@ export default function Versions() {
 
       <Modal open={!!exporting} onClose={() => setExporting(null)} title="导出确认">
         {exporting && (
-          <div className="text-center py-2">
-            <p className="text-sm text-text mb-4">
-              <strong className="text-primary">{exporting.label}</strong> 尚未接入后端导出能力。
-            </p>
-            <p className="text-xs text-text-sub mb-5">当前不会创建文件或伪造导出任务。</p>
-            <Button variant="primary" onClick={() => setExporting(null)}>
-              知道了
-            </Button>
+          <div className="space-y-4">
+            {['plain','markdown'].includes(exporting.key) ? <>
+              <p className="text-sm text-text">按章节顺序导出最新自动保存工作稿（含空白稿），文件保存到项目的 exports 文件夹。</p>
+              {exportResult && <div className="text-sm space-y-2"><p>已导出 {exportResult.chapterCount} 章，其中 {exportResult.draftCount} 章使用工作稿。</p><p className="break-all select-all" aria-label="导出文件路径">{exportResult.path}</p></div>}
+              {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+              <Button variant="primary" disabled={loading} onClick={()=>{
+                setLoading(true);setError('');
+                void studio.exportManuscript(exporting.key).then(setExportResult).catch(reason=>setError(reason instanceof Error?reason.message:'导出失败')).finally(()=>setLoading(false));
+              }}>{loading ? '导出中…' : exportResult ? '再次导出' : '确认导出'}</Button>
+            </> : <p className="text-sm text-text">{exporting.label} 尚未接入后端导出能力。当前可使用 TXT 或 Markdown。</p>}
           </div>
         )}
       </Modal>

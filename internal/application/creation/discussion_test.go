@@ -496,3 +496,20 @@ func waitForDiscussionReply(t *testing.T, store *memoryStore) bool {
 		return answered > 0 && running == 0
 	})
 }
+
+func TestLockedFieldCanBeDiscussedButCannotBeRevised(t *testing.T) {
+	ctx := context.Background()
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	base := seedProposalCandidate(t, service, store)
+	if _, err := service.LockCandidateField(ctx, "project-1", base.ID, "/protagonist_arc"); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewDiscussionAuthorization(ctx, "project-1", DiscussionAuthorizationRequest{CandidateID: base.ID, FieldPaths: []string{"/protagonist_arc"}, IdempotencyKey: "read-locked"}, discussionProfile())
+	if err != nil || preview.ActionID == "" {
+		t.Fatalf("locked discussion = %#v %v", preview, err)
+	}
+	if _, err := service.PreviewRevision(ctx, "project-1", RevisionRequest{CandidateID: base.ID, Paths: []string{"/protagonist_arc"}, Instruction: "修改", IdempotencyKey: "write-locked"}, revisionProfile()); !errors.Is(err, creationdomain.ErrFieldLocked) {
+		t.Fatalf("locked write error = %v", err)
+	}
+}

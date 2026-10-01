@@ -143,25 +143,29 @@ function errorMessage(error: unknown): string {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
-  const beforeCloseHandler = useRef<(() => Promise<void>) | null>(null);
+  const beforeCloseHandlers = useRef(new Set<() => Promise<void>>());
   const closing = useRef(false);
 
   // 页面可注册退出前刷新动作；正文编辑器用它落盘尚未触发防抖保存的内容。
   const registerBeforeClose = useCallback((handler: () => Promise<void>) => {
-    beforeCloseHandler.current = handler;
-    return () => {
-      if (beforeCloseHandler.current === handler) beforeCloseHandler.current = null;
-    };
+    beforeCloseHandlers.current.add(handler);
+    return () => { beforeCloseHandlers.current.delete(handler); };
   }, []);
+  const flushEdits = useCallback(async () => {
+    for (const save of [...beforeCloseHandlers.current]) await save();
+  }, []);
+  const hasEditGuard = useCallback(() => beforeCloseHandlers.current.size > 0, []);
 
   // 原生关闭按钮和“退出”菜单共用同一条链路，保证先保存再通知后端放行。
   const requestApplicationClose = useCallback(async () => {
     if (closing.current || !studio.available()) return;
     closing.current = true;
     try {
-      await beforeCloseHandler.current?.();
+      await flushEdits();
     } catch (error) {
       dispatch({ type: 'SET_ERROR', payload: errorMessage(error) });
+      closing.current = false;
+      return;
     }
     try {
       await studio.completeClose();
@@ -169,7 +173,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       closing.current = false;
       dispatch({ type: 'SET_ERROR', payload: errorMessage(error) });
     }
-  }, []);
+  }, [flushEdits]);
 
   const refreshBootstrap = useCallback(async () => {
     if (!studio.available()) return;
@@ -207,6 +211,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const parentDirectory = await studio.chooseProjectParent();
       if (!parentDirectory) return false;
+      await flushEdits();
       const project = await studio.createProject({
         parentDirectory,
         title: input.title,
@@ -222,13 +227,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       dispatch({ type: 'SET_BUSY', payload: false });
     }
-  }, [activateProject, refreshBootstrap]);
+  }, [activateProject, refreshBootstrap, flushEdits]);
 
   const openProject = useCallback(async () => {
     dispatch({ type: 'SET_BUSY', payload: true });
     try {
       const path = await studio.chooseProjectToOpen();
       if (!path) return false;
+      await flushEdits();
       const result = await studio.openProject(path);
       if (result.outcome !== 'opened' || !result.project) {
         throw new Error('项目正在被其他实例使用，请稍后重试或以只读方式打开。');
@@ -242,11 +248,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       dispatch({ type: 'SET_BUSY', payload: false });
     }
-  }, [activateProject, refreshBootstrap]);
+  }, [activateProject, refreshBootstrap, flushEdits]);
 
   const openRecentProject = useCallback(async (projectId: string) => {
     dispatch({ type: 'SET_BUSY', payload: true });
     try {
+      await flushEdits();
       const result = await studio.openRecentProject(projectId);
       if (result.outcome !== 'opened' || !result.project) throw new Error('无法打开最近项目');
       activateProject(result.project);
@@ -257,12 +264,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       dispatch({ type: 'SET_BUSY', payload: false });
     }
-  }, [activateProject]);
+  }, [activateProject, flushEdits]);
 
   const closeProject = useCallback(async () => {
+    await flushEdits();
     if (studio.available()) await studio.closeProject();
     dispatch({ type: 'SET_BACKEND_PROJECT', payload: null });
-  }, []);
+  }, [flushEdits]);
 
   useEffect(() => {
     void refreshBootstrap();
@@ -291,6 +299,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       openRecentProject,
       closeProject,
       registerBeforeClose,
+      flushEdits,
+      hasEditGuard,
       requestApplicationClose,
     }}>
       {children}

@@ -21,6 +21,9 @@ export interface ProjectView {
   workbench: WorkbenchProjection;
 }
 
+export interface ChapterRevisionView {
+ chapterId:string; revision:number; title:string; body:string; source:string; summary:string; createdAt:string; isCurrent:boolean;
+}
 export interface ChapterView {
   id: string;
   projectId: string;
@@ -567,7 +570,8 @@ export const studio = {
   discardDraft: (id: string, revision: number) => call<void>('DiscardDraft', id, revision),
   commitChapter: (id: string, body: string, revision: number) =>
     call<ChapterView>('CommitChapter', id, body, revision),
-  chapterHistory: (id: string) => call<Array<Record<string, unknown>>>('ChapterHistory', id),
+  chapterHistory: (id: string) => call<ChapterRevisionView[]>('ChapterHistory', id),
+  restoreChapterRevision: (id:string,target:number,expected:number) => call<ChapterView>('RestoreChapterRevision',id,target,expected),
 
   changeSets: () => call<ChangeSetView[]>('ChangeSets'),
   applyChangeSet: (id: string) => call<Record<string, unknown>>('ApplyChangeSet', id),
@@ -577,9 +581,10 @@ export const studio = {
   rejectChangeOperation: (changeSetId: string, operationId: string) =>
     call<void>('RejectChangeOperation', changeSetId, operationId),
 
+  exportManuscript: (format:string) => call<{path:string;chapterCount:number;draftCount:number}>('ExportManuscript',format),
   snapshots: () => call<SnapshotView[]>('Snapshots'),
   createSnapshot: (name: string) => call<SnapshotView>('CreateSnapshot', name),
-  restoreSnapshot: (id: string) => call<Record<string, unknown>>('RestoreSnapshot', id),
+  restoreSnapshot: (id: string) => call<{project:ProjectView;chapters:ChapterView[]}>('RestoreSnapshot', id),
   branches: () => call<Array<Record<string, unknown>>>('Branches'),
   createBranch: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateBranch', input),
   switchBranch: (id: string) => call<Record<string, unknown>>('SwitchBranch', id),
@@ -676,7 +681,7 @@ export const studio = {
     call<{ runId: string }>('ConfirmCreationGenerate', input),
   cancelCreationRun: () => call<void>('CancelCreationRun'),
   recoverCreation: () => call<CreationWorkbenchView>('RecoverCreation'),
-  previewCreationArchive: () => call<{ confirmationDigest: string; title: string; characterCount: number; outlineCount: number }>('PreviewCreationArchive'),
+  previewCreationArchive: () => call<{ confirmationDigest: string; title: string; characterCount: number; outlineCount: number; anchorCount: number; operations: Array<{kind:string;action:string;summary:string}>; excluded: Array<{id:string;scope:string}> }>('PreviewCreationArchive'),
   confirmCreationArchive: (input: { confirmationDigest: string; idempotencyKey: string }) =>
     call<{ changeSetId: string }>('ConfirmCreationArchive', input),
   resolveCreationImpact: (choice: string) => call<{ projection: CreationWorkbenchView['impact'] }>('ResolveCreationImpact', choice),

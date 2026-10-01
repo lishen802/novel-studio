@@ -13,7 +13,7 @@ export function Layout() {
   const applicationWorkspace = isApplicationWorkspace(location.pathname);
   const hasProject = state.currentProject !== null;
   const showProjectShell = !applicationWorkspace && hasProject;
-  const showAiPanel = showProjectShell && ['/chapters', '/review'].includes(location.pathname);
+  const showAiPanel = showProjectShell && location.pathname === '/review';
 
   useEffect(() => {
     if (!showAiPanel) return;
@@ -34,13 +34,13 @@ export function Layout() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-atmosphere">
+    <div className="app-shell h-full flex flex-col bg-atmosphere">
       <TitleBar />
       <div className="flex-1 flex overflow-hidden relative">
         {showProjectShell && <Sidebar />}
         <main
           className={clsx(
-            'flex-1 overflow-auto bg-atmosphere relative transition-[margin-right] duration-220',
+            'workspace-main flex-1 min-w-0 overflow-auto bg-atmosphere relative transition-[margin-right] duration-220',
             showProjectShell && 'ml-[220px]',
             showAiPanel && state.aiPanelOpen && 'mr-[360px]',
           )}

@@ -1,5 +1,6 @@
 import { Component, useEffect, type ReactNode } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { EditorNavigationGuard } from './EditorNavigationGuard';
 import { TitleBar } from './TitleBar';
 import { Sidebar } from './Sidebar';
 import { useApp } from '../store/useApp';
@@ -190,17 +191,19 @@ export function Layout() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-atmosphere">
+    <div className="app-shell h-full flex flex-col bg-atmosphere">
+      <EditorNavigationGuard />
       <TitleBar />
+      {state.error && <div role="alert" className="bg-danger/10 p-3 text-sm text-danger">{state.error} <button onClick={() => dispatch({type:'SET_ERROR',payload:null})}>关闭提示</button></div>}
       <div className="flex-1 flex overflow-hidden relative">
         {showProjectShell && <Sidebar />}
         <main
-          className={`flex-1 overflow-auto bg-atmosphere relative ${showProjectShell ? 'ml-[220px]' : ''}`}
+          className={`workspace-main flex-1 min-w-0 overflow-auto bg-atmosphere relative ${showProjectShell ? 'ml-[220px]' : ''}`}
           style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
         >
           <div data-testid="route-viewport" className="h-full min-h-full p-6">
             <RouteErrorBoundary resetKey={location.pathname}>
-              <Outlet />
+              <Outlet key={state.backendProject?.id ?? "no-project"} />
             </RouteErrorBoundary>
           </div>
         </main>

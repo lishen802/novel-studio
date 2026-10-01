@@ -1,9 +1,13 @@
 package project
 
 import (
+	"errors"
 	"strings"
 	"time"
 )
+
+// ErrUnsavedDraft 表示替换正式正文前必须处理作者已自动保存的工作稿。
+var ErrUnsavedDraft = errors.New("chapter has uncommitted author changes")
 
 type Chapter struct {
 	ID        string

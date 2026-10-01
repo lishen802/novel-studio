@@ -15,6 +15,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
+	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
@@ -388,6 +389,10 @@ func (s *Service) createChapterAgentRunLocked(
 		return AgentRunView{}, err
 	}
 
+	if err := requireSavedChapter(ctx, s.active.store, chapter); err != nil {
+		return AgentRunView{}, err
+	}
+
 	// 读取项目锁定的方案版本；项目未锁定方案时 AI 功能不可用。
 	selection, found, err := readProfileSelection(ctx, s.active.store)
 	if err != nil {
@@ -517,6 +522,19 @@ func (s *Service) ExecuteAgentRun(ctx context.Context, id string) (AgentRunView,
 		s.mu.Unlock()
 		return AgentRunView{}, fmt.Errorf("agent run is not queued: %s", run.Status)
 	}
+	chapter, err := s.active.store.Chapter(ctx, run.ChapterID)
+	if err != nil {
+		s.mu.Unlock()
+		return AgentRunView{}, err
+	}
+	if chapter.Revision != run.ChapterBaseRevision {
+		s.mu.Unlock()
+		return AgentRunView{}, projectdomain.ErrRevisionConflict
+	}
+	if err := requireSavedChapter(ctx, s.active.store, chapter); err != nil {
+		s.mu.Unlock()
+		return AgentRunView{}, err
+	}
 	lease, err := s.leases.acquire(runID, generation)
 	if err != nil {
 		s.mu.Unlock()
@@ -630,10 +648,16 @@ func (s *Service) runAgentPipeline(
 	if err != nil {
 		return failed(err)
 	}
-	contextJSON, contextStats, err := s.assembleAuthoringContext(
+	if chapter.Revision != run.ChapterBaseRevision {
+		return failed(projectdomain.ErrRevisionConflict)
+	}
+	if err := requireSavedChapter(ctx, projectStore, chapter); err != nil {
+		return failed(err)
+	}
+	contextJSON, contextStats, err := s.assembleChapterContext(
 		ctx,
 		projectStore,
-		chapter.ID,
+		chapter,
 		run.ContextCharBudget,
 	)
 	if err != nil {
@@ -833,13 +857,26 @@ func (s *Service) runAgentPipeline(
 		return failStale()
 	}
 	var reviewOutput struct {
-		Summary string `json:"summary"`
+		Approved bool              `json:"approved"`
+		Summary  string            `json:"summary"`
+		Issues   []json.RawMessage `json:"issues"`
 	}
 	_ = json.Unmarshal([]byte(review), &reviewOutput)
+	reviewSummary := strings.TrimSpace(reviewOutput.Summary)
+	if !reviewOutput.Approved {
+		reviewSummary = "审阅未通过，请核对问题后再决定是否采用。\n" + reviewSummary
+	}
+	for _, issue := range reviewOutput.Issues {
+		var plain string
+		if json.Unmarshal(issue, &plain) != nil {
+			plain = string(issue)
+		}
+		reviewSummary += "\n• " + plain
+	}
 	changeSet, err := revisiondomain.NewChapterBodyChangeSet(
 		s.ids.NewID(), s.ids.NewID(), run.ProjectID, run.ChapterID,
 		"智能体草稿："+chapter.Title,
-		strings.TrimSpace(reviewOutput.Summary),
+		reviewSummary,
 		"agent-run:"+run.ID,
 		run.ChapterBaseRevision, chapter.Body, draft,
 		"由规划、写作和连续性审阅智能体生成，等待作者确认。",
@@ -987,11 +1024,17 @@ func (s *Service) assembleAuthoringContext(
 	chapterID string,
 	charBudget int,
 ) (string, contextManifestStats, error) {
-	project, err := store.Project(ctx)
+	chapter, err := store.Chapter(ctx, chapterID)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
-	chapter, err := store.Chapter(ctx, chapterID)
+	return s.assembleChapterContext(ctx, store, chapter, charBudget)
+}
+
+// assembleChapterContext 使用同一份目标正文快照构造上下文和候选基准。
+func (s *Service) assembleChapterContext(ctx context.Context, store ports.ProjectStore, chapter projectdomain.Chapter, charBudget int) (string, contextManifestStats, error) {
+	chapterID := chapter.ID
+	project, err := store.Project(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
@@ -999,6 +1042,14 @@ func (s *Service) assembleAuthoringContext(
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
+	recent := chapters[:0:0]
+	for _, item := range chapters {
+		if item.Position < chapter.Position {
+			recent = append(recent, item)
+		}
+	}
+	sort.SliceStable(recent, func(i, j int) bool { return recent[i].Position > recent[j].Position })
+	chapters = recent
 	outline, err := store.ListOutlineNodes(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
@@ -1333,6 +1384,10 @@ func agentRunView(run agentdomain.Run) AgentRunView {
 
 func agentRunErrorCode(err error) string {
 	switch {
+	case errors.Is(err, projectdomain.ErrUnsavedDraft):
+		return "author_draft_pending"
+	case errors.Is(err, projectdomain.ErrRevisionConflict):
+		return "chapter_revision_conflict"
 	case errors.Is(err, ErrTokenBudgetExceeded):
 		return "token_budget_exceeded"
 	case errors.Is(err, ErrContextBudgetExceeded):
@@ -1486,4 +1541,16 @@ func computeLegacySourceDigest(snapshot ports.LegacyAgentSettingsSnapshot) strin
 	}
 	fmt.Fprintf(h, "settings|%d|%d\n", snapshot.MaxRunTokens, snapshot.MaxContextChars)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// requireSavedChapter 阻止旧正文入口忽略作者工作稿；作者须明确保存版本再运行。
+func requireSavedChapter(ctx context.Context, store ports.ProjectStore, chapter projectdomain.Chapter) error {
+	body, revision, _, found, err := store.Draft(ctx, chapter.ID)
+	if err != nil {
+		return fmt.Errorf("read author draft before model call: %w", err)
+	}
+	if found && (revision != chapter.Revision || body != chapter.Body) {
+		return projectdomain.ErrUnsavedDraft
+	}
+	return nil
 }

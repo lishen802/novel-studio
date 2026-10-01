@@ -145,3 +145,16 @@ html, body, #root {
   from { transform: translateX(-100%); }
   to { transform: translateX(300%); }
 }
+
+/* 专注写作保留退出入口，隐藏会挤占正文宽度的导航。 */
+.app-shell:has([data-editor-focus="true"]) .project-navigation { display: none; }
+.app-shell:has([data-editor-focus="true"]) .workspace-main { margin-left: 0; }
+.assistant-dismiss { display: none; }
+@media (max-width: 1400px) {
+  .assistant-dismiss { display: block; position: absolute; inset: 0; z-index: 34; background: rgb(0 0 0 / 5%); }
+  .manuscript-workspace .chapter-navigation { width: 208px; }
+  .manuscript-workspace .manuscript-assistant {
+    position: absolute; right: 0; top: 0; bottom: 0; z-index: 35;
+    max-width: min(440px, 90%); box-shadow: -8px 0 30px rgb(0 0 0 / 12%);
+  }
+}

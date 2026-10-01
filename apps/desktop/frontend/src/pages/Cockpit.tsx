@@ -343,18 +343,28 @@ export default function Cockpit() {
     }
   };
 
+  const [archivePreview, setArchivePreview] = useState<Awaited<ReturnType<typeof studio.previewCreationArchive>> | null>(null);
+  const archiveKey = useRef('');
+  const confirmArchive = async () => {
+    if (!archivePreview || busy) return;
+    setBusy(true); setError('');
+    try {
+      await studio.confirmCreationArchive({confirmationDigest:archivePreview.confirmationDigest,idempotencyKey:archiveKey.current});
+      const workbenchState = await studio.projectWorkbench();
+      if (state.backendProject) dispatch({type:'SET_BACKEND_PROJECT',payload:{...state.backendProject,workbench:workbenchState}});
+      setArchivePreview(null); navigate('/archive/outline');
+    } catch (err) { setError(err instanceof Error ? err.message : '入档失败，请重新核对预览。'); }
+    finally { setBusy(false); }
+  };
   const confirmNext = async (cardId?: string) => {
     if (fieldDirty) { setError('请先保存文本修改，再继续生成或进入下一阶段。'); return; }
     if (materialDirty) { setError("请先保存材料，再审阅下一阶段。"); return; }
     if (workbench.stage === 'archive_confirm') {
-      const archive = await studio.previewCreationArchive();
-      await studio.confirmCreationArchive({
-        confirmationDigest: archive.confirmationDigest,
-        idempotencyKey: `archive-${Date.now()}`,
-      });
-      const workbenchState = await studio.projectWorkbench();
-      if (state.backendProject) dispatch({ type: 'SET_BACKEND_PROJECT', payload: { ...state.backendProject, workbench: workbenchState } });
-      navigate('/archive/outline');
+      if (busy) return;
+      setBusy(true); setError('');
+      try { setArchivePreview(await studio.previewCreationArchive()); archiveKey.current = crypto.randomUUID(); }
+      catch (err) { setError(err instanceof Error ? err.message : '无法获取入档预览。'); }
+      finally { setBusy(false); }
       return;
     }
     if (workbench.stage === 'directions' && workbench.directionSet.candidateId) {
@@ -853,6 +863,17 @@ export default function Cockpit() {
         )}
       </Modal>
 
+      <Modal open={Boolean(archivePreview)} onClose={() => { if (!busy) setArchivePreview(null); }} title="核对正式入档内容">
+        {archivePreview && <div className="space-y-4">
+          <p className="font-medium">{archivePreview.title}</p>
+          <p className="text-sm text-text-sub">人物 {archivePreview.characterCount} 项 · 大纲 {archivePreview.outlineCount} 项 · 锚点 {archivePreview.anchorCount ?? 0} 项</p>
+          <ul className="max-h-[40vh] overflow-auto text-sm space-y-2">{(archivePreview.operations ?? []).map((item,index) => <li key={index}>{item.action === 'create' ? '新增' : '更新'} · {item.summary}</li>)}</ul>
+          {(archivePreview.excluded?.length ?? 0) > 0 && <p className="text-sm text-warning">{archivePreview.excluded.length} 项已排除，不会入档：{archivePreview.excluded.map(item => item.id).join("、")}</p>}
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          <p className="text-xs text-text-sub">确认后才会写入正式档案；候选发生变化时需要重新预览。</p>
+          <div className="flex justify-end gap-2"><Button disabled={busy} onClick={() => setArchivePreview(null)}>返回审阅</Button><Button variant="primary" disabled={busy} onClick={() => void confirmArchive()}>{busy ? '入档中…' : '确认写入正式档案'}</Button></div>
+        </div>}
+      </Modal>
       <Modal open={compareOpen} onClose={() => setCompareOpen(false)} title="比较故事方向">
         <div className="space-y-4 max-h-[70vh] overflow-auto">
           {cards.map((card, index) => (

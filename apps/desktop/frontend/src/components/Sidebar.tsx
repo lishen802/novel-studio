@@ -22,7 +22,7 @@ export function Sidebar() {
   if (!project) return null;
 
   return (
-    <aside className="fixed left-0 top-10 bottom-0 w-[220px] bg-surface border-r border-border flex flex-col z-30">
+    <aside className="project-navigation fixed left-0 top-10 bottom-0 w-[220px] bg-surface border-r border-border flex flex-col z-30">
       <nav className="flex-1 py-4 px-3 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;

@@ -26,6 +26,8 @@ export interface AppCtxValue {
   openRecentProject: (projectId: string) => Promise<boolean>;
   closeProject: () => Promise<void>;
   registerBeforeClose: (handler: () => Promise<void>) => () => void;
+  flushEdits?: () => Promise<void>;
+  hasEditGuard?: () => boolean;
   requestApplicationClose: () => Promise<void>;
 }
 

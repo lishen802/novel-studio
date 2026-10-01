@@ -1106,7 +1106,7 @@ func validateDiscussionPaths(base creationdomain.Candidate, paths []string) erro
 	}
 	allowed := map[string]bool{}
 	for _, field := range candidateTextFields(base).Fields {
-		allowed[field.Path] = !field.Locked
+		allowed[field.Path] = true
 	}
 	seen := map[string]bool{}
 	for _, path := range paths {

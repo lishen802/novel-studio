@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -931,5 +932,80 @@ func TestLegacyOpenAlreadyPinnedSkipsMigration(t *testing.T) {
 	}
 	if reopenedView.ProfileSelection.ProfileID != "pinned-profile-1" || reopenedView.ProfileSelection.Version != 3 {
 		t.Fatalf("selection = %+v, want pinned-profile-1 v3", reopenedView.ProfileSelection)
+	}
+}
+
+func TestAgentAuthoringPreservesFailedReviewAndIssues(t *testing.T) {
+	ctx := context.Background()
+	providerFactory := &fakeModelProviderFactory{
+		outputs: map[string]string{
+			"planner-model":  `{"summary":"夜探宗门","scenes":[{"title":"潜入","goal":"取得名册","conflict":"守卫巡查","outcome":"发现暗门"}]}`,
+			"writer-model":   "夜色压在山门之上，墨老沿着石阶无声而行。",
+			"reviewer-model": `{"approved":false,"summary":"存在连续性冲突","issues":["人物不应知道密码"]}`,
+		},
+	}
+	resolved := defaultResolvedProfile()
+	for index := range resolved.Roles {
+		switch resolved.Roles[index].Role {
+		case agentdomain.RolePlanner:
+			resolved.Roles[index].Model = "planner-model"
+		case agentdomain.RoleWriter:
+			resolved.Roles[index].Model = "writer-model"
+		case agentdomain.RoleContinuityReviewer:
+			resolved.Roles[index].Model = "reviewer-model"
+		}
+	}
+	service := newAgentServiceWithResolver(t, providerFactory, resolved)
+	defer service.Close()
+	project, err := service.CreateProject(ctx, t.TempDir(), "凡人修仙", "修仙", "墨老企图夺舍主角")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chapter, err := service.CreateChapter(ctx, "第一章")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := service.CreateChapterAgentRun(ctx, chapter.ID, "续写这一章，保持克制的第三人称。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = service.ExecuteAgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForAgentRunStatus(t, service, run.ID, "completed", 5*time.Second)
+	run, err = service.AgentRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "completed" || run.ChangeSetID == "" {
+		t.Fatalf("unexpected run: %#v", run)
+	}
+	if run.InputTokens != 30 || run.OutputTokens != 15 {
+		t.Fatalf("unexpected run token usage: %#v", run)
+	}
+	if run.Steps[0].InputTokens != 10 || run.Steps[0].OutputTokens != 5 {
+		t.Fatalf("unexpected step token usage: %#v", run.Steps[0])
+	}
+	if len(providerFactory.requests) != 3 {
+		t.Fatalf("provider calls = %d", len(providerFactory.requests))
+	}
+	if providerFactory.requests[1].Input == "" || providerFactory.requests[2].Input == "" {
+		t.Fatal("writer and reviewer must receive assembled context")
+	}
+	changeSets, err := service.ChangeSets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changeSets) != 1 ||
+		changeSets[0].Operations[0].AfterValue != providerFactory.outputs["writer-model"] {
+		t.Fatalf("unexpected change sets: %#v", changeSets)
+	}
+	if project.ID == "" {
+		t.Fatal("project id missing")
+	}
+	if !strings.Contains(changeSets[0].Summary, "审阅未通过") || !strings.Contains(changeSets[0].Summary, "人物不应知道密码") {
+		t.Fatalf("review was hidden: %s", changeSets[0].Summary)
 	}
 }

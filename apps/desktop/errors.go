@@ -314,6 +314,8 @@ func safeDesktopError(err error) error {
 		code, message = errorRecoveryCopyChanged, "源项目在创建恢复副本时发生变化，请重试。"
 	case errors.Is(err, ErrRecoveryCopyResultMissing), strings.Contains(lowerMessage, "recovery copy"):
 		code, message = errorRecoveryCopyFailed, "无法创建恢复副本，请检查目标位置后重试。"
+	case errors.Is(err, projectdomain.ErrUnsavedDraft):
+		code, message = "AUTHOR_DRAFT_PENDING", "当前章有自动保存的工作稿，请先保存为版本或处理差异后再继续。工作稿和候选均已保留。"
 	case errors.Is(err, projectdomain.ErrRevisionConflict):
 		code, message = errorRevisionConflict, "章节已在其他位置更新，本地文本已保留。"
 	case errors.Is(err, revisiondomain.ErrBranchDiverged):

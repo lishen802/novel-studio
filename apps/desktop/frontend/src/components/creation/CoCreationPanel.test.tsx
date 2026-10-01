@@ -22,7 +22,7 @@ it('提出修改时冻结当前候选、字段和实体引用', async () => {
   await userEvent.type(screen.getByRole('textbox',{name:'共创消息'}),'标题更含蓄一些');
   await userEvent.click(screen.getByRole('button',{name:'提出修改'}));
   expect(onSend).toHaveBeenCalledWith(expect.objectContaining({candidateId:'candidate-2',entityRef:'arc:3',fieldPath:'/title',text:'标题更含蓄一些'}));
-  expect(screen.queryByRole('option',{name:/结局/})).toBeNull();
+  expect(screen.getByRole('option',{name:/结局.*已锁定，可讨论/})).toBeTruthy();
 });
 
 it('输入后切换字段必须重新核对草稿目标', async () => {
@@ -69,4 +69,23 @@ it('授权后显示余额，修改建议不会自动执行', async () => {
   expect(onPreviewSuggestion).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole('button',{name:'查看修改提案与费用'}));
   expect(onPreviewSuggestion).toHaveBeenCalledWith('m1','s1');
+});
+
+it('锁定字段可以讨论，但不能直接提出修改',async()=>{
+ const preview=vi.fn().mockResolvedValue({actionId:'a',argumentsHash:'h',idempotencyKey:'k',state:'pending_confirmation'});
+ render(<CoCreationPanel editor={editor} messages={[]} onSend={vi.fn()} onPreviewDiscussion={preview}/>);
+ await userEvent.selectOptions(screen.getByRole('combobox',{name:'共创目标字段'}),'/ending');
+ await userEvent.type(screen.getByRole('textbox',{name:'共创消息'}),'结局是否合适');
+ expect((screen.getByRole('button',{name:'提出修改'}) as HTMLButtonElement).disabled).toBe(true);
+ await userEvent.click(screen.getByRole('button',{name:'讨论这个问题'}));
+ expect(preview).toHaveBeenCalledWith(expect.objectContaining({fieldPaths:['/ending']}));
+});
+it('整个候选讨论冻结全部读取路径，不扩展为修改授权',async()=>{
+ const preview=vi.fn().mockResolvedValue({actionId:'a',argumentsHash:'h',idempotencyKey:'k',state:'pending_confirmation'});
+ render(<CoCreationPanel editor={editor} entityRef="arc:3" messages={[]} onSend={vi.fn()} onPreviewDiscussion={preview}/>);
+ await userEvent.selectOptions(screen.getByRole('combobox',{name:'共创目标字段'}),'*');
+ await userEvent.type(screen.getByRole('textbox',{name:'共创消息'}),'整体节奏是否合理');
+ await userEvent.click(screen.getByRole('button',{name:'讨论这个问题'}));
+ expect(preview).toHaveBeenCalledWith(expect.objectContaining({entityRef:'',fieldPaths:['/title','/protagonist_arc','/ending']}));
+ expect((screen.getByRole('button',{name:'提出修改'}) as HTMLButtonElement).disabled).toBe(true);
 });

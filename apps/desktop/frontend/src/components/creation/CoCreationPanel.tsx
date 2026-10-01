@@ -23,16 +23,17 @@ interface Props {
   onPreviewSuggestion?: (messageId: string, suggestionId: string) => Promise<void>;
 }
 
-function boundToCurrent(auth: DiscussionAuthorizationView | undefined, candidateId: string, entityRef: string, fieldPath: string) {
+function boundToCurrent(auth: DiscussionAuthorizationView | undefined, candidateId: string, entityRef: string, requestedPaths: string[]) {
 	if (!auth || auth.candidateId !== candidateId) return false;
   if ((auth.entityRef ?? '') !== entityRef) return false;
   const paths = auth.fieldPaths ?? [];
-  return paths.length === 0 || paths.includes(fieldPath);
+  return paths.length === 0 || requestedPaths.every(path => paths.includes(path));
 }
 
 export function CoCreationPanel({editor, entityRef = '', messages, authorization, authorizations = [], pendingDiscussion, disabled, onSend, onPreviewDiscussion, onConfirmDiscussion, onSendDiscussion, onRevokeDiscussion, onPreviewSuggestion}: Props) {
-  const available = useMemo(() => editor?.fields?.filter(field => !field.locked) ?? [], [editor]);
-  const pendingFieldPath = pendingDiscussion?.authorization?.fieldPaths?.[0] ?? '';
+  const available = useMemo(() => editor?.fields ?? [], [editor]);
+  const pendingPaths = pendingDiscussion?.authorization?.fieldPaths ?? [];
+  const pendingFieldPath = pendingPaths.length > 1 ? '*' : pendingPaths[0] ?? '';
   const [fieldPath, setFieldPath] = useState(pendingFieldPath || available[0]?.path || '');
   const [text, setText] = useState(pendingDiscussion?.draftMessage ?? '');
   const bindingKey = (path: string) => `${editor?.candidateId ?? ''}\u0000${editor?.version ?? 0}\u0000${entityRef}\u0000${path}`;
@@ -43,11 +44,13 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!available.some(field => field.path === fieldPath)) setFieldPath(available[0]?.path ?? '');
+    if (fieldPath !== '*' && !available.some(field => field.path === fieldPath)) setFieldPath(available[0]?.path ?? '');
   }, [editor?.candidateId, available, fieldPath]);
 
+  const fieldPaths = fieldPath === '*' ? available.map(field => field.path) : [fieldPath];
+  const discussionEntity = fieldPath === '*' ? '' : entityRef;
   const staleDraft = !!text.trim() && draftBase !== bindingKey(fieldPath);
-	const targetAuth = [...(authorizations ?? []), ...(authorization ? [authorization] : [])].reverse().find(auth => boundToCurrent(auth, editor?.candidateId ?? '', entityRef, fieldPath));
+	const targetAuth = [...(authorizations ?? []), ...(authorization ? [authorization] : [])].reverse().find(auth => boundToCurrent(auth, editor?.candidateId ?? '', discussionEntity, fieldPaths));
 	const currentAuth = targetAuth && !targetAuth.stale && targetAuth.state === 'active' ? targetAuth : undefined;
 	const staleAuth = targetAuth && (targetAuth.stale || targetAuth.state === 'stale');
 
@@ -62,18 +65,18 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
   };
 
   const propose = () => {
-    if (!editor || !fieldPath || !text.trim() || staleDraft) return;
+    if (!editor || !fieldPath || !text.trim() || staleDraft || fieldPath === '*' || available.find(field => field.path === fieldPath)?.locked) return;
     void act(async () => { await onSend({candidateId: editor.candidateId, entityRef, fieldPath, text: text.trim(), idempotencyKey: crypto.randomUUID()}); }, true);
   };
 
   const discuss = () => {
     if (!editor || !fieldPath || !text.trim() || staleDraft || !onPreviewDiscussion) return;
     if (currentAuth?.id && onSendDiscussion) {
-      void act(async () => { await onSendDiscussion({authorizationId: currentAuth.id ?? '', candidateId: editor.candidateId, entityRef, fieldPaths: [fieldPath], text: text.trim(), idempotencyKey: crypto.randomUUID()}); }, true);
+      void act(async () => { await onSendDiscussion({authorizationId: currentAuth.id ?? '', candidateId: editor.candidateId, entityRef:discussionEntity, fieldPaths, text: text.trim(), idempotencyKey: crypto.randomUUID()}); }, true);
       return;
     }
     void act(async () => {
-      const next = await onPreviewDiscussion({candidateId: editor.candidateId, entityRef, fieldPaths: [fieldPath], message: text.trim(), idempotencyKey: crypto.randomUUID()});
+      const next = await onPreviewDiscussion({candidateId: editor.candidateId, entityRef:discussionEntity, fieldPaths, message: text.trim(), idempotencyKey: crypto.randomUUID()});
       setPreview(next);
     });
   };
@@ -87,12 +90,13 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
       {currentAuth?.id && onRevokeDiscussion && <Button size="sm" className="mt-2" disabled={disabled || busy} onClick={() => void act(async () => { await onRevokeDiscussion(currentAuth.id ?? ''); })}>撤销讨论授权</Button>}
     </div>
     <div className="flex-1 overflow-auto p-4 space-y-3">
-      {messages.length === 0 && <p className="text-sm text-text-muted">选择一个字段，先讨论问题，或直接提出修改。</p>}
+      {messages.length === 0 && <p className="text-sm text-text-muted">可以讨论整个当前候选或某个字段；提出修改需要选定具体字段。</p>}
       {messages.map(message => <DiscussionMessage key={message.id} message={message} ignored={ignored} disabled={disabled || busy} onPreviewSuggestion={onPreviewSuggestion} onIgnore={id => setIgnored(old => new Set(old).add(id))} />)}
     </div>
     <div className="p-4 border-t border-border space-y-3">
       <select aria-label="共创目标字段" className="w-full rounded-md border border-border bg-surface p-2 text-sm" value={fieldPath} disabled={disabled || busy || available.length === 0} onChange={event => setFieldPath(event.target.value)}>
-        {available.map(field => <option key={field.path} value={field.path}>{field.group} · {field.label}</option>)}
+        <option value="*">当前候选整体（仅讨论）</option>
+        {available.map(field => <option key={field.path} value={field.path}>{field.group} · {field.label}{field.locked ? "（已锁定，可讨论）" : ""}</option>)}
       </select>
       <Textarea aria-label="共创消息" placeholder="例如：这个人物的动机哪里不够可信？" maxLength={4000} value={text} disabled={disabled || busy || !editor} onChange={event => { const next = event.target.value; if (!text.trim() && next.trim()) setDraftBase(bindingKey(fieldPath)); setText(next); }} />
       {staleDraft && <p role="alert" className="text-xs text-warning">候选、对象或字段已变化，输入已保留。<Button size="sm" onClick={() => setDraftBase(bindingKey(fieldPath))}>核对后绑定当前目标</Button></p>}
@@ -101,7 +105,7 @@ export function CoCreationPanel({editor, entityRef = '', messages, authorization
         <Button className="w-full gap-2" disabled={disabled || busy || !editor || !fieldPath || !text.trim() || staleDraft || staleAuth} onClick={() => void discuss()}>
           <MessageSquare className="w-4 h-4" />{busy ? '处理中…' : '讨论这个问题'}
         </Button>
-        <Button variant="primary" className="w-full gap-2" disabled={disabled || busy || !editor || !fieldPath || !text.trim() || staleDraft} onClick={() => void propose()}>
+        <Button variant="primary" className="w-full gap-2" disabled={disabled || busy || !editor || !fieldPath || !text.trim() || staleDraft || fieldPath === '*' || available.find(field => field.path === fieldPath)?.locked} onClick={() => void propose()}>
           <Send className="w-4 h-4" />提出修改
         </Button>
       </div>

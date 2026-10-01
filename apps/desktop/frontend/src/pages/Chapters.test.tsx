@@ -171,4 +171,17 @@ describe('正文编辑器真实模型运行确认', () => {
     expect(screen.getByText('低')).toBeTruthy();
     expect((screen.getByRole('button', { name: '确认运行' }) as HTMLButtonElement).disabled).toBe(false);
   });
+  it('重新生成先展示当前预算，取消不会调用重试接口', async () => {
+    const user=userEvent.setup();
+    renderConfiguredEditor(vi.fn().mockResolvedValue({profileId:'profile-1',version:1,name:'当前方案',roles:[],maxRunTokens:12000,maxContextChars:40000,createdAt:''}));
+    const retry=vi.fn();
+    const failed={id:'failed-run',chapterId:'chapter-1',prompt:'原写作目标',status:'recoverable',steps:[],errorCode:'interrupted',errorMessage:'中断',inputTokens:0,outputTokens:0};
+    Object.assign(window.go!.main!.DesktopAPI!,{AgentRuns:vi.fn().mockResolvedValue([failed]),AgentRun:vi.fn().mockResolvedValue(failed),RetryAgentRun:retry,JobSnapshot:vi.fn().mockResolvedValue({status:'recoverable',maxSequence:0}),JobEvents:vi.fn().mockResolvedValue([])});
+    await user.click(await screen.findByRole('button',{name:/唤起创作助手/}));
+    await user.click(await screen.findByRole('button',{name:'重新生成'}));
+    expect(await screen.findByText('当前方案')).toBeTruthy();
+    expect(screen.getByText(/重新执行规划、写作和审阅步骤/)).toBeTruthy();expect(retry).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button',{name:/^取消$/}));expect(retry).not.toHaveBeenCalled();
+  });
+
 });

@@ -378,6 +378,9 @@ func prepareChapterOperation(
 		current.Revision != operation.BaseRevision || current.Body != operation.BeforeValue {
 		return preparedOperation{}, projectdomain.ErrRevisionConflict
 	}
+	if err := requireCleanDraft(ctx, tx, current); err != nil {
+		return preparedOperation{}, err
+	}
 	updated, err := current.Commit(operation.AfterValue, operation.BaseRevision, appliedAt)
 	if err != nil {
 		return preparedOperation{}, err
@@ -758,4 +761,21 @@ func optionalPlanning(value string) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(value)
+}
+
+// requireCleanDraft 防止候选或历史恢复静默删除尚未保存为版本的作者工作稿。
+func requireCleanDraft(ctx context.Context, tx *sql.Tx, chapter projectdomain.Chapter) error {
+	var body string
+	var revision int64
+	err := tx.QueryRowContext(ctx, "SELECT body, base_revision FROM drafts WHERE chapter_id = ?", chapter.ID).Scan(&body, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return databaseOperationError("read author draft before replacement", err)
+	}
+	if body != chapter.Body || revision != chapter.Revision {
+		return projectdomain.ErrUnsavedDraft
+	}
+	return nil
 }

@@ -179,6 +179,16 @@ func (s *Service) RestoreSnapshot(
 		_ = restoredStore.Close()
 		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, err)
 	}
+	selection, _, err := readProfileSelection(ctx, restoredStore)
+	if err != nil {
+		_ = restoredStore.Close()
+		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, err)
+	}
+	workbench, err := computeWorkbenchProjection(ctx, restoredStore)
+	if err != nil {
+		_ = restoredStore.Close()
+		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, err)
+	}
 	if err := s.snapshots.CommitRestore(active.packageInfo.Database); err != nil {
 		_ = restoredStore.Close()
 		return SnapshotRestoreView{}, s.rollbackSnapshotRestoreLocked(ctx, active.packageInfo, s.handleFilesystemWriteFailureLocked(err))
@@ -197,7 +207,7 @@ func (s *Service) RestoreSnapshot(
 	}
 	return SnapshotRestoreView{
 		SnapshotID: selected.ID,
-		Project:    projectViewWithHealth(restoredProject, active.packageInfo.Root, active.filesystemHealth),
+		Project:    projectViewWithProfile(restoredProject, active.packageInfo.Root, active.filesystemHealth, selection, workbench),
 		Chapters:   chapterViews,
 	}, nil
 }

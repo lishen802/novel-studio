@@ -1,5 +1,7 @@
+import { ChapterHistory } from '../components/ChapterHistory';
+import { EditorSession } from '../editorSession';
 import { CreationProgress } from '../components/creation/CreationProgress';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
@@ -115,12 +117,74 @@ export default function Chapters() {
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
+  const [content, setContentState] = useState('');
+  const historyRef = useRef({past: [] as string[], future: [] as string[]});
+  const [findOpen, setFindOpen] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [findMessage, setFindMessage] = useState('');
+  const sessionRef = useRef<EditorSession | null>(null);
+  const [saveError, setSaveError] = useState('');
+  const [loadError,setLoadError] = useState(false);
+  const [loadAttempt,setLoadAttempt] = useState(0);
+  const [actionNotice,setActionNotice] = useState('');
+  const [switching, setSwitching] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const readOnly = state.backendProject?.accessMode === 'read_only';
+  const setContent = (body: string) => {
+    if (sessionRef.current) {
+      const history = historyRef.current;
+      if (sessionRef.current.body !== body) { history.past.push(sessionRef.current.body); if (history.past.length > 100) history.past.shift(); history.future = []; }
+      sessionRef.current.body = body;
+    }
+    setContentState(body);
+    setSaveState('idle');
+  };
+  const historyAction = (redo = false) => {
+    const session = sessionRef.current;
+    if (!session || readOnly || hydrating) return;
+    const history = historyRef.current;
+    const from = redo ? history.future : history.past;
+    const to = redo ? history.past : history.future;
+    const body = from.pop();
+    if (body === undefined) return;
+    to.push(session.body); session.body = body; setContentState(body); setSaveState('idle');
+  };
+  const findNext = () => {
+    if (!findText || !editorRef.current) return;
+    const editor = editorRef.current;
+    let index = content.indexOf(findText, editor.selectionEnd);
+    if (index < 0) index = content.indexOf(findText);
+    if (index < 0) { setFindMessage('未找到匹配内容'); return; }
+    editor.focus(); editor.setSelectionRange(index,index + findText.length); setFindMessage(`已定位第 ${index + 1} 个字符`);
+  };
+  const flushDraft = useCallback(async () => {
+    const session = sessionRef.current;
+    if (!session) return;
+    setSaveState(session.dirty ? 'saving' : 'saved');
+    try {
+      await session.flush();
+      if (sessionRef.current === session) { setSaveState('saved'); setSaveError(''); }
+    } catch (error) {
+      if (sessionRef.current === session) {
+        setSaveState('idle');
+        setSaveError(error instanceof Error ? error.message : '自动保存失败，输入仍保留，请重试。');
+      }
+      throw error;
+    }
+  }, []);
+  const selectChapter = async (id: string) => {
+    if (switching) return;
+    setSwitching(true);
+    try { await flushDraft(); setSelectedId(id); }
+    catch { /* 保存失败时保留原章节和输入。 */ }
+    finally { setSwitching(false); }
+  };
   const [revision, setRevision] = useState(0);
   const [hydrating, setHydrating] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('saved');
   const [search, setSearch] = useState('');
   const [focusMode, setFocusMode] = useState(false);
+  const [historyOpen,setHistoryOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiWidth, setAiWidth] = useState(320);
   const [aiInput, setAiInput] = useState('');
@@ -128,10 +192,9 @@ export default function Chapters() {
   const [aiLoading, setAiLoading] = useState(false);
   const [activeRun, setActiveRun] = useState<AgentRunView | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [retryBusy, setRetryBusy] = useState(false);
   const [runPollError, setRunPollError] = useState<string | null>(null);
   // 运行前确认：用户发起创作任务后先暂存 prompt，确认弹窗展示方案来源与预算后再真正创建 AgentRun。
-  const [pendingRun, setPendingRun] = useState<{ prompt: string; label: string } | null>(null);
+  const [pendingRun, setPendingRun] = useState<{ prompt: string; label: string; retryId?: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // JobEvent 游标：按持久化序列号增量补拉，事件漏推或重复推送后仍能重建一致状态。
   const jobCursorRef = useRef(0);
@@ -231,41 +294,41 @@ export default function Chapters() {
       }));
       setVolumes([{ id: 'manuscript', title: '正文', chapters }]);
       setSelectedId((current) => current || chapters[0]?.id || null);
-    }).catch(() => setVolumes([]));
+    }).catch((error) => setSaveError(error instanceof Error ? error.message : '无法读取章节'));
     return () => { active = false; };
   }, []);
 
   useEffect(() => {
     if (!selectedId) return;
     let active = true;
-    setHydrating(true);
+    setHydrating(true);setLoadError(false);
     void studio.openChapter(selectedId).then((chapter: ChapterView) => {
       if (!active) return;
       setTitle(chapter.title);
-      setContent(chapter.hasRecoveryDraft ? chapter.recoveryBody || chapter.body : chapter.body);
+      const body = chapter.hasRecoveryDraft ? chapter.recoveryBody ?? '' : chapter.body;
+      sessionRef.current = new EditorSession(chapter.id, body, chapter.revision, studio.saveDraft);
+      setContentState(body);
+      historyRef.current = {past:[],future:[]};
+      setSaveError('');
       setRevision(chapter.revision);
       setSaveState('saved');
       setHydrating(false);
+    }).catch((error) => {
+      if (active) { setLoadError(true);setSaveError(error instanceof Error ? error.message : '正文读取失败'); setHydrating(true); }
     });
     return () => { active = false; };
-  }, [selectedId]);
+  }, [selectedId,loadAttempt]);
 
   useEffect(() => {
-    if (!selected || hydrating) return;
-    const timer = window.setTimeout(() => {
-      setSaveState('saving');
-      void studio.saveDraft(selected.id, content, revision)
-        .then(() => setSaveState('saved'))
-        .catch(() => setSaveState('idle'));
-    }, 800);
+    if (hydrating || readOnly || !sessionRef.current?.dirty) return;
+    const timer = window.setTimeout(() => { void flushDraft().catch(() => undefined); }, 800);
     return () => window.clearTimeout(timer);
-  }, [content, selected, revision, hydrating]);
+  }, [content, revision, hydrating, readOnly, flushDraft]);
 
   useEffect(() => {
-    if (!selected || hydrating) return;
-    // 窗口关闭可能早于 800ms 防抖保存，退出前显式刷新当前正文草稿。
-    return registerBeforeClose(() => studio.saveDraft(selected.id, content, revision));
-  }, [content, selected, revision, hydrating, registerBeforeClose]);
+    if (readOnly) return;
+    return registerBeforeClose(flushDraft);
+  }, [readOnly, registerBeforeClose, flushDraft]);
 
   // 组件卸载时停止运行状态轮询。
   useEffect(() => () => {
@@ -423,35 +486,15 @@ export default function Chapters() {
     }
   };
 
-  /** 重试被中断或失败的运行；后端会基于冻结快照重新创建并执行。 */
-  const retryRun = async () => {
-    if (!activeRun) return;
-    setRetryBusy(true);
-    setRunPollError(null);
-    try {
-      const retried = await studio.retryAgentRun(activeRun.id);
-      const executed = await studio.executeAgentRun(String(retried.id));
-      setActiveRun(executed);
-      observeRun(String(executed.id));
-    } catch (error) {
-      setRunPollError(error instanceof Error ? error.message : '重试运行失败');
-    } finally {
-      setRetryBusy(false);
-    }
+  // 失败任务按当前方案重新生成，重新展示预算并征得本次调用确认。
+  const retryRun = () => {
+    if (!activeRun || !selected) return;
+    setPendingRun({prompt: activeRun.prompt, label: '重新生成', retryId: activeRun.id});
   };
 
   const runAiAction = (label: string) => {
-    if (!selection || !selected) return;
-    if (!profileConfigured) {
-      navigate('/settings');
-      return;
-    }
-    const selectedText = selection.text;
-    // 真实调用前先弹出确认框：展示方案角色来源与预算，作者确认后再创建 AgentRun。
-    setPendingRun({ prompt: `${label}\n\n选中文字：\n${selectedText}`, label });
-    setAiOpen(true);
-    setSelection(null);
-    editorRef.current?.focus();
+    setActionNotice(`${label}尚未接入独立的选区处理流程，当前不会发起整章生成。`);
+    setAiOpen(true); setSelection(null);
   };
 
   const handleFloatingAction = (action: string) => {
@@ -489,11 +532,12 @@ export default function Chapters() {
   const confirmRun = async () => {
     // 精确方案预览是付费调用前置条件；函数守卫和按钮禁用共同防止绕过确认。
     if (!pendingRun || !selected || !runPreview || runPreviewLoading) return;
-    const { prompt, label } = pendingRun;
+    const { prompt, label, retryId } = pendingRun;
     setPendingRun(null);
     setAiLoading(true);
     try {
-      const run = await studio.createChapterAgentRun(selected.id, prompt);
+      await flushDraft();
+      const run = retryId ? await studio.retryAgentRun(retryId) : await studio.createChapterAgentRun(selected.id, prompt);
       const executed = await studio.executeAgentRun(String(run.id));
       setActiveRun(executed);
       observeRun(String(executed.id));
@@ -537,10 +581,14 @@ export default function Chapters() {
   /** 显式提交正文 revision；恢复草稿仍由自动保存维护。 */
   const commitCurrentChapter = async () => {
     if (!selected) return;
+    const session = sessionRef.current;
+    if (!session || committing || hydrating || readOnly) return;
     setSaveState('saving');
     try {
-      const committed = await studio.commitChapter(selected.id, content, revision);
+      setCommitting(true);
+      const committed = await session.commit(studio.commitChapter);
       setRevision(committed.revision);
+      setSaveError('');
       setSaveState('saved');
       setVolumes((previous) => previous.map((volume) => ({
         ...volume,
@@ -548,12 +596,14 @@ export default function Chapters() {
           ? { ...chapter, wordCount: countWords(committed.body), status: committed.body ? 'draft' : 'empty' }
           : chapter),
       })));
-    } catch {
+    } catch (error) {
       setSaveState('idle');
-    }
+      setSaveError(error instanceof Error ? error.message : '保存版本失败');
+    } finally { setCommitting(false); }
   };
 
   const createChapter = async () => {
+    await flushDraft();
     const created = await studio.createChapter(`第 ${chapters.length + 1} 章　新章节`);
     const newChapter: Chapter = {
       id: created.id,
@@ -595,9 +645,9 @@ export default function Chapters() {
   const canNext = selectedIndex >= 0 && selectedIndex < chapters.length - 1;
 
   return (
-    <div className="h-[calc(100%+3rem)] flex animate-fade-up -m-6">
+    <div data-editor-focus={focusMode} className="manuscript-workspace h-[calc(100%+3rem)] flex animate-fade-up -m-6">
       {/* Left chapter tree */}
-      <aside className="w-[260px] shrink-0 flex flex-col border-r border-border bg-surface">
+      <aside className={clsx("chapter-navigation w-[260px] shrink-0 flex flex-col border-r border-border bg-surface", focusMode && "hidden")}>
         <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-text">卷与章节</h2>
@@ -612,7 +662,7 @@ export default function Chapters() {
               className="pl-9 h-8 text-sm"
             />
           </div>
-          <Button variant="default" size="sm" onClick={() => void createChapter()} className="w-full gap-1">
+          <Button variant="default" size="sm" disabled={readOnly || hydrating || committing || switching} onClick={() => void createChapter().catch(error => setSaveError(error instanceof Error ? error.message : '创建章节失败'))} className="w-full gap-1">
             <Plus className="w-4 h-4" />
             新建章节
           </Button>
@@ -625,7 +675,8 @@ export default function Chapters() {
                 {volume.chapters.map((chapter) => (
                   <button
                     key={chapter.id}
-                    onClick={() => setSelectedId(chapter.id)}
+                    disabled={switching || committing}
+                    onClick={() => void selectChapter(chapter.id)}
                     className={clsx(
                       'w-full text-left px-3 py-2 rounded-lg border transition-colors group',
                       selectedId === chapter.id
@@ -686,8 +737,8 @@ export default function Chapters() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={!canPrev}
-                  onClick={() => setSelectedId(chapters[selectedIndex - 1].id)}
+                  disabled={!canPrev || switching || committing}
+                  onClick={() => void selectChapter(chapters[selectedIndex - 1].id)}
                   className="px-2"
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -695,20 +746,20 @@ export default function Chapters() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={!canNext}
-                  onClick={() => setSelectedId(chapters[selectedIndex + 1].id)}
+                  disabled={!canNext || switching || committing}
+                  onClick={() => void selectChapter(chapters[selectedIndex + 1].id)}
                   className="px-2"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </Button>
                 <div className="h-4 w-px bg-border mx-1" />
-                <Button variant="ghost" size="sm" className="px-2" title="撤销">
+                <Button variant="ghost" size="sm" className="px-2" title="撤销" disabled={readOnly || hydrating || !historyRef.current.past.length} onClick={() => historyAction()}>
                   <Undo2 className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="sm" className="px-2" title="重做">
+                <Button variant="ghost" size="sm" className="px-2" title="重做" disabled={readOnly || hydrating || !historyRef.current.future.length} onClick={() => historyAction(true)}>
                   <Redo2 className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="sm" className="px-2" title="查找">
+                <Button variant="ghost" size="sm" className="px-2" title="查找" onClick={() => setFindOpen(open => !open)}>
                   <Search className="w-4 h-4" />
                 </Button>
                 <Button
@@ -720,7 +771,7 @@ export default function Chapters() {
                   <Focus className="w-4 h-4" />
                   专注
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/versions')} className="gap-1 px-2">
+                <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)} className="gap-1 px-2">
                   <History className="w-4 h-4" />
                   版本
                 </Button>
@@ -854,9 +905,9 @@ export default function Chapters() {
               </div>
 
               <div className="flex items-center gap-3 text-xs text-text-sub">
-                <Button variant="default" size="sm" onClick={() => void commitCurrentChapter()}>
+                <Button variant="default" size="sm" disabled={hydrating || readOnly || committing} onClick={() => void commitCurrentChapter()}>
                   <Save className="w-3.5 h-3.5" />
-                  保存正文
+                  保存版本
                 </Button>
                 <span className="flex items-center gap-1.5">
                   {saveState === 'saving' ? (
@@ -864,7 +915,7 @@ export default function Chapters() {
                   ) : (
                     <Save className="w-3.5 h-3.5" />
                   )}
-                  {saveState === 'saved' ? '自动保存于 刚刚' : '保存中…'}
+                  {loadError ? '读取失败' : saveError ? '保存失败' : saveState === 'saved' ? '工作稿已自动保存' : saveState === 'saving' ? '保存中…' : '有未保存修改'}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
@@ -874,6 +925,7 @@ export default function Chapters() {
               </div>
             </div>
 
+            {saveError && <div role="alert" className="p-3 text-sm text-danger">{saveError} <Button size="sm" onClick={() => loadError ? setLoadAttempt(value => value+1) : void flushDraft().catch(() => undefined)}>{loadError ? '重新读取' : '重试保存'}</Button></div>}
             {/* Editor */}
             <div className="flex-1 overflow-auto">
               <div
@@ -895,6 +947,13 @@ export default function Chapters() {
                 />
                 <Textarea
                   ref={editorRef}
+                  onKeyDown={event => {
+                    if (!(event.metaKey || event.ctrlKey)) return;
+                    if (event.key.toLowerCase() === 'z') { event.preventDefault(); historyAction(event.shiftKey); }
+                    if (event.key.toLowerCase() === 'y') { event.preventDefault(); historyAction(true); }
+                    if (event.key.toLowerCase() === 'f') { event.preventDefault(); setFindOpen(true); }
+                  }}
+                  disabled={hydrating || readOnly || switching || committing}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   onMouseUp={handleMouseUp}
@@ -916,10 +975,14 @@ export default function Chapters() {
         )}
       </main>
 
+      {findOpen && <div className="absolute top-16 right-8 z-30 bg-surface border border-border rounded-lg p-3 shadow-lg flex flex-wrap gap-2 items-center" role="search">
+        <Input autoFocus aria-label="查找正文" value={findText} onChange={e => {setFindText(e.target.value);setFindMessage('');}} onKeyDown={e => {if(e.key === 'Enter')findNext();if(e.key === 'Escape')setFindOpen(false);}} />
+        <Button onClick={findNext} disabled={!findText}>下一处</Button><Button onClick={() => setFindOpen(false)}>关闭查找</Button><span role="status" className="text-xs">{findMessage}</span>
+      </div>}
       {/* AI entry / panel */}
       {!aiOpen && selected && (
         <button
-          onClick={() => setAiOpen(true)}
+          onClick={() => {setFocusMode(false);setAiOpen(true);}}
           className="absolute right-6 top-24 z-20 flex items-center gap-2 px-3 py-2 bg-surface border border-border rounded-lg shadow-sm text-sm text-text-sub hover:text-text hover:border-border-strong transition-colors"
         >
           <Sparkles className="w-4 h-4" />
@@ -928,9 +991,10 @@ export default function Chapters() {
         </button>
       )}
 
-      {aiOpen && (
+      {aiOpen && !focusMode && <button aria-label="关闭创作助手浮层" className="assistant-dismiss" onClick={() => setAiOpen(false)} />}
+      {aiOpen && !focusMode && (
         <aside
-          className="shrink-0 border-l border-border bg-surface flex flex-col relative"
+          className="manuscript-assistant shrink-0 border-l border-border bg-surface flex flex-col relative"
           style={{ width: aiWidth }}
         >
           <div
@@ -948,14 +1012,15 @@ export default function Chapters() {
               <Bot className="w-4 h-4 text-primary" />
               <span className="text-sm font-medium text-text">创作助手</span>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setAiOpen(false)} className="px-2">
+            <Button variant="ghost" size="sm" onClick={() => setAiOpen(false)} aria-label="关闭创作助手" className="px-2">
               <PanelRightClose className="w-4 h-4" />
             </Button>
           </div>
 
           <div className="flex-1 overflow-auto p-4 space-y-4">
+            {actionNotice && <p role="status" className="text-sm text-warning">{actionNotice}</p>}
             <div className="p-3 bg-primary-subtle border border-primary/10 rounded-lg text-xs text-text-sub leading-relaxed">
-              基于当前章节、选中文本或你的指令工作。AI 不会直接覆盖正文，所有修改都会以候选片段形式供你确认。
+              根据指令和本章保存版本生成整章候选，需审阅后采用。选区解释、润色、改写暂未就绪。
             </div>
 
             <div className="space-y-3">
@@ -981,7 +1046,7 @@ export default function Chapters() {
             {activeRun && (
               <div className="space-y-3">
                 <CreationProgress status={activeRun.status} steps={activeRun.steps.map(step => ({stage:step.role,status:step.status}))} createdAt={activeRun.createdAt} updatedAt={activeRun.updatedAt} onCancel={cancelRun} cancelDisabled={cancelBusy} cancelLabel="取消" />
-                {(activeRun.status === 'recoverable' || activeRun.status === 'failed') && <Button variant="ghost" size="sm" onClick={() => void retryRun()} disabled={retryBusy}>{retryBusy ? '重试中…' : '重试'}</Button>}
+                {(activeRun.status === 'recoverable' || activeRun.status === 'failed') && <Button variant="ghost" size="sm" onClick={() => void retryRun()} disabled={aiLoading || Boolean(pendingRun)}>重新生成</Button>}
                 <div className="space-y-2">
                   <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-xs text-text-sub">模型与用量详情</summary>
                   <div className="text-xs text-text-sub">
@@ -1072,6 +1137,18 @@ export default function Chapters() {
         </div>
       )}
 
+      {selected && <ChapterHistory chapterId={selected.id} open={historyOpen} readOnly={readOnly} onClose={() => setHistoryOpen(false)} onRestore={async target => {
+        const session = sessionRef.current;
+        if (!session || committing) return;
+        setCommitting(true);
+        try {
+          await session.commit(studio.commitChapter);
+          setRevision(session.revision);
+          const restored = await studio.restoreChapterRevision(session.id,target,session.revision);
+          sessionRef.current = new EditorSession(restored.id,restored.body,restored.revision,studio.saveDraft);
+          setContentState(restored.body);setRevision(restored.revision);setSaveError('');setSaveState('saved');historyRef.current={past:[],future:[]};
+        } finally {setCommitting(false);}
+      }} />}
       {/* 运行前确认弹窗：展示方案角色来源、模型与预算，作者确认后才真实调用模型。 */}
       <Modal
         open={!!pendingRun}
@@ -1082,8 +1159,9 @@ export default function Chapters() {
         <div className="space-y-4">
           <div className="flex items-start gap-2 p-3 bg-warning/10 border border-warning/20 rounded-md text-sm">
             <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-            <span className="text-text-sub">将调用真实模型，会产生 API 调用费用。运行结果进入候选/变更集，不会直接覆盖正文。</span>
+            <span className="text-text-sub">将基于本章已保存版本生成整章候选，请先点击「保存版本」保留最新工作稿。会调用真实模型并产生费用，结果需另行审阅采用。</span>
           </div>
+          {pendingRun?.retryId && <p className="text-sm text-warning">重新生成会使用当前方案重新执行规划、写作和审阅步骤，并重新计费。</p>}
           {runPreviewLoading ? (
             <p className="text-sm text-text-sub">正在加载方案预览…</p>
           ) : runPreview ? (

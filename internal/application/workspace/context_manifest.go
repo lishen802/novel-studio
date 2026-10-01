@@ -69,8 +69,15 @@ func buildContextManifest(
 	})
 
 	original := make(map[string][]json.RawMessage, len(domains))
+	sourceHashes := make(map[string]string, len(domains))
 	for _, domain := range domains {
 		original[domain.Name] = append([]json.RawMessage(nil), domain.Items...)
+		source, err := json.Marshal(original[domain.Name])
+		if err != nil {
+			return "", contextManifestStats{}, err
+		}
+		sum := sha256.Sum256(source)
+		sourceHashes[domain.Name] = hex.EncodeToString(sum[:])
 	}
 	encode := func() ([]byte, contextManifestStats, error) {
 		document := contextManifestDocument{
@@ -83,11 +90,6 @@ func buildContextManifest(
 			Domains: make(map[string][]json.RawMessage, len(domains)),
 		}
 		for _, domain := range domains {
-			source, err := json.Marshal(original[domain.Name])
-			if err != nil {
-				return nil, contextManifestStats{}, err
-			}
-			sum := sha256.Sum256(source)
 			total := len(original[domain.Name])
 			included := len(domain.Items)
 			document.Domains[domain.Name] = domain.Items
@@ -95,7 +97,7 @@ func buildContextManifest(
 				Total:      total,
 				Included:   included,
 				Omitted:    total - included,
-				SourceHash: hex.EncodeToString(sum[:]),
+				SourceHash: sourceHashes[domain.Name],
 			}
 			if included < total {
 				document.Meta.Truncated = true
@@ -120,27 +122,46 @@ func buildContextManifest(
 		}, nil
 	}
 
-	for {
-		encoded, stats, err := encode()
+	// 从低优先级开始整组裁剪，再二分保留数量，避免逐条全量编码。
+	encoded, stats, err := encode()
+	if err != nil {
+		return "", contextManifestStats{}, err
+	}
+	if stats.CharCount <= charBudget {
+		return string(encoded), stats, nil
+	}
+	for index := len(domains) - 1; index >= 0; index-- {
+		if domains[index].Required || len(domains[index].Items) == 0 {
+			continue
+		}
+		items := domains[index].Items
+		domains[index].Items = items[:0]
+		encoded, stats, err = encode()
 		if err != nil {
 			return "", contextManifestStats{}, err
 		}
-		if stats.CharCount <= charBudget {
-			return string(encoded), stats, nil
+		if stats.CharCount > charBudget {
+			continue
 		}
-		removed := false
-		for index := len(domains) - 1; index >= 0; index-- {
-			if domains[index].Required || len(domains[index].Items) == 0 {
-				continue
+		low, high := 0, len(items)
+		for low < high {
+			mid := (low + high + 1) / 2
+			domains[index].Items = items[:mid]
+			_, check, e := encode()
+			if e != nil {
+				return "", contextManifestStats{}, e
 			}
-			domains[index].Items = domains[index].Items[:len(domains[index].Items)-1]
-			removed = true
-			break
+			if check.CharCount <= charBudget {
+				low = mid
+			} else {
+				high = mid - 1
+			}
 		}
-		if !removed {
-			return "", contextManifestStats{}, ErrContextBudgetExceeded
-		}
+		domains[index].Items = items[:low]
+		encoded, stats, err = encode()
+		return string(encoded), stats, err
 	}
+	return "", contextManifestStats{}, ErrContextBudgetExceeded
 }
 
 func rawContextItems[T any](values []T) ([]json.RawMessage, error) {

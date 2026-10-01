@@ -106,6 +106,9 @@ func (s *Store) RestoreChapterRevision(
 		}
 	}
 
+	if err := requireCleanDraft(ctx, tx, current); err != nil {
+		return projectdomain.Chapter{}, err
+	}
 	var currentSource, currentSummary string
 	if err := tx.QueryRowContext(ctx, `
 		SELECT revision_source, revision_summary FROM chapters WHERE id = ?

@@ -123,7 +123,25 @@ export default function Chapters() {
   const [volumes, setVolumes] = useState<Volume[]>(initialVolumes);
   const [selectedId, setSelectedId] = useState<string | null>('c3');
   const [title, setTitle] = useState('第三章　灯塔不亮');
-  const [content, setContent] = useState(initialContent);
+  const [content, setContentState] = useState(initialContent);
+  const historyRef = useRef({past:[] as string[],future:[] as string[]});
+  const [findOpen,setFindOpen] = useState(false);
+  const [findText,setFindText] = useState('');
+  const [findMessage,setFindMessage] = useState('');
+  const setContent = (body:string) => {
+    if(body!==content){historyRef.current.past.push(content);historyRef.current.future=[];}
+    setContentState(body);
+  };
+  const historyAction = (redo=false) => {
+    const history=historyRef.current;const from=redo?history.future:history.past;const to=redo?history.past:history.future;
+    const body=from.pop();if(body===undefined)return;to.push(content);setContentState(body);
+  };
+  const findNext = () => {
+    if(!findText||!editorRef.current)return;
+    const editor=editorRef.current;let index=content.indexOf(findText,editor.selectionEnd);if(index<0)index=content.indexOf(findText);
+    if(index<0){setFindMessage('未找到匹配内容');return;}
+    editor.focus();editor.setSelectionRange(index,index+findText.length);setFindMessage(`已定位第 ${index+1} 个字符`);
+  };
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('saved');
   const [search, setSearch] = useState('');
   const [focusMode, setFocusMode] = useState(false);
@@ -146,7 +164,8 @@ export default function Chapters() {
   useEffect(() => {
     if (!selected) return;
     setTitle(selected.title);
-    setContent(selected.id === 'c3' ? initialContent : '');
+    setContentState(selected.id === 'c3' ? initialContent : '');
+    historyRef.current={past:[],future:[]};
     setSaveState('saved');
   }, [selected]);
 
@@ -296,9 +315,9 @@ export default function Chapters() {
   const canNext = selectedIndex >= 0 && selectedIndex < chapters.length - 1;
 
   return (
-    <div className="h-full flex animate-fade-up -m-6">
+    <div data-editor-focus={focusMode} className="manuscript-workspace h-[calc(100%+3rem)] flex animate-fade-up -m-6">
       {/* Left chapter tree */}
-      <aside className="w-[260px] shrink-0 flex flex-col border-r border-border bg-surface">
+      <aside className={clsx("chapter-navigation w-[260px] shrink-0 flex flex-col border-r border-border bg-surface", focusMode && "hidden")}>
         <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-text">卷与章节</h2>
@@ -403,13 +422,13 @@ export default function Chapters() {
                   <ChevronRight className="w-4 h-4" />
                 </Button>
                 <div className="h-4 w-px bg-border mx-1" />
-                <Button variant="ghost" size="sm" className="px-2" title="撤销">
+                <Button variant="ghost" size="sm" className="px-2" title="撤销" disabled={!historyRef.current.past.length} onClick={() => historyAction()}>
                   <Undo2 className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="sm" className="px-2" title="重做">
+                <Button variant="ghost" size="sm" className="px-2" title="重做" disabled={!historyRef.current.future.length} onClick={() => historyAction(true)}>
                   <Redo2 className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="sm" className="px-2" title="查找">
+                <Button variant="ghost" size="sm" className="px-2" title="查找" onClick={() => setFindOpen(open => !open)}>
                   <Search className="w-4 h-4" />
                 </Button>
                 <Button
@@ -612,10 +631,14 @@ export default function Chapters() {
         )}
       </main>
 
+      {findOpen && <div className="absolute top-16 right-8 z-30 bg-surface border border-border rounded-lg p-3 shadow-lg flex flex-wrap gap-2 items-center" role="search">
+        <Input autoFocus aria-label="查找正文" value={findText} onChange={e => {setFindText(e.target.value);setFindMessage('');}} onKeyDown={e => {if(e.key === 'Enter')findNext();if(e.key === 'Escape')setFindOpen(false);}} />
+        <Button onClick={findNext} disabled={!findText}>下一处</Button><Button onClick={() => setFindOpen(false)}>关闭查找</Button><span role="status" className="text-xs">{findMessage}</span>
+      </div>}
       {/* AI entry / panel */}
       {!aiOpen && selected && (
         <button
-          onClick={() => setAiOpen(true)}
+          onClick={() => {setFocusMode(false);setAiOpen(true);}}
           className="absolute right-6 top-24 z-20 flex items-center gap-2 px-3 py-2 bg-surface border border-border rounded-lg shadow-sm text-sm text-text-sub hover:text-text hover:border-border-strong transition-colors"
         >
           <Sparkles className="w-4 h-4" />
@@ -624,9 +647,10 @@ export default function Chapters() {
         </button>
       )}
 
-      {aiOpen && (
+      {aiOpen && !focusMode && <button aria-label="关闭创作助手浮层" className="assistant-dismiss" onClick={() => setAiOpen(false)} />}
+      {aiOpen && !focusMode && (
         <aside
-          className="shrink-0 border-l border-border bg-surface flex flex-col relative"
+          className="manuscript-assistant shrink-0 border-l border-border bg-surface flex flex-col relative"
           style={{ width: aiWidth }}
         >
           <div
@@ -644,7 +668,7 @@ export default function Chapters() {
               <Bot className="w-4 h-4 text-primary" />
               <span className="text-sm font-medium text-text">创作助手</span>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setAiOpen(false)} className="px-2">
+            <Button variant="ghost" size="sm" onClick={() => setAiOpen(false)} aria-label="关闭创作助手" className="px-2">
               <PanelRightClose className="w-4 h-4" />
             </Button>
           </div>

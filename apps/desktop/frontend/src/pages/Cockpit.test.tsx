@@ -894,3 +894,17 @@ describe('修订的结构授权', () => {
     expect(request.allowRemove).toBeUndefined();
   });
 });
+
+it('入档先展示正式资产预览，确认后才写入', async () => {
+  const preview = vi.fn().mockResolvedValue({confirmationDigest:'archive-digest',title:'潮汐关',characterCount:1,outlineCount:1,anchorCount:2,operations:[{kind:'character',action:'create',summary:'新增人物：江潮'}],excluded:[]});
+  const confirm = vi.fn().mockResolvedValue({changeSetId:'archived'});
+  const view = workbench({stage:'archive_confirm',capabilities:['Archive'],review:{candidateId:'c',stage:'archive_confirm',reviewVersion:1,accepted:[],rejected:[],unreviewed:[],complete:true,updatedAt:''}});
+  window.go = {main:{DesktopAPI:{CreationWorkbench:vi.fn().mockResolvedValue(view),RecoverCreation:vi.fn().mockResolvedValue(view),PreviewCreationArchive:preview,ConfirmCreationArchive:confirm,ProjectWorkbench:vi.fn().mockResolvedValue({stage:'writing'})}}};
+  render(<MemoryRouter><AppContext.Provider value={contextValue({hasCredential:true})}><Cockpit/></AppContext.Provider></MemoryRouter>);
+  await userEvent.click(await screen.findByRole('button',{name:'确认作品档案'}));
+  expect(await screen.findByText('新增人物：江潮',{exact:false})).toBeTruthy();
+  expect(confirm).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button',{name:'确认写入正式档案'}));
+  await waitFor(()=>expect(confirm).toHaveBeenCalledWith(expect.objectContaining({confirmationDigest:'archive-digest',idempotencyKey:expect.any(String)})));
+  cleanup();delete window.go;
+});
