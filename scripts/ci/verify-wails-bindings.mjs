@@ -26,6 +26,10 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Formal outline append preview",apiDeclaration,"PreviewFormalOutlineAppend(arg1:storyasset.FormalOutlineAppendRequest):Promise<storyasset.FormalOutlineAppendPreview>"],
+ ["Formal outline append confirmation",apiDeclaration,"ConfirmFormalOutlineAppend(arg1:storyasset.FormalOutlineAppendCommand):Promise<storyasset.FormalOutlineAppendPreview>"],
+ ["Formal outline append runtime",apiRuntime,"export function ConfirmFormalOutlineAppend(arg1)"],
+ ["Formal outline append model",models,"export class FormalOutlineAppendPreview"],
  ["Planning rearchive preview",apiDeclaration,"PreviewPlanningRearchive(arg1:string,arg2:string):Promise<storyasset.PlanningRearchivePreview>"],
  ["Planning rearchive confirmation",apiDeclaration,"ConfirmPlanningRearchive(arg1:storyasset.PlanningRearchiveCommand):Promise<storyasset.PlanningRearchivePreview>"],
  ["Planning rearchive runtime",apiRuntime,"export function ConfirmPlanningRearchive(arg1)"],

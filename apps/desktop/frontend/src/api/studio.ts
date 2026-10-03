@@ -5,6 +5,8 @@ export interface PlanningField {path:string;label:string;value:string}
 export interface ConstraintView {fields?:PlanningField[];candidateSuggestions?:CharacterSuggestion[];assetId:string;typedId?:string;kind:string;name:string;original:string;current:string;revision:number;locked:boolean;changes:ConstraintChange[]}
 export interface ConstraintRequest {candidateId?:string;projectId?:string;branchId?:string;assetId:string;intent:string;chapterId:string;text:string;reason:string}
 export interface PlanningRearchivePreview {request:{projectId:string;branchId:string;chapterId:string;reason:string};digest:string;position:number;protectedChapters:number;futureChapters:number;changes:Array<{assetId:string;kind:string;before:string;after:string}>}
+export interface FormalOutlineAppendRequest {projectId?:string;branchId?:string;parentAssetId:string;chapterId:string;title:string;summary:string;goal:string;conflict:string;outcome:string;reason:string}
+export interface FormalOutlineAppendPreview {request:FormalOutlineAppendRequest;digest:string;position:number;nodePosition:number;parentTitle:string;assetId?:string;nodeId?:string}
 export interface ConstraintPreview {request:ConstraintRequest;digest:string;before:string;revision:number;position:number;protectedChapters:number;futureChapters:number;canApply:boolean;blockedReason:string}
 export interface ConstraintCommand {request:ConstraintRequest;digest:string;idempotencyKey:string}
 export type ProjectAccessMode = 'editable' | 'read_only';
@@ -599,6 +601,8 @@ export const studio = {
 
   storyStructure: () => call<StoryStructureView>('StoryStructure'),
   createOutlineNode: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateOutlineNode', input),
+  previewFormalOutlineAppend: (input:FormalOutlineAppendRequest) => call<FormalOutlineAppendPreview>('PreviewFormalOutlineAppend',input),
+  confirmFormalOutlineAppend: (command:{request:FormalOutlineAppendRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineAppendPreview>('ConfirmFormalOutlineAppend',command),
   createStoryLine: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateStoryLine', input),
   createSceneCard: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateSceneCard', input),
   storyWorld: () => call<StoryWorldView>('StoryWorld'),

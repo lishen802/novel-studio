@@ -185,7 +185,8 @@ func (s *Store) EffectiveConstraints(ctx context.Context, position int) ([]asset
  (SELECT c.revision FROM story_constraint_changes c WHERE c.asset_id=a.id AND c.position<=? ORDER BY c.position DESC LIMIT 1),1)
  LEFT JOIN world_rules w ON a.kind='world_rule' AND w.id=a.typed_id
  LEFT JOIN story_anchors h ON h.asset_id=a.id
- WHERE a.status='canonical' AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character','proposal','outline_node') ORDER BY a.id`, position)
+ LEFT JOIN formal_outline_introductions intro ON intro.asset_id=a.id
+ WHERE a.status='canonical' AND (intro.asset_id IS NULL OR intro.position<=?) AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character','proposal','outline_node') ORDER BY a.id`, position, position)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import { studio, type StoryStructureView } from '../../api/studio';
 import { PlanningRevisions } from '../../components/PlanningRevisions';
+import { FormalOutlineAppend } from '../../components/FormalOutlineAppend';
 import { useApp } from '../../store/useApp';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -56,6 +57,7 @@ export default function Structure() {
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [open, setOpen] = useState(false);
+  const [revisionEpoch,setRevisionEpoch]=useState(0);
   const [error, setError] = useState<string | null>(null);
   const nodes = structure?.outlineNodes || [];
   const byParent = useMemo(() => nodes.reduce((groups, node) => {
@@ -83,6 +85,7 @@ export default function Structure() {
         <div className="flex justify-between gap-3">
           <div>
             <h3 className="text-sm font-medium text-text">{String(node.title)}</h3>
+            {Number(node.effectiveFromPosition)>0 && <p className="text-xs text-primary mt-1">第 {String(node.effectiveFromPosition)} 章起生效</p>}
             <p className="text-xs text-text-sub mt-1">{String(node.summary || '暂无说明')}</p>
             {planningLines(node).map(([label, text]) => (
               <p key={`${String(node.id)}-${label}-${text}`} className="text-xs text-text-sub mt-1"><span className="text-text-muted">{label} · </span>{text}</p>
@@ -98,8 +101,9 @@ export default function Structure() {
   return (
     <div className="space-y-5 animate-fade-up">
       <div className="flex justify-between"><div><h2 className="text-lg font-display text-text">故事架构</h2><p className="text-sm text-text-sub">数据已连接项目结构档案。</p></div><Button variant="primary" disabled={formalTree || state.backendProject?.accessMode === "read_only"} onClick={() => setOpen(true)}><Plus className="w-4 h-4" />添加节点</Button></div>
-      <PlanningRevisions api={studio} kind="outline_node" registerBeforeLeave={registerBeforeClose} readOnly={state.backendProject?.accessMode === "read_only"} onFormalTree={setFormalTree} />
-      <p className="text-xs text-text-muted">下方展示原始结构；按章节生效的最新目标请查看修订记录。正式规划的节点增删和重排尚未就绪。</p>
+      <PlanningRevisions key={revisionEpoch} api={studio} kind="outline_node" registerBeforeLeave={registerBeforeClose} readOnly={state.backendProject?.accessMode === "read_only"} onFormalTree={setFormalTree} />
+      {formalTree && <FormalOutlineAppend api={studio} arcs={nodes.filter(node=>node.level==='arc').map(node=>({id:String(node.id),title:String(node.title)}))} readOnly={state.backendProject?.accessMode==='read_only'} registerBeforeLeave={registerBeforeClose} onApplied={async()=>{setRevisionEpoch(value=>value+1);await refresh();}} />}
+      <p className="text-xs text-text-muted">下方展示原始结构；按章节生效的最新目标请查看修订记录。正式规划的节点删除和重排尚未就绪。</p>
       {error && <p className="text-sm text-danger">{error}</p>}
       {nodes.length ? <div className="space-y-3">{renderNodes()}</div> : <EmptyState icon={Sparkles} title="还没有故事架构" description="创建全书节点后，再逐层添加卷、故事弧与章节。" />}
       <Modal open={open} onClose={() => setOpen(false)} title="添加大纲节点">

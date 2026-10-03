@@ -18,7 +18,9 @@ func (s *Store) PlanningArchiveAssets(ctx context.Context, projectID string) ([]
 	rows, err := s.db.QueryContext(ctx, `SELECT a.id,a.kind,a.typed_id,COALESCE(a.source_candidate_id,''),o.payload_json,r.payload_json,a.current_revision
  FROM story_assets a JOIN story_asset_revisions o ON o.asset_id=a.id AND o.revision=1
  JOIN story_asset_revisions r ON r.asset_id=a.id AND r.revision=a.current_revision
- WHERE a.project_id=? AND a.status='canonical' AND a.kind IN ('proposal','outline_node') ORDER BY a.kind,a.id`, projectID)
+ WHERE a.project_id=? AND a.status='canonical' AND a.kind IN ('proposal','outline_node')
+ AND NOT EXISTS(SELECT 1 FROM formal_outline_introductions i WHERE i.asset_id=a.id)
+ ORDER BY a.kind,a.id`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("read planning archive assets: %w", err)
 	}
