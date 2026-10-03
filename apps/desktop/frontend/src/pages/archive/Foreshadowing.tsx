@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import { Link2, Users, ArrowRight, Sparkles } from 'lucide-react';
 import type { Foreshadowing, ForeshadowStatus } from '../../types';
+import type { ChapterView } from '../../api/studio';
+import { Modal } from '../../components/ui/Modal';
+import { Button } from '../../components/ui/Button';
 import { studio } from '../../api/studio';
 import { Card } from '../../components/ui/Card';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -28,22 +31,33 @@ const statusLabel: Record<ForeshadowStatus, string> = {
   dropped: '已弃用',
 };
 
+// 界面状态别名在边界转换为后端生命周期值。
+const serverStatus: Record<ForeshadowStatus, string> = { planted: 'planted', growing: 'progressing', resolved: 'resolved', dropped: 'abandoned' };
+function hookItem(item: Record<string, unknown>): Foreshadowing {
+ const status = { planted: 'planted', progressing: 'growing', resolved: 'resolved', abandoned: 'dropped' }[String(item.status)] as ForeshadowStatus | undefined;
+ return { id: String(item.id), projectId: '', title: String(item.title || ''), description: String(item.setup || ''), status: status || 'planted', linkedChapters: [String(item.plantedChapterId || '')].filter(Boolean), payoffChapterId: String(item.resolvedChapterId || '') || undefined };
+}
+
 export default function Foreshadowing() {
+  const [chapters, setChapters] = useState<ChapterView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [recovering, setRecovering] = useState<string | null>(null);
+  const [recoveryChapter, setRecoveryChapter] = useState('');
   const [items, setItems] = useState<Foreshadowing[]>([]);
   const [relationNodes, setRelationNodes] = useState<Array<{ id: string; label: string; type: 'character' | 'faction' }>>([]);
   const [relations, setRelations] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([studio.worldAssets(), studio.storyWorld()]).then(([assets, world]) => {
+    setLoading(true);
+    setError('');
+    void Promise.all([studio.worldAssets(), studio.storyWorld(), studio.listChapters()]).then(([assets, world, chapterList]) => {
       if (!active) return;
-      setItems(assets.hooks.map((item) => ({
-        id: String(item.id || ''), projectId: '', title: String(item.title || ''),
-        description: String(item.setup || ''),
-        status: (['planted', 'growing', 'resolved', 'dropped'].includes(String(item.status)) ? item.status : 'planted') as ForeshadowStatus,
-        linkedChapters: [String(item.plantedChapterId || '')].filter(Boolean),
-        payoffChapterId: String(item.resolvedChapterId || '') || undefined,
-      })));
+      setItems(assets.hooks.map(hookItem));
+      setChapters(chapterList);
       const names = new Map<string, string>();
       const nodes: Array<{ id: string; label: string; type: 'character' | 'faction' }> = [];
       world.characters.forEach((item) => {
@@ -56,24 +70,33 @@ export default function Foreshadowing() {
       });
       setRelationNodes(nodes);
       setRelations(world.relationships.map((item) => `${names.get(String(item.sourceCharacterId || '')) || '未知人物'} → ${String(item.label || item.kind || '关系')} → ${names.get(String(item.targetCharacterId || '')) || '未知人物'}`));
-    });
+    }).catch((reason: unknown) => {
+      if (active) setError(`加载失败：${reason instanceof Error ? reason.message : String(reason)}`);
+    }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [loadAttempt]);
 
-  const updateStatus = async (id: string, status: ForeshadowStatus) => {
-    const item = items.find((candidate) => candidate.id === id);
-    if (!item) return;
-    await studio.updateForeshadowingHook(id, {
-      title: item.title,
-      setup: item.description,
-      plantedChapterId: item.linkedChapters[0] || '',
-      dueChapterId: '',
-      resolvedChapterId: item.payoffChapterId || '',
-      status,
-      notes: '',
-    });
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, status } : item)));
+  const updateStatus = async (id: string, status: ForeshadowStatus, chapterId = '') => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await studio.updateForeshadowingHookStatus(id, serverStatus[status], chapterId);
+      setItems((prev) => prev.map((item) => item.id === id ? hookItem(updated) : item));
+      setRecovering(null);
+    } catch (reason) {
+      setError(`保存失败：${reason instanceof Error ? reason.message : String(reason)}`);
+    } finally { setBusy(false); }
   };
+
+  const chooseStatus = (id: string, status: ForeshadowStatus) => {
+    if (status === 'resolved') {
+      setRecoveryChapter(items.find((item) => item.id === id)?.payoffChapterId || '');
+      setError('');
+      setRecovering(id);
+    } else { void updateStatus(id, status); }
+  };
+  const chapterTitle = (id: string) => chapters.find((chapter) => chapter.id === id)?.title || id;
 
   return (
     <div className="space-y-8 animate-fade-up">
@@ -82,8 +105,11 @@ export default function Foreshadowing() {
         <p className="text-sm text-text-sub mt-0.5">跟踪伏笔的生命周期，梳理人物与势力之间的潜在联系。</p>
       </div>
 
+      {error && <div role="alert" className="text-sm text-danger">{error}</div>}
+      {loading && <p role="status" className="text-sm text-text-sub">正在加载伏笔…</p>}
+      {!loading && error.startsWith('加载失败') && <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>重试加载</Button>}
       <div className="space-y-4">
-        {items.length === 0 ? (
+        {loading || error.startsWith('加载失败') ? null : items.length === 0 ? (
           <EmptyState icon={Sparkles} title="还没有伏笔" description="在正文或设定中埋下线索，便于后续回收。" />
         ) : (
           items.map((item, idx) => (
@@ -99,10 +125,10 @@ export default function Foreshadowing() {
                     <Link2 className="w-3.5 h-3.5 text-text-muted" />
                     {item.linkedChapters.map((ch) => (
                       <span
-                        key={ch}
+                        key={chapterTitle(ch)}
                         className="text-xs px-2 py-0.5 rounded bg-surface-hover text-text-sub border border-border"
                       >
-                        {ch}
+                        {chapterTitle(ch)}
                       </span>
                     ))}
                   </div>
@@ -111,8 +137,10 @@ export default function Foreshadowing() {
                 <div className="shrink-0">
                   <label className="block text-xs text-text-muted mb-1.5">状态</label>
                   <select
+                    aria-label={`${item.title}状态`}
+                    disabled={busy}
                     value={item.status}
-                    onChange={(e) => void updateStatus(item.id, e.target.value as ForeshadowStatus)}
+                    onChange={(e) => chooseStatus(item.id, e.target.value as ForeshadowStatus)}
                     className={clsx(
                       'h-9 px-3 pr-8 bg-surface border border-border rounded-md text-sm text-text',
                       'focus:outline-none focus:ring-2 focus:ring-primary/35',
@@ -130,6 +158,21 @@ export default function Foreshadowing() {
           ))
         )}
       </div>
+
+      <Modal open={recovering !== null} title="选择回收章节" onClose={() => { if (!busy) setRecovering(null); }}>
+        <div className="space-y-4">
+          <p className="text-sm text-text-sub">选择揭晓这条伏笔的章节，确认后标记为已回收。</p>
+          <select aria-label="回收章节" value={recoveryChapter} disabled={busy} onChange={(event) => setRecoveryChapter(event.target.value)} className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text">
+            <option value="">请选择章节</option>
+            {chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title}</option>)}
+          </select>
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => setRecovering(null)}>取消</Button>
+            <Button disabled={busy || !recoveryChapter} onClick={() => { if (recovering) void updateStatus(recovering, 'resolved', recoveryChapter); }}>{busy ? '保存中…' : '确认回收'}</Button>
+          </div>
+        </div>
+      </Modal>
 
       <Card className="space-y-4">
         <h3 className="text-base font-medium text-text flex items-center gap-2">

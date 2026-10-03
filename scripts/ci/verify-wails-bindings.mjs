@@ -26,6 +26,7 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Hook status command", apiRuntime, "export function UpdateForeshadowingHookStatus(arg1, arg2)"],
  ["Constraint history", apiDeclaration, "Constraints():Promise<Array<storyasset.ConstraintView>>"],
  ["Constraint preview", apiDeclaration, "PreviewConstraintChange(arg1:storyasset.ConstraintRequest):Promise<storyasset.ConstraintPreview>"],
  ["Constraint confirmation", apiDeclaration, "ApplyConstraintChange(arg1:storyasset.ConstraintCommand):Promise<storyasset.ConstraintPreview>"],

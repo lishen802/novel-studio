@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { Link2, Users, ArrowRight, Sparkles } from 'lucide-react';
-import { foreshadowing, characters, factions } from '../../mock/data';
+import { foreshadowing, characters, factions, chapters } from '../../mock/data';
 import type { ForeshadowStatus } from '../../types';
+import { Modal } from '../../components/ui/Modal';
+import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -29,9 +31,12 @@ const statusLabel: Record<ForeshadowStatus, string> = {
 };
 
 export default function Foreshadowing() {
+  const [recovering, setRecovering] = useState<string | null>(null);
+  const [recoveryChapter, setRecoveryChapter] = useState('');
   const [items, setItems] = useState(foreshadowing);
 
   const updateStatus = (id: string, status: ForeshadowStatus) => {
+    if (status === 'resolved') { setRecovering(id); setRecoveryChapter(items.find((item) => item.id === id)?.payoffChapterId || ''); return; }
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, status } : item)));
   };
 
@@ -64,10 +69,10 @@ export default function Foreshadowing() {
                     <Link2 className="w-3.5 h-3.5 text-text-muted" />
                     {item.linkedChapters.map((ch) => (
                       <span
-                        key={ch}
+                        key={chapters.find((chapter) => chapter.id === ch)?.title || ch}
                         className="text-xs px-2 py-0.5 rounded bg-surface-hover text-text-sub border border-border"
                       >
-                        {ch}
+                        {chapters.find((chapter) => chapter.id === ch)?.title || ch}
                       </span>
                     ))}
                   </div>
@@ -76,6 +81,7 @@ export default function Foreshadowing() {
                 <div className="shrink-0">
                   <label className="block text-xs text-text-muted mb-1.5">状态</label>
                   <select
+                    aria-label={`${item.title}状态`}
                     value={item.status}
                     onChange={(e) => updateStatus(item.id, e.target.value as ForeshadowStatus)}
                     className={clsx(
@@ -95,6 +101,21 @@ export default function Foreshadowing() {
           ))
         )}
       </div>
+
+      <Modal open={recovering !== null} title="选择回收章节" onClose={() => setRecovering(null)}>
+        <div className="space-y-4">
+          <p className="text-sm text-text-sub">选择揭晓这条伏笔的章节，确认后标记为已回收。</p>
+          <p className="text-xs text-text-muted">原型演示仅更新本地状态，正式保存尚未就绪。</p>
+          <select aria-label="回收章节" value={recoveryChapter} onChange={(event) => setRecoveryChapter(event.target.value)} className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text">
+            <option value="">请选择章节</option>
+            {chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title}</option>)}
+          </select>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRecovering(null)}>取消</Button>
+            <Button disabled={!recoveryChapter} onClick={() => { setItems((prev) => prev.map((item) => item.id === recovering ? { ...item, status: 'resolved', payoffChapterId: recoveryChapter } : item)); setRecovering(null); }}>确认回收</Button>
+          </div>
+        </div>
+      </Modal>
 
       <Card className="space-y-4">
         <h3 className="text-base font-medium text-text flex items-center gap-2">

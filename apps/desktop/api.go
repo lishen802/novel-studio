@@ -90,6 +90,7 @@ type WorkspaceUseCases interface {
 	ArchiveWorldRule(context.Context, string) error
 	CreateForeshadowingHook(context.Context, workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error)
 	UpdateForeshadowingHook(context.Context, string, workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error)
+	UpdateForeshadowingHookStatus(context.Context, string, workspace.ForeshadowingHookStatusInput) (workspace.ForeshadowingHookView, error)
 	ArchiveForeshadowingHook(context.Context, string) error
 	Continuity(context.Context) (workspace.ContinuityView, error)
 	CreateStoryEvent(context.Context, workspace.StoryEventInput) (workspace.StoryEventView, error)
@@ -975,6 +976,10 @@ func (a *DesktopAPI) CreateForeshadowingHook(input workspace.ForeshadowingHookIn
 
 func (a *DesktopAPI) UpdateForeshadowingHook(id string, input workspace.ForeshadowingHookInput) (workspace.ForeshadowingHookView, error) {
 	return safeResult(a.workspace.UpdateForeshadowingHook(a.ctx, id, input))
+}
+
+func (a *DesktopAPI) UpdateForeshadowingHookStatus(id string, input workspace.ForeshadowingHookStatusInput) (workspace.ForeshadowingHookView, error) {
+	return safeResult(a.workspace.UpdateForeshadowingHookStatus(a.ctx, id, input))
 }
 
 func (a *DesktopAPI) ArchiveForeshadowingHook(id string) error {

@@ -643,6 +643,42 @@ func (s *Service) UpdateForeshadowingHook(ctx context.Context, id string, input 
 	return foreshadowingHookView(updated), nil
 }
 
+type ForeshadowingHookStatusInput struct {
+	Status            string `json:"status"`
+	ResolvedChapterID string `json:"resolvedChapterId"`
+}
+
+// UpdateForeshadowingHookStatus 只修改生命周期，保留存储中最新的伏笔内容、期限和备注。
+func (s *Service) UpdateForeshadowingHookStatus(ctx context.Context, id string, input ForeshadowingHookStatusInput) (ForeshadowingHookView, error) {
+	if err := s.license.Require(ctx, license.EditStory); err != nil {
+		return ForeshadowingHookView{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireEditableLocked(); err != nil {
+		return ForeshadowingHookView{}, err
+	}
+	hook, err := s.active.store.ForeshadowingHook(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return ForeshadowingHookView{}, worlddomain.ErrInvalidReference
+	}
+	resolved := hook.ResolvedChapterID
+	if input.Status == string(worlddomain.HookResolved) {
+		resolved = strings.TrimSpace(input.ResolvedChapterID)
+	}
+	if err := s.validateHookChaptersLocked(ctx, hook.ProjectID, hook.PlantedChapterID, hook.DueChapterID, resolved); err != nil {
+		return ForeshadowingHookView{}, err
+	}
+	updated, err := hook.Update(hook.Title, hook.Setup, hook.PlantedChapterID, hook.DueChapterID, resolved, worlddomain.HookStatus(input.Status), hook.Notes, s.clock.Now())
+	if err != nil {
+		return ForeshadowingHookView{}, err
+	}
+	if err := s.active.store.UpdateForeshadowingHook(ctx, updated); err != nil {
+		return ForeshadowingHookView{}, fmt.Errorf("update foreshadowing status: %w", s.handleFilesystemWriteFailureLocked(err))
+	}
+	return foreshadowingHookView(updated), nil
+}
+
 func (s *Service) ArchiveForeshadowingHook(ctx context.Context, id string) error {
 	return s.withStoryWrite(ctx, func() error {
 		return s.active.store.ArchiveForeshadowingHook(ctx, strings.TrimSpace(id), s.clock.Now())

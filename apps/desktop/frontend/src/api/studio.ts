@@ -611,6 +611,7 @@ export const studio = {
   createLocation: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateLocation', input),
   createWorldRule: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateWorldRule', input),
   createForeshadowingHook: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateForeshadowingHook', input),
+  updateForeshadowingHookStatus: (id: string, status: string, resolvedChapterId = '') => call<Record<string, unknown>>('UpdateForeshadowingHookStatus', id, { status, resolvedChapterId }),
   updateForeshadowingHook: (id: string, input: Record<string, unknown>) => call<Record<string, unknown>>('UpdateForeshadowingHook', id, input),
   continuity: () => call<ContinuityView>('Continuity'),
   createStoryEvent: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateStoryEvent', input),

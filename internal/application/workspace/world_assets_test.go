@@ -205,3 +205,36 @@ func TestWorldAssetUpdatesAndArchivesUseDomainRules(t *testing.T) {
 		t.Fatalf("hook was not archived: %#v", store.foreshadowingHooks[hook.ID])
 	}
 }
+
+func TestHookStatusPreservesMetadataAndRejectsInvalidRecovery(t *testing.T) {
+	project := mustProject(t, "project-1", "长夜织境")
+	store := newFakeStore(project)
+	chapter := mustChapter(t, "chapter-1", project.ID, "第一章", 1)
+	store.chapters[chapter.ID] = chapter
+	hook, _ := worlddomain.NewForeshadowingHook("hook-1", project.ID, "断剑之谜", "最新线索", chapter.ID, chapter.ID, time.Unix(100, 0))
+	hook.Notes = "保留作者备注"
+	store.foreshadowingHooks[hook.ID] = hook
+	service := openTestService(t, store, &sequenceIDs{})
+	ctx := context.Background()
+	updated, err := service.UpdateForeshadowingHookStatus(ctx, hook.ID, ForeshadowingHookStatusInput{Status: "progressing"})
+	if err != nil || updated.Status != "progressing" || updated.DueChapterID != chapter.ID || updated.Notes != hook.Notes || updated.Setup != hook.Setup {
+		t.Fatalf("status update lost metadata: %#v, %v", updated, err)
+	}
+	for _, input := range []ForeshadowingHookStatusInput{{Status: "resolved"}, {Status: "resolved", ResolvedChapterID: "missing"}, {Status: "growing"}} {
+		before := store.foreshadowingHooks[hook.ID]
+		if _, err := service.UpdateForeshadowingHookStatus(ctx, hook.ID, input); err == nil {
+			t.Fatalf("accepted invalid status input: %#v", input)
+		}
+		if store.foreshadowingHooks[hook.ID] != before {
+			t.Fatal("failed update changed stored hook")
+		}
+	}
+	updated, err = service.UpdateForeshadowingHookStatus(ctx, hook.ID, ForeshadowingHookStatusInput{Status: "resolved", ResolvedChapterID: chapter.ID})
+	if err != nil || updated.ResolvedChapterID != chapter.ID || updated.Notes != hook.Notes {
+		t.Fatalf("recovery = %#v, %v", updated, err)
+	}
+	updated, err = service.UpdateForeshadowingHookStatus(ctx, hook.ID, ForeshadowingHookStatusInput{Status: "abandoned"})
+	if err != nil || updated.Status != "abandoned" || updated.Notes != hook.Notes {
+		t.Fatalf("abandon = %#v, %v", updated, err)
+	}
+}

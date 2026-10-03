@@ -1622,6 +1622,9 @@ func (f *fakeWorkspace) UpdateForeshadowingHook(_ context.Context, id string, in
 	f.updatedHookID, f.hookInput = id, input
 	return workspace.ForeshadowingHookView{}, nil
 }
+func (f *fakeWorkspace) UpdateForeshadowingHookStatus(_ context.Context, _ string, _ workspace.ForeshadowingHookStatusInput) (workspace.ForeshadowingHookView, error) {
+	return workspace.ForeshadowingHookView{}, nil
+}
 func (f *fakeWorkspace) ArchiveForeshadowingHook(_ context.Context, id string) error {
 	f.archivedHookID = id
 	return nil
