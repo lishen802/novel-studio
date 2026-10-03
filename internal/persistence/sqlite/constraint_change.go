@@ -64,9 +64,25 @@ func constraintRows(ctx context.Context, q constraintReader) ([]constraintRow, e
 	if err != nil {
 		return nil, err
 	}
-	return append(result, characters...), nil
+	planning, err := planningConstraintRows(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(result, characters...), planning...), nil
 }
 func constraintText(kind, payload string) string {
+	if kind == "proposal" || kind == "outline_node" {
+		fields, err := asset.PlanningFields(kind, payload)
+		if err != nil {
+			return ""
+		}
+		values := map[string]string{}
+		for _, field := range fields {
+			values[field.Path] = field.Value
+		}
+		encoded, _ := json.Marshal(values)
+		return string(encoded)
+	}
 	if kind == "character" {
 		var profile asset.CharacterProfile
 		if json.Unmarshal([]byte(payload), &profile) != nil {
@@ -98,15 +114,15 @@ func constraintText(kind, payload string) string {
 
 // Constraints 同时返回原设定与修订序列，不将未来版本回写到原档案。
 func (s *Store) Constraints(ctx context.Context) ([]asset.ConstraintView, error) {
-	return s.constraintHistory(ctx, false)
+	return s.constraintHistory(ctx, "constraint")
 }
 
 // CharacterRevisions 提供原始人物与按章修订历史，不把未来档案回写为全书事实。
 func (s *Store) CharacterRevisions(ctx context.Context) ([]asset.ConstraintView, error) {
-	return s.constraintHistory(ctx, true)
+	return s.constraintHistory(ctx, "character")
 }
 
-func (s *Store) constraintHistory(ctx context.Context, characters bool) ([]asset.ConstraintView, error) {
+func (s *Store) constraintHistory(ctx context.Context, kind string) ([]asset.ConstraintView, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -147,9 +163,9 @@ func (s *Store) constraintHistory(ctx context.Context, characters bool) ([]asset
 	}
 	out := make([]asset.ConstraintView, 0, len(rows))
 	for _, r := range rows {
-		if (r.Kind == "character") == characters {
+		if (kind == "character" && r.Kind == "character") || (kind == "planning" && (r.Kind == "proposal" || r.Kind == "outline_node")) || (kind == "constraint" && r.Kind != "character" && r.Kind != "proposal" && r.Kind != "outline_node") {
 			r.TypedID = r.typedID
-			if characters {
+			if kind == "character" {
 				r.CandidateSuggestions, err = characterSuggestions(ctx, tx, r)
 				if err != nil {
 					return nil, err
@@ -169,7 +185,7 @@ func (s *Store) EffectiveConstraints(ctx context.Context, position int) ([]asset
  (SELECT c.revision FROM story_constraint_changes c WHERE c.asset_id=a.id AND c.position<=? ORDER BY c.position DESC LIMIT 1),1)
  LEFT JOIN world_rules w ON a.kind='world_rule' AND w.id=a.typed_id
  LEFT JOIN story_anchors h ON h.asset_id=a.id
- WHERE a.status='canonical' AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character') ORDER BY a.id`, position)
+ WHERE a.status='canonical' AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character','proposal','outline_node') ORDER BY a.id`, position)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +225,7 @@ func constraintFingerprint(ctx context.Context, q constraintReader, r asset.Cons
 		`SELECT id,lock_map_json FROM creation_candidates ORDER BY id`,
 		`SELECT id,version,status,content_sha256 FROM creation_candidates ORDER BY id`,
 		`SELECT id,status,after_value FROM change_operations ORDER BY id`,
-		`SELECT id,title,summary,planning_json FROM outline_nodes WHERE deleted_at IS NULL ORDER BY id`,
+		`SELECT id,parent_id,level,title,summary,goal,conflict,outcome,position,chapter_id,planning_json,deleted_at FROM outline_nodes ORDER BY id`,
 	}
 	h := sha256.New()
 	encoded, _ := json.Marshal(r)
@@ -305,6 +321,12 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 		}
 		encoded, _ := json.Marshal(profile)
 		p.Request.Text = string(encoded)
+	} else if selected.Kind == "proposal" || selected.Kind == "outline_node" {
+		_, normalized, e := asset.EditPlanning(selected.Kind, selected.payload, r.Text)
+		if e != nil {
+			return p, selected, e
+		}
+		p.Request.Text = normalized
 	} else if utf8.RuneCountInString(r.Text) > 12000 {
 		return p, selected, asset.ErrChangeUnsupported
 	}
@@ -417,6 +439,14 @@ func (s *Store) ApplyConstraintChange(ctx context.Context, c asset.ConstraintCom
 		_ = json.Unmarshal(fields, &updates)
 		for key, value := range updates {
 			payload[key] = value
+		}
+	} else if row.Kind == "proposal" || row.Kind == "outline_node" {
+		updated, _, e := asset.EditPlanning(row.Kind, row.payload, c.Request.Text)
+		if e != nil {
+			return p, e
+		}
+		if json.Unmarshal([]byte(updated), &payload) != nil {
+			return p, asset.ErrChangeUnsupported
 		}
 	} else {
 		key := "statement"

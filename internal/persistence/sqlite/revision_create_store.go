@@ -131,6 +131,9 @@ func prepareCreateOutlineOperation(
 	operation revision.PatchOperation,
 	appliedAt time.Time,
 ) (preparedOperation, error) {
+	if err := rejectFormalOutlineStructure(ctx, tx, changeSet.ProjectID); err != nil {
+		return preparedOperation{}, err
+	}
 	var proposed createOutlineNodeValue
 	if err := decodeOperationValue(operation.AfterValue, &proposed); err != nil {
 		return preparedOperation{}, err

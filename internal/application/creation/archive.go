@@ -370,10 +370,14 @@ func (mapper *archiveMapper) addProject(project projectdomain.Project, blueprint
 }
 
 func (mapper *archiveMapper) addProposal(candidate creationdomain.Candidate, blueprint agentdomain.StoryBlueprintOutput) error {
+	payload, err := withSourceLocks(candidate.PayloadJSON, candidate.LockMap)
+	if err != nil {
+		return err
+	}
 	after, err := encodeJSON(map[string]string{
 		"kind": string(storyassetdomain.KindProposal), "origin": string(storyassetdomain.OriginModel),
 		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,
-		"payloadJson": candidate.PayloadJSON,
+		"payloadJson": payload,
 	})
 	if err != nil {
 		return err
@@ -507,7 +511,7 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 func (mapper *archiveMapper) addTypedAsset(
 	candidate creationdomain.Candidate, kind storyassetdomain.Kind, table, typedID, payloadJSON string,
 ) error {
-	if kind == storyassetdomain.KindCharacter {
+	if kind == storyassetdomain.KindCharacter || kind == storyassetdomain.KindOutlineNode {
 		var fields map[string]any
 		if err := json.Unmarshal([]byte(payloadJSON), &fields); err != nil {
 			return err
@@ -718,4 +722,15 @@ func encodeJSON(value any) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// withSourceLocks 将来源锁冻结进完整规划载荷，后续版本不能因候选更换而解除保护。
+func withSourceLocks(payload string, locks map[string]bool) (string, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &object); err != nil {
+		return "", err
+	}
+	object["_sourceLocks"], _ = json.Marshal(locks)
+	encoded, err := json.Marshal(object)
+	return string(encoded), err
 }

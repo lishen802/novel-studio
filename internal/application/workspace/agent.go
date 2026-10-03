@@ -17,6 +17,7 @@ import (
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	storydomain "github.com/lishen802/novel-studio/internal/domain/story"
 	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
@@ -1093,6 +1094,8 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 	}
 	constraints := []storyassetdomain.EffectiveConstraint{}
 	characterVersions := []storyassetdomain.EffectiveConstraint{}
+	planningVersions := []storyassetdomain.EffectiveConstraint{}
+	proposals := []storyassetdomain.EffectiveConstraint{}
 	if reader, ok := store.(constraintContextStore); ok {
 		constraints, err = reader.EffectiveConstraints(ctx, chapter.Position)
 		if err != nil {
@@ -1127,10 +1130,31 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 				}
 			}
 		}
+		// 按章选择规划文字，并在原节点 ID 上应用；旧章不能读到未来目标。
+		for _, constraint := range constraints {
+			if constraint.Kind != "proposal" && constraint.Kind != "outline_node" {
+				continue
+			}
+			reference := constraint
+			reference.Text = ""
+			planningVersions = append(planningVersions, reference)
+			if constraint.Kind == "proposal" {
+				proposals = append(proposals, constraint)
+				continue
+			}
+			for i := range outline {
+				if outline[i].ID == constraint.TypedID {
+					outline[i], err = storyassetdomain.ApplyOutlinePlanning(outline[i], constraint.Text)
+					if err != nil {
+						return "", contextManifestStats{}, fmt.Errorf("read effective planning: %w", err)
+					}
+				}
+			}
+		}
 		// 必要清单保留精确版本引用，人物正文沿用有界人物域，避免重复装配整份小传。
 		formalRules := constraints[:0:0]
 		for _, constraint := range constraints {
-			if constraint.Kind != "character" {
+			if constraint.Kind != "character" && constraint.Kind != "proposal" && constraint.Kind != "outline_node" {
 				formalRules = append(formalRules, constraint)
 			}
 		}
@@ -1237,6 +1261,9 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 	}{
 		{"formalConstraints", 0, true, constraints},
 		{"formalCharacterVersions", 0, true, characterVersions},
+		{"formalPlanningVersions", 0, true, planningVersions},
+		{"formalProposal", 0, true, proposals},
+		{"formalOutlinePlanning", 0, true, formalOutlinePlanning(outline, planningVersions)},
 		{"confirmedFacts", 0, true, confirmedFacts},
 		{"associatedOutline", 0, true, associatedOutline},
 		{"sceneCards", 0, true, scenes},
@@ -1281,6 +1308,8 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 			"contract": map[string]any{
 				"confirmedFactsAreHardConstraints":           true,
 				"formalConstraintVersionsMatchTargetChapter": true,
+				"formalPlanningVersionsMatchTargetChapter":   true,
+				"planningGoalsAreNotHistoricalFacts":         true,
 				"candidateFactsRequireCaution":               true,
 				"chapterBodyIsReferenceOnly":                 true,
 			},
@@ -1609,4 +1638,21 @@ func requireSavedChapter(ctx context.Context, store ports.ProjectStore, chapter 
 		return projectdomain.ErrUnsavedDraft
 	}
 	return nil
+}
+
+// formalOutlinePlanning 仅将正式规划节点列为必要输入，规划目标不代表已经发生的事实。
+func formalOutlinePlanning(nodes []storydomain.OutlineNode, versions []storyassetdomain.EffectiveConstraint) []storydomain.OutlineNode {
+	ids := map[string]bool{}
+	for _, version := range versions {
+		if version.Kind == "outline_node" {
+			ids[version.TypedID] = true
+		}
+	}
+	result := []storydomain.OutlineNode{}
+	for _, node := range nodes {
+		if ids[node.ID] {
+			result = append(result, node)
+		}
+	}
+	return result
 }

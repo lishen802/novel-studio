@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { ChevronDown, ChevronRight, Plus, Sparkles } from 'lucide-react';
+import { PlanningRevisions } from '../../components/PlanningRevisions';
+import { planningRevisionDemo } from '../../mock/planningRevisions';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -95,6 +97,8 @@ export default function Structure() {
 
   return (
     <div className="space-y-6 animate-fade-up">
+      <p className="text-xs text-text-muted">原型仅演示规划修订，正式保存尚未就绪。</p>
+      <PlanningRevisions api={planningRevisionDemo} kind="outline_node" />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-display text-text">故事架构</h2>

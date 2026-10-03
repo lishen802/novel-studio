@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import { studio, type StoryStructureView } from '../../api/studio';
+import { PlanningRevisions } from '../../components/PlanningRevisions';
+import { useApp } from '../../store/useApp';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -47,6 +49,8 @@ function planningLines(node: NodeView): Array<[string, string]> {
 
 /** 读取并创建真实大纲节点，层级校验由后端统一完成。 */
 export default function Structure() {
+ const {state,registerBeforeClose}=useApp();
+ const [formalTree,setFormalTree]=useState(true);
   const [structure, setStructure] = useState<StoryStructureView | null>(null);
   const [parentId, setParentId] = useState('');
   const [title, setTitle] = useState('');
@@ -93,7 +97,9 @@ export default function Structure() {
 
   return (
     <div className="space-y-5 animate-fade-up">
-      <div className="flex justify-between"><div><h2 className="text-lg font-display text-text">故事架构</h2><p className="text-sm text-text-sub">数据已连接项目结构档案。</p></div><Button variant="primary" onClick={() => setOpen(true)}><Plus className="w-4 h-4" />添加节点</Button></div>
+      <div className="flex justify-between"><div><h2 className="text-lg font-display text-text">故事架构</h2><p className="text-sm text-text-sub">数据已连接项目结构档案。</p></div><Button variant="primary" disabled={formalTree || state.backendProject?.accessMode === "read_only"} onClick={() => setOpen(true)}><Plus className="w-4 h-4" />添加节点</Button></div>
+      <PlanningRevisions api={studio} kind="outline_node" registerBeforeLeave={registerBeforeClose} readOnly={state.backendProject?.accessMode === "read_only"} onFormalTree={setFormalTree} />
+      <p className="text-xs text-text-muted">下方展示原始结构；按章节生效的最新目标请查看修订记录。正式规划的节点增删和重排尚未就绪。</p>
       {error && <p className="text-sm text-danger">{error}</p>}
       {nodes.length ? <div className="space-y-3">{renderNodes()}</div> : <EmptyState icon={Sparkles} title="还没有故事架构" description="创建全书节点后，再逐层添加卷、故事弧与章节。" />}
       <Modal open={open} onClose={() => setOpen(false)} title="添加大纲节点">

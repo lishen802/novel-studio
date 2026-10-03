@@ -422,6 +422,9 @@ func prepareOutlineOperation(
 	operation revisiondomain.PatchOperation,
 	appliedAt time.Time,
 ) (preparedOperation, error) {
+	if err := rejectFormalOutlineWrite(ctx, tx, operation.TargetID); err != nil {
+		return preparedOperation{}, err
+	}
 	current, err := scanOutlineNode(tx.QueryRowContext(ctx, `
 		SELECT id, project_id, COALESCE(parent_id, ''), level, title, summary, goal,
 			conflict, outcome, position, COALESCE(chapter_id, ''), COALESCE(planning_json, '{}'), created_at, updated_at

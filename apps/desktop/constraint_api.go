@@ -48,3 +48,14 @@ func (a *DesktopAPI) CharacterRevisions() ([]asset.ConstraintView, error) {
 	}
 	return safeResult(reader.CharacterRevisions(a.ctx))
 }
+
+// PlanningRevisions 转发正式方案与路线图的版本投影。
+func (a *DesktopAPI) PlanningRevisions() ([]asset.ConstraintView, error) {
+	reader, ok := a.workspace.(interface {
+		PlanningRevisions(context.Context) ([]asset.ConstraintView, error)
+	})
+	if !ok {
+		return nil, safeDesktopError(asset.ErrChangeUnsupported)
+	}
+	return safeResult(reader.PlanningRevisions(a.ctx))
+}

@@ -756,7 +756,7 @@ func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
 			t.Fatalf("资产 %s 未关联类型表写入: %+v", operation.TargetID, envelope)
 		}
 		envelopePayload := wantPayload
-		if envelope.Kind == "character" {
+		if envelope.Kind == "character" || envelope.Kind == "outline_node" {
 			var fields map[string]any
 			if err := json.Unmarshal([]byte(wantPayload), &fields); err != nil {
 				t.Fatal(err)

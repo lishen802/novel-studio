@@ -768,6 +768,13 @@ func collectBranchDomains(
 		}
 	}
 
+	planningRevisions := []assetdomain.ConstraintView{}
+	if reader, ok := store.(planningRevisionReader); ok {
+		planningRevisions, err = reader.PlanningRevisions(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	hooks, err := store.ListForeshadowingHooks(ctx)
 	if err != nil {
 		return nil, err
@@ -807,8 +814,8 @@ func collectBranchDomains(
 	return []branchDomainState{
 		newBranchDomainState(
 			"story", "故事架构",
-			len(outlineNodes)+len(storyLines)+len(storyLinks)+len(sceneCards),
-			outlineNodes, storyLines, storyLinks, sceneCards,
+			len(outlineNodes)+len(storyLines)+len(storyLinks)+len(sceneCards)+len(planningRevisions),
+			outlineNodes, storyLines, storyLinks, sceneCards, planningRevisions,
 		),
 		newBranchDomainState(
 			"characters", "人物与势力",

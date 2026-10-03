@@ -144,3 +144,21 @@ func (s *Service) CharacterRevisions(ctx context.Context) ([]asset.ConstraintVie
 	}
 	return views, nil
 }
+
+type planningRevisionReader interface {
+	PlanningRevisions(context.Context) ([]asset.ConstraintView, error)
+}
+
+// PlanningRevisions 返回正式方案和路线图的版本文字，不把未来规划回写到原档案。
+func (s *Service) PlanningRevisions(ctx context.Context) ([]asset.ConstraintView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return nil, ErrNoActiveProject
+	}
+	reader, ok := s.active.store.(planningRevisionReader)
+	if !ok {
+		return nil, asset.ErrChangeUnsupported
+	}
+	return reader.PlanningRevisions(ctx)
+}

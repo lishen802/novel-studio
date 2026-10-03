@@ -20,7 +20,15 @@ func outlinePlanningJSON(value string) string {
 }
 
 func (s *Store) CreateOutlineNode(ctx context.Context, node storydomain.OutlineNode) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = rejectFormalOutlineStructure(ctx, tx, node.ProjectID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO outline_nodes (
 			id, project_id, parent_id, level, title, summary, goal, conflict,
 			outcome, position, chapter_id, planning_json, created_at, updated_at, deleted_at
@@ -31,7 +39,7 @@ func (s *Store) CreateOutlineNode(ctx context.Context, node storydomain.OutlineN
 	if err != nil {
 		return databaseOperationError("create outline node", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) ListOutlineNodes(ctx context.Context) ([]storydomain.OutlineNode, error) {
@@ -69,6 +77,9 @@ func (s *Store) ArchiveOutlineNode(ctx context.Context, id string, archivedAt ti
 		return databaseOperationError("begin archive outline transaction", err)
 	}
 	defer tx.Rollback()
+	if err = rejectFormalOutlineWrite(ctx, tx, id); err != nil {
+		return err
+	}
 	var references int
 	err = tx.QueryRowContext(ctx, `
 		SELECT

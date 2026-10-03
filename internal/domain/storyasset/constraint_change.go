@@ -17,6 +17,7 @@ type ConstraintView struct {
 	Current              string                `json:"current"`
 	Revision             int64                 `json:"revision"`
 	Locked               bool                  `json:"locked"`
+	Fields               []PlanningField       `json:"fields,omitempty"`
 	CandidateSuggestions []CharacterSuggestion `json:"candidateSuggestions,omitempty"`
 	Changes              []ConstraintChange    `json:"changes"`
 }

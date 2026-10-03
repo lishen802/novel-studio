@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Save, Check, BookOpen, User, Eye, Palette, Swords } from 'lucide-react';
 import { currentProject } from '../../mock/data';
+import { PlanningRevisions } from '../../components/PlanningRevisions';
+import { planningRevisionDemo } from '../../mock/planningRevisions';
 import { Card } from '../../components/ui/Card';
 import { Textarea } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -31,6 +33,8 @@ export default function Outline() {
 
   return (
     <div className="space-y-6 animate-fade-up">
+      <p className="text-xs text-text-muted">原型仅演示规划修订，正式保存尚未就绪。</p>
+      <PlanningRevisions api={planningRevisionDemo} kind="proposal" />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 space-y-4">
           <div className="flex items-start justify-between gap-4">
