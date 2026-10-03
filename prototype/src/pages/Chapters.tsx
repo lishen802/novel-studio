@@ -145,6 +145,16 @@ export default function Chapters() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('saved');
   const [search, setSearch] = useState('');
   const [focusMode, setFocusMode] = useState(false);
+  const [chapterTreeOpen, setChapterTreeOpen] = useState(() => !window.matchMedia?.('(max-width: 1100px)').matches);
+  // 小窗口默认让出正文空间；跨越断点时重新调整目录，手动展开仍可选章。
+  useEffect(() => {
+    const query = window.matchMedia?.('(max-width: 1100px)');
+    if (!query) return;
+    const resize = () => setChapterTreeOpen(!query.matches);
+    query.addEventListener('change', resize);
+    return () => query.removeEventListener('change', resize);
+  }, []);
+
   const [aiOpen, setAiOpen] = useState(false);
   const [aiWidth, setAiWidth] = useState(320);
   const [aiInput, setAiInput] = useState('');
@@ -314,10 +324,15 @@ export default function Chapters() {
   const canPrev = selectedIndex > 0;
   const canNext = selectedIndex >= 0 && selectedIndex < chapters.length - 1;
 
+  const directoryButton = <Button variant="ghost" size="sm" aria-controls="chapter-directory" aria-expanded={chapterTreeOpen && !focusMode} onClick={() => {
+    setChapterTreeOpen(focusMode || !chapterTreeOpen); setFocusMode(false);
+  }} className="gap-1 shrink-0"><BookOpen className="w-4 h-4" />章节目录</Button>;
+
   return (
-    <div data-editor-focus={focusMode} className="manuscript-workspace h-[calc(100%+3rem)] flex animate-fade-up -m-6">
+    <div data-editor-focus={focusMode} className="manuscript-workspace relative h-[calc(100%+3rem)] flex animate-fade-up -m-6">
       {/* Left chapter tree */}
-      <aside className={clsx("chapter-navigation w-[260px] shrink-0 flex flex-col border-r border-border bg-surface", focusMode && "hidden")}>
+      {chapterTreeOpen && !focusMode && <button aria-label="关闭章节目录浮层" className="chapter-dismiss" onClick={() => setChapterTreeOpen(false)} />}
+      <aside id="chapter-directory" hidden={focusMode || !chapterTreeOpen} aria-label="章节目录" className={clsx("chapter-navigation w-[260px] shrink-0 flex-col border-r border-border bg-surface", !focusMode && chapterTreeOpen ? "flex" : "hidden")}>
         <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-text">卷与章节</h2>
@@ -345,7 +360,7 @@ export default function Chapters() {
                 {volume.chapters.map((chapter) => (
                   <button
                     key={chapter.id}
-                    onClick={() => setSelectedId(chapter.id)}
+                    onClick={() => { setSelectedId(chapter.id); if (window.matchMedia?.('(max-width: 1100px)').matches) setChapterTreeOpen(false); }}
                     className={clsx(
                       'w-full text-left px-3 py-2 rounded-lg border transition-colors group',
                       selectedId === chapter.id
@@ -379,7 +394,8 @@ export default function Chapters() {
         style={{ backgroundColor: canvasColor.bg, color: canvasColor.text }}
       >
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center p-6">
+          <div className="flex-1 flex flex-col gap-4 items-center justify-center p-6">
+            {directoryButton}
             <EmptyState
               icon={BookOpen}
               title="选择章节开始写作"
@@ -400,9 +416,10 @@ export default function Chapters() {
               </div>
             )}
 
-            {/* Top toolbar */}
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border bg-surface/80 backdrop-blur-sm sticky top-0 z-10">
-              <div className="flex items-center gap-2">
+            {/* 正文工具栏 */}
+            <div className="editor-toolbar flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-border bg-surface/80 backdrop-blur-sm sticky top-0 z-10">
+              <div className="flex flex-wrap items-center gap-2">
+                {directoryButton}
                 <Button
                   variant="ghost"
                   size="sm"

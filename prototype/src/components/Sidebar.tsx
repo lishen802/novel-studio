@@ -35,6 +35,8 @@ export function Sidebar() {
             <NavLink
               key={item.path}
               to={item.path}
+              aria-label={item.label}
+              title={item.label}
               className={clsx(
                 'group flex items-center gap-3 h-10 px-3 rounded-md text-sm transition-colors relative',
                 isActive
@@ -46,13 +48,13 @@ export function Sidebar() {
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-r-full" />
               )}
               <Icon className={clsx('w-5 h-5', isActive ? 'text-primary' : 'text-text-muted group-hover:text-text')} />
-              <span>{item.label}</span>
+              <span className="navigation-label">{item.label}</span>
             </NavLink>
           );
         })}
       </nav>
 
-      <div className="p-4 border-t border-border">
+      <div className="project-navigation-summary p-4 border-t border-border">
         <div className="bg-surface-elevated border border-border rounded-lg p-3">
           <p className="text-xs text-text-muted mb-1">当前作品</p>
           <p className="text-sm font-medium text-text truncate">{project.title}</p>

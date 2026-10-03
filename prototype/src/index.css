@@ -158,3 +158,21 @@ html, body, #root {
     max-width: min(440px, 90%); box-shadow: -8px 0 30px rgb(0 0 0 / 12%);
   }
 }
+
+/* 窄窗口章节目录覆盖正文而不挤压，仍保留显式关闭入口。 */
+.chapter-dismiss { display: none; }
+@media (max-width: 1100px) {
+  .chapter-dismiss { display: block; position: absolute; inset: 0; z-index: 24; background: rgb(0 0 0 / 12%); }
+  .manuscript-workspace .chapter-navigation { position: absolute; inset: 0 auto 0 0; z-index: 25; width: min(280px, 85%); box-shadow: 8px 0 30px rgb(0 0 0 / 12%); }
+}
+
+/* 小窗口一级导航保留图标与名称提示，把宽度让给正文。 */
+@media (max-width: 1400px) {
+  .app-shell .project-navigation { width: 64px; }
+  .app-shell .project-navigation nav { padding-inline: 8px; }
+  .app-shell .project-navigation nav a { justify-content: center; padding-inline: 0; }
+  .app-shell .project-navigation .navigation-label,
+  .app-shell .project-navigation .project-navigation-summary { display: none; }
+  .app-shell:has(.project-navigation) .workspace-main { margin-left: 64px; }
+  .app-shell:has([data-editor-focus="true"]) .workspace-main { margin-left: 0; }
+}

@@ -103,3 +103,33 @@ it('选区操作未就绪时明确提示，不借用整章生成',async()=>{
  fireEvent.click(screen.getByRole('button',{name:'解释'}));
  expect(await screen.findByText(/解释这段尚未接入/)).toBeTruthy();expect(create).not.toHaveBeenCalled();
 });
+
+it('章节目录可独立收起，专注后仍能主动展开目录',async()=>{
+ setup();const editor=await screen.findByPlaceholderText('从这里开始书写……');
+ await waitFor(()=>expect((editor as HTMLTextAreaElement).value).toBe('原有正文'));
+ const directory=screen.getByRole('button',{name:'章节目录'});
+ expect(directory.getAttribute('aria-expanded')).toBe('true');
+ fireEvent.click(directory);expect(directory.getAttribute('aria-expanded')).toBe('false');
+ expect(screen.queryByRole('button',{name:/第二章/})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'专注'}));
+ fireEvent.click(directory);
+ expect(directory.getAttribute('aria-expanded')).toBe('true');
+ expect(screen.getByRole('button',{name:/第二章/})).toBeTruthy();
+ expect((editor as HTMLTextAreaElement).value).toBe('原有正文');
+});
+
+it('窄窗口目录默认收起，展开选章后自动收起且先保存输入',async()=>{
+ const original=window.matchMedia;
+ window.matchMedia=vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()});
+ try {
+  const {save}=setup();const editor=await screen.findByPlaceholderText('从这里开始书写……');
+  await waitFor(()=>expect((editor as HTMLTextAreaElement).value).toBe('原有正文'));
+  const directory=screen.getByRole('button',{name:'章节目录'});
+  expect(directory.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.change(editor,{target:{value:'窄窗口新稿'}});fireEvent.click(directory);
+  fireEvent.click(screen.getByRole('button',{name:/第二章/}));
+  await waitFor(()=>expect((editor as HTMLTextAreaElement).value).toBe('第二章正文'));
+  expect(save).toHaveBeenCalledWith('c1','窄窗口新稿',1);
+  expect(directory.getAttribute('aria-expanded')).toBe('false');
+ } finally {window.matchMedia=original;}
+});
