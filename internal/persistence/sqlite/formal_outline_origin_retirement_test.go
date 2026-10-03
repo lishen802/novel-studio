@@ -33,6 +33,10 @@ func TestOriginalFormalOutlineRetirementKeepsPastAndRejectsReferences(t *testing
 			t.Fatal(err)
 		}
 	}
+	scene, _ := story.NewOutlineNode("child-scene", project.ID, &chapter, story.LevelScene, "城门场景", 1, now)
+	if err := s.CreateOutlineNode(ctx, scene); err != nil {
+		t.Fatal(err)
+	}
 	session, _ := creation.NewSession("original-session", project.ID, "main", now)
 	if _, err := s.CreateCreationSession(ctx, session); err != nil {
 		t.Fatal(err)
@@ -66,11 +70,47 @@ func TestOriginalFormalOutlineRetirementKeepsPastAndRejectsReferences(t *testing
 	if _, err = s.db.ExecContext(ctx, `INSERT INTO story_anchors(id,asset_id,project_id,strength,scope_kind,scope_id,statement,created_at) VALUES(?,?,?,?,?,?,?,?)`, "original-anchor", formal.ID, project.ID, "hard", "roadmap_node", chapter.ID, "保持目标", formatTime(now)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO story_lines(id,project_id,name,status,created_at,updated_at) VALUES(?,?,'主线','planned',?,?)`, "linked-line", project.ID, formatTime(now), formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO story_line_links(project_id,story_line_id,outline_node_id,position,created_at) VALUES(?,?,?,1,?)`, project.ID, "linked-line", chapter.ID, formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO scene_cards(id,project_id,chapter_id,outline_node_id,title,position,status,created_at,updated_at) VALUES(?,?,?,?,?,1,'planned',?,?)`, "linked-card", project.ID, "old", chapter.ID, "抵达场景", formatTime(now), formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	referencing, _ := asset.New("linked-asset", project.ID, asset.KindWorldRule, asset.OriginAuthor, "", "", "", "world_rules", "untyped", now)
+	refTx, _ := s.db.BeginTx(ctx, nil)
+	if err = insertStoryAsset(ctx, refTx, referencing, `{"roadmapNode":"original-chapter"}`, now); err != nil {
+		t.Fatal(err)
+	}
+	if err = refTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := s.FormalOutlineReferences(ctx, project.ID, "main", formal.ID)
+	if err != nil || len(refs.References) != 5 {
+		t.Fatalf("references: %+v %v", refs, err)
+	}
+	wantKinds := []string{"child", "story_line", "scene_card", "anchor", "formal_asset"}
+	for i, kind := range wantKinds {
+		if refs.References[i].Kind != kind || refs.References[i].ID == "" || refs.References[i].Label == "" {
+			t.Fatalf("reference %d: %+v", i, refs.References[i])
+		}
+	}
 	if _, err = s.PreviewFormalOutlineRetire(ctx, request); !errors.Is(err, asset.ErrChangeConflict) {
 		t.Fatalf("referenced original node: %v", err)
 	}
 	if _, err = s.db.ExecContext(ctx, `DELETE FROM story_anchors WHERE id='original-anchor'`); err != nil {
 		t.Fatal(err)
+	}
+	for _, statement := range []string{`DELETE FROM scene_cards WHERE id='linked-card'`, `DELETE FROM story_line_links WHERE story_line_id='linked-line'`, `DELETE FROM story_lines WHERE id='linked-line'`, `DELETE FROM outline_nodes WHERE id='child-scene'`, `DELETE FROM story_assets WHERE id='linked-asset'`} {
+		if _, err = s.db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refs, err = s.FormalOutlineReferences(ctx, project.ID, "main", formal.ID)
+	if err != nil || len(refs.References) != 0 {
+		t.Fatalf("cleared references: %+v %v", refs, err)
 	}
 	preview, err := s.PreviewFormalOutlineRetire(ctx, request)
 	if err != nil || preview.IntroducedAt != 0 || preview.Position != 2 {

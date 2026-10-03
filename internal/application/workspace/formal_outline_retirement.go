@@ -13,6 +13,30 @@ type formalOutlineRetireStore interface {
 	ConfirmFormalOutlineRetire(context.Context, asset.FormalOutlineRetireCommand, time.Time) (asset.FormalOutlineRetirePreview, error)
 }
 
+// FormalOutlineReferences 读取当前项目分支中阻止节点停用的确定性引用。
+func (s *Service) FormalOutlineReferences(ctx context.Context, assetID string) (asset.FormalOutlineReferenceView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return asset.FormalOutlineReferenceView{}, ErrNoActiveProject
+	}
+	store, ok := s.active.store.(interface {
+		FormalOutlineReferences(context.Context, string, string, string) (asset.FormalOutlineReferenceView, error)
+	})
+	if !ok {
+		return asset.FormalOutlineReferenceView{}, asset.ErrChangeUnsupported
+	}
+	project, err := s.active.store.Project(ctx)
+	if err != nil {
+		return asset.FormalOutlineReferenceView{}, err
+	}
+	branchID, err := s.constraintBranchLocked()
+	if err != nil {
+		return asset.FormalOutlineReferenceView{}, err
+	}
+	return store.FormalOutlineReferences(ctx, project.ID, branchID, assetID)
+}
+
 // PreviewFormalOutlineRetire 绑定当前项目分支，预览作者未来停用的节点。
 func (s *Service) PreviewFormalOutlineRetire(ctx context.Context, assetID, chapterID, reason string) (asset.FormalOutlineRetirePreview, error) {
 	s.mu.RLock()

@@ -11,6 +11,17 @@ type formalOutlineRetireUseCases interface {
 	ConfirmFormalOutlineRetire(context.Context, asset.FormalOutlineRetireCommand) (asset.FormalOutlineRetirePreview, error)
 }
 
+// FormalOutlineReferences 显示阻止正式节点停用的直接引用。
+func (a *DesktopAPI) FormalOutlineReferences(assetID string) (asset.FormalOutlineReferenceView, error) {
+	svc, ok := a.workspace.(interface {
+		FormalOutlineReferences(context.Context, string) (asset.FormalOutlineReferenceView, error)
+	})
+	if !ok {
+		return asset.FormalOutlineReferenceView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(svc.FormalOutlineReferences(a.ctx, assetID))
+}
+
 // PreviewFormalOutlineRetire 只传作者选择，项目分支由工作区读取。
 func (a *DesktopAPI) PreviewFormalOutlineRetire(assetID, chapterID, reason string) (asset.FormalOutlineRetirePreview, error) {
 	svc, ok := a.workspace.(formalOutlineRetireUseCases)

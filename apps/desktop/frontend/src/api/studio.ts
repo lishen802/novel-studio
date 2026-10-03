@@ -9,6 +9,7 @@ export interface FormalOutlineAppendRequest {projectId?:string;branchId?:string;
 export interface FormalOutlineAppendPreview {request:FormalOutlineAppendRequest;digest:string;position:number;nodePosition:number;parentTitle:string;assetId?:string;nodeId?:string}
 export interface FormalOutlineRetireRequest {projectId:string;branchId:string;assetId:string;chapterId:string;reason:string}
 export interface FormalOutlineRetirePreview {request:FormalOutlineRetireRequest;digest:string;nodeId:string;title:string;introducedAt:number;position:number}
+export interface FormalOutlineReferenceView {assetId:string;nodeId:string;title:string;references:Array<{kind:string;id:string;label:string}>}
 export interface ConstraintPreview {request:ConstraintRequest;digest:string;before:string;revision:number;position:number;protectedChapters:number;futureChapters:number;canApply:boolean;blockedReason:string}
 export interface ConstraintCommand {request:ConstraintRequest;digest:string;idempotencyKey:string}
 export type ProjectAccessMode = 'editable' | 'read_only';
@@ -606,6 +607,7 @@ export const studio = {
   previewFormalOutlineAppend: (input:FormalOutlineAppendRequest) => call<FormalOutlineAppendPreview>('PreviewFormalOutlineAppend',input),
   confirmFormalOutlineAppend: (command:{request:FormalOutlineAppendRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineAppendPreview>('ConfirmFormalOutlineAppend',command),
   previewFormalOutlineRetire: (assetId:string,chapterId:string,reason:string) => call<FormalOutlineRetirePreview>('PreviewFormalOutlineRetire',assetId,chapterId,reason),
+  formalOutlineReferences: (assetId:string) => call<FormalOutlineReferenceView>('FormalOutlineReferences',assetId),
   confirmFormalOutlineRetire: (command:{request:FormalOutlineRetireRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineRetirePreview>('ConfirmFormalOutlineRetire',command),
   createStoryLine: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateStoryLine', input),
   createSceneCard: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateSceneCard', input),

@@ -85,13 +85,8 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 	if err = q.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),0) FROM story_constraint_changes WHERE asset_id=?`, r.AssetID).Scan(&last); err != nil || p.Position <= last {
 		return p, asset.ErrChangeConflict
 	}
-	var refs int
-	if err = q.QueryRowContext(ctx, `SELECT
- (SELECT COUNT(*) FROM outline_nodes WHERE parent_id=? AND deleted_at IS NULL)+
- (SELECT COUNT(*) FROM story_line_links WHERE outline_node_id=?)+
- (SELECT COUNT(*) FROM scene_cards WHERE outline_node_id=? AND deleted_at IS NULL)+
- (SELECT COUNT(*) FROM story_anchors WHERE project_id=? AND scope_kind='roadmap_node' AND scope_id IN (?,?))+
- (SELECT COUNT(*) FROM story_asset_revisions v JOIN story_assets a ON a.id=v.asset_id AND a.current_revision=v.revision WHERE a.project_id=? AND a.id<>? AND EXISTS(SELECT 1 FROM json_tree(v.payload_json) j WHERE j.type='text' AND j.value IN (?,?)))`, p.NodeID, p.NodeID, p.NodeID, r.ProjectID, p.NodeID, r.AssetID, r.ProjectID, r.AssetID, p.NodeID, r.AssetID).Scan(&refs); err != nil || refs != 0 {
+	references, err := formalOutlineReferences(ctx, q, r.ProjectID, r.BranchID, r.AssetID)
+	if err != nil || len(references.References) != 0 {
 		return p, asset.ErrChangeConflict
 	}
 	var pending int

@@ -25,3 +25,18 @@ type FormalOutlineRetireCommand struct {
 	Digest         string                     `json:"digest"`
 	IdempotencyKey string                     `json:"idempotencyKey"`
 }
+
+// FormalOutlineReference 记录阻止未来停用的确定性结构引用。
+type FormalOutlineReference struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// FormalOutlineReferenceView 返回节点身份及当前直接引用，不代表停用授权。
+type FormalOutlineReferenceView struct {
+	AssetID    string                   `json:"assetId"`
+	NodeID     string                   `json:"nodeId"`
+	Title      string                   `json:"title"`
+	References []FormalOutlineReference `json:"references"`
+}
