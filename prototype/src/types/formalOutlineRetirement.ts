@@ -1,0 +1,4 @@
+export interface ChapterView {id:string;projectId:string;title:string;position:number;body:string;revision:number;updatedAt:string;hasRecoveryDraft:boolean}
+export interface ConstraintView {assetId:string;kind:string;typedId?:string}
+export interface FormalOutlineRetireRequest {projectId:string;branchId:string;assetId:string;chapterId:string;reason:string}
+export interface FormalOutlineRetirePreview {request:FormalOutlineRetireRequest;digest:string;nodeId:string;title:string;introducedAt:number;position:number}

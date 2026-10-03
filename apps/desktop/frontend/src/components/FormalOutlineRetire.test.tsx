@@ -1,0 +1,38 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { FormalOutlineRetire, type FormalOutlineRetireAPI } from './FormalOutlineRetire';
+import type { ConstraintView, FormalOutlineRetirePreview } from '../api/studio';
+
+const request={projectId:'project',branchId:'main',assetId:'new-asset',chapterId:'later',reason:'后续目标调整'};
+const preview:FormalOutlineRetirePreview={request,digest:'frozen',nodeId:'new',title:'旧目标',introducedAt:2,position:3};
+const api=():FormalOutlineRetireAPI=>({listChapters:vi.fn().mockResolvedValue([{id:'later',projectId:'project',title:'第三章',position:3,body:'',revision:1,updatedAt:'',hasRecoveryDraft:false}]),planningRevisions:vi.fn().mockResolvedValue([{assetId:'new-asset',kind:'outline_node',typedId:'new'} as ConstraintView]),previewFormalOutlineRetire:vi.fn().mockResolvedValue(preview),confirmFormalOutlineRetire:vi.fn().mockResolvedValue(preview)});
+afterEach(cleanup);
+
+it('冻结停用边界，确认后刷新正式树',async()=>{
+ const client=api();const refreshed=vi.fn().mockResolvedValue(undefined);
+ render(<FormalOutlineRetire api={client} nodes={[{id:'new',title:'旧目标',introducedAt:2,retiredAt:0}]} readOnly={false} onApplied={refreshed}/>);
+ fireEvent.click(screen.getByText('预览未来停用'));
+ await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
+ fireEvent.change(screen.getByLabelText('待停用节点'),{target:{value:'new-asset'}});
+ fireEvent.change(screen.getByLabelText('停用生效章节'),{target:{value:'later'}});
+ fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:request.reason}});
+ fireEvent.click(screen.getByText('预览停用范围'));
+ await screen.findByText('“旧目标”从第 2 章起加入，拟从第 3 章起停用。');
+ expect(client.confirmFormalOutlineRetire).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByText('确认从该章起停用'));
+ await waitFor(()=>expect(client.confirmFormalOutlineRetire).toHaveBeenCalledWith({request,digest:'frozen',idempotencyKey:expect.any(String)}));
+ await waitFor(()=>expect(refreshed).toHaveBeenCalledTimes(1));
+});
+
+it('未确认输入阻止离开，明确取消才关闭',async()=>{
+ let guard:(()=>Promise<void>)|undefined;
+ render(<FormalOutlineRetire api={api()} nodes={[{id:'new',title:'旧目标',introducedAt:2,retiredAt:0}]} readOnly={false} registerBeforeLeave={handler=>{guard=handler;return ()=>{guard=undefined};}}/>);
+ fireEvent.click(screen.getByText('预览未来停用'));
+ await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
+ fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:'还没确认'}});
+ await expect(guard!()).rejects.toThrow('尚未确认');
+ fireEvent.keyDown(window,{key:'Escape'});
+ expect(screen.getByRole('dialog')).toBeTruthy();
+ fireEvent.click(screen.getByText('取消输入并关闭'));
+ expect(screen.queryByRole('dialog')).toBeNull();
+});

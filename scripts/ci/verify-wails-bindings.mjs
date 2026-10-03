@@ -26,6 +26,10 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Formal outline retirement preview",apiDeclaration,"PreviewFormalOutlineRetire(arg1:string,arg2:string,arg3:string):Promise<storyasset.FormalOutlineRetirePreview>"],
+ ["Formal outline retirement confirmation",apiDeclaration,"ConfirmFormalOutlineRetire(arg1:storyasset.FormalOutlineRetireCommand):Promise<storyasset.FormalOutlineRetirePreview>"],
+ ["Formal outline retirement runtime",apiRuntime,"export function ConfirmFormalOutlineRetire(arg1)"],
+ ["Formal outline retirement model",models,"export class FormalOutlineRetirePreview"],
  ["Formal outline append preview",apiDeclaration,"PreviewFormalOutlineAppend(arg1:storyasset.FormalOutlineAppendRequest):Promise<storyasset.FormalOutlineAppendPreview>"],
  ["Formal outline append confirmation",apiDeclaration,"ConfirmFormalOutlineAppend(arg1:storyasset.FormalOutlineAppendCommand):Promise<storyasset.FormalOutlineAppendPreview>"],
  ["Formal outline append runtime",apiRuntime,"export function ConfirmFormalOutlineAppend(arg1)"],

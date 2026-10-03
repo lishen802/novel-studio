@@ -44,18 +44,19 @@ type CreateSceneCardInput struct {
 }
 
 type OutlineNodeView struct {
-	ID                    string         `json:"id"`
-	ParentID              string         `json:"parentId"`
-	Level                 string         `json:"level"`
-	Title                 string         `json:"title"`
-	Summary               string         `json:"summary"`
-	Goal                  string         `json:"goal"`
-	Conflict              string         `json:"conflict"`
-	Outcome               string         `json:"outcome"`
-	Position              int            `json:"position"`
-	ChapterID             string         `json:"chapterId"`
-	Planning              map[string]any `json:"planning,omitempty"`
-	EffectiveFromPosition int            `json:"effectiveFromPosition,omitempty"`
+	ID                     string         `json:"id"`
+	ParentID               string         `json:"parentId"`
+	Level                  string         `json:"level"`
+	Title                  string         `json:"title"`
+	Summary                string         `json:"summary"`
+	Goal                   string         `json:"goal"`
+	Conflict               string         `json:"conflict"`
+	Outcome                string         `json:"outcome"`
+	Position               int            `json:"position"`
+	ChapterID              string         `json:"chapterId"`
+	Planning               map[string]any `json:"planning,omitempty"`
+	EffectiveFromPosition  int            `json:"effectiveFromPosition,omitempty"`
+	EffectiveUntilPosition int            `json:"effectiveUntilPosition,omitempty"`
 }
 
 type StoryLineView struct {
@@ -136,6 +137,21 @@ func (s *Service) StoryStructure(ctx context.Context) (StoryStructureView, error
 		}
 		for i := range view.OutlineNodes {
 			view.OutlineNodes[i].EffectiveFromPosition = boundaries[view.OutlineNodes[i].ID]
+		}
+	}
+	if reader, ok := s.active.store.(interface {
+		FormalOutlineRetirements(context.Context, string) (map[string]int, error)
+	}); ok {
+		project, err := s.active.store.Project(ctx)
+		if err != nil {
+			return StoryStructureView{}, err
+		}
+		boundaries, err := reader.FormalOutlineRetirements(ctx, project.ID)
+		if err != nil {
+			return StoryStructureView{}, err
+		}
+		for i := range view.OutlineNodes {
+			view.OutlineNodes[i].EffectiveUntilPosition = boundaries[view.OutlineNodes[i].ID]
 		}
 	}
 	return view, nil

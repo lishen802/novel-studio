@@ -18,7 +18,7 @@ func TestFormalOutlineAppendHasFutureBoundaryAndReceipt(t *testing.T) {
 	s, project := createTestStore(t)
 	defer s.Close()
 	now := time.Unix(100, 0)
-	for i, id := range []string{"old", "future"} {
+	for i, id := range []string{"old", "future", "later"} {
 		if err := s.CreateChapter(ctx, mustChapter(t, id, project.ID, id, i+1)); err != nil {
 			t.Fatal(err)
 		}
@@ -91,6 +91,52 @@ func TestFormalOutlineAppendHasFutureBoundaryAndReceipt(t *testing.T) {
 	tooEarly, err := s.PreviewConstraintChange(ctx, asset.ConstraintRequest{ProjectID: project.ID, BranchID: "main", AssetID: first.AssetID, Intent: "future_only", ChapterID: "old", Text: strings.Replace(addedText, "逼近城门", "新的章节目标", 1), Reason: "调整目标"})
 	if err != nil || tooEarly.CanApply || tooEarly.BlockedReason != "生效章节不能早于该节点的新增边界" {
 		t.Fatalf("revision before introduction: %+v %v", tooEarly, err)
+	}
+	retireRequest := asset.FormalOutlineRetireRequest{ProjectID: project.ID, BranchID: "main", AssetID: first.AssetID, ChapterID: "later", Reason: "后续章节改用其他目标"}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO story_anchors(id,asset_id,project_id,strength,scope_kind,scope_id,statement,created_at) VALUES(?,?,?,?,?,?,?,?)`, "retire-anchor", formal.ID, project.ID, "hard", "roadmap_node", first.NodeID, "仍被引用", formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.PreviewFormalOutlineRetire(ctx, retireRequest); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("referenced node must not retire: %v", err)
+	}
+	if _, err = s.db.ExecContext(ctx, `DELETE FROM story_anchors WHERE id='retire-anchor'`); err != nil {
+		t.Fatal(err)
+	}
+	retirePreview, err := s.PreviewFormalOutlineRetire(ctx, retireRequest)
+	if err != nil || retirePreview.Position != 3 || retirePreview.IntroducedAt != 2 {
+		t.Fatalf("retire preview: %+v %v", retirePreview, err)
+	}
+	retireCommand := asset.FormalOutlineRetireCommand{Request: retireRequest, Digest: retirePreview.Digest, IdempotencyKey: "retire-once"}
+	retired, err := s.ConfirmFormalOutlineRetire(ctx, retireCommand, time.Unix(250, 0))
+	if err != nil || retired.NodeID != first.NodeID {
+		t.Fatalf("retire: %+v %v", retired, err)
+	}
+	replayed, err := s.ConfirmFormalOutlineRetire(ctx, retireCommand, time.Unix(300, 0))
+	if err != nil || replayed.Digest != retired.Digest {
+		t.Fatalf("retire replay: %+v %v", replayed, err)
+	}
+	retirements, err := s.FormalOutlineRetirements(ctx, project.ID)
+	if err != nil || retirements[first.NodeID] != 3 {
+		t.Fatalf("retirements: %v %v", retirements, err)
+	}
+	for position, want := range map[int]bool{1: false, 2: true, 3: false} {
+		versions, e := s.EffectiveConstraints(ctx, position)
+		if e != nil {
+			t.Fatal(e)
+		}
+		found := false
+		for _, v := range versions {
+			if v.AssetID == first.AssetID {
+				found = true
+			}
+		}
+		if found != want {
+			t.Fatalf("retired node visibility at %d: %v", position, found)
+		}
+	}
+	retireCommand.Request.Reason = "reused key"
+	if _, err = s.ConfirmFormalOutlineRetire(ctx, retireCommand, time.Unix(350, 0)); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("retirement key reuse: %v", err)
 	}
 	originalArchive, err := s.PlanningArchiveAssets(ctx, project.ID)
 	if err != nil || len(originalArchive) != 1 || originalArchive[0].AssetID != formal.ID {

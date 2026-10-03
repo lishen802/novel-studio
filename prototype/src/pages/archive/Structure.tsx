@@ -3,7 +3,9 @@ import { clsx } from 'clsx';
 import { ChevronDown, ChevronRight, Plus, Sparkles } from 'lucide-react';
 import { PlanningRevisions } from '../../components/PlanningRevisions';
 import { FormalOutlineAppend } from '../../components/FormalOutlineAppend';
+import { FormalOutlineRetire } from '../../components/FormalOutlineRetire';
 import { formalOutlineDemo } from '../../mock/formalOutline';
+import { formalOutlineRetirementDemo } from '../../mock/formalOutlineRetirement';
 import { planningRevisionDemo } from '../../mock/planningRevisions';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -102,6 +104,7 @@ export default function Structure() {
       <p className="text-xs text-text-muted">原型仅演示规划修订，正式保存尚未就绪。</p>
       <PlanningRevisions api={planningRevisionDemo} kind="outline_node" />
       <FormalOutlineAppend api={formalOutlineDemo} arcs={initialArcs.map(arc=>({id:arc.id,title:arc.title}))} readOnly={false} />
+      <FormalOutlineRetire api={formalOutlineRetirementDemo} nodes={[{id:'demo-node',title:'近期章节目标',introducedAt:12,retiredAt:0}]} readOnly={false} />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-display text-text">故事架构</h2>

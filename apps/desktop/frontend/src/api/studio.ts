@@ -7,6 +7,8 @@ export interface ConstraintRequest {candidateId?:string;projectId?:string;branch
 export interface PlanningRearchivePreview {request:{projectId:string;branchId:string;chapterId:string;reason:string};digest:string;position:number;protectedChapters:number;futureChapters:number;changes:Array<{assetId:string;kind:string;before:string;after:string}>}
 export interface FormalOutlineAppendRequest {projectId?:string;branchId?:string;parentAssetId:string;chapterId:string;title:string;summary:string;goal:string;conflict:string;outcome:string;reason:string}
 export interface FormalOutlineAppendPreview {request:FormalOutlineAppendRequest;digest:string;position:number;nodePosition:number;parentTitle:string;assetId?:string;nodeId?:string}
+export interface FormalOutlineRetireRequest {projectId:string;branchId:string;assetId:string;chapterId:string;reason:string}
+export interface FormalOutlineRetirePreview {request:FormalOutlineRetireRequest;digest:string;nodeId:string;title:string;introducedAt:number;position:number}
 export interface ConstraintPreview {request:ConstraintRequest;digest:string;before:string;revision:number;position:number;protectedChapters:number;futureChapters:number;canApply:boolean;blockedReason:string}
 export interface ConstraintCommand {request:ConstraintRequest;digest:string;idempotencyKey:string}
 export type ProjectAccessMode = 'editable' | 'read_only';
@@ -603,6 +605,8 @@ export const studio = {
   createOutlineNode: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateOutlineNode', input),
   previewFormalOutlineAppend: (input:FormalOutlineAppendRequest) => call<FormalOutlineAppendPreview>('PreviewFormalOutlineAppend',input),
   confirmFormalOutlineAppend: (command:{request:FormalOutlineAppendRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineAppendPreview>('ConfirmFormalOutlineAppend',command),
+  previewFormalOutlineRetire: (assetId:string,chapterId:string,reason:string) => call<FormalOutlineRetirePreview>('PreviewFormalOutlineRetire',assetId,chapterId,reason),
+  confirmFormalOutlineRetire: (command:{request:FormalOutlineRetireRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineRetirePreview>('ConfirmFormalOutlineRetire',command),
   createStoryLine: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateStoryLine', input),
   createSceneCard: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateSceneCard', input),
   storyWorld: () => call<StoryWorldView>('StoryWorld'),
