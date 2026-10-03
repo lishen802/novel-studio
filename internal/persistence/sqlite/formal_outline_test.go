@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,13 +78,19 @@ func TestFormalOutlineAppendHasFutureBoundaryAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundPlanning := false
+	var addedText string
 	for _, row := range planning {
 		if row.AssetID == first.AssetID && row.TypedID == first.NodeID {
 			foundPlanning = true
+			addedText = row.Current
 		}
 	}
 	if !foundPlanning {
 		t.Fatalf("new node absent from formal planning: %+v", planning)
+	}
+	tooEarly, err := s.PreviewConstraintChange(ctx, asset.ConstraintRequest{ProjectID: project.ID, BranchID: "main", AssetID: first.AssetID, Intent: "future_only", ChapterID: "old", Text: strings.Replace(addedText, "逼近城门", "新的章节目标", 1), Reason: "调整目标"})
+	if err != nil || tooEarly.CanApply || tooEarly.BlockedReason != "生效章节不能早于该节点的新增边界" {
+		t.Fatalf("revision before introduction: %+v %v", tooEarly, err)
 	}
 	originalArchive, err := s.PlanningArchiveAssets(ctx, project.ID)
 	if err != nil || len(originalArchive) != 1 || originalArchive[0].AssetID != formal.ID {

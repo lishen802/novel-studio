@@ -351,6 +351,17 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 		p.CanApply = false
 		p.BlockedReason = "生效章节必须晚于该约束已有的生效边界"
 	}
+	if selected.Kind == "outline_node" {
+		var introducedAt int
+		err = q.QueryRowContext(ctx, `SELECT COALESCE((SELECT position FROM formal_outline_introductions WHERE asset_id=?),0)`, r.AssetID).Scan(&introducedAt)
+		if err != nil {
+			return p, selected, err
+		}
+		if introducedAt > 0 && p.Position < introducedAt {
+			p.CanApply = false
+			p.BlockedReason = "生效章节不能早于该节点的新增边界"
+		}
+	}
 	var count int
 	err = q.QueryRowContext(ctx, `SELECT count(*) FROM chapters c WHERE c.position>=? AND (c.body<>'' OR EXISTS(SELECT 1 FROM chapter_revisions h WHERE h.chapter_id=c.id AND h.body<>'') OR EXISTS(SELECT 1 FROM drafts d WHERE d.chapter_id=c.id AND d.body<>''))`, p.Position).Scan(&count)
 	if err != nil {
