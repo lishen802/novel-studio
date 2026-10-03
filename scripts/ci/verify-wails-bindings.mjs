@@ -26,6 +26,10 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Planning rearchive preview",apiDeclaration,"PreviewPlanningRearchive(arg1:string,arg2:string):Promise<storyasset.PlanningRearchivePreview>"],
+ ["Planning rearchive confirmation",apiDeclaration,"ConfirmPlanningRearchive(arg1:storyasset.PlanningRearchiveCommand):Promise<storyasset.PlanningRearchivePreview>"],
+ ["Planning rearchive runtime",apiRuntime,"export function ConfirmPlanningRearchive(arg1)"],
+ ["Planning rearchive model",models,"export class PlanningRearchivePreview"],
  ["Formal character preview",apiDeclaration,"PreviewCharacterRevision(arg1:creation.FormalCharacterRequest):Promise<creation.RevisionView>"],
  ["Formal character recovery",apiRuntime,"export function CharacterRevisionActions()"],
  ["Character revisions", apiRuntime, "export function CharacterRevisions()"],

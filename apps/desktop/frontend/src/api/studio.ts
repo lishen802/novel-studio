@@ -4,6 +4,7 @@ export interface CharacterSuggestion {branchId?:string;candidateId:string;entity
 export interface PlanningField {path:string;label:string;value:string}
 export interface ConstraintView {fields?:PlanningField[];candidateSuggestions?:CharacterSuggestion[];assetId:string;typedId?:string;kind:string;name:string;original:string;current:string;revision:number;locked:boolean;changes:ConstraintChange[]}
 export interface ConstraintRequest {candidateId?:string;projectId?:string;branchId?:string;assetId:string;intent:string;chapterId:string;text:string;reason:string}
+export interface PlanningRearchivePreview {request:{projectId:string;branchId:string;chapterId:string;reason:string};digest:string;position:number;protectedChapters:number;futureChapters:number;changes:Array<{assetId:string;kind:string;before:string;after:string}>}
 export interface ConstraintPreview {request:ConstraintRequest;digest:string;before:string;revision:number;position:number;protectedChapters:number;futureChapters:number;canApply:boolean;blockedReason:string}
 export interface ConstraintCommand {request:ConstraintRequest;digest:string;idempotencyKey:string}
 export type ProjectAccessMode = 'editable' | 'read_only';
@@ -697,6 +698,8 @@ export const studio = {
   cancelCreationRun: () => call<void>('CancelCreationRun'),
   recoverCreation: () => call<CreationWorkbenchView>('RecoverCreation'),
   previewCreationArchive: () => call<{ confirmationDigest: string; title: string; characterCount: number; outlineCount: number; anchorCount: number; operations: Array<{kind:string;action:string;summary:string}>; excluded: Array<{id:string;scope:string}> }>('PreviewCreationArchive'),
+  previewPlanningRearchive: (chapterId:string,reason:string) => call<PlanningRearchivePreview>('PreviewPlanningRearchive',chapterId,reason),
+  confirmPlanningRearchive: (command:{request:PlanningRearchivePreview['request'];digest:string;idempotencyKey:string}) => call<PlanningRearchivePreview>('ConfirmPlanningRearchive',command),
   confirmCreationArchive: (input: { confirmationDigest: string; idempotencyKey: string }) =>
     call<{ changeSetId: string }>('ConfirmCreationArchive', input),
   resolveCreationImpact: (choice: string) => call<{ projection: CreationWorkbenchView['impact'] }>('ResolveCreationImpact', choice),
