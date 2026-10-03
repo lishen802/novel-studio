@@ -104,7 +104,7 @@ export default function Structure() {
       <p className="text-xs text-text-muted">原型仅演示规划修订，正式保存尚未就绪。</p>
       <PlanningRevisions api={planningRevisionDemo} kind="outline_node" />
       <FormalOutlineAppend api={formalOutlineDemo} arcs={initialArcs.map(arc=>({id:arc.id,title:arc.title}))} readOnly={false} />
-      <FormalOutlineRetire api={formalOutlineRetirementDemo} nodes={[{id:'demo-node',title:'近期章节目标',introducedAt:12,retiredAt:0}]} readOnly={false} />
+      <FormalOutlineRetire api={formalOutlineRetirementDemo} nodes={[{id:'demo-node',title:'近期章节目标',level:'chapter',introducedAt:0,retiredAt:0}]} readOnly={false} />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-display text-text">故事架构</h2>

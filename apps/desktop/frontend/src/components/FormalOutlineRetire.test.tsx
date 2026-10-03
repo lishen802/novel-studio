@@ -10,7 +10,7 @@ afterEach(cleanup);
 
 it('冻结停用边界，确认后刷新正式树',async()=>{
  const client=api();const refreshed=vi.fn().mockResolvedValue(undefined);
- render(<FormalOutlineRetire api={client} nodes={[{id:'new',title:'旧目标',introducedAt:2,retiredAt:0}]} readOnly={false} onApplied={refreshed}/>);
+ render(<FormalOutlineRetire api={client} nodes={[{id:'new',title:'旧目标',level:'chapter',introducedAt:2,retiredAt:0}]} readOnly={false} onApplied={refreshed}/>);
  fireEvent.click(screen.getByText('预览未来停用'));
  await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
  fireEvent.change(screen.getByLabelText('待停用节点'),{target:{value:'new-asset'}});
@@ -26,7 +26,7 @@ it('冻结停用边界，确认后刷新正式树',async()=>{
 
 it('未确认输入阻止离开，明确取消才关闭',async()=>{
  let guard:(()=>Promise<void>)|undefined;
- render(<FormalOutlineRetire api={api()} nodes={[{id:'new',title:'旧目标',introducedAt:2,retiredAt:0}]} readOnly={false} registerBeforeLeave={handler=>{guard=handler;return ()=>{guard=undefined};}}/>);
+ render(<FormalOutlineRetire api={api()} nodes={[{id:'new',title:'旧目标',level:'chapter',introducedAt:2,retiredAt:0}]} readOnly={false} registerBeforeLeave={handler=>{guard=handler;return ()=>{guard=undefined};}}/>);
  fireEvent.click(screen.getByText('预览未来停用'));
  await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
  fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:'还没确认'}});
@@ -35,4 +35,17 @@ it('未确认输入阻止离开，明确取消才关闭',async()=>{
  expect(screen.getByRole('dialog')).toBeTruthy();
  fireEvent.click(screen.getByText('取消输入并关闭'));
  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('首次入档章节点可选择，并清楚显示原始规划边界',async()=>{
+ const client=api();
+ (client.previewFormalOutlineRetire as ReturnType<typeof vi.fn>).mockResolvedValue({...preview,introducedAt:0});
+ render(<FormalOutlineRetire api={client} nodes={[{id:'new',title:'旧目标',level:'chapter',introducedAt:0,retiredAt:0}]} readOnly={false}/>);
+ fireEvent.click(screen.getByText('预览未来停用'));
+ await screen.findByRole('option',{name:'旧目标 · 首次入档'});
+ fireEvent.change(screen.getByLabelText('待停用节点'),{target:{value:'new-asset'}});
+ fireEvent.change(screen.getByLabelText('停用生效章节'),{target:{value:'later'}});
+ fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:request.reason}});
+ fireEvent.click(screen.getByText('预览停用范围'));
+ await screen.findByText('“旧目标”属于首次入档规划，拟从第 3 章起停用。');
 });

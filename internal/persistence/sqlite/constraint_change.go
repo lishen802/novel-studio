@@ -187,7 +187,8 @@ func (s *Store) EffectiveConstraints(ctx context.Context, position int) ([]asset
  LEFT JOIN story_anchors h ON h.asset_id=a.id
  LEFT JOIN formal_outline_introductions intro ON intro.asset_id=a.id
  LEFT JOIN formal_outline_retirements retirement ON retirement.asset_id=a.id
- WHERE a.status='canonical' AND (intro.asset_id IS NULL OR intro.position<=?) AND (retirement.asset_id IS NULL OR retirement.position>?) AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character','proposal','outline_node') ORDER BY a.id`, position, position, position)
+ LEFT JOIN formal_outline_origin_retirements origin_retirement ON origin_retirement.asset_id=a.id
+ WHERE a.status='canonical' AND (intro.asset_id IS NULL OR intro.position<=?) AND (retirement.asset_id IS NULL OR retirement.position>?) AND (origin_retirement.asset_id IS NULL OR origin_retirement.position>?) AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character','proposal','outline_node') ORDER BY a.id`, position, position, position, position)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +364,7 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 			p.BlockedReason = "生效章节不能早于该节点的新增边界"
 		}
 		var retired int
-		err = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM formal_outline_retirements WHERE asset_id=?`, r.AssetID).Scan(&retired)
+		err = q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM formal_outline_retirements WHERE asset_id=?)+(SELECT COUNT(*) FROM formal_outline_origin_retirements WHERE asset_id=?)`, r.AssetID, r.AssetID).Scan(&retired)
 		if err != nil {
 			return p, selected, err
 		}

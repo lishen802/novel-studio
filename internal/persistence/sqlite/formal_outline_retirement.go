@@ -17,7 +17,7 @@ import (
 
 // FormalOutlineRetirements 返回未来停用节点的章序，供档案显示时间边界。
 func (s *Store) FormalOutlineRetirements(ctx context.Context, projectID string) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT node_id,position FROM formal_outline_retirements WHERE project_id=?`, projectID)
+	rows, err := s.db.QueryContext(ctx, `SELECT node_id,position FROM formal_outline_retirements WHERE project_id=? UNION ALL SELECT node_id,position FROM formal_outline_origin_retirements WHERE project_id=?`, projectID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -54,11 +54,18 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 	}
 	var status, level string
 	var locked, stale int
-	if err := q.QueryRowContext(ctx, `SELECT i.node_id,i.position,a.status,a.locked,a.stale,n.level,n.title FROM formal_outline_introductions i JOIN story_assets a ON a.id=i.asset_id JOIN outline_nodes n ON n.id=i.node_id AND n.project_id=i.project_id AND n.deleted_at IS NULL WHERE i.asset_id=? AND i.project_id=? AND i.branch_id=?`, r.AssetID, r.ProjectID, r.BranchID).Scan(&p.NodeID, &p.IntroducedAt, &status, &locked, &stale, &level, &p.Title); err != nil || level != "chapter" || status != "canonical" || locked != 0 || stale != 0 || p.Position <= p.IntroducedAt {
+	var hasArchiveSource int
+	if err := q.QueryRowContext(ctx, `SELECT a.typed_id,COALESCE(i.position,0),a.status,a.locked,a.stale,n.level,n.title,EXISTS(SELECT 1 FROM creation_candidates c JOIN creation_sessions s ON s.id=c.session_id WHERE c.id=a.source_candidate_id AND c.kind='roadmap' AND s.project_id=a.project_id AND s.branch_id=?) FROM story_assets a JOIN outline_nodes n ON n.id=a.typed_id AND n.project_id=a.project_id AND n.deleted_at IS NULL LEFT JOIN formal_outline_introductions i ON i.asset_id=a.id AND i.project_id=a.project_id AND i.branch_id=? WHERE a.id=? AND a.project_id=? AND a.kind='outline_node' AND a.typed_table='outline_nodes'`, r.BranchID, r.BranchID, r.AssetID, r.ProjectID).Scan(&p.NodeID, &p.IntroducedAt, &status, &locked, &stale, &level, &p.Title, &hasArchiveSource); err != nil || level != "chapter" || status != "canonical" || locked != 0 || stale != 0 || p.Position <= p.IntroducedAt || (p.IntroducedAt == 0 && hasArchiveSource == 0) {
 		return p, asset.ErrChangeConflict
 	}
+	if p.IntroducedAt == 0 {
+		var otherIntroduction int
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM formal_outline_introductions WHERE asset_id=?`, r.AssetID).Scan(&otherIntroduction); err != nil || otherIntroduction != 0 {
+			return p, asset.ErrChangeConflict
+		}
+	}
 	var previous int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM formal_outline_retirements WHERE asset_id=?`, r.AssetID).Scan(&previous); err != nil || previous != 0 {
+	if err := q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM formal_outline_retirements WHERE asset_id=?)+(SELECT COUNT(*) FROM formal_outline_origin_retirements WHERE asset_id=?)`, r.AssetID, r.AssetID).Scan(&previous); err != nil || previous != 0 {
 		return p, asset.ErrChangeConflict
 	}
 	rows, err := planningConstraintRows(ctx, q)
@@ -117,7 +124,7 @@ func (s *Store) ConfirmFormalOutlineRetire(ctx context.Context, command asset.Fo
 	defer tx.Rollback()
 	requestJSON, _ := json.Marshal(command.Request)
 	var oldRequest, oldDigest, receipt string
-	err = tx.QueryRowContext(ctx, `SELECT request_json,digest,receipt_json FROM formal_outline_retirements WHERE project_id=? AND branch_id=? AND idempotency_key=?`, command.Request.ProjectID, command.Request.BranchID, command.IdempotencyKey).Scan(&oldRequest, &oldDigest, &receipt)
+	err = tx.QueryRowContext(ctx, `SELECT request_json,digest,receipt_json FROM formal_outline_retirements WHERE project_id=? AND branch_id=? AND idempotency_key=? UNION ALL SELECT request_json,digest,receipt_json FROM formal_outline_origin_retirements WHERE project_id=? AND branch_id=? AND idempotency_key=?`, command.Request.ProjectID, command.Request.BranchID, command.IdempotencyKey, command.Request.ProjectID, command.Request.BranchID, command.IdempotencyKey).Scan(&oldRequest, &oldDigest, &receipt)
 	if err == nil {
 		var previous asset.FormalOutlineRetirePreview
 		if oldRequest != string(requestJSON) || oldDigest != command.Digest || json.Unmarshal([]byte(receipt), &previous) != nil {
@@ -133,7 +140,11 @@ func (s *Store) ConfirmFormalOutlineRetire(ctx context.Context, command asset.Fo
 		return p, asset.ErrChangeConflict
 	}
 	encoded, _ := json.Marshal(p)
-	_, err = tx.ExecContext(ctx, `INSERT INTO formal_outline_retirements(asset_id,node_id,project_id,branch_id,chapter_id,position,reason,digest,idempotency_key,request_json,receipt_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, command.Request.AssetID, p.NodeID, command.Request.ProjectID, command.Request.BranchID, command.Request.ChapterID, p.Position, command.Request.Reason, p.Digest, command.IdempotencyKey, string(requestJSON), string(encoded), formatTime(now))
+	table := "formal_outline_retirements"
+	if p.IntroducedAt == 0 {
+		table = "formal_outline_origin_retirements"
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO `+table+`(asset_id,node_id,project_id,branch_id,chapter_id,position,reason,digest,idempotency_key,request_json,receipt_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, command.Request.AssetID, p.NodeID, command.Request.ProjectID, command.Request.BranchID, command.Request.ChapterID, p.Position, command.Request.Reason, p.Digest, command.IdempotencyKey, string(requestJSON), string(encoded), formatTime(now))
 	if err != nil {
 		return p, fmt.Errorf("record future outline retirement: %w", err)
 	}

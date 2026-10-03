@@ -1,6 +1,6 @@
 package storyasset
 
-// FormalOutlineRetireRequest 选择作者新增的正式近期章节点及未来停用边界。
+// FormalOutlineRetireRequest 选择正式近期章节点及未来停用边界。
 type FormalOutlineRetireRequest struct {
 	ProjectID string `json:"projectId"`
 	BranchID  string `json:"branchId"`
