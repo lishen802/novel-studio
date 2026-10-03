@@ -41,7 +41,7 @@ func (s *Store) PreviewFormalOutlineRetire(ctx context.Context, r asset.FormalOu
 
 func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset.FormalOutlineRetireRequest) (asset.FormalOutlineRetirePreview, error) {
 	p := asset.FormalOutlineRetirePreview{Request: r}
-	if r.ProjectID == "" || r.BranchID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Reason) > 2000 {
+	if r.ProjectID == "" || r.BranchID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Reason) > 2000 || len(r.UnlinkStoryLineID) > 200 {
 		return p, asset.ErrChangeUnsupported
 	}
 	var chapterProject, body string
@@ -86,8 +86,26 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 		return p, asset.ErrChangeConflict
 	}
 	references, err := formalOutlineReferences(ctx, q, r.ProjectID, r.BranchID, r.AssetID)
-	if err != nil || len(references.References) != 0 {
+	if err != nil {
 		return p, asset.ErrChangeConflict
+	}
+	if r.UnlinkStoryLineID == "" {
+		if len(references.References) != 0 {
+			return p, asset.ErrChangeConflict
+		}
+	} else {
+		if len(references.References) != 1 || references.References[0].Kind != "story_line" || references.References[0].ID != r.UnlinkStoryLineID {
+			return p, asset.ErrChangeConflict
+		}
+		var allWritten int
+		if err = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM chapters c WHERE c.project_id=? AND (c.body<>'' OR EXISTS(SELECT 1 FROM chapter_revisions h WHERE h.chapter_id=c.id AND h.body<>'') OR EXISTS(SELECT 1 FROM drafts d WHERE d.chapter_id=c.id AND d.body<>''))`, r.ProjectID).Scan(&allWritten); err != nil || allWritten != 0 {
+			return p, asset.ErrChangeConflict
+		}
+		unlink := &asset.FormalStoryLineUnlink{StoryLineID: r.UnlinkStoryLineID}
+		if err = q.QueryRowContext(ctx, `SELECT l.position,l.created_at,s.name FROM story_line_links l JOIN story_lines s ON s.id=l.story_line_id AND s.project_id=l.project_id WHERE l.project_id=? AND l.story_line_id=? AND l.outline_node_id=?`, r.ProjectID, r.UnlinkStoryLineID, p.NodeID).Scan(&unlink.Position, &unlink.CreatedAt, &unlink.Name); err != nil {
+			return p, asset.ErrChangeConflict
+		}
+		p.UnlinkedStoryLine = unlink
 	}
 	var pending int
 	if err = q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM assistant_authorizations a JOIN assistant_sessions s ON s.id=a.session_id WHERE s.project_id=? AND a.state IN ('pending_confirmation','active'))+(SELECT COUNT(*) FROM assistant_actions WHERE project_id=? AND state IN ('pending_confirmation','executing','outcome_unknown'))+(SELECT COUNT(*) FROM change_operations o JOIN change_sets c ON c.id=o.change_set_id WHERE c.project_id=? AND o.status='pending')+(SELECT COUNT(*) FROM agent_runs WHERE project_id=? AND status IN ('queued','running'))`, r.ProjectID, r.ProjectID, r.ProjectID, r.ProjectID).Scan(&pending); err != nil || pending != 0 {
@@ -107,7 +125,7 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 	return p, nil
 }
 
-// ConfirmFormalOutlineRetire 在事务中重算摘要，只追加停用边界和成功回执。
+// ConfirmFormalOutlineRetire 在事务中重算摘要，一并解除选定链接并记录停用回执。
 func (s *Store) ConfirmFormalOutlineRetire(ctx context.Context, command asset.FormalOutlineRetireCommand, now time.Time) (asset.FormalOutlineRetirePreview, error) {
 	if command.IdempotencyKey == "" || len(command.IdempotencyKey) > 200 || command.Digest == "" {
 		return asset.FormalOutlineRetirePreview{}, asset.ErrChangeConflict
@@ -133,6 +151,15 @@ func (s *Store) ConfirmFormalOutlineRetire(ctx context.Context, command asset.Fo
 	p, err := previewFormalOutlineRetire(ctx, tx, command.Request)
 	if err != nil || p.Digest != command.Digest {
 		return p, asset.ErrChangeConflict
+	}
+	if p.UnlinkedStoryLine != nil {
+		result, e := tx.ExecContext(ctx, `DELETE FROM story_line_links WHERE project_id=? AND story_line_id=? AND outline_node_id=? AND position=? AND created_at=?`, command.Request.ProjectID, p.UnlinkedStoryLine.StoryLineID, p.NodeID, p.UnlinkedStoryLine.Position, p.UnlinkedStoryLine.CreatedAt)
+		if e != nil {
+			return p, fmt.Errorf("unlink retired outline story line: %w", e)
+		}
+		if e = requireOneRow(result, "story line link", p.UnlinkedStoryLine.StoryLineID); e != nil {
+			return p, e
+		}
 	}
 	encoded, _ := json.Marshal(p)
 	table := "formal_outline_retirements"

@@ -59,7 +59,7 @@ it('列明直接引用并阻止确认，重新检查后允许预览',async()=>{
  fireEvent.click(screen.getByText('预览未来停用'));
  await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
  fireEvent.change(screen.getByLabelText('待停用节点'),{target:{value:'new-asset'}});
- await screen.findByText('发现 1 项引用，需先处理引用才能停用：');
+ await screen.findByText('发现 1 项引用：');
  expect(screen.getByText('锚点 · 保持城门目标')).toBeTruthy();
  fireEvent.change(screen.getByLabelText('停用生效章节'),{target:{value:'later'}});
  fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:request.reason}});
@@ -67,4 +67,22 @@ it('列明直接引用并阻止确认，重新检查后允许预览',async()=>{
  blocked=false;fireEvent.click(screen.getByText('重新检查引用'));
  await screen.findByText('未发现直接结构引用；仍须核对未来章节和正式版本。');
  expect((screen.getByText('预览停用范围') as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('唯一故事线链接须明确选择解除，并显示冻结的解除范围',async()=>{
+ const client=api();
+ (client.formalOutlineReferences as ReturnType<typeof vi.fn>).mockResolvedValue({assetId:'new-asset',nodeId:'new',title:'旧目标',references:[{kind:'story_line',id:'linked-line',label:'主线'}]});
+ (client.previewFormalOutlineRetire as ReturnType<typeof vi.fn>).mockResolvedValue({...preview,request:{...request,unlinkStoryLineId:'linked-line'},unlinkedStoryLine:{storyLineId:'linked-line',name:'主线',position:1,createdAt:'2026-01-01T00:00:00Z'}});
+ render(<FormalOutlineRetire api={client} nodes={[{id:'new',title:'旧目标',level:'chapter',introducedAt:2,retiredAt:0}]} readOnly={false}/>);
+ fireEvent.click(screen.getByText('预览未来停用'));
+ await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
+ fireEvent.change(screen.getByLabelText('待停用节点'),{target:{value:'new-asset'}});
+ await screen.findByText('故事线 · 主线');
+ fireEvent.change(screen.getByLabelText('停用生效章节'),{target:{value:'later'}});
+ fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:request.reason}});
+ expect((screen.getByText('预览停用范围') as HTMLButtonElement).disabled).toBe(true);
+ fireEvent.click(screen.getByLabelText('同时解除故事线关联'));
+ fireEvent.click(screen.getByText('预览停用范围'));
+ await screen.findByText('将同时解除“主线”故事线与此节点的关联。');
+ expect(client.previewFormalOutlineRetire).toHaveBeenCalledWith('new-asset','later',request.reason,'linked-line');
 });

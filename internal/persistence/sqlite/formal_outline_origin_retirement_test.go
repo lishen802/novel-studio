@@ -103,17 +103,48 @@ func TestOriginalFormalOutlineRetirementKeepsPastAndRejectsReferences(t *testing
 	if _, err = s.db.ExecContext(ctx, `DELETE FROM story_anchors WHERE id='original-anchor'`); err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{`DELETE FROM scene_cards WHERE id='linked-card'`, `DELETE FROM story_line_links WHERE story_line_id='linked-line'`, `DELETE FROM story_lines WHERE id='linked-line'`, `DELETE FROM outline_nodes WHERE id='child-scene'`, `DELETE FROM story_assets WHERE id='linked-asset'`} {
+	for _, statement := range []string{`DELETE FROM scene_cards WHERE id='linked-card'`, `DELETE FROM outline_nodes WHERE id='child-scene'`, `DELETE FROM story_assets WHERE id='linked-asset'`} {
 		if _, err = s.db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
 		}
 	}
 	refs, err = s.FormalOutlineReferences(ctx, project.ID, "main", formal.ID)
-	if err != nil || len(refs.References) != 0 {
-		t.Fatalf("cleared references: %+v %v", refs, err)
+	if err != nil || len(refs.References) != 1 || refs.References[0].Kind != "story_line" {
+		t.Fatalf("remaining story line reference: %+v %v", refs, err)
+	}
+	if _, err = s.PreviewFormalOutlineRetire(ctx, request); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("story line requires explicit unlink: %v", err)
+	}
+	request.UnlinkStoryLineID = "linked-line"
+	if _, err = s.db.ExecContext(ctx, `UPDATE chapters SET body='已写正文' WHERE id='old'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.PreviewFormalOutlineRetire(ctx, request); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("written history must block global unlink: %v", err)
+	}
+	if _, err = s.db.ExecContext(ctx, `UPDATE chapters SET body='' WHERE id='old'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO chapter_revisions(chapter_id,revision,title,body,created_at) VALUES('old',1,'旧章','历史正文',?)`, formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.PreviewFormalOutlineRetire(ctx, request); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("historical manuscript must block global unlink: %v", err)
+	}
+	if _, err = s.db.ExecContext(ctx, `DELETE FROM chapter_revisions WHERE chapter_id='old'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO drafts(chapter_id,body,base_revision,updated_at) VALUES('old','恢复稿',1,?)`, formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.PreviewFormalOutlineRetire(ctx, request); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("recovery draft must block global unlink: %v", err)
+	}
+	if _, err = s.db.ExecContext(ctx, `DELETE FROM drafts WHERE chapter_id='old'`); err != nil {
+		t.Fatal(err)
 	}
 	preview, err := s.PreviewFormalOutlineRetire(ctx, request)
-	if err != nil || preview.IntroducedAt != 0 || preview.Position != 2 {
+	if err != nil || preview.IntroducedAt != 0 || preview.Position != 2 || preview.UnlinkedStoryLine == nil || preview.UnlinkedStoryLine.Name != "主线" {
 		t.Fatalf("preview: %+v %v", preview, err)
 	}
 	command := asset.FormalOutlineRetireCommand{Request: request, Digest: preview.Digest, IdempotencyKey: "original-retirement"}
@@ -129,6 +160,10 @@ func TestOriginalFormalOutlineRetirementKeepsPastAndRejectsReferences(t *testing
 	result, err := s.ConfirmFormalOutlineRetire(ctx, command, time.Unix(200, 0))
 	if err != nil || result.NodeID != chapter.ID {
 		t.Fatalf("confirm: %+v %v", result, err)
+	}
+	refs, err = s.FormalOutlineReferences(ctx, project.ID, "main", formal.ID)
+	if err != nil || len(refs.References) != 0 {
+		t.Fatalf("link removed with retirement: %+v %v", refs, err)
 	}
 	replay, err := s.ConfirmFormalOutlineRetire(ctx, command, time.Unix(300, 0))
 	if err != nil || replay.Digest != result.Digest {
