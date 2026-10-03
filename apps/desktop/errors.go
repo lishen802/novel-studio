@@ -155,6 +155,8 @@ func safeDesktopError(err error) error {
 		code, message = errorCreationVersionConflict, "创作会话已更新，本次修改未覆盖已有内容。请保留当前输入，重新读取并比较后再保存。"
 	case errors.Is(err, creationdomain.ErrConfirmationStale):
 		code, message = errorCreationConfirmationStale, "确认前置条件已变化，本次入档未执行。请重新预览并确认。"
+	case errors.Is(err, creationdomain.ErrHistoryImpactRequired):
+		code, message = errorCreationImpact, "作品已有保存正文或历史正文，当前整包入档尚不能声明变更生效范围，因此本次入档已阻止。候选和历史正文已保留，请继续编辑或审阅；高层变更需先完成历史影响处理。"
 	case errors.Is(err, creationdomain.ErrImpactUnresolved):
 		code, message = errorCreationImpact, "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"
 	case errors.Is(err, creationdomain.ErrInvalidSampleHandoff):

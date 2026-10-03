@@ -364,6 +364,20 @@ func TestConfirmArchiveReplaysIdempotentlyDespiteCandidateChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chapter, err := projectdomain.NewChapter("replay-body", project.ID, "入档后保存正文", 1, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = raw.CreateChapter(ctx, chapter); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := chapter.Commit("已经开始创作的正文", chapter.Revision, testClock{}.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = raw.CommitChapter(ctx, committed, chapter); err != nil {
+		t.Fatal(err)
+	}
 	// 入档成功后修改候选锁。
 	proposal, err := bridge.Candidate(ctx, "proposal-1")
 	if err != nil {

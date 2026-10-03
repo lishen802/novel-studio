@@ -48,6 +48,7 @@ type Store interface {
 	PendingActionCount(ctx context.Context, projectID string) (int, error)
 	Project(ctx context.Context) (projectdomain.Project, error)
 	WorkbenchState(ctx context.Context) (projectdomain.WorkbenchState, error)
+	HasSavedManuscript(context.Context) (bool, error)
 	ApplyArchive(ctx context.Context, apply ArchiveApply) error
 	// ReserveOperation 以 (project, branch, command, key) 唯一键预留操作回执；
 	// 键已存在时返回既有回执与 created=false，不依赖内存缓存即可跨重启去重。

@@ -13,6 +13,7 @@ import (
 
 // SQLBackend 是 SQLite 创作表的最小持久化端口，供工作区把活动项目 store 适配进来。
 type SQLBackend interface {
+	HasSavedManuscript(context.Context) (bool, error)
 	SaveCreationSample(context.Context, creationdomain.Session, creationdomain.Candidate, creationdomain.SampleHandoff) error
 	LatestCreationSample(context.Context, string) (creationdomain.SampleHandoff, error)
 	CurrentCreationEntry(context.Context, string) (creationdomain.EntryRevision, error)
@@ -241,4 +242,9 @@ func (store sqliteStore) SaveSample(ctx context.Context, s creationdomain.Sessio
 // LatestSample 读取最近的试写准备。
 func (store sqliteStore) LatestSample(ctx context.Context, id string) (creationdomain.SampleHandoff, error) {
 	return store.inner.LatestCreationSample(ctx, id)
+}
+
+// HasSavedManuscript 将当前正文与历史正文检查委托给持久化层。
+func (store sqliteStore) HasSavedManuscript(ctx context.Context) (bool, error) {
+	return store.inner.HasSavedManuscript(ctx)
 }

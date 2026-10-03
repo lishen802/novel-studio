@@ -577,3 +577,6 @@ func cloneReview(review creationdomain.CandidateReview) creationdomain.Candidate
 	review.Rejected = append([]creationdomain.ReviewRef{}, review.Rejected...)
 	return review
 }
+
+// HasSavedManuscript 内存策划测试仓库不保存正文，其历史安全行为由 SQLite 合同测试覆盖。
+func (store *memoryStore) HasSavedManuscript(context.Context) (bool, error) { return false, nil }

@@ -27,6 +27,12 @@ func (s *Store) ApplyCreationArchive(
 		return databaseOperationError("begin creation archive transaction", err)
 	}
 	defer tx.Rollback()
+	// 预览后作者仍可保存正文，必须在同一写入事务中重新检查历史保护。
+	if saved, err := hasSavedManuscript(ctx, tx); err != nil {
+		return err
+	} else if saved {
+		return creationdomain.ErrHistoryImpactRequired
+	}
 	if err := insertChangeSet(ctx, tx, changeSet); err != nil {
 		return err
 	}
@@ -147,4 +153,22 @@ func verifyAcceptedCreationCandidateTx(ctx context.Context, tx *sql.Tx, candidat
 		return fmt.Errorf("%w: candidate %s is no longer current", creationdomain.ErrConfirmationStale, candidate.ID)
 	}
 	return nil
+}
+
+// HasSavedManuscript 检查正式正文及旧 revision，空白当前正文不能掩盖已有历史。
+func (s *Store) HasSavedManuscript(ctx context.Context) (bool, error) {
+	return hasSavedManuscript(ctx, s.db)
+}
+
+type manuscriptHistoryReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func hasSavedManuscript(ctx context.Context, reader manuscriptHistoryReader) (bool, error) {
+	var saved bool
+	err := reader.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chapters WHERE body <> '') OR EXISTS(SELECT 1 FROM chapter_revisions WHERE body <> '')`).Scan(&saved)
+	if err != nil {
+		return false, databaseOperationError("check saved manuscript history", err)
+	}
+	return saved, nil
 }

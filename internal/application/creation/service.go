@@ -1274,6 +1274,9 @@ func (service *Service) PreviewConfirmArchive(ctx context.Context, projectID str
 	if err != nil {
 		return ArchivePreview{}, err
 	}
+	if err := service.requireArchiveWithoutManuscript(ctx); err != nil {
+		return ArchivePreview{}, err
+	}
 	selection, err := service.resolveArchiveSelection(ctx, candidates)
 	if err != nil {
 		return ArchivePreview{}, err
@@ -1330,6 +1333,9 @@ func (service *Service) ConfirmArchive(ctx context.Context, request ArchiveReque
 			return replay, nil
 		}
 		return ArchiveResult{}, ErrConfirmationRequired
+	}
+	if err := service.requireArchiveWithoutManuscript(ctx); err != nil {
+		return ArchiveResult{}, err
 	}
 	project, err := service.store.Project(ctx)
 	if err != nil {
@@ -1580,3 +1586,15 @@ func hashParts(parts ...string) string {
 }
 
 const defaultRunTimeout = 30 * time.Minute
+
+// requireArchiveWithoutManuscript 在生效边界合同就绪前保守阻断整包入档，幂等成功重放先行返回。
+func (service *Service) requireArchiveWithoutManuscript(ctx context.Context) error {
+	saved, err := service.store.HasSavedManuscript(ctx)
+	if err != nil {
+		return fmt.Errorf("check manuscript history before archive: %w", err)
+	}
+	if saved {
+		return creationdomain.ErrHistoryImpactRequired
+	}
+	return nil
+}

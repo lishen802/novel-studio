@@ -248,3 +248,9 @@ func (store creationStore) LatestSample(ctx context.Context, id string) (h creat
 	err = store.guard.access(ctx, false, func() error { h, err = store.inner.LatestSample(ctx, id); return err })
 	return
 }
+
+// HasSavedManuscript 在读取历史保护状态前核对活动项目代次，避免跨项目检查。
+func (store creationStore) HasSavedManuscript(ctx context.Context) (saved bool, err error) {
+	err = store.guard.access(ctx, false, func() error { saved, err = store.inner.HasSavedManuscript(ctx); return err })
+	return
+}

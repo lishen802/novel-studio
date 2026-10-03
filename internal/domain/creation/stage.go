@@ -3,13 +3,15 @@ package creation
 import "strings"
 
 var (
-	ErrBlankValue                  = err("creation value must not be blank")
-	ErrInvalidTransition           = err("invalid creation stage transition")
-	ErrStageIncomplete             = err("creation stage is incomplete")
-	ErrFieldLocked                 = err("creation field is locked")
-	ErrInvalidJSON                 = err("creation payload is not valid json")
-	ErrFieldMissing                = err("creation field path is missing")
-	ErrImpactUnresolved            = err("creation impact must be resolved")
+	ErrBlankValue        = err("creation value must not be blank")
+	ErrInvalidTransition = err("invalid creation stage transition")
+	ErrStageIncomplete   = err("creation stage is incomplete")
+	ErrFieldLocked       = err("creation field is locked")
+	ErrInvalidJSON       = err("creation payload is not valid json")
+	ErrFieldMissing      = err("creation field path is missing")
+	ErrImpactUnresolved  = err("creation impact must be resolved")
+	// ErrHistoryImpactRequired 表示现有入档合同不能证明高层变更不会影响已保存正文。
+	ErrHistoryImpactRequired       = err("creation archive requires manuscript history impact boundary")
 	ErrDirectionCard               = err("creation direction card not found in candidate")
 	ErrQualityBlocked              = err("creation candidate quality is blocked")
 	ErrCandidateAcceptanceRequired = err("creation candidate must be accepted before advancing or archiving")

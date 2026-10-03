@@ -826,6 +826,7 @@ func TestSafeDesktopErrorClassifiesCreationFailuresWithoutLeakingBody(t *testing
 		message string
 	}{
 		{name: "digest", err: creation.ErrConfirmationRequired, code: errorCreationConfirmation, message: "创作费用确认已变化，请重新预览并确认。"},
+		{name: "manuscript impact", err: creationdomain.ErrHistoryImpactRequired, code: errorCreationImpact, message: "作品已有保存正文或历史正文，当前整包入档尚不能声明变更生效范围，因此本次入档已阻止。候选和历史正文已保留，请继续编辑或审阅；高层变更需先完成历史影响处理。"},
 		{name: "impact", err: creationdomain.ErrImpactUnresolved, code: errorCreationImpact, message: "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"},
 		{name: "acceptance", err: creationdomain.ErrCandidateAcceptanceRequired, code: errorCreationAcceptance, message: "请先接受当前候选版本，再继续推进或确认作品档案。"},
 		{name: "unavailable workspace", err: workspace.ErrCreationUnavailable, code: errorFeatureNotAvailable, message: "当前项目无法打开创作工作台。"},
