@@ -131,3 +131,36 @@ func (s *Service) ApplyCreationRevision(ctx context.Context, command creationapp
 	}
 	return s.creationWorkbench(ctx, false)
 }
+
+// PreviewCharacterRevision 从当前正式人物版本冻结费用与单字段修改提案。
+func (s *Service) PreviewCharacterRevision(ctx context.Context, request creationapp.FormalCharacterRequest) (creationapp.RevisionView, error) {
+	runtime, err := s.creationRuntime(ctx, true)
+	if err != nil {
+		return creationapp.RevisionView{}, err
+	}
+	profile, err := s.creationProfile(ctx)
+	if err != nil {
+		return creationapp.RevisionView{}, err
+	}
+	return runtime.service.PreviewFormalCharacterRevision(ctx, runtime.projectID, request, profile)
+}
+
+// CharacterRevisionActions 恢复正式人物任务；只读查看不改写任务状态。
+func (s *Service) CharacterRevisionActions(ctx context.Context) ([]creationapp.RevisionView, error) {
+	runtime, err := s.creationRuntime(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	readOnly := s.requireEditable() != nil
+	views, err := runtime.service.RevisionActions(ctx, runtime.projectID, !readOnly)
+	if err != nil {
+		return nil, err
+	}
+	out := []creationapp.RevisionView{}
+	for _, view := range views {
+		if view.FormalAssetID != "" {
+			out = append(out, view)
+		}
+	}
+	return out, nil
+}

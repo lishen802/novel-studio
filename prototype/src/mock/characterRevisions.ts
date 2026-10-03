@@ -6,6 +6,22 @@ const rows: ConstraintView[] = characters.map((character) => {
 });
 const receipts = new Map<string, ConstraintPreview>();
 export const characterRevisionDemo = {
+ previewCharacterRevision: async (request:{assetId:string;expectedRevision:number;field:string;instruction:string;idempotencyKey:string}):Promise<RevisionCard> => {
+  const old=aiActions.find(action=>action.idempotencyKey===request.idempotencyKey);if(old){if(old.argumentsHash!==JSON.stringify(request))throw new Error('演示提案参数冲突');return structuredClone(old);}
+  const item=rows.find(row=>row.assetId===request.assetId);if(!item || item.locked || item.revision!==request.expectedRevision)throw new Error('人物基线已变化');
+  const value=JSON.parse(item.current)[request.field] || '';
+  const action:RevisionCard={formalAssetId:item.assetId,formalRevision:item.revision,actionId:crypto.randomUUID(),argumentsHash:JSON.stringify(request),idempotencyKey:request.idempotencyKey,candidateId:'',version:item.revision,state:'pending_confirmation',instruction:request.instruction,targets:[{ownerRef:item.typedId || item.assetId,path:request.field,label:labels[request.field],group:'人物',value,locked:false}],preserved:[],cost:{estimatedCalls:2,maxRunTokens:30000,runBudgetUnlimited:false,roleModels:[{role:'planner',provider:'原型演示',model:'不调用模型'},{role:'continuity_reviewer',provider:'原型演示',model:'不调用模型'}]},runId:'',quality:'',summary:'原型仅演示费用确认与候选交互。',stale:false,canApply:false,applied:false,diffs:[]};aiActions.unshift(action);return structuredClone(action);
+ },
+ characterRevisionActions: async ():Promise<RevisionCard[]> => structuredClone(aiActions.map(action=>({...action,stale:rows.find(row=>row.assetId===action.formalAssetId)?.revision!==action.formalRevision}))),
+ confirmCreationRevision: async (command:{actionId:string;argumentsHash:string;idempotencyKey:string}):Promise<RevisionCard> => {
+  const action=aiActions.find(item=>item.actionId===command.actionId)!;if(action.argumentsHash!==command.argumentsHash || action.idempotencyKey!==command.idempotencyKey)throw new Error('演示费用提案已变化');
+  if(action.state==='succeeded')return structuredClone(action);
+  const item=rows.find(row=>row.assetId===action.formalAssetId)!;if(item.revision!==action.formalRevision || item.locked)throw new Error('正式基线已变化');
+  const target=action.targets[0];const after=target.value+'（演示：'+action.instruction+'）';const profile={...JSON.parse(item.current),[target.path]:after};
+  action.state='succeeded';action.quality='passed';action.runId='demo-run';action.canApply=true;action.diffs=[{path:target.path,label:target.label,group:'人物',kind:'text',before:target.value,after}];action.summary='原型候选演示；没有调用真实模型。';
+  item.candidateSuggestions=[{candidateId:'formal-revision:'+action.actionId,entityId:item.typedId || item.assetId,actionId:action.actionId,text:JSON.stringify(profile)}];return structuredClone(action);
+ },
+ rejectCreationRevision: async(id:string)=>{const action=aiActions.find(item=>item.actionId===id)!;action.state='rejected';return {};},
  characterRevisions: async () => structuredClone(rows),
  listChapters: async () => chapters.map((chapter,index) => ({id:chapter.id,title:chapter.title,position:index+1})) as ChapterView[],
  previewConstraintChange: async (request:ConstraintRequest):Promise<ConstraintPreview> => {
@@ -24,3 +40,8 @@ export const characterRevisionDemo = {
   receipts.set(command.idempotencyKey,preview);return preview;
  },
 };
+
+// 正式人物生成演示只保存本地状态，不调用模型或写入正式数据库。
+import type { RevisionCard } from '../types/formalCharacter';
+const aiActions: RevisionCard[] = [];
+const labels: Record<string,string> = {name:'姓名',summary:'简介',motivation:'动机',fear:'恐惧',secret:'秘密',arc:'人物弧'};

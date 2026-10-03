@@ -6,6 +6,7 @@ import (
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
+	asset "github.com/lishen802/novel-studio/internal/domain/storyasset"
 )
 
 // creationStore 为创作会话、候选及回执统一提供短锁与项目代次保护。
@@ -252,5 +253,25 @@ func (store creationStore) LatestSample(ctx context.Context, id string) (h creat
 // HasSavedManuscript 在读取历史保护状态前核对活动项目代次，避免跨项目检查。
 func (store creationStore) HasSavedManuscript(ctx context.Context) (saved bool, err error) {
 	err = store.guard.access(ctx, false, func() error { saved, err = store.inner.HasSavedManuscript(ctx); return err })
+	return
+}
+
+// FormalCharacterRevisionBase 在项目代次保护下读取正式人物基线。
+func (store creationStore) FormalCharacterRevisionBase(ctx context.Context, project, branch, id string) (base asset.CharacterRevisionBase, err error) {
+	err = store.guard.access(ctx, false, func() error {
+		reader, ok := store.inner.(interface {
+			FormalCharacterRevisionBase(context.Context, string, string, string) (asset.CharacterRevisionBase, error)
+		})
+		if !ok {
+			return creationapp.ErrUnavailable
+		}
+		// 既有创作会话使用 main 别名；正式修订以磁盘分支目录的活动 ID 为权威。
+		actual, e := store.guard.workspace.constraintBranchLocked()
+		if e != nil {
+			return e
+		}
+		base, err = reader.FormalCharacterRevisionBase(ctx, project, actual, id)
+		return err
+	})
 	return
 }

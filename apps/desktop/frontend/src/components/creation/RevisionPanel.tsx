@@ -10,6 +10,7 @@ export interface RevisionDiff {path:string;label:string;group:string;kind:'text'
 // 结构授权回传：只带被勾选的集合名；两者都为空表示本次修订不允许任何结构增删。
 export interface RevisionAllow {allowAdd?:string[];allowRemove?:string[]}
 export interface RevisionCard {
+ formalAssetId?:string;formalRevision?:number;
  actionId:string;argumentsHash:string;idempotencyKey:string;candidateId:string;version:number;state:string;instruction:string;
  targets:FieldEditor['fields'];preserved:FieldEditor['fields'];cost:{estimatedCalls:number;maxRunTokens:number;runBudgetUnlimited:boolean;roleModels:{role:string;provider:string;model:string}[]};
  runId:string;quality:string;summary:string;stale:boolean;canApply:boolean;applied:boolean;

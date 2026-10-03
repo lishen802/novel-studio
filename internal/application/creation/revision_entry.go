@@ -17,12 +17,15 @@ import (
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	assistantdomain "github.com/lishen802/novel-studio/internal/domain/assistant"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
+	asset "github.com/lishen802/novel-studio/internal/domain/storyasset"
 )
 
 type RevisionRequest struct {
-	CandidateID string   `json:"candidateId"`
-	Paths       []string `json:"paths"`
-	Instruction string   `json:"instruction"`
+	FormalAssetID    string   `json:"formalAssetId,omitempty"`
+	ExpectedRevision int64    `json:"expectedRevision,omitempty"`
+	CandidateID      string   `json:"candidateId"`
+	Paths            []string `json:"paths"`
+	Instruction      string   `json:"instruction"`
 	// AllowAdd/AllowRemove 显式授权可增删实体的集合（如 characters、volumes）。
 	// 为空时任何结构变化都会被范围门禁拒绝。
 	AllowAdd       []string `json:"allowAdd"`
@@ -38,6 +41,8 @@ type RevisionCommand struct {
 	Paths []string `json:"paths"`
 }
 type RevisionView struct {
+	FormalAssetID  string             `json:"formalAssetId,omitempty"`
+	FormalRevision int64              `json:"formalRevision,omitempty"`
 	ActionID       string             `json:"actionId"`
 	ArgumentsHash  string             `json:"argumentsHash"`
 	IdempotencyKey string             `json:"idempotencyKey"`
@@ -67,6 +72,7 @@ type RevisionDiffView struct {
 	After  string `json:"after"`
 }
 type revisionInput struct {
+	Formal         *asset.CharacterRevisionBase        `json:"formal,omitempty"`
 	Sources        []agentkernel.Source                `json:"sources"`
 	Contract       string                              `json:"contract"`
 	Request        RevisionRequest                     `json:"request"`
@@ -119,17 +125,46 @@ func (service *Service) PreviewRevision(ctx context.Context, projectID string, r
 	if session.ActiveRunID != "" {
 		return RevisionView{}, ErrRunActive
 	}
-	base, err := service.CandidatePayload(ctx, projectID, request.CandidateID)
-	if err != nil {
-		return RevisionView{}, err
-	}
 	candidates, err := service.store.ListCandidates(ctx, session.ID)
 	if err != nil {
 		return RevisionView{}, err
 	}
-	current, ok := currentCandidate(candidates, base.Stage)
-	if !ok || current.ID != base.ID || base.Status == creationdomain.StatusStale {
-		return RevisionView{}, creationdomain.ErrCandidateVersionConflict
+	var base creationdomain.Candidate
+	var formal *asset.CharacterRevisionBase
+	if request.FormalAssetID != "" {
+		if request.CandidateID != "" || request.ExpectedRevision < 1 || len(request.Paths) != 1 || len(request.AllowAdd) > 0 || len(request.AllowRemove) > 0 {
+			return RevisionView{}, asset.ErrChangeUnsupported
+		}
+		reader, ok := service.store.(formalCharacterReader)
+		if !ok {
+			return RevisionView{}, ErrUnavailable
+		}
+		snapshot, e := reader.FormalCharacterRevisionBase(ctx, projectID, session.BranchID, request.FormalAssetID)
+		if e != nil {
+			return RevisionView{}, e
+		}
+		if snapshot.Revision != request.ExpectedRevision {
+			return RevisionView{}, asset.ErrChangeConflict
+		}
+		prefix := "/characters/" + escapeField("@"+snapshot.EntityID) + "/"
+		field := strings.TrimPrefix(request.Paths[0], prefix)
+		if field == request.Paths[0] || !allowedFormalCharacterField(field) {
+			return RevisionView{}, asset.ErrChangeUnsupported
+		}
+		formal = &snapshot
+		base, e = creationdomain.NewCandidate("formal:"+snapshot.AssetID, session.ID, creationdomain.StagePeopleWorld, creationdomain.KindPeopleWorld, int(snapshot.Revision), "", "", "", snapshot.CastJSON, "story_cast.schema", 2, service.clock.Now())
+		if e != nil {
+			return RevisionView{}, e
+		}
+	} else {
+		base, err = service.CandidatePayload(ctx, projectID, request.CandidateID)
+		if err != nil {
+			return RevisionView{}, err
+		}
+		current, ok := currentCandidate(candidates, base.Stage)
+		if !ok || current.ID != base.ID || base.Status == creationdomain.StatusStale {
+			return RevisionView{}, creationdomain.ErrCandidateVersionConflict
+		}
 	}
 	envelope := revisionEnvelope(base)
 	if err := envelope.Validate(); err != nil {
@@ -172,14 +207,23 @@ func (service *Service) PreviewRevision(ctx context.Context, projectID string, r
 		return RevisionView{}, err
 	}
 	projectJSON, _ := json.Marshal(project)
-	sources, err := generateSources(session, candidates, base.Stage)
-	if err != nil {
-		return RevisionView{}, err
+	var sources []agentkernel.Source
+	if formal != nil {
+		sources = []agentkernel.Source{{Kind: agentdomain.ManifestStoryAsset, ID: formal.AssetID, Version: fmt.Sprint(formal.Revision), Content: formal.ContextJSON, Priority: 1000, SelectionReason: "最新正式设定；未来版本不代表历史事实，原集合仅为不可修改参考", Required: true}}
+	} else {
+		sources, err = generateSources(session, candidates, base.Stage)
+		if err != nil {
+			return RevisionView{}, err
+		}
 	}
-	input := revisionInput{Sources: sources, Contract: "story_revision@1", Request: request, Base: base, SessionVersion: session.ContentVersion, UpstreamDigest: liveUpstreamDigest(session, candidates, base.Stage), ProjectDigest: hashBytes(projectJSON), Profile: profile, Cost: cost, RunID: service.ids.NewID(), BaseID: service.ids.NewID(), ResultID: service.ids.NewID()}
+	input := revisionInput{Formal: formal, Sources: sources, Contract: "story_revision@1", Request: request, Base: base, SessionVersion: session.ContentVersion, UpstreamDigest: liveUpstreamDigest(session, candidates, base.Stage), ProjectDigest: hashBytes(projectJSON), Profile: profile, Cost: cost, RunID: service.ids.NewID(), BaseID: service.ids.NewID(), ResultID: service.ids.NewID()}
 	encoded, _ := json.Marshal(input)
 	now := service.clock.Now()
-	action, err := assistantdomain.NewAction(service.ids.NewID(), assistant.ID, projectID, session.BranchID, assistantdomain.OpReviseFields, assistantdomain.RiskPaid, []string{base.ID}, []string{fmt.Sprintf("%s@%d", base.ID, base.Version)}, string(encoded), hashBytes(encoded), request.IdempotencyKey, "金额暂不可估算，按模型服务商实际用量计费", now, now.Add(assistantActionTTL))
+	actionBranch := session.BranchID
+	if formal != nil {
+		actionBranch = formal.BranchID
+	}
+	action, err := assistantdomain.NewAction(service.ids.NewID(), assistant.ID, projectID, actionBranch, assistantdomain.OpReviseFields, assistantdomain.RiskPaid, []string{base.ID}, []string{fmt.Sprintf("%s@%d", base.ID, base.Version)}, string(encoded), hashBytes(encoded), request.IdempotencyKey, "金额暂不可估算，按模型服务商实际用量计费", now, now.Add(assistantActionTTL))
 	if err != nil {
 		return RevisionView{}, err
 	}
@@ -201,6 +245,23 @@ func revisionEnvelope(base creationdomain.Candidate) agentdomain.StoryCandidateR
 
 // revisionCurrent 只核对冻结基线，不把旧授权换绑到最新候选。
 func (service *Service) revisionCurrent(ctx context.Context, session creationdomain.Session, input revisionInput) error {
+	if input.Formal != nil {
+		if input.Formal.ProjectID != session.ProjectID {
+			return asset.ErrChangeConflict
+		}
+		reader, ok := service.store.(formalCharacterReader)
+		if !ok {
+			return ErrUnavailable
+		}
+		latest, err := reader.FormalCharacterRevisionBase(ctx, session.ProjectID, session.BranchID, input.Formal.AssetID)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(latest, *input.Formal) {
+			return asset.ErrChangeConflict
+		}
+		return nil
+	}
 	if session.ContentVersion != input.SessionVersion {
 		return creationdomain.ErrSessionVersionConflict
 	}
@@ -260,7 +321,11 @@ func (service *Service) ConfirmRevision(ctx context.Context, projectID string, c
 		return RevisionView{}, err
 	}
 	now := service.clock.Now()
-	operation, created, err := service.store.ReserveOperation(ctx, creationdomain.Operation{ID: action.ID, ProjectID: projectID, BranchID: session.BranchID, Command: "revise_candidate", IdempotencyKey: action.IdempotencyKey, ArgumentsHash: action.ArgumentsHash, FrozenInputDigest: input.UpstreamDigest, Status: creationdomain.OperationReserved, RunID: input.RunID, CreatedAt: now, UpdatedAt: now})
+	runBranch := session.BranchID
+	if input.Formal != nil {
+		runBranch = input.Formal.BranchID
+	}
+	operation, created, err := service.store.ReserveOperation(ctx, creationdomain.Operation{ID: action.ID, ProjectID: projectID, BranchID: runBranch, Command: "revise_candidate", IdempotencyKey: action.IdempotencyKey, ArgumentsHash: action.ArgumentsHash, FrozenInputDigest: input.UpstreamDigest, Status: creationdomain.OperationReserved, RunID: input.RunID, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		return RevisionView{}, err
 	}
@@ -302,7 +367,7 @@ func (service *Service) ConfirmRevision(ctx context.Context, projectID string, c
 		TargetRefs: input.Request.Paths, PreserveRefs: preserve, AuthorInstructionRef: input.Request.Instruction,
 		AllowAdd: input.Request.AllowAdd, AllowRemove: input.Request.AllowRemove,
 	}
-	_, err = service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{RunID: input.RunID, ProjectID: projectID, BranchID: session.BranchID, CanonicalHead: input.ProjectDigest, AuthorInstruction: input.Request.Instruction, WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, WorkflowVersion: revisionBindingFor(input.Base).Version, Profile: input.Profile, Sources: input.Sources, BaseCandidate: &base, RevisionDirective: &directive, Deadline: now.Add(defaultRunTimeout)})
+	_, err = service.kernel.CreateRun(lease.Context(), agentkernel.CreateRequest{RunID: input.RunID, ProjectID: projectID, BranchID: runBranch, CanonicalHead: input.ProjectDigest, AuthorInstruction: input.Request.Instruction, WorkflowID: agentassets.StoryCandidateRevisionWorkflowID, WorkflowVersion: revisionBindingFor(input.Base).Version, Profile: input.Profile, Sources: input.Sources, BaseCandidate: &base, RevisionDirective: &directive, Deadline: now.Add(defaultRunTimeout)})
 	if err != nil {
 		service.failRevision(lease.Context(), executing, operation, "启动失败")
 		service.clearRunSlot(lease.Context(), projectID, input.RunID)
@@ -436,6 +501,10 @@ func (service *Service) RevisionActions(ctx context.Context, projectID string, r
 }
 func (service *Service) revisionView(ctx context.Context, session creationdomain.Session, action assistantdomain.Action, input revisionInput) (RevisionView, error) {
 	view := RevisionView{ActionID: action.ID, ArgumentsHash: action.ArgumentsHash, IdempotencyKey: action.IdempotencyKey, CandidateID: input.Base.ID, Version: input.Base.Version, State: string(action.State), Instruction: input.Request.Instruction, Targets: []TextFieldView{}, Preserved: []TextFieldView{}, Cost: input.Cost, Diffs: []RevisionDiffView{}, Summary: action.ErrorCode}
+	if input.Formal != nil {
+		view.FormalAssetID = input.Formal.AssetID
+		view.FormalRevision = input.Formal.Revision
+	}
 	fields := candidateTextFields(input.Base).Fields
 	targets := map[string]bool{}
 	for _, path := range input.Request.Paths {
@@ -463,12 +532,19 @@ func (service *Service) revisionView(ctx context.Context, session creationdomain
 	if action.State == assistantdomain.StateSucceeded {
 		run, _, diffs, e := service.revisionResult(ctx, input)
 		if e != nil {
+			if input.Formal != nil {
+				view.Summary = "修订工件无法核验，请查看运行记录并重新提出修改。"
+				return view, nil
+			}
 			return view, e
 		}
 		view.Quality = string(run.QualityStatus)
 		view.Summary = "修订与独立审阅已完成，采用后仍需确认本阶段候选。"
 		if run.QualityStatus != agentdomain.QualityPassed {
 			view.Summary = "独立审阅发现问题，此结果暂不可采用。"
+		}
+		if input.Formal != nil && run.QualityStatus == agentdomain.QualityPassed {
+			view.Summary = "人物修改与独立审阅已完成，请在正式人物修订中核对差异并选择未来空章节采用。"
 		}
 		view.Summary += service.revisionReviewSummary(ctx, run)
 		for _, diff := range diffs {
@@ -496,6 +572,9 @@ func (service *Service) ApplyRevision(ctx context.Context, projectID string, com
 	input, err := decodeRevisionInput(action)
 	if err != nil {
 		return creationdomain.Candidate{}, err
+	}
+	if input.Formal != nil {
+		return creationdomain.Candidate{}, asset.ErrChangeUnsupported
 	}
 	if len(command.Paths) == 0 {
 		// 整组采用按结果工件重放。

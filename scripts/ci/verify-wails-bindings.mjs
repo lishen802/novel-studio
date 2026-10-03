@@ -26,6 +26,8 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Formal character preview",apiDeclaration,"PreviewCharacterRevision(arg1:creation.FormalCharacterRequest):Promise<creation.RevisionView>"],
+ ["Formal character recovery",apiRuntime,"export function CharacterRevisionActions()"],
  ["Character revisions", apiRuntime, "export function CharacterRevisions()"],
  ["Planning revisions",apiRuntime,"export function PlanningRevisions()"],
  ["Hook status command", apiRuntime, "export function UpdateForeshadowingHookStatus(arg1, arg2)"],

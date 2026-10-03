@@ -113,3 +113,27 @@ func (a *DesktopAPI) PreviewCreationDiscussionSuggestion(request creationapp.Dis
 	}
 	return safeResult(service.PreviewCreationDiscussionSuggestion(a.ctx, request))
 }
+
+// formalCharacterUseCases 保持正式人物修订绑定薄且独立于建档候选写入。
+type formalCharacterUseCases interface {
+	PreviewCharacterRevision(context.Context, creationapp.FormalCharacterRequest) (creationapp.RevisionView, error)
+	CharacterRevisionActions(context.Context) ([]creationapp.RevisionView, error)
+}
+
+// PreviewCharacterRevision 转发正式人物的最新版本付费提案。
+func (a *DesktopAPI) PreviewCharacterRevision(request creationapp.FormalCharacterRequest) (creationapp.RevisionView, error) {
+	service, ok := a.workspace.(formalCharacterUseCases)
+	if !ok {
+		return creationapp.RevisionView{}, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(service.PreviewCharacterRevision(a.ctx, request))
+}
+
+// CharacterRevisionActions 转发正式人物修改进度与恢复查询。
+func (a *DesktopAPI) CharacterRevisionActions() ([]creationapp.RevisionView, error) {
+	service, ok := a.workspace.(formalCharacterUseCases)
+	if !ok {
+		return nil, safeDesktopError(errFeatureNotAvailable)
+	}
+	return safeResult(service.CharacterRevisionActions(a.ctx))
+}

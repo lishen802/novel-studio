@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/lishen802/novel-studio/internal/agentassets"
 	agent "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -31,6 +32,9 @@ type characterAdoptionSource struct {
 
 // characterAdoption 核对已审阅的完整候选及冻结授权，以唯一完整档案定位稳定人物身份。
 func characterAdoption(ctx context.Context, q constraintReader, row constraintRow, candidateID, projectID, branchID string) (characterAdoptionSource, error) {
+	if strings.HasPrefix(candidateID, asset.FormalCharacterCandidatePrefix) {
+		return formalCharacterAdoption(ctx, q, row, candidateID, projectID, branchID)
+	}
 	var source characterAdoptionSource
 	var parent, payload, candidateHash, runID, artifactID, arguments, argumentsHash, artifact, artifactHash, basePayload, sourceID string
 	err := q.QueryRowContext(ctx, `SELECT c.parent_candidate_id,c.payload_json,c.content_sha256,c.run_id,c.artifact_id,x.id,x.arguments,x.arguments_hash,f.content,f.sha256,b.payload_json,a.source_candidate_id
@@ -120,7 +124,8 @@ func castProfile(c agent.CastCharacter) string {
 
 // characterSuggestions 只列出可证明基线和来源的人物修改，未接通的候选不冒充正式修订。
 func characterSuggestions(ctx context.Context, q constraintReader, row constraintRow) ([]asset.CharacterSuggestion, error) {
-	rows, err := q.QueryContext(ctx, `SELECT c.id,s.project_id,s.branch_id FROM creation_candidates c JOIN creation_sessions s ON s.id=c.session_id JOIN story_assets a ON a.id=? AND a.source_candidate_id=c.parent_candidate_id WHERE c.kind='people_world' AND c.status IN ('draft','selected','confirmed') ORDER BY c.version DESC,c.id LIMIT 20`, row.AssetID)
+	rows, err := q.QueryContext(ctx, `SELECT c.id,s.project_id,s.branch_id,c.created_at AS ordering FROM creation_candidates c JOIN creation_sessions s ON s.id=c.session_id JOIN story_assets a ON a.id=? AND a.source_candidate_id=c.parent_candidate_id WHERE c.kind='people_world' AND c.status IN ('draft','selected','confirmed')
+ UNION ALL SELECT 'formal-revision:'||x.id,x.project_id,x.branch_id,x.created_at FROM assistant_actions x WHERE x.operation='revise_fields' AND x.state='succeeded' AND CASE WHEN json_valid(x.arguments) THEN json_extract(x.arguments,'$.formal.assetId') END=? ORDER BY ordering DESC LIMIT 40`, row.AssetID, row.AssetID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +133,8 @@ func characterSuggestions(ctx context.Context, q constraintReader, row constrain
 	refs := []ref{}
 	for rows.Next() {
 		var r ref
-		if err = rows.Scan(&r.id, &r.project, &r.branch); err != nil {
+		var stamp string
+		if err = rows.Scan(&r.id, &r.project, &r.branch, &stamp); err != nil {
 			rows.Close()
 			return nil, err
 		}
