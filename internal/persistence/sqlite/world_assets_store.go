@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	assetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
@@ -448,6 +449,14 @@ func (s *Store) WorldRule(ctx context.Context, id string) (worlddomain.WorldRule
 }
 
 func (s *Store) UpdateWorldRule(ctx context.Context, rule worlddomain.WorldRule) error {
+	var formal bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM story_assets WHERE typed_table='world_rules' AND typed_id=? AND status='canonical')`, rule.ID).Scan(&formal); err != nil {
+		return err
+	}
+	if formal {
+		return assetdomain.ErrChangeUnsupported
+	}
+
 	result, err := s.db.ExecContext(ctx, `UPDATE world_rules SET name = ?, description = ?, scope_type = ?, scope_id = ?, status = ?, updated_at = ? WHERE id = ? AND project_id = ? AND deleted_at IS NULL`, rule.Name, rule.Description, rule.ScopeType, nullString(rule.ScopeID), rule.Status, formatTime(rule.UpdatedAt), rule.ID, rule.ProjectID)
 	if err != nil {
 		return databaseOperationError("update world rule", err)
@@ -461,6 +470,13 @@ func (s *Store) ArchiveWorldRule(ctx context.Context, id string, archivedAt time
 		return databaseOperationError("begin archive world rule transaction", err)
 	}
 	defer tx.Rollback()
+	var formal bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM story_assets WHERE typed_table='world_rules' AND typed_id=? AND status='canonical')`, id).Scan(&formal); err != nil {
+		return err
+	}
+	if formal {
+		return assetdomain.ErrChangeUnsupported
+	}
 	references, err := countContinuityTargetReferences(ctx, tx, "rule", id)
 	if err != nil {
 		return err

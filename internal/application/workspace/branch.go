@@ -15,6 +15,7 @@ import (
 	"github.com/lishen802/novel-studio/internal/application/ports"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	assetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 )
 
 var ErrBranchFeatureUnavailable = errors.New("project branch feature is unavailable")
@@ -748,6 +749,13 @@ func collectBranchDomains(
 	if err != nil {
 		return nil, err
 	}
+	constraints := []assetdomain.ConstraintView{}
+	if reader, ok := store.(constraintStore); ok {
+		constraints, err = reader.Constraints(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	hooks, err := store.ListForeshadowingHooks(ctx)
 	if err != nil {
 		return nil, err
@@ -799,8 +807,8 @@ func collectBranchDomains(
 		newBranchDomainState(
 			"world", "世界设定",
 			len(regions)+len(adjacencies)+len(locations)+len(locationLinks)+
-				len(items)+len(itemTransfers)+len(rules)+len(hooks),
-			regions, adjacencies, locations, locationLinks, items, itemTransfers, rules, hooks,
+				len(items)+len(itemTransfers)+len(rules)+len(hooks)+len(constraints),
+			regions, adjacencies, locations, locationLinks, items, itemTransfers, rules, hooks, constraints,
 		),
 		newBranchDomainState(
 			"continuity", "时间线与事实",

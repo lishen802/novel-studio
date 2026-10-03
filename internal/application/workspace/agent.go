@@ -17,6 +17,7 @@ import (
 	canondomain "github.com/lishen802/novel-studio/internal/domain/canon"
 	projectdomain "github.com/lishen802/novel-studio/internal/domain/project"
 	revisiondomain "github.com/lishen802/novel-studio/internal/domain/revision"
+	storyassetdomain "github.com/lishen802/novel-studio/internal/domain/storyasset"
 	worlddomain "github.com/lishen802/novel-studio/internal/domain/world"
 )
 
@@ -1090,6 +1091,25 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 	if err != nil {
 		return "", contextManifestStats{}, err
 	}
+	constraints := []storyassetdomain.EffectiveConstraint{}
+	if reader, ok := store.(constraintContextStore); ok {
+		constraints, err = reader.EffectiveConstraints(ctx, chapter.Position)
+		if err != nil {
+			return "", contextManifestStats{}, err
+		}
+		effectiveRules := make(map[string]string, len(constraints))
+		for _, constraint := range constraints {
+			if constraint.Kind == "world_rule" {
+				effectiveRules[constraint.TypedID] = constraint.Text
+			}
+		}
+		for index := range rules {
+			if text, ok := effectiveRules[rules[index].ID]; ok {
+				rules[index].Description = text
+			}
+		}
+
+	}
 	hooks, err := store.ListForeshadowingHooks(ctx)
 	if err != nil {
 		return "", contextManifestStats{}, err
@@ -1182,6 +1202,7 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 		required bool
 		values   any
 	}{
+		{"formalConstraints", 0, true, constraints},
 		{"confirmedFacts", 0, true, confirmedFacts},
 		{"associatedOutline", 0, true, associatedOutline},
 		{"sceneCards", 0, true, scenes},
@@ -1224,9 +1245,10 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 	return buildContextManifest(contextManifestInput{
 		Header: map[string]any{
 			"contract": map[string]any{
-				"confirmedFactsAreHardConstraints": true,
-				"candidateFactsRequireCaution":     true,
-				"chapterBodyIsReferenceOnly":       true,
+				"confirmedFactsAreHardConstraints":           true,
+				"formalConstraintVersionsMatchTargetChapter": true,
+				"candidateFactsRequireCaution":               true,
+				"chapterBodyIsReferenceOnly":                 true,
 			},
 			"project":       project,
 			"targetChapter": chapter,

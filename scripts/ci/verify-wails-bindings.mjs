@@ -26,6 +26,10 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Constraint history", apiDeclaration, "Constraints():Promise<Array<storyasset.ConstraintView>>"],
+ ["Constraint preview", apiDeclaration, "PreviewConstraintChange(arg1:storyasset.ConstraintRequest):Promise<storyasset.ConstraintPreview>"],
+ ["Constraint confirmation", apiDeclaration, "ApplyConstraintChange(arg1:storyasset.ConstraintCommand):Promise<storyasset.ConstraintPreview>"],
+ ["Constraint runtime", apiRuntime, "export function ApplyConstraintChange(arg1)"],
  ["Revision preview", apiDeclaration, "PreviewCreationRevision(arg1:creation.RevisionRequest):Promise<creation.RevisionView>"],
  ["Revision confirmation", apiDeclaration, "ConfirmCreationRevision(arg1:creation.RevisionCommand):Promise<creation.RevisionView>"],
  ["Revision adoption", apiDeclaration, "ApplyCreationRevision(arg1:creation.RevisionCommand):Promise<creation.WorkbenchView>"],

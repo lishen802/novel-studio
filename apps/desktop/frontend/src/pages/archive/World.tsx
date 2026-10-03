@@ -3,6 +3,8 @@ import { clsx } from 'clsx';
 import { Search, Globe, BookMarked, Flame, Sparkles, Settings2 } from 'lucide-react';
 import type { WorldCategory, WorldEntry } from '../../types';
 import { studio } from '../../api/studio';
+import {ConstraintChanges} from '../../components/ConstraintChanges';
+import {useApp} from '../../store/useApp';
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -32,6 +34,7 @@ const importanceVariant: Record<'core' | 'secondary' | 'detail', 'warning' | 'in
 };
 
 export default function World() {
+  const {registerBeforeClose} = useApp();
   const [activeTab, setActiveTab] = useState<'all' | 'geography' | 'history' | 'culture' | 'system'>('all');
   const [query, setQuery] = useState('');
   const [worldEntries, setWorldEntries] = useState<WorldEntry[]>([]);
@@ -142,6 +145,7 @@ export default function World() {
           ))}
         </div>
       )}
+      <ConstraintChanges api={studio} registerBeforeLeave={registerBeforeClose}/>
     </div>
   );
 }

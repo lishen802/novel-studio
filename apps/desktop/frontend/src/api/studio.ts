@@ -1,4 +1,9 @@
 import type { RevisionCard } from '../components/creation/RevisionPanel';
+export interface ConstraintChange {assetId:string;revision:number;chapterId:string;position:number;text:string;reason:string}
+export interface ConstraintView {assetId:string;kind:string;name:string;original:string;current:string;revision:number;locked:boolean;changes:ConstraintChange[]}
+export interface ConstraintRequest {projectId?:string;branchId?:string;assetId:string;intent:string;chapterId:string;text:string;reason:string}
+export interface ConstraintPreview {request:ConstraintRequest;digest:string;before:string;revision:number;position:number;protectedChapters:number;futureChapters:number;canApply:boolean;blockedReason:string}
+export interface ConstraintCommand {request:ConstraintRequest;digest:string;idempotencyKey:string}
 export type ProjectAccessMode = 'editable' | 'read_only';
 
 export interface WorkbenchProjection {
@@ -598,6 +603,9 @@ export const studio = {
   updateCharacter: (id: string, input: Record<string, unknown>) => call<Record<string, unknown>>('UpdateCharacter', id, input),
   createFaction: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateFaction', input),
   updateFaction: (id: string, input: Record<string, unknown>) => call<Record<string, unknown>>('UpdateFaction', id, input),
+  constraints: () => call<ConstraintView[]>('Constraints'),
+  previewConstraintChange: (request:ConstraintRequest) => call<ConstraintPreview>('PreviewConstraintChange',request),
+  applyConstraintChange: (command:ConstraintCommand) => call<ConstraintPreview>('ApplyConstraintChange',command),
   worldAssets: () => call<WorldAssetsView>('WorldAssets'),
   createWorldRegion: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateWorldRegion', input),
   createLocation: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateLocation', input),

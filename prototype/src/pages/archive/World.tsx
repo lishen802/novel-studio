@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { Search, Globe, BookMarked, Flame, Sparkles, Settings2 } from 'lucide-react';
+import {ConstraintChanges} from '../../components/ConstraintChanges';
+import {constraintAPI} from '../../api/constraint';
 import { worldEntries } from '../../mock/data';
 import type { WorldCategory } from '../../types';
 import { Card } from '../../components/ui/Card';
@@ -116,6 +118,8 @@ export default function World() {
           ))}
         </div>
       )}
+      <p className="text-sm text-text-muted">本地交互样例，正式项目保存尚未接通。</p>
+      <ConstraintChanges api={constraintAPI}/>
     </div>
   );
 }

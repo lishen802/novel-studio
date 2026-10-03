@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	asset "github.com/lishen802/novel-studio/internal/domain/storyasset"
 	"io/fs"
 	"strings"
 
@@ -155,6 +156,10 @@ func safeDesktopError(err error) error {
 		code, message = errorCreationVersionConflict, "创作会话已更新，本次修改未覆盖已有内容。请保留当前输入，重新读取并比较后再保存。"
 	case errors.Is(err, creationdomain.ErrConfirmationStale):
 		code, message = errorCreationConfirmationStale, "确认前置条件已变化，本次入档未执行。请重新预览并确认。"
+	case errors.Is(err, asset.ErrChangeConflict):
+		code, message = errorCreationImpact, "设定变更预览已失效或涉及已有正文，请保留输入并重新预览，选择更晚的空章节。"
+	case errors.Is(err, asset.ErrChangeUnsupported):
+		code, message = errorCreationImpact, "当前仅支持已入档规则和锚点的文字修订，并从指定章节起生效。其他对象、故事内变化和追溯修改尚未接通。"
 	case errors.Is(err, creationdomain.ErrHistoryImpactRequired):
 		code, message = errorCreationImpact, "作品已有保存正文或历史正文，当前整包入档尚不能声明变更生效范围，因此本次入档已阻止。候选和历史正文已保留，请继续编辑或审阅；高层变更需先完成历史影响处理。"
 	case errors.Is(err, creationdomain.ErrImpactUnresolved):
