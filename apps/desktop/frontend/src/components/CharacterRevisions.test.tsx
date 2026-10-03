@@ -67,3 +67,23 @@ it('锁定档案不能修改，读取失败可重新读取', async () => {
  expect((screen.getByLabelText('动机') as HTMLTextAreaElement).disabled).toBe(true);
  expect((screen.getByText('预览人物差异') as HTMLButtonElement).disabled).toBe(true);
 });
+it('采用已审阅 AI 人物候选时冻结档案，只提交选定人物和来源', async () => {
+ const api = setup(); const candidateText = JSON.stringify({ ...profile, motivation: '保护同伴' });
+ vi.mocked(api.characterRevisions).mockResolvedValue([{ assetId: 'a1', typedId: 'c1', name: '林舟', kind: 'character', original, current: original, revision: 1, locked: false, changes: [], candidateSuggestions: [{ candidateId: 'reviewed-ai', entityId: 'cast-hero', text: candidateText, actionId: 'review' }] }]);
+ render(<CharacterRevisions api={api} />);
+ await waitFor(() => expect((screen.getByText('修订人物档案') as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByText('修订人物档案'));
+ fireEvent.change(screen.getByLabelText('动机'), { target: { value: '尚未保存的作者动机' } });
+ fireEvent.change(screen.getByLabelText('人物修改来源'), { target: { value: 'reviewed-ai' } });
+ expect((screen.getByLabelText('动机') as HTMLTextAreaElement).value).toBe('保护同伴');
+ expect((screen.getByLabelText('动机') as HTMLTextAreaElement).disabled).toBe(true);
+ fireEvent.change(screen.getByLabelText('人物修订理由'), { target: { value: '采纳建议' } });
+ fireEvent.change(screen.getByLabelText('人物生效章节'), { target: { value: 'future' } });
+ fireEvent.click(screen.getByText('预览人物差异')); await screen.findByText('修改后：保护同伴');
+ expect(vi.mocked(api.previewConstraintChange).mock.calls[0][0]).toMatchObject({ candidateId: 'reviewed-ai', assetId: 'a1', text: candidateText });
+ fireEvent.change(screen.getByLabelText('人物修改来源'), { target: { value: '' } });
+ expect(screen.queryByText('修改后：保护同伴')).toBeNull();
+ expect((screen.getByLabelText('动机') as HTMLTextAreaElement).disabled).toBe(false);
+ expect((screen.getByLabelText('动机') as HTMLTextAreaElement).value).toBe('尚未保存的作者动机');
+ expect((screen.getByText('确认人物修订') as HTMLButtonElement).disabled).toBe(true);
+});

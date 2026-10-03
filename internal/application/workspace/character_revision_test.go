@@ -138,3 +138,66 @@ func TestFutureCharacterFlowsThroughContextRestartAndBranches(t *testing.T) {
 		t.Fatalf("restart history: %#v %v", history, err)
 	}
 }
+
+// suggestionProjectionStore 模拟同一正式版本下候选可用性变化，不替代正式历史。
+type suggestionProjectionStore struct {
+	ports.ProjectStore
+	suggestion string
+	branchID   string
+}
+
+func (s suggestionProjectionStore) CharacterRevisions(context.Context) ([]asset.ConstraintView, error) {
+	return []asset.ConstraintView{{AssetID: "formal", Kind: "character", Revision: 1, Current: "same", CandidateSuggestions: []asset.CharacterSuggestion{{CandidateID: s.suggestion, Text: "candidate", BranchID: s.branchID}}}}, nil
+}
+
+func TestBranchCharacterComparisonIgnoresCandidateSuggestions(t *testing.T) {
+	ctx := context.Background()
+	s := NewService(projectfs.Manager{}, sqlite.Factory{}, license.NoopService{}, fixedClock{now: time.Unix(200, 0)}, ids.UUIDGenerator{}, snapshotfs.Archive{}, branchfs.Archive{})
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.CreateProject(ctx, t.TempDir(), "分支", "奇幻", ""); err != nil {
+		t.Fatal(err)
+	}
+	fingerprints := []string{}
+	for _, id := range []string{"candidate-one", "candidate-two"} {
+		domains, err := collectBranchDomains(ctx, suggestionProjectionStore{ProjectStore: s.active.store, suggestion: id}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, domain := range domains {
+			if domain.key == "characters" {
+				fingerprints = append(fingerprints, domain.fingerprint)
+			}
+		}
+	}
+	if len(fingerprints) != 2 || fingerprints[0] != fingerprints[1] {
+		t.Fatalf("candidate changed formal branch diff: %#v", fingerprints)
+	}
+}
+
+func TestCharacterSuggestionsBelongToActiveBranch(t *testing.T) {
+	ctx := context.Background()
+	s := NewService(projectfs.Manager{}, sqlite.Factory{}, license.NoopService{}, fixedClock{now: time.Unix(200, 0)}, ids.UUIDGenerator{}, snapshotfs.Archive{}, branchfs.Archive{})
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.CreateProject(ctx, t.TempDir(), "候选分支", "奇幻", ""); err != nil {
+		t.Fatal(err)
+	}
+	branchID, err := s.constraintBranchLocked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := s.active.store
+	for _, branch := range []string{"other-branch", branchID} {
+		s.active.store = suggestionProjectionStore{ProjectStore: store, suggestion: "candidate", branchID: branch}
+		views, err := s.CharacterRevisions(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if branch == branchID {
+			want = 1
+		}
+		if len(views[0].CandidateSuggestions) != want {
+			t.Fatalf("wrong branch suggestions: %#v", views)
+		}
+	}
+}

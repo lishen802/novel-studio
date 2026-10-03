@@ -125,5 +125,22 @@ func (s *Service) CharacterRevisions(ctx context.Context) ([]asset.ConstraintVie
 	if !ok {
 		return nil, asset.ErrChangeUnsupported
 	}
-	return reader.CharacterRevisions(ctx)
+	views, err := reader.CharacterRevisions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	branchID, err := s.constraintBranchLocked()
+	if err != nil {
+		return nil, err
+	}
+	for i := range views {
+		suggestions := make([]asset.CharacterSuggestion, 0, len(views[i].CandidateSuggestions))
+		for _, suggestion := range views[i].CandidateSuggestions {
+			if suggestion.BranchID == branchID {
+				suggestions = append(suggestions, suggestion)
+			}
+		}
+		views[i].CandidateSuggestions = suggestions
+	}
+	return views, nil
 }

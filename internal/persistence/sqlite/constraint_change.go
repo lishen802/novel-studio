@@ -132,6 +132,12 @@ func (s *Store) constraintHistory(ctx context.Context, characters bool) ([]asset
 			return nil, err
 		}
 		c.Text = constraintText(kind, payload)
+		var metadata struct {
+			Source characterAdoptionSource `json:"_candidateAdoption"`
+		}
+		if json.Unmarshal([]byte(payload), &metadata) == nil {
+			c.CandidateID = metadata.Source.CandidateID
+		}
 		if i, ok := index[c.AssetID]; ok {
 			rows[i].Changes = append(rows[i].Changes, c)
 		}
@@ -143,6 +149,12 @@ func (s *Store) constraintHistory(ctx context.Context, characters bool) ([]asset
 	for _, r := range rows {
 		if (r.Kind == "character") == characters {
 			r.TypedID = r.typedID
+			if characters {
+				r.CandidateSuggestions, err = characterSuggestions(ctx, tx, r)
+				if err != nil {
+					return nil, err
+				}
+			}
 			out = append(out, r.ConstraintView)
 		}
 	}
@@ -242,6 +254,7 @@ func constraintFingerprint(ctx context.Context, q constraintReader, r asset.Cons
 // previewConstraint 核对可执行边界并生成不可换绑的确认摘要。
 func previewConstraint(ctx context.Context, q constraintReader, r asset.ConstraintRequest) (asset.ConstraintPreview, constraintRow, error) {
 	p := asset.ConstraintPreview{Request: r}
+	var adoptionSource characterAdoptionSource
 	if err := validateConstraintRequest(r); err != nil {
 		return p, constraintRow{}, err
 	}
@@ -266,6 +279,24 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 	err = q.QueryRowContext(ctx, `SELECT project_id FROM story_assets WHERE id=?`, r.AssetID).Scan(&owner)
 	if err != nil || owner != r.ProjectID || selected.AssetID == "" {
 		return p, selected, asset.ErrChangeUnsupported
+	}
+	if r.CandidateID != "" {
+		if selected.Kind != "character" {
+			return p, selected, asset.ErrChangeUnsupported
+		}
+		source, e := characterAdoption(ctx, q, selected, r.CandidateID, r.ProjectID, r.BranchID)
+		adoptionSource = source
+		if e != nil {
+			return p, selected, e
+		}
+		profile, e := asset.ParseCharacterProfile(r.Text)
+		if e != nil {
+			return p, selected, asset.ErrChangeConflict
+		}
+		encoded, _ := json.Marshal(profile)
+		if string(encoded) != source.Text {
+			return p, selected, asset.ErrChangeConflict
+		}
 	}
 	if selected.Kind == "character" {
 		profile, e := asset.ParseCharacterProfile(r.Text)
@@ -324,6 +355,10 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 		p.BlockedReason = "有模型任务正在运行，请等待结束后重新预览"
 	}
 	p.Digest, err = constraintFingerprint(ctx, q, p.Request)
+	if r.CandidateID != "" {
+		sourceJSON, _ := json.Marshal(adoptionSource)
+		p.Digest = adoptionHash(p.Digest + string(sourceJSON))
+	}
 	return p, selected, err
 }
 
@@ -390,9 +425,21 @@ func (s *Store) ApplyConstraintChange(ctx context.Context, c asset.ConstraintCom
 		}
 		payload[key], _ = json.Marshal(c.Request.Text)
 	}
+	createdBy := "author-future-only"
+	delete(payload, "_candidateAdoption")
+	// 来源必须在写入版本的同一事务重新验证，客户端不能自报 AI 审计信息。
+	if c.Request.CandidateID != "" {
+		source, e := characterAdoption(ctx, tx, row, c.Request.CandidateID, c.Request.ProjectID, c.Request.BranchID)
+		if e != nil {
+			return p, e
+		}
+		source.Text = ""
+		payload["_candidateAdoption"], _ = json.Marshal(source)
+		createdBy = "ai-candidate-future-only"
+	}
 	encoded, _ := json.Marshal(payload)
 	sum := sha256.Sum256(encoded)
-	_, err = tx.ExecContext(ctx, `INSERT INTO story_asset_revisions(asset_id,revision,payload_json,content_sha256,created_by,created_at) VALUES(?,?,?,?,?,?)`, row.AssetID, p.Revision, string(encoded), hex.EncodeToString(sum[:]), "author-future-only", formatTime(now))
+	_, err = tx.ExecContext(ctx, `INSERT INTO story_asset_revisions(asset_id,revision,payload_json,content_sha256,created_by,created_at) VALUES(?,?,?,?,?,?)`, row.AssetID, p.Revision, string(encoded), hex.EncodeToString(sum[:]), createdBy, formatTime(now))
 	if err != nil {
 		return p, err
 	}

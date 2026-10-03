@@ -24,6 +24,7 @@ export function CharacterRevisions({ api, registerBeforeLeave, readOnly = false 
  const [items, setItems] = useState<ConstraintView[]>([]);
  const [chapters, setChapters] = useState<ChapterView[]>([]);
  const [open, setOpen] = useState(false);
+ const [candidateId, setCandidateId] = useState('');
  const [assetId, setAssetId] = useState('');
  const [draft, setDraft] = useState<Profile>(empty);
  const [aliases, setAliases] = useState('');
@@ -36,9 +37,10 @@ export function CharacterRevisions({ api, registerBeforeLeave, readOnly = false 
  const [notice, setNotice] = useState('');
  const [reload, setReload] = useState(0);
  const key = useRef('');
+ const authorDraft = useRef({ profile: empty, aliases: '' });
  const selected = items.find((item) => item.assetId === assetId);
  const text = JSON.stringify({ ...draft, aliases: aliases.split(/[、,，\n]/).map((value) => value.trim()).filter(Boolean) });
- const dirty = open && (!!reason || !!chapterId || text !== (selected ? JSON.stringify(parse(selected.current)) : JSON.stringify(empty)));
+ const dirty = open && (!!candidateId || !!reason || !!chapterId || text !== (selected ? JSON.stringify(parse(selected.current)) : JSON.stringify(empty)));
  const pending = useRef({ dirty, busy }); pending.current = { dirty, busy };
  useEffect(() => {
   if ((!dirty && !busy) || !registerBeforeLeave) return;
@@ -52,13 +54,13 @@ export function CharacterRevisions({ api, registerBeforeLeave, readOnly = false 
   return () => { active = false; };
  }, [api, reload]);
  const invalidate = () => { setPreview(null); key.current = ''; setError(''); };
- const choose = (id: string) => { const item = items.find((item) => item.assetId === id); setAssetId(id); const profile = item ? parse(item.current) : empty; setDraft(profile); setAliases(profile.aliases.join('、')); setReason(''); setChapterId(''); invalidate(); };
+ const choose = (id: string) => { const item = items.find((item) => item.assetId === id); setAssetId(id); setCandidateId(''); const profile = item ? parse(item.current) : empty; setDraft(profile); setAliases(profile.aliases.join('、')); authorDraft.current = { profile, aliases: profile.aliases.join('、') }; setReason(''); setChapterId(''); invalidate(); };
  const discard = () => { if (!busy) { setOpen(false); invalidate(); } };
  const close = () => { if (busy) return; if (dirty) { setError('还有未确认的人物修改，请继续核对或点击取消修订。'); return; } discard(); };
  const prepare = async () => {
   if (busy || readOnly || !selected) return;
   setBusy(true); setError(''); setPreview(null);
-  try { setPreview(await api.previewConstraintChange({ assetId, intent: 'future_only', chapterId, text, reason })); key.current = crypto.randomUUID(); }
+  try { setPreview(await api.previewConstraintChange({ assetId, intent: 'future_only', chapterId, text, reason, ...(candidateId ? { candidateId } : {}) })); key.current = crypto.randomUUID(); }
   catch (e) { setError(message(e)); } finally { setBusy(false); }
  };
  const confirm = async () => {
@@ -78,15 +80,19 @@ export function CharacterRevisions({ api, registerBeforeLeave, readOnly = false 
   {loading && <p role="status" className="text-sm text-text-sub">正在读取人物版本…</p>}
   {!loading && !items.length && !error && <p className="text-sm text-text-muted">正式入档后可修订人物。旧手工或导入人物仍可查看，纳入版本管理尚未就绪。</p>}
   {readOnly && <p className="text-sm text-text-muted">当前项目为只读，不能保存修订。</p>}
-  {items.filter((item) => item.changes.length > 0).map((item) => <details key={item.assetId} className="border-t border-border pt-2 text-sm"><summary className="cursor-pointer">{item.name} · 当前版本 {item.revision} · 查看修订记录</summary><div className="space-y-3 mt-3"><ProfileDetails profile={parse(item.original)} title="原始档案" />{item.changes.map((change) => <ProfileDetails key={change.revision} profile={parse(change.text)} title={`从第 ${change.position} 章起 · 版本 ${change.revision} · ${change.reason}`} />)}</div></details>)}
+  {items.filter((item) => item.changes.length > 0).map((item) => <details key={item.assetId} className="border-t border-border pt-2 text-sm"><summary className="cursor-pointer">{item.name} · 当前版本 {item.revision} · 查看修订记录</summary><div className="space-y-3 mt-3"><ProfileDetails profile={parse(item.original)} title="原始档案" />{item.changes.map((change) => <ProfileDetails key={change.revision} profile={parse(change.text)} title={`从第 ${change.position} 章起 · 版本 ${change.revision} · ${change.reason}${change.candidateId ? ` · AI 候选 ${change.candidateId}` : ""}`} />)}</div></details>)}
   {notice && <p role="status" className="text-sm text-primary">{notice}</p>}
   {error && !open && <div><p role="alert" className="text-sm text-danger">{error}</p><Button disabled={loading} onClick={() => setReload((value) => value + 1)}>重新读取版本</Button></div>}
   <Modal open={open} onClose={close} title="修订正式人物档案">
    <div className="space-y-4 max-h-[70vh] overflow-auto">
-    <p className="text-sm text-text-sub">仅从未来空章节起生效；旧章和原始档案保留。故事内状态变化、历史重写和 AI 人物候选采用尚未就绪。</p>
+    <p className="text-sm text-text-sub">仅从未来空章节起生效；旧章和原始档案保留。故事内状态变化和历史重写尚未就绪。</p>
     <label className="block text-sm">正式人物<select aria-label="正式人物" disabled={busy || dirty} value={assetId} onChange={(e) => choose(e.target.value)} className="w-full mt-1 p-2 bg-surface border border-border rounded-md">{items.map((item) => <option key={item.assetId} value={item.assetId}>{item.name} · 版本 {item.revision}</option>)}</select></label>
     {selected?.locked && <p role="alert" className="text-sm text-warning">人物或来源候选的人物字段已锁定，不能直接修订。解锁入口尚未就绪。</p>}
-    {(Object.keys(fields) as (keyof Profile)[]).map((field) => <label key={field} className="block text-sm">{fields[field]}{field === 'role' ? <select aria-label={fields[field]} value={draft.role} disabled={busy || readOnly || selected?.locked} onChange={(e) => { setDraft({ ...draft, role: e.target.value }); invalidate(); }} className="w-full mt-1 p-2 bg-surface border border-border rounded-md">{Object.entries(roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : field === 'name' || field === 'aliases' ? <Input aria-label={fields[field]} maxLength={field === 'name' ? 200 : 2000} disabled={busy || readOnly || selected?.locked} value={field === 'aliases' ? aliases : draft.name} onChange={(e) => { if (field === 'aliases') setAliases(e.target.value); else setDraft({ ...draft, name: e.target.value }); invalidate(); }} /> : <Textarea aria-label={fields[field]} maxLength={8000} rows={2} disabled={busy || readOnly || selected?.locked} value={draft[field]} onChange={(e) => { setDraft({ ...draft, [field]: e.target.value }); invalidate(); }} />}</label>)}
+    <label className="block text-sm">修改来源<select aria-label="人物修改来源" disabled={busy || readOnly || selected?.locked} value={candidateId} onChange={(e) => {
+     const id = e.target.value; if (!candidateId) authorDraft.current = { profile: draft, aliases }; setCandidateId(id); const suggestion = selected?.candidateSuggestions?.find((item) => item.candidateId === id); const profile = suggestion ? parse(suggestion.text) : authorDraft.current.profile; setDraft(profile); setAliases(suggestion ? profile.aliases.join('、') : authorDraft.current.aliases); invalidate();
+    }} className="w-full mt-1 p-2 bg-surface border border-border rounded-md"><option value="">作者直接编辑</option>{selected?.candidateSuggestions?.map((item, index) => <option key={item.candidateId} value={item.candidateId}>已审阅 AI 候选 {index + 1} · {item.candidateId}</option>)}</select></label>
+    {candidateId ? <p className="text-sm text-text-sub">仅采用当前人物的档案字段；同组关系、规则和其他人物不会入档。候选来源：{candidateId}。如需继续手工编辑，请切回作者直接编辑。</p> : <p className="text-xs text-text-muted">共创中整组保存且通过审阅的字段修改候选，基线与当前档案一致时可在此选择。重新生成、部分采用或已过期的候选暂不能入档。</p>}
+    {(Object.keys(fields) as (keyof Profile)[]).map((field) => <label key={field} className="block text-sm">{fields[field]}{field === 'role' ? <select aria-label={fields[field]} value={draft.role} disabled={busy || readOnly || selected?.locked || !!candidateId} onChange={(e) => { setDraft({ ...draft, role: e.target.value }); invalidate(); }} className="w-full mt-1 p-2 bg-surface border border-border rounded-md">{Object.entries(roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : field === 'name' || field === 'aliases' ? <Input aria-label={fields[field]} maxLength={field === 'name' ? 200 : 2000} disabled={busy || readOnly || selected?.locked || !!candidateId} value={field === 'aliases' ? aliases : draft.name} onChange={(e) => { if (field === 'aliases') setAliases(e.target.value); else setDraft({ ...draft, name: e.target.value }); invalidate(); }} /> : <Textarea aria-label={fields[field]} maxLength={8000} rows={2} disabled={busy || readOnly || selected?.locked || !!candidateId} value={draft[field]} onChange={(e) => { setDraft({ ...draft, [field]: e.target.value }); invalidate(); }} />}</label>)}
     <p className="text-xs text-text-muted">别名用顿号或逗号分隔。角色定位是叙事职责；人物状态和关系不在本次修改范围。</p>
     <label className="block text-sm">修订理由<Input aria-label="人物修订理由" maxLength={2000} disabled={busy || readOnly} value={reason} onChange={(e) => { setReason(e.target.value); invalidate(); }} /></label>
     <label className="block text-sm">从该章起（含本章）<select aria-label="人物生效章节" disabled={busy || readOnly} value={chapterId} onChange={(e) => { setChapterId(e.target.value); invalidate(); }} className="w-full mt-1 p-2 bg-surface border border-border rounded-md"><option value="">选择未来空章节</option>{chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>第 {chapter.position} 章 · {chapter.title}</option>)}</select></label>

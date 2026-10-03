@@ -762,6 +762,10 @@ func collectBranchDomains(
 		if err != nil {
 			return nil, err
 		}
+		// 可采用候选是临时交互投影，不代表正式人物版本发生了变化。
+		for i := range characterRevisions {
+			characterRevisions[i].CandidateSuggestions = nil
+		}
 	}
 
 	hooks, err := store.ListForeshadowingHooks(ctx)
