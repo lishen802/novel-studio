@@ -10,6 +10,7 @@ var (
 // ConstraintView 保留原设定与最新版本，避免档案把未来语句冒充全书事实。
 type ConstraintView struct {
 	AssetID  string             `json:"assetId"`
+	TypedID  string             `json:"typedId"`
 	Kind     string             `json:"kind"`
 	Name     string             `json:"name"`
 	Original string             `json:"original"`

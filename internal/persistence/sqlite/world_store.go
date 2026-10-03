@@ -31,6 +31,9 @@ func (s *Store) CreateCharacter(ctx context.Context, character worlddomain.Chara
 }
 
 func (s *Store) UpdateCharacter(ctx context.Context, character worlddomain.Character) error {
+	if err := rejectFormalCharacterWrite(ctx, s.db, character.ID); err != nil {
+		return err
+	}
 	aliases, err := json.Marshal(character.Aliases)
 	if err != nil {
 		return fmt.Errorf("encode character aliases: %w", err)
@@ -39,6 +42,7 @@ func (s *Store) UpdateCharacter(ctx context.Context, character worlddomain.Chara
 		UPDATE characters SET name = ?, aliases_json = ?, role = ?, summary = ?,
 			motivation = ?, fear = ?, secret = ?, arc = ?, status = ?, updated_at = ?
 		WHERE id = ? AND project_id = ? AND deleted_at IS NULL
+ AND NOT EXISTS(SELECT 1 FROM story_assets a WHERE a.kind='character' AND a.typed_table='characters' AND a.typed_id=characters.id AND a.status IN ('canonical','stale'))
 	`, character.Name, string(aliases), character.Role, character.Summary, character.Motivation,
 		character.Fear, character.Secret, character.Arc, character.Status, formatTime(character.UpdatedAt),
 		character.ID, character.ProjectID)
@@ -86,6 +90,9 @@ func (s *Store) ArchiveCharacter(ctx context.Context, id string, archivedAt time
 		return databaseOperationError("begin character archive transaction", err)
 	}
 	defer tx.Rollback()
+	if err := rejectFormalCharacterWrite(ctx, tx, id); err != nil {
+		return err
+	}
 	var references int
 	err = tx.QueryRowContext(ctx, `
 		SELECT

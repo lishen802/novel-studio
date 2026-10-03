@@ -40,6 +40,9 @@ export interface Character {
   summary: string;
   appearance: string;
   motivation: string;
+  fear?: string;
+  secret?: string;
+  arc?: string;
 }
 
 export type FactionType = 'family' | 'organization' | 'nation' | 'sect' | 'other';

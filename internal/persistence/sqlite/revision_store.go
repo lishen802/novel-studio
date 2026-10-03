@@ -471,6 +471,9 @@ func prepareCharacterOperation(
 	operation revisiondomain.PatchOperation,
 	appliedAt time.Time,
 ) (preparedOperation, error) {
+	if err := rejectFormalCharacterWrite(ctx, tx, operation.TargetID); err != nil {
+		return preparedOperation{}, err
+	}
 	current, err := scanCharacter(tx.QueryRowContext(ctx, `
 		SELECT id, project_id, name, aliases_json, role, summary, motivation, fear,
 			secret, arc, status, created_at, updated_at

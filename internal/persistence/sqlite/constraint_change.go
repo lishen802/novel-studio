@@ -60,9 +60,29 @@ func constraintRows(ctx context.Context, q constraintReader) ([]constraintRow, e
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	return result, nil
+	characters, err := characterConstraintRows(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return append(result, characters...), nil
 }
 func constraintText(kind, payload string) string {
+	if kind == "character" {
+		var profile asset.CharacterProfile
+		if json.Unmarshal([]byte(payload), &profile) != nil {
+			return ""
+		}
+		normalized, err := json.Marshal(profile)
+		if err != nil {
+			return ""
+		}
+		canonical, e := asset.ParseCharacterProfile(string(normalized))
+		if e != nil {
+			return ""
+		}
+		normalized, _ = json.Marshal(canonical)
+		return string(normalized)
+	}
 	var v map[string]json.RawMessage
 	if json.Unmarshal([]byte(payload), &v) != nil {
 		return ""
@@ -78,11 +98,25 @@ func constraintText(kind, payload string) string {
 
 // Constraints 同时返回原设定与修订序列，不将未来版本回写到原档案。
 func (s *Store) Constraints(ctx context.Context) ([]asset.ConstraintView, error) {
-	rows, err := constraintRows(ctx, s.db)
+	return s.constraintHistory(ctx, false)
+}
+
+// CharacterRevisions 提供原始人物与按章修订历史，不把未来档案回写为全书事实。
+func (s *Store) CharacterRevisions(ctx context.Context) ([]asset.ConstraintView, error) {
+	return s.constraintHistory(ctx, true)
+}
+
+func (s *Store) constraintHistory(ctx context.Context, characters bool) ([]asset.ConstraintView, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	changes, err := s.db.QueryContext(ctx, `SELECT c.asset_id,c.revision,c.chapter_id,c.position,c.reason,r.payload_json,a.kind FROM story_constraint_changes c JOIN story_asset_revisions r ON r.asset_id=c.asset_id AND r.revision=c.revision JOIN story_assets a ON a.id=c.asset_id ORDER BY c.asset_id,c.position`)
+	defer tx.Rollback()
+	rows, err := constraintRows(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	changes, err := tx.QueryContext(ctx, `SELECT c.asset_id,c.revision,c.chapter_id,c.position,c.reason,r.payload_json,a.kind FROM story_constraint_changes c JOIN story_asset_revisions r ON r.asset_id=c.asset_id AND r.revision=c.revision JOIN story_assets a ON a.id=c.asset_id ORDER BY c.asset_id,c.position`)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +141,10 @@ func (s *Store) Constraints(ctx context.Context) ([]asset.ConstraintView, error)
 	}
 	out := make([]asset.ConstraintView, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, r.ConstraintView)
+		if (r.Kind == "character") == characters {
+			r.TypedID = r.typedID
+			out = append(out, r.ConstraintView)
+		}
 	}
 	return out, nil
 }
@@ -120,7 +157,7 @@ func (s *Store) EffectiveConstraints(ctx context.Context, position int) ([]asset
  (SELECT c.revision FROM story_constraint_changes c WHERE c.asset_id=a.id AND c.position<=? ORDER BY c.position DESC LIMIT 1),1)
  LEFT JOIN world_rules w ON a.kind='world_rule' AND w.id=a.typed_id
  LEFT JOIN story_anchors h ON h.asset_id=a.id
- WHERE a.status='canonical' AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden') ORDER BY a.id`, position)
+ WHERE a.status='canonical' AND a.kind IN ('world_rule','hard_anchor','soft_anchor','forbidden','character') ORDER BY a.id`, position)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +179,7 @@ func validateConstraintRequest(r asset.ConstraintRequest) error {
 	if r.Intent != "future_only" {
 		return asset.ErrChangeUnsupported
 	}
-	if r.ProjectID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Text) == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Text) > 12000 || utf8.RuneCountInString(r.Reason) > 2000 {
+	if r.ProjectID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Text) == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Text) > 48000 || utf8.RuneCountInString(r.Reason) > 2000 {
 		return asset.ErrChangeUnsupported
 	}
 	return nil
@@ -155,6 +192,9 @@ func constraintFingerprint(ctx context.Context, q constraintReader, r asset.Cons
 		`SELECT chapter_id,revision,title,body FROM chapter_revisions ORDER BY chapter_id,revision`,
 		`SELECT chapter_id,body,base_revision FROM drafts ORDER BY chapter_id`,
 		`SELECT id,current_revision,locked,stale,status FROM story_assets ORDER BY id`,
+		`SELECT asset_id,revision,payload_json FROM story_asset_revisions ORDER BY asset_id,revision`,
+		`SELECT id,name,aliases_json,role,summary,motivation,fear,secret,arc,status,deleted_at FROM characters ORDER BY id`,
+		`SELECT id,lock_map_json FROM creation_candidates ORDER BY id`,
 		`SELECT id,version,status,content_sha256 FROM creation_candidates ORDER BY id`,
 		`SELECT id,status,after_value FROM change_operations ORDER BY id`,
 		`SELECT id,title,summary,planning_json FROM outline_nodes WHERE deleted_at IS NULL ORDER BY id`,
@@ -227,14 +267,24 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 	if err != nil || owner != r.ProjectID || selected.AssetID == "" {
 		return p, selected, asset.ErrChangeUnsupported
 	}
+	if selected.Kind == "character" {
+		profile, e := asset.ParseCharacterProfile(r.Text)
+		if e != nil {
+			return p, selected, e
+		}
+		encoded, _ := json.Marshal(profile)
+		p.Request.Text = string(encoded)
+	} else if utf8.RuneCountInString(r.Text) > 12000 {
+		return p, selected, asset.ErrChangeUnsupported
+	}
 	p.Before = selected.Current
 	p.Revision = selected.Revision + 1
 	p.CanApply = true
 	if selected.Locked || selected.stale {
 		p.CanApply = false
-		p.BlockedReason = "该约束已锁定或失效，不能修订"
+		p.BlockedReason = "该资产或来源人物字段已锁定，或资产已失效，不能修订"
 	}
-	if strings.TrimSpace(r.Text) == strings.TrimSpace(p.Before) {
+	if strings.TrimSpace(p.Request.Text) == strings.TrimSpace(p.Before) {
 		p.CanApply = false
 		p.BlockedReason = "新旧语句相同"
 	}
@@ -273,7 +323,7 @@ func previewConstraint(ctx context.Context, q constraintReader, r asset.Constrai
 		p.CanApply = false
 		p.BlockedReason = "有模型任务正在运行，请等待结束后重新预览"
 	}
-	p.Digest, err = constraintFingerprint(ctx, q, r)
+	p.Digest, err = constraintFingerprint(ctx, q, p.Request)
 	return p, selected, err
 }
 
@@ -322,18 +372,31 @@ func (s *Store) ApplyConstraintChange(ctx context.Context, c asset.ConstraintCom
 	if err = json.Unmarshal([]byte(row.payload), &payload); err != nil {
 		return p, err
 	}
-	key := "statement"
-	if row.Kind == "world_rule" {
-		key = "description"
+	if row.Kind == "character" {
+		profile, e := asset.ParseCharacterProfile(c.Request.Text)
+		if e != nil {
+			return p, e
+		}
+		fields, _ := json.Marshal(profile)
+		var updates map[string]json.RawMessage
+		_ = json.Unmarshal(fields, &updates)
+		for key, value := range updates {
+			payload[key] = value
+		}
+	} else {
+		key := "statement"
+		if row.Kind == "world_rule" {
+			key = "description"
+		}
+		payload[key], _ = json.Marshal(c.Request.Text)
 	}
-	payload[key], _ = json.Marshal(c.Request.Text)
 	encoded, _ := json.Marshal(payload)
 	sum := sha256.Sum256(encoded)
 	_, err = tx.ExecContext(ctx, `INSERT INTO story_asset_revisions(asset_id,revision,payload_json,content_sha256,created_by,created_at) VALUES(?,?,?,?,?,?)`, row.AssetID, p.Revision, string(encoded), hex.EncodeToString(sum[:]), "author-future-only", formatTime(now))
 	if err != nil {
 		return p, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE story_assets SET current_revision=?,updated_at=? WHERE id=? AND current_revision=? AND locked=0 AND stale=0`, p.Revision, formatTime(now), row.AssetID, row.Revision)
+	result, err := tx.ExecContext(ctx, `UPDATE story_assets SET current_revision=?,updated_at=? WHERE id=? AND current_revision=? AND locked=0 AND stale=0 AND status='canonical'`, p.Revision, formatTime(now), row.AssetID, row.Revision)
 	if err != nil {
 		return p, err
 	}

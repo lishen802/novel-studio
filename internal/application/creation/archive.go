@@ -507,6 +507,18 @@ func (mapper *archiveMapper) addCast(candidate creationdomain.Candidate, cast ag
 func (mapper *archiveMapper) addTypedAsset(
 	candidate creationdomain.Candidate, kind storyassetdomain.Kind, table, typedID, payloadJSON string,
 ) error {
+	if kind == storyassetdomain.KindCharacter {
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(payloadJSON), &fields); err != nil {
+			return err
+		}
+		fields["_sourceLocks"] = candidate.LockMap
+		encoded, err := encodeJSON(fields)
+		if err != nil {
+			return err
+		}
+		payloadJSON = encoded
+	}
 	after, err := encodeJSON(map[string]string{
 		"kind": string(kind), "origin": string(storyassetdomain.OriginModel),
 		"sourceCandidateId": candidate.ID, "sourceRunId": candidate.RunID, "sourceArtifactId": candidate.ArtifactID,

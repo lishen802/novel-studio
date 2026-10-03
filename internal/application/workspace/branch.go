@@ -756,6 +756,14 @@ func collectBranchDomains(
 			return nil, err
 		}
 	}
+	characterRevisions := []assetdomain.ConstraintView{}
+	if reader, ok := store.(characterRevisionReader); ok {
+		characterRevisions, err = reader.CharacterRevisions(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	hooks, err := store.ListForeshadowingHooks(ctx)
 	if err != nil {
 		return nil, err
@@ -801,8 +809,8 @@ func collectBranchDomains(
 		newBranchDomainState(
 			"characters", "人物与势力",
 			len(characters)+len(factions)+len(memberships)+len(relationships)+
-				len(chapterAppearances)+len(sceneAppearances),
-			characters, factions, memberships, relationships, chapterAppearances, sceneAppearances,
+				len(chapterAppearances)+len(sceneAppearances)+len(characterRevisions),
+			characters, factions, memberships, relationships, chapterAppearances, sceneAppearances, characterRevisions,
 		),
 		newBranchDomainState(
 			"world", "世界设定",

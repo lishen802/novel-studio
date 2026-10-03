@@ -61,7 +61,7 @@ export function ConstraintChanges({api,registerBeforeLeave}:{api:ConstraintAPI;r
  };
  return <Card className="space-y-3">
   <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-medium">按章节修订规则与约束</h3><p className="text-sm text-text-sub">新语句从选定章节起使用；原设定及历史正文保留。</p></div><Button disabled={!constraints.length} onClick={()=>{choose(constraints[0].assetId);setNotice('');setOpen(true);}}>修订生效范围</Button></div>
-  {!constraints.length&&!error&&<p className="text-sm text-text-muted">正式入档后，可修订世界规则、锚点和禁写项。人物、方案及大纲结构的生效范围尚未接通。</p>}
+  {!constraints.length&&!error&&<p className="text-sm text-text-muted">正式入档后，可修订世界规则、锚点和禁写项。人物修订可在人物页操作；方案及大纲结构的生效范围尚未接通。</p>}
   {constraints.filter(item=>item.changes.length>0).map(item=><div key={item.assetId} className="text-sm border-t border-border pt-2"><p>{labels[item.kind]} · {item.name}</p><p className="text-text-sub">原设定：{item.original}</p>{item.changes.map(change=><p key={change.revision} className="text-text-sub">第 {change.position} 章起 · 版本 {change.revision}：{change.text}（{change.reason}）</p>)}</div>)}
   {notice&&<p role="status" className="text-sm text-primary">{notice}</p>}
   {error&&!open&&<p role="alert" className="text-sm text-danger">{error}</p>}

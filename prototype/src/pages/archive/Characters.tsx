@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { Users, Flag, User, Swords, Eye, HelpCircle } from 'lucide-react';
+import { CharacterRevisions } from '../../components/CharacterRevisions';
+import { characterRevisionDemo } from '../../mock/characterRevisions';
 import { characters, factions } from '../../mock/data';
 import type { Character, Faction, CharacterRole, FactionType } from '../../types';
 import { Card } from '../../components/ui/Card';
@@ -82,6 +84,7 @@ export default function Characters() {
         </div>
       </div>
 
+      <div className={activeTab === 'characters' ? 'space-y-2' : 'hidden'}><p className="text-xs text-text-muted">原型仅演示人物修订交互，正式保存尚未就绪。</p><CharacterRevisions api={characterRevisionDemo}/><p className="text-xs text-text-muted">人物卡片显示原始档案；按章节生效的新资料见修订记录。</p></div>
       {activeTab === 'characters' && (
         <div>
           {characters.length === 0 ? (
@@ -227,6 +230,9 @@ export default function Characters() {
               <h4 className="text-xs text-text-muted mb-1.5">简介</h4>
               <p className="text-sm text-text-sub leading-relaxed">{selectedCharacter.summary}</p>
             </div>
+
+            {([['恐惧', selectedCharacter.fear], ['秘密', selectedCharacter.secret], ['人物弧', selectedCharacter.arc]] as const).map(([label, value]) => <div key={label}><h4 className="text-xs text-text-muted mb-1.5">{label}</h4><p className="text-sm text-text-sub whitespace-pre-wrap">{value || '尚未记录'}</p></div>)}
+            <p className="text-xs text-text-muted">此处为原始档案；按章节生效的新设定见页面的正式人物修订记录。</p>
 
             <div className="flex flex-wrap gap-2 pt-1">
               {selectedCharacter.tags.map((tag) => (

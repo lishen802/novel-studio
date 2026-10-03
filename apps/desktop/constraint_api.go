@@ -37,3 +37,14 @@ func (a *DesktopAPI) ApplyConstraintChange(c asset.ConstraintCommand) (asset.Con
 	}
 	return safeResult(feature.ApplyConstraintChange(a.ctx, c))
 }
+
+// CharacterRevisions 转发正式人物档案的版本投影。
+func (a *DesktopAPI) CharacterRevisions() ([]asset.ConstraintView, error) {
+	reader, ok := a.workspace.(interface {
+		CharacterRevisions(context.Context) ([]asset.ConstraintView, error)
+	})
+	if !ok {
+		return nil, safeDesktopError(asset.ErrChangeUnsupported)
+	}
+	return safeResult(reader.CharacterRevisions(a.ctx))
+}

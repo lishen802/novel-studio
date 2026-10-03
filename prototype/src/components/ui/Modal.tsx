@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { X } from 'lucide-react';
 import { Button } from './Button';
@@ -22,7 +23,8 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
 
   if (!open) return null;
 
-  return (
+  // 挂载到窗口根节点，避免页面动画的变换使固定弹窗被滚动容器裁切。
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={onClose}
@@ -45,6 +47,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         </div>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -755,7 +755,25 @@ func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
 		if !ok {
 			t.Fatalf("资产 %s 未关联类型表写入: %+v", operation.TargetID, envelope)
 		}
-		if envelope.PayloadJSON != wantPayload {
+		envelopePayload := wantPayload
+		if envelope.Kind == "character" {
+			var fields map[string]any
+			if err := json.Unmarshal([]byte(wantPayload), &fields); err != nil {
+				t.Fatal(err)
+			}
+			candidate, err := raw.CreationCandidate(ctx, envelope.SourceCandidateID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields["_sourceLocks"] = candidate.LockMap
+			encoded, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelopePayload = string(encoded)
+		}
+
+		if envelope.PayloadJSON != envelopePayload {
 			t.Fatalf("资产 %s 操作载荷不完整:\n got %s\nwant %s", operation.TargetID, envelope.PayloadJSON, wantPayload)
 		}
 		if persistedPayloads[envelope.TypedID] != wantPayload {
@@ -774,10 +792,10 @@ func TestConfirmArchivePreservesCompleteTypedAssetRevisions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if revision.PayloadJSON != wantPayload {
+		if revision.PayloadJSON != envelopePayload {
 			t.Fatalf("资产 %s revision 载荷不完整:\n got %s\nwant %s", asset.ID, revision.PayloadJSON, wantPayload)
 		}
-		sum := sha256.Sum256([]byte(wantPayload))
+		sum := sha256.Sum256([]byte(envelopePayload))
 		if revision.ContentSHA256 != hex.EncodeToString(sum[:]) || revision.CreatedBy != "creation-archive" {
 			t.Fatalf("资产 %s revision 审计信息不一致: %+v", asset.ID, revision)
 		}

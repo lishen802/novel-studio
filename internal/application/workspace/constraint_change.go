@@ -109,3 +109,21 @@ func (s *Service) constraintBranchLocked() (string, error) {
 	}
 	return catalog.ActiveBranchID, nil
 }
+
+type characterRevisionReader interface {
+	CharacterRevisions(context.Context) ([]asset.ConstraintView, error)
+}
+
+// CharacterRevisions 读取正式人物原档案和生效记录，无信封人物不伪造历史。
+func (s *Service) CharacterRevisions(ctx context.Context) ([]asset.ConstraintView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.active == nil {
+		return nil, ErrNoActiveProject
+	}
+	reader, ok := s.active.store.(characterRevisionReader)
+	if !ok {
+		return nil, asset.ErrChangeUnsupported
+	}
+	return reader.CharacterRevisions(ctx)
+}

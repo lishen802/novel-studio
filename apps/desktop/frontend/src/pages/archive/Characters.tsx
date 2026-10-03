@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { Users, Flag, User, Swords, Eye, HelpCircle } from 'lucide-react';
 import type { Character, Faction, CharacterRole, FactionType } from '../../types';
+import { CharacterRevisions } from '../../components/CharacterRevisions';
+import { useApp } from '../../store/useApp';
 import { studio } from '../../api/studio';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -42,6 +44,8 @@ const factionTypeVariant: Record<FactionType, 'info' | 'success' | 'warning' | '
 type Tab = 'characters' | 'factions';
 
 export default function Characters() {
+  const {state, registerBeforeClose} = useApp();
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('characters');
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -60,7 +64,8 @@ export default function Characters() {
         factionId: memberships.get(String(item.id || '')) || undefined,
         tags: Array.isArray(item.aliases) ? item.aliases.map(String) : [],
         summary: String(item.summary || ''),
-        appearance: String(item.secret || ''),
+        appearance: '',
+        secret: String(item.secret || ''), fear: String(item.fear || ''), arc: String(item.arc || ''),
         motivation: String(item.motivation || ''),
       })));
       setFactions(world.factions.map((item) => ({
@@ -72,7 +77,7 @@ export default function Characters() {
         goals: String(item.goal || ''),
         conflicts: '',
       })));
-    });
+    }).catch((e: unknown) => { if (active) setLoadError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; };
   }, []);
 
@@ -113,6 +118,8 @@ export default function Characters() {
         </div>
       </div>
 
+      {loadError && <p role="alert" className="text-sm text-danger">读取人物档案失败：{loadError}</p>}
+      <div className={activeTab === 'characters' ? '' : 'hidden'}><CharacterRevisions api={studio} registerBeforeLeave={registerBeforeClose} readOnly={state.backendProject?.accessMode === 'read_only'} /><p className="text-xs text-text-muted mt-2">人物卡片显示原始档案；按章节生效的新资料见修订记录。</p></div>
       {activeTab === 'characters' && (
         <div>
           {characters.length === 0 ? (
@@ -244,7 +251,7 @@ export default function Characters() {
               <h4 className="text-xs text-text-muted mb-1.5 flex items-center gap-1.5">
                 <Eye className="w-3.5 h-3.5" /> 外貌
               </h4>
-              <p className="text-sm text-text-sub leading-relaxed">{selectedCharacter.appearance}</p>
+              <p className="text-sm text-text-sub leading-relaxed">{selectedCharacter.appearance || '尚未记录外貌'}</p>
             </div>
 
             <div>
@@ -258,6 +265,9 @@ export default function Characters() {
               <h4 className="text-xs text-text-muted mb-1.5">简介</h4>
               <p className="text-sm text-text-sub leading-relaxed">{selectedCharacter.summary}</p>
             </div>
+
+            {([['恐惧', selectedCharacter.fear], ['秘密', selectedCharacter.secret], ['人物弧', selectedCharacter.arc]] as const).map(([label, value]) => <div key={label}><h4 className="text-xs text-text-muted mb-1.5">{label}</h4><p className="text-sm text-text-sub whitespace-pre-wrap">{value || '尚未记录'}</p></div>)}
+            <p className="text-xs text-text-muted">此处为原始档案；按章节生效的新设定见页面的正式人物修订记录。</p>
 
             <div className="flex flex-wrap gap-2 pt-1">
               {selectedCharacter.tags.map((tag) => (

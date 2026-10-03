@@ -1092,6 +1092,7 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 		return "", contextManifestStats{}, err
 	}
 	constraints := []storyassetdomain.EffectiveConstraint{}
+	characterVersions := []storyassetdomain.EffectiveConstraint{}
 	if reader, ok := store.(constraintContextStore); ok {
 		constraints, err = reader.EffectiveConstraints(ctx, chapter.Position)
 		if err != nil {
@@ -1103,6 +1104,38 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 				effectiveRules[constraint.TypedID] = constraint.Text
 			}
 		}
+
+		// 人物设定与必要版本清单使用同一章序，避免最新档案泄漏到旧章。
+		for _, constraint := range constraints {
+			if constraint.Kind != "character" {
+				continue
+			}
+			reference := constraint
+			reference.Text = ""
+			characterVersions = append(characterVersions, reference)
+
+			profile, e := storyassetdomain.ParseCharacterProfile(constraint.Text)
+			if e != nil {
+				return "", contextManifestStats{}, fmt.Errorf("read effective character: %w", e)
+			}
+			for index := range characters {
+				if characters[index].ID == constraint.TypedID {
+					characters[index], e = profile.Apply(characters[index])
+					if e != nil {
+						return "", contextManifestStats{}, e
+					}
+				}
+			}
+		}
+		// 必要清单保留精确版本引用，人物正文沿用有界人物域，避免重复装配整份小传。
+		formalRules := constraints[:0:0]
+		for _, constraint := range constraints {
+			if constraint.Kind != "character" {
+				formalRules = append(formalRules, constraint)
+			}
+		}
+		constraints = formalRules
+
 		for index := range rules {
 			if text, ok := effectiveRules[rules[index].ID]; ok {
 				rules[index].Description = text
@@ -1203,6 +1236,7 @@ func (s *Service) assembleChapterContext(ctx context.Context, store ports.Projec
 		values   any
 	}{
 		{"formalConstraints", 0, true, constraints},
+		{"formalCharacterVersions", 0, true, characterVersions},
 		{"confirmedFacts", 0, true, confirmedFacts},
 		{"associatedOutline", 0, true, associatedOutline},
 		{"sceneCards", 0, true, scenes},
