@@ -181,6 +181,11 @@ export default function Cockpit() {
 
   const modelReady = (state.bootstrap?.providers ?? []).some((provider) => provider.hasCredential);
   const projectTitle = state.backendProject?.title || state.currentProject?.title || '未命名作品';
+  const archiveConfirmed = state.backendProject?.workbench.archiveStatus === 'confirmed' || workbench.archiveConfirmed;
+  const statusText = workbench.blockingReason ? `已暂停：${workbench.blockingReason}`
+    : archiveConfirmed ? '作品档案已确认'
+    : state.backendProject?.workbench.stage === 'writing' ? '已有正文 · 策划待确认'
+    : '创意构建中';
 
   const load = useCallback(async (recover = false) => {
     const view = recover ? await studio.recoverCreation() : await studio.creationWorkbench();
@@ -508,7 +513,7 @@ export default function Cockpit() {
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge variant={workbench.blockingReason ? 'warning' : 'info'}>
-            {workbench.blockingReason ? `已暂停：${workbench.blockingReason}` : '创意构建中'}
+            {statusText}
           </StatusBadge>
           <div className="flex items-center gap-2 text-sm text-text-sub bg-surface-hover px-3 py-1.5 rounded-md max-w-xl">
             <Lightbulb className="w-4 h-4 text-warning shrink-0" />
@@ -534,6 +539,15 @@ export default function Cockpit() {
           </div>
         ))}
       </nav>
+
+      <div className="px-8 py-2 border-b border-border bg-surface flex items-center gap-3 flex-wrap" aria-label="创作推进模式">
+        <span className="text-xs text-text-sub">推进方式</span>
+        <div role="group" aria-label="创作推进方式" className="flex gap-2">
+          <Button size="sm" variant={workbench.advanceMode !== 'auto_advance' ? 'primary' : 'ghost'} aria-pressed={workbench.advanceMode !== 'auto_advance'} disabled={busy || generating || workbench.readOnly || fieldDirty || materialDirty} onClick={() => void run(() => studio.setCreationAdvanceMode('step_review')).catch(() => undefined)}>分步审阅</Button>
+          <Button size="sm" variant={workbench.advanceMode === 'auto_advance' ? 'primary' : 'ghost'} aria-pressed={workbench.advanceMode === 'auto_advance'} disabled={busy || generating || workbench.readOnly || fieldDirty || materialDirty} onClick={() => void run(() => studio.setCreationAdvanceMode('auto_advance')).catch(() => undefined)}>自动推进</Button>
+        </div>
+        <p className="text-xs text-text-muted">{workbench.advanceMode === 'auto_advance' ? '费用确认后连续生成适用阶段；质量、预算、冲突和正式入档仍会暂停。' : '每阶段生成后暂停，供你审阅并决定下一步。'}</p>
+      </div>
 
       {!modelReady && (
         <div data-testid="model-missing-notice" className="px-8 py-3 bg-warning/5 border-b border-warning/15 flex items-center gap-3 shrink-0">
@@ -906,6 +920,7 @@ export default function Cockpit() {
       <Modal open={Boolean(preview)} onClose={() => setPreview(null)} title="确认生成费用">
         {preview && (
           <div className="space-y-4 p-1">
+            <p className="text-sm text-text-sub">{preview.remainingStages?.length ? `本次自动推进范围：${[preview.stage, ...preview.remainingStages].map(stage => stageNames[stage] || stage).join(' → ')}。遇到阻断条件会暂停，正式入档仍需单独确认。` : `本次只生成${stageNames[preview.stage] || '当前阶段'}候选，完成后等待审阅。`}</p>
             <p className="text-sm text-text-sub">预计调用 {preview.estimatedCalls} 次。确认后才会创建运行；运行开始后取消仍可能产生已发生的费用。</p>
             <p className="text-sm text-text-sub">Token 上限：{preview.runBudgetUnlimited ? '未设置' : preview.maxRunTokens}；金额估算未知，请核对模型价格。</p>
             {(preview.roleModels ?? []).map((model) => <p key={model.role} className="text-xs text-text-sub">{model.role}：{model.provider} / {model.model}</p>)}

@@ -236,6 +236,35 @@ describe('创作驾驶舱', () => {
     expect((screen.getByLabelText('创作输入') as HTMLTextAreaElement).value).toBe('新作品构思');
   });
 
+  it('自动推进显示授权范围与预算，模式切换不直接启动付费运行', async () => {
+    const user = userEvent.setup();
+    recoverCreation.mockResolvedValue(workbench({ stage: 'proposal', advanceMode: 'step_review' }));
+    const setMode = vi.fn().mockResolvedValue(workbench({ stage: 'proposal', advanceMode: 'auto_advance' }));
+    previewCreationGenerate.mockResolvedValue({
+      stage: 'proposal', workflowId: 'story.foundation', estimatedCalls: 7,
+      maxRunTokens: 30000, runBudgetUnlimited: false,
+      remainingStages: ['people_world', 'roadmap'], confirmationDigest: 'auto-digest',
+    });
+    Object.assign(window.go!.main!.DesktopAPI!, { SetCreationAdvanceMode: setMode });
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+
+    await user.click(await screen.findByRole('button', { name: '自动推进' }));
+    expect(setMode).toHaveBeenCalledWith('auto_advance');
+    expect(confirmCreationGenerate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '重新生成' }));
+    expect(await screen.findByText(/作品方案 → 人物与世界 → 全书路线图/)).toBeTruthy();
+    expect(screen.getByText(/预计调用 7 次/)).toBeTruthy();
+    expect(screen.getByText(/30000/)).toBeTruthy();
+    expect(confirmCreationGenerate).not.toHaveBeenCalled();
+  });
+
+  it('已确认档案的作品不再显示创意构建中', async () => {
+    recoverCreation.mockResolvedValue(workbench({ archiveConfirmed: true, stage: 'archive_confirm' }));
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ archiveStatus: 'confirmed' })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    expect(await screen.findByText('作品档案已确认')).toBeTruthy();
+    expect(screen.queryByText('创意构建中')).toBeNull();
+  });
+
   it('选择第二张卡时把候选 ID 和卡 ID 一起传给后端', async () => {
     const user = userEvent.setup();
     const view = workbench({ stage: 'directions', directionSet: {
