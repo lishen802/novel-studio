@@ -172,6 +172,12 @@ export default function Cockpit() {
   const projectId = state.backendProject?.id ?? '';
   const currentProjectId = useRef(projectId);
   currentProjectId.current = projectId;
+  const operationVersion = useRef(0);
+
+  useEffect(() => {
+    operationVersion.current += 1;
+    setBusy(false);
+  }, [projectId]);
 
   const modelReady = (state.bootstrap?.providers ?? []).some((provider) => provider.hasCredential);
   const projectTitle = state.backendProject?.title || state.currentProject?.title || '未命名作品';
@@ -245,20 +251,23 @@ export default function Cockpit() {
   }, [workbench]);
 
   const run = async (action: () => Promise<CreationWorkbenchView>) => {
+    const startedInProject = projectId;
+    const version = ++operationVersion.current;
     setBusy(true);
     setError(null);
     try {
       const view = await action();
+      if (currentProjectId.current !== startedInProject || operationVersion.current !== version) return view;
       setWorkbench(view);
-      setIntent(view.intentText);
+      if (intentRef.current === savedIntent.current) setIntent(view.intentText);
       savedIntent.current = view.intentText;
       return view;
     } catch (err) {
       const message = err instanceof StudioClientError ? err.message : err instanceof Error ? err.message : '操作失败';
-      setError(message);
+      if (currentProjectId.current === startedInProject && operationVersion.current === version) setError(message);
       throw err;
     } finally {
-      setBusy(false);
+      if (currentProjectId.current === startedInProject && operationVersion.current === version) setBusy(false);
     }
   };
 
@@ -550,8 +559,8 @@ export default function Cockpit() {
             <p className="text-sm text-text-sub">{workbench.impact.evidence || '下游候选已过期。'}</p>
             <p className="text-xs text-text-muted">需重新核对：{workbench.impact.regenerateStages.map(stage => workbench.stageRail.find(item => item.id === stage)?.label || stageNames[stage] || '未知阶段').join('、')} · 预计 {workbench.impact.estimatedCalls} 次模型调用；局部重算先预览最早受影响阶段的费用。</p>
           </div>
-          <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('keep_exception').then(() => studio.creationWorkbench()))}>保留为例外</Button>
-          <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('abandon_upstream').then(() => studio.creationWorkbench()))}>放弃上游修改</Button>
+          <Button size="sm" disabled={busy || generating || workbench.readOnly || materialDirty || fieldDirty} onClick={() => void run(() => studio.resolveCreationImpact('keep_exception').then(() => studio.creationWorkbench())).catch(() => undefined)}>保留为例外</Button>
+          <Button size="sm" disabled={busy || generating || workbench.readOnly || materialDirty || fieldDirty} onClick={() => void run(() => studio.resolveCreationImpact('abandon_upstream').then(() => studio.creationWorkbench())).catch(() => undefined)}>放弃上游修改</Button>
           <Button size="sm" variant="ghost" disabled={busy || generating || fieldDirty || materialDirty || workbench.readOnly || workbench.impact.regenerateStages.length === 0} onClick={() => void prepareLocalRegeneration()}>局部重算</Button>
         </div>
       )}
@@ -643,7 +652,7 @@ export default function Cockpit() {
                       onClick={() => void (async () => {
                         if (intent.trim()) await run(() => studio.saveCreationIntent(intent.trim()));
                         await startGenerate();
-                      })()}
+                      })().catch(() => undefined)}
                       disabled={generating || busy}
                       className="gap-2"
                     >
@@ -760,7 +769,7 @@ export default function Cockpit() {
                           />
                         )}
                         {section.lockPath && (
-                          <Button size="sm" variant="ghost" disabled={reviewDisabled} onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath))}>
+                          <Button size="sm" variant="ghost" disabled={reviewDisabled} onClick={() => void run(() => (section.locked ? studio.unlockCreationField : studio.lockCreationField)(workbench.proposal.candidateId, section.lockPath)).catch(() => undefined)}>
                             {section.locked ? '解锁' : '锁定'}
                           </Button>
                         )}
@@ -878,7 +887,7 @@ export default function Cockpit() {
           disabled={!previousStage(workbench.stage) || generating || fieldDirty}
           onClick={() => {
             const target = workbench.entry?.kind === 'author_plan' && workbench.stage === 'proposal' ? 'intent' : previousStage(workbench.stage);
-            if (target) void run(() => studio.lookBackCreationStage(target));
+            if (target) void run(() => studio.lookBackCreationStage(target)).catch(() => undefined);
           }}
         >
           上一步
@@ -887,7 +896,7 @@ export default function Cockpit() {
           <Button disabled={generating || busy} onClick={() => void startGenerate()} className="gap-1">
             <RefreshCw className="w-4 h-4" />{workbench.entry?.kind === 'author_plan' ? (workbench.stage === 'intent' ? '重新解析' : '补齐本阶段候选') : '重新生成'}
           </Button>
-          {workbench.entry?.kind !== 'author_plan' && <Button disabled={generating || busy} onClick={() => void run(() => studio.saveCreationIntent(intent.trim() || workbench.intentText))}>保存草稿</Button>}
+          {workbench.entry?.kind !== 'author_plan' && <Button disabled={generating || busy} onClick={() => void run(() => studio.saveCreationIntent(intent.trim() || workbench.intentText)).catch(() => undefined)}>保存草稿</Button>}
           <Button variant="primary" disabled={generating || busy} onClick={() => void confirmNext()} className="gap-1">
             {['proposal', 'people_world', 'roadmap'].includes(workbench.stage) ? '接受并进入下一步' : '确认进入下一步'} <ChevronRight className="w-4 h-4" />
           </Button>

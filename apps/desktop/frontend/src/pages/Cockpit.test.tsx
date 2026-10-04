@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,12 +53,12 @@ function workbench(overrides: Partial<CreationWorkbenchView> = {}): CreationWork
   };
 }
 
-function contextValue(options: { archiveStatus?: string; hasCredential?: boolean } = {}): AppCtxValue {
+function contextValue(options: { archiveStatus?: string; hasCredential?: boolean; projectId?: string } = {}): AppCtxValue {
   return {
     state: {
       currentProject: null,
       backendProject: {
-        id: 'project-1',
+        id: options.projectId ?? 'project-1',
         title: '潮汐关',
         genre: '悬疑',
         summary: '',
@@ -187,6 +187,53 @@ describe('创作驾驶舱', () => {
     expect(await screen.findByText('受影响候选已变化，请刷新后重新核对。')).toBeTruthy();
     expect(previewCreationGenerate).not.toHaveBeenCalled();
     expect(confirmCreationGenerate).not.toHaveBeenCalled();
+  });
+
+  it('处理下游影响后不覆盖尚未保存的创作输入', async () => {
+    const user = userEvent.setup();
+    const impact = {
+      items: [{ candidateId: 'old', stage: 'proposal', severity: 'maybe_affected', reason: '方向已变化', locked: false, confirmed: false, excepted: false }],
+      touchesLocked: false, touchesConfirmed: false, canAdvance: false,
+      regenerateStages: ['proposal'], estimatedCalls: 1, evidence: '方向已变化',
+    };
+    recoverCreation.mockResolvedValue(workbench({ intentText: '原意图', impact }));
+    creationWorkbench.mockResolvedValue(workbench({ intentText: '原意图', impact: { ...impact, items: [] } }));
+    const resolve = vi.fn().mockResolvedValue({ projection: { ...impact, items: [] }, regenerateStages: [] });
+    Object.assign(window.go!.main!.DesktopAPI!, { ResolveCreationImpact: resolve });
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+
+    const input = await screen.findByLabelText('创作输入') as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe('原意图'));
+    await user.type(input, '与新想法');
+    await user.click(screen.getByRole('button', { name: '保留为例外' }));
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('keep_exception'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '保留为例外' })).toBeNull());
+    expect(input.value).toBe('原意图与新想法');
+  });
+
+  it('切换作品后忽略前一作品迟到的操作投影', async () => {
+    const user = userEvent.setup();
+    const impact = {
+      items: [{ candidateId: 'old', stage: 'proposal', severity: 'maybe_affected', reason: '方向已变化', locked: false, confirmed: false, excepted: false }],
+      touchesLocked: false, touchesConfirmed: false, canAdvance: false,
+      regenerateStages: ['proposal'], estimatedCalls: 1, evidence: '方向已变化',
+    };
+    const first = workbench({ intentText: '旧作品构思', impact });
+    const second = workbench({ projectId: 'project-2', sessionId: 'session-2', intentText: '新作品构思' });
+    recoverCreation.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    let releaseOld: (value: CreationWorkbenchView) => void = () => undefined;
+    creationWorkbench.mockReturnValueOnce(new Promise<CreationWorkbenchView>(resolve => { releaseOld = resolve; }));
+    const resolve = vi.fn().mockResolvedValue({ projection: { ...impact, items: [] }, regenerateStages: [] });
+    Object.assign(window.go!.main!.DesktopAPI!, { ResolveCreationImpact: resolve });
+    const renderPage = (projectId: string) => <MemoryRouter><AppContext.Provider value={contextValue({ projectId })}><Cockpit /></AppContext.Provider></MemoryRouter>;
+    const page = render(renderPage('project-1'));
+    await user.click(await screen.findByRole('button', { name: '保留为例外' }));
+    await waitFor(() => expect(creationWorkbench).toHaveBeenCalledTimes(1));
+
+    page.rerender(renderPage('project-2'));
+    await waitFor(() => expect((screen.getByLabelText('创作输入') as HTMLTextAreaElement).value).toBe('新作品构思'));
+    await act(async () => { releaseOld(workbench({ ...first, intentText: '旧作品更新' })); });
+    expect((screen.getByLabelText('创作输入') as HTMLTextAreaElement).value).toBe('新作品构思');
   });
 
   it('选择第二张卡时把候选 ID 和卡 ID 一起传给后端', async () => {
