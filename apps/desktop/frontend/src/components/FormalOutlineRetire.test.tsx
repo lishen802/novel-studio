@@ -84,7 +84,7 @@ it('唯一故事线链接须明确选择解除，并显示冻结的解除范围'
  fireEvent.click(screen.getByLabelText('同时解除故事线关联'));
  fireEvent.click(screen.getByText('预览停用范围'));
  await screen.findByText('将同时解除“主线”故事线与此节点的关联。');
- expect(client.previewFormalOutlineRetire).toHaveBeenCalledWith('new-asset','later',request.reason,'linked-line',[]);
+ expect(client.previewFormalOutlineRetire).toHaveBeenCalledWith('new-asset','later',request.reason,'linked-line',[],'','');
 });
 
 it('多条故事线必须全部选择，预览列明每条解除项',async()=>{
@@ -102,5 +102,24 @@ it('多条故事线必须全部选择，预览列明每条解除项',async()=>{
  fireEvent.click(screen.getByLabelText('同时解除故事线关联'));
  fireEvent.click(screen.getByText('预览停用范围'));
  await screen.findByText('将同时解除“主线”、“支线”故事线与此节点的关联。');
- expect(client.previewFormalOutlineRetire).toHaveBeenCalledWith('new-asset','later',request.reason,'',['line-a','line-b']);
+ expect(client.previewFormalOutlineRetire).toHaveBeenCalledWith('new-asset','later',request.reason,'',['line-a','line-b'],'','');
+});
+
+it('唯一故事线可改绑同故事弧目标并预览原目标停用',async()=>{
+ const client=api();
+ (client.planningRevisions as ReturnType<typeof vi.fn>).mockResolvedValue([{assetId:'new-asset',kind:'outline_node',typedId:'new'},{assetId:'target-asset',kind:'outline_node',typedId:'target'}]);
+ (client.formalOutlineReferences as ReturnType<typeof vi.fn>).mockResolvedValue({assetId:'new-asset',nodeId:'new',title:'旧目标',references:[{kind:'story_line',id:'linked-line',label:'主线'}]});
+ (client.previewFormalOutlineRetire as ReturnType<typeof vi.fn>).mockResolvedValue({...preview,request:{...request,rebindStoryLineId:'linked-line',rebindTargetAssetId:'target-asset'},reboundStoryLine:{storyLineId:'linked-line',name:'主线',position:1,createdAt:'2026-01-01T00:00:00Z',targetAssetId:'target-asset',targetNodeId:'target',targetTitle:'新目标',targetRevision:1,targetParentId:'arc',targetIntroducedAt:0}});
+ render(<FormalOutlineRetire api={client} nodes={[{id:'new',title:'旧目标',level:'chapter',parentId:'arc',introducedAt:2,retiredAt:0},{id:'target',title:'新目标',level:'chapter',parentId:'arc',introducedAt:0,retiredAt:0}]} readOnly={false}/>);
+ fireEvent.click(screen.getByText('预览未来停用'));
+ await screen.findByRole('option',{name:'旧目标 · 第 2 章起'});
+ fireEvent.change(screen.getByLabelText('待停用节点'),{target:{value:'new-asset'}});
+ await screen.findByText('故事线 · 主线');
+ fireEvent.change(screen.getByLabelText('停用生效章节'),{target:{value:'later'}});
+ fireEvent.change(screen.getByLabelText('节点停用理由'),{target:{value:request.reason}});
+ fireEvent.change(screen.getByLabelText('故事线改绑目标'),{target:{value:'target-asset'}});
+ expect((screen.getByLabelText('同时解除故事线关联') as HTMLInputElement).checked).toBe(false);
+ fireEvent.click(screen.getByText('预览停用范围'));
+ await screen.findByText('将把“主线”故事线从此节点改绑到“新目标”。');
+ expect(client.previewFormalOutlineRetire).toHaveBeenCalledWith('new-asset','later',request.reason,'',[],'linked-line','target-asset');
 });

@@ -2,13 +2,15 @@ package storyasset
 
 // FormalOutlineRetireRequest 选择正式近期章节点及未来停用边界。
 type FormalOutlineRetireRequest struct {
-	ProjectID          string   `json:"projectId"`
-	BranchID           string   `json:"branchId"`
-	AssetID            string   `json:"assetId"`
-	ChapterID          string   `json:"chapterId"`
-	Reason             string   `json:"reason"`
-	UnlinkStoryLineID  string   `json:"unlinkStoryLineId,omitempty"`
-	UnlinkStoryLineIDs []string `json:"unlinkStoryLineIds,omitempty"`
+	ProjectID           string   `json:"projectId"`
+	BranchID            string   `json:"branchId"`
+	AssetID             string   `json:"assetId"`
+	ChapterID           string   `json:"chapterId"`
+	Reason              string   `json:"reason"`
+	UnlinkStoryLineID   string   `json:"unlinkStoryLineId,omitempty"`
+	UnlinkStoryLineIDs  []string `json:"unlinkStoryLineIds,omitempty"`
+	RebindStoryLineID   string   `json:"rebindStoryLineId,omitempty"`
+	RebindTargetAssetID string   `json:"rebindTargetAssetId,omitempty"`
 }
 
 // FormalStoryLineUnlink 保存确认时解除的故事线链接原始位置和时间。
@@ -17,6 +19,17 @@ type FormalStoryLineUnlink struct {
 	Name        string `json:"name"`
 	Position    int    `json:"position"`
 	CreatedAt   string `json:"createdAt"`
+}
+
+// FormalStoryLineRebind 保存原故事线链接与新章节目标的冻结身份。
+type FormalStoryLineRebind struct {
+	FormalStoryLineUnlink
+	TargetAssetID      string `json:"targetAssetId"`
+	TargetNodeID       string `json:"targetNodeId"`
+	TargetTitle        string `json:"targetTitle"`
+	TargetRevision     int    `json:"targetRevision"`
+	TargetParentID     string `json:"targetParentId"`
+	TargetIntroducedAt int    `json:"targetIntroducedAt"`
 }
 
 // FormalOutlineRetirePreview 是停用操作的冻结摘要与受影响节点说明。
@@ -29,6 +42,7 @@ type FormalOutlineRetirePreview struct {
 	Position           int                        `json:"position"`
 	UnlinkedStoryLine  *FormalStoryLineUnlink     `json:"unlinkedStoryLine,omitempty"`
 	UnlinkedStoryLines []FormalStoryLineUnlink    `json:"unlinkedStoryLines,omitempty"`
+	ReboundStoryLine   *FormalStoryLineRebind     `json:"reboundStoryLine,omitempty"`
 }
 
 // FormalOutlineRetireCommand 由作者确认摘要和幂等键。
