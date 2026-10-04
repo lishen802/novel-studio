@@ -265,6 +265,37 @@ describe('创作驾驶舱', () => {
     expect(screen.queryByText('创意构建中')).toBeNull();
   });
 
+  it('未保存的一句创意阻止离开，保存后可以离开', async () => {
+    const user = userEvent.setup();
+    const app = contextValue();
+    recoverCreation.mockResolvedValue(workbench({ intentText: '旧创意' }));
+    render(<MemoryRouter><AppContext.Provider value={app}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    const input = await screen.findByLabelText('创作输入') as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe('旧创意'));
+    await user.type(input, '的新发展');
+    const guards = vi.mocked(app.registerBeforeClose).mock.calls.map(([guard]) => guard);
+    expect(guards.length).toBeGreaterThan(0);
+    expect((await Promise.allSettled(guards.map(guard => guard()))).some(result => result.status === 'rejected')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(saveCreationIntent).toHaveBeenCalledWith('旧创意的新发展'));
+    await waitFor(async () => expect((await Promise.allSettled(guards.map(guard => guard()))).every(result => result.status === 'fulfilled')).toBe(true));
+  });
+
+  it('未保存创意不能按旧版本生成或推进', async () => {
+    const user = userEvent.setup();
+    recoverCreation.mockResolvedValue(workbench({ intentText: '原意图' }));
+    const advance = vi.fn().mockResolvedValue(workbench());
+    Object.assign(window.go!.main!.DesktopAPI!, { AdvanceCreationStage: advance });
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+    const input = await screen.findByLabelText('创作输入');
+    await user.type(input, '的新方向');
+    await user.click(screen.getByRole('button', { name: '重新生成' }));
+    expect(previewCreationGenerate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '确认进入下一步' }));
+    expect(advance).not.toHaveBeenCalled();
+    expect((await screen.findByRole('alert')).textContent).toContain('请先保存创作输入');
+  });
+
   it('选择第二张卡时把候选 ID 和卡 ID 一起传给后端', async () => {
     const user = userEvent.setup();
     const view = workbench({ stage: 'directions', directionSet: {

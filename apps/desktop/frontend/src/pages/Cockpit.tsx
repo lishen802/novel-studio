@@ -197,6 +197,14 @@ export default function Cockpit() {
     return view;
   }, [projectId]);
 
+  // 创意输入是作者草稿，未保存时阻止切页、切项目和关闭窗口。
+  useEffect(() => {
+    if (!workbench.sessionId || workbench.readOnly || workbench.entry?.kind === 'author_plan') return;
+    return registerBeforeClose(async () => {
+      if (intentRef.current !== savedIntent.current) throw new Error('创作输入尚未保存，请先保存草稿。');
+    });
+  }, [registerBeforeClose, workbench.sessionId, workbench.readOnly, workbench.entry?.kind]);
+
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -277,6 +285,7 @@ export default function Cockpit() {
   };
 
   const startGenerate = async (requestedStage?: string) => {
+    if (intentRef.current !== savedIntent.current) { setError('请先保存创作输入，再预览生成费用。'); return; }
     if (fieldDirty) { setError('请先保存文本修改，再继续生成或进入下一阶段。'); return; }
     if (materialDirty) { setError("请先保存已修改的材料与起点，再开始解析或生成。"); return; }
     if (!modelReady) {
@@ -401,6 +410,7 @@ export default function Cockpit() {
     finally { setBusy(false); }
   };
   const confirmNext = async (cardId?: string) => {
+    if (intentRef.current !== savedIntent.current) { setError('请先保存创作输入，再进入下一阶段。'); return; }
     if (fieldDirty) { setError('请先保存文本修改，再继续生成或进入下一阶段。'); return; }
     if (materialDirty) { setError("请先保存材料，再审阅下一阶段。"); return; }
     if (workbench.stage === 'archive_confirm') {
