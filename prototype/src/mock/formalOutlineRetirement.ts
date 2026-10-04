@@ -4,7 +4,7 @@ import type { FormalOutlineRetireAPI } from '../components/FormalOutlineRetire';
 export const formalOutlineRetirementDemo: FormalOutlineRetireAPI = {
   listChapters: async () => [{id:'later',projectId:'demo',title:'后续空章',position:13,body:'',revision:1,updatedAt:'',hasRecoveryDraft:false}],
   planningRevisions: async () => [{assetId:'demo-new',kind:'outline_node',typedId:'demo-node'}],
-  formalOutlineReferences: async assetId => ({assetId,nodeId:'demo-node',title:'近期章节目标',references:[{kind:'story_line',id:'demo-story-line',label:'主线'}]}),
-  previewFormalOutlineRetire: async (assetId, chapterId, reason, unlinkStoryLineId) => ({request:{projectId:'demo',branchId:'main',assetId,chapterId,reason,unlinkStoryLineId},digest:'demo-retirement',nodeId:'demo-node',title:'近期章节目标',introducedAt:0,position:13,unlinkedStoryLine:{storyLineId:unlinkStoryLineId,name:'主线',position:1,createdAt:'2026-01-01T00:00:00Z'}}),
+  formalOutlineReferences: async assetId => ({assetId,nodeId:'demo-node',title:'近期章节目标',references:[{kind:'story_line',id:'demo-story-line-a',label:'主线'},{kind:'story_line',id:'demo-story-line-b',label:'支线'}]}),
+  previewFormalOutlineRetire: async (assetId, chapterId, reason, unlinkStoryLineId, unlinkStoryLineIds) => ({request:{projectId:'demo',branchId:'main',assetId,chapterId,reason,unlinkStoryLineId,unlinkStoryLineIds},digest:'demo-retirement',nodeId:'demo-node',title:'近期章节目标',introducedAt:0,position:13,unlinkedStoryLines:unlinkStoryLineIds.map((storyLineId,index)=>({storyLineId,name:index===0?'主线':'支线',position:1,createdAt:'2026-01-01T00:00:00Z'}))}),
   confirmFormalOutlineRetire: async command => ({request:command.request,digest:command.digest,nodeId:'demo-node',title:'近期章节目标',introducedAt:0,position:13}),
 };

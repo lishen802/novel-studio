@@ -38,7 +38,7 @@ func (s *Service) FormalOutlineReferences(ctx context.Context, assetID string) (
 }
 
 // PreviewFormalOutlineRetire 绑定当前项目分支，预览作者未来停用的节点。
-func (s *Service) PreviewFormalOutlineRetire(ctx context.Context, assetID, chapterID, reason, unlinkStoryLineID string) (asset.FormalOutlineRetirePreview, error) {
+func (s *Service) PreviewFormalOutlineRetire(ctx context.Context, assetID, chapterID, reason, unlinkStoryLineID string, unlinkStoryLineIDs []string) (asset.FormalOutlineRetirePreview, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := s.requireEditableLocked(); err != nil {
@@ -56,7 +56,7 @@ func (s *Service) PreviewFormalOutlineRetire(ctx context.Context, assetID, chapt
 	if err != nil {
 		return asset.FormalOutlineRetirePreview{}, err
 	}
-	return store.PreviewFormalOutlineRetire(ctx, asset.FormalOutlineRetireRequest{ProjectID: project.ID, BranchID: branchID, AssetID: assetID, ChapterID: chapterID, Reason: reason, UnlinkStoryLineID: unlinkStoryLineID})
+	return store.PreviewFormalOutlineRetire(ctx, asset.FormalOutlineRetireRequest{ProjectID: project.ID, BranchID: branchID, AssetID: assetID, ChapterID: chapterID, Reason: reason, UnlinkStoryLineID: unlinkStoryLineID, UnlinkStoryLineIDs: unlinkStoryLineIDs})
 }
 
 // ConfirmFormalOutlineRetire 在可写工作区内校验预览摘要和活动分支。

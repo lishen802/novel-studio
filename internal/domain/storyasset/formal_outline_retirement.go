@@ -2,12 +2,13 @@ package storyasset
 
 // FormalOutlineRetireRequest 选择正式近期章节点及未来停用边界。
 type FormalOutlineRetireRequest struct {
-	ProjectID         string `json:"projectId"`
-	BranchID          string `json:"branchId"`
-	AssetID           string `json:"assetId"`
-	ChapterID         string `json:"chapterId"`
-	Reason            string `json:"reason"`
-	UnlinkStoryLineID string `json:"unlinkStoryLineId,omitempty"`
+	ProjectID          string   `json:"projectId"`
+	BranchID           string   `json:"branchId"`
+	AssetID            string   `json:"assetId"`
+	ChapterID          string   `json:"chapterId"`
+	Reason             string   `json:"reason"`
+	UnlinkStoryLineID  string   `json:"unlinkStoryLineId,omitempty"`
+	UnlinkStoryLineIDs []string `json:"unlinkStoryLineIds,omitempty"`
 }
 
 // FormalStoryLineUnlink 保存确认时解除的故事线链接原始位置和时间。
@@ -20,13 +21,14 @@ type FormalStoryLineUnlink struct {
 
 // FormalOutlineRetirePreview 是停用操作的冻结摘要与受影响节点说明。
 type FormalOutlineRetirePreview struct {
-	Request           FormalOutlineRetireRequest `json:"request"`
-	Digest            string                     `json:"digest"`
-	NodeID            string                     `json:"nodeId"`
-	Title             string                     `json:"title"`
-	IntroducedAt      int                        `json:"introducedAt"`
-	Position          int                        `json:"position"`
-	UnlinkedStoryLine *FormalStoryLineUnlink     `json:"unlinkedStoryLine,omitempty"`
+	Request            FormalOutlineRetireRequest `json:"request"`
+	Digest             string                     `json:"digest"`
+	NodeID             string                     `json:"nodeId"`
+	Title              string                     `json:"title"`
+	IntroducedAt       int                        `json:"introducedAt"`
+	Position           int                        `json:"position"`
+	UnlinkedStoryLine  *FormalStoryLineUnlink     `json:"unlinkedStoryLine,omitempty"`
+	UnlinkedStoryLines []FormalStoryLineUnlink    `json:"unlinkedStoryLines,omitempty"`
 }
 
 // FormalOutlineRetireCommand 由作者确认摘要和幂等键。

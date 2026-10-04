@@ -41,8 +41,13 @@ func (s *Store) PreviewFormalOutlineRetire(ctx context.Context, r asset.FormalOu
 
 func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset.FormalOutlineRetireRequest) (asset.FormalOutlineRetirePreview, error) {
 	p := asset.FormalOutlineRetirePreview{Request: r}
-	if r.ProjectID == "" || r.BranchID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Reason) > 2000 || len(r.UnlinkStoryLineID) > 200 {
+	if r.ProjectID == "" || r.BranchID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Reason) > 2000 || len(r.UnlinkStoryLineID) > 200 || len(r.UnlinkStoryLineIDs) == 1 || len(r.UnlinkStoryLineIDs) > 100 || (r.UnlinkStoryLineID != "" && len(r.UnlinkStoryLineIDs) != 0) {
 		return p, asset.ErrChangeUnsupported
+	}
+	for i, id := range r.UnlinkStoryLineIDs {
+		if id == "" || len(id) > 200 || (i > 0 && id <= r.UnlinkStoryLineIDs[i-1]) {
+			return p, asset.ErrChangeUnsupported
+		}
 	}
 	var chapterProject, body string
 	if err := q.QueryRowContext(ctx, `SELECT project_id,position,body FROM chapters WHERE id=?`, r.ChapterID).Scan(&chapterProject, &p.Position, &body); err != nil || chapterProject != r.ProjectID || body != "" {
@@ -89,23 +94,38 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 	if err != nil {
 		return p, asset.ErrChangeConflict
 	}
-	if r.UnlinkStoryLineID == "" {
+	if r.UnlinkStoryLineID == "" && len(r.UnlinkStoryLineIDs) == 0 {
 		if len(references.References) != 0 {
 			return p, asset.ErrChangeConflict
 		}
 	} else {
-		if len(references.References) != 1 || references.References[0].Kind != "story_line" || references.References[0].ID != r.UnlinkStoryLineID {
+		ids := r.UnlinkStoryLineIDs
+		if r.UnlinkStoryLineID != "" {
+			ids = []string{r.UnlinkStoryLineID}
+		}
+		if len(references.References) != len(ids) {
 			return p, asset.ErrChangeConflict
+		}
+		for i, reference := range references.References {
+			if reference.Kind != "story_line" || reference.ID != ids[i] {
+				return p, asset.ErrChangeConflict
+			}
 		}
 		var allWritten int
 		if err = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM chapters c WHERE c.project_id=? AND (c.body<>'' OR EXISTS(SELECT 1 FROM chapter_revisions h WHERE h.chapter_id=c.id AND h.body<>'') OR EXISTS(SELECT 1 FROM drafts d WHERE d.chapter_id=c.id AND d.body<>''))`, r.ProjectID).Scan(&allWritten); err != nil || allWritten != 0 {
 			return p, asset.ErrChangeConflict
 		}
-		unlink := &asset.FormalStoryLineUnlink{StoryLineID: r.UnlinkStoryLineID}
-		if err = q.QueryRowContext(ctx, `SELECT l.position,l.created_at,s.name FROM story_line_links l JOIN story_lines s ON s.id=l.story_line_id AND s.project_id=l.project_id WHERE l.project_id=? AND l.story_line_id=? AND l.outline_node_id=?`, r.ProjectID, r.UnlinkStoryLineID, p.NodeID).Scan(&unlink.Position, &unlink.CreatedAt, &unlink.Name); err != nil {
-			return p, asset.ErrChangeConflict
+		for _, id := range ids {
+			unlink := asset.FormalStoryLineUnlink{StoryLineID: id}
+			if err = q.QueryRowContext(ctx, `SELECT l.position,l.created_at,s.name FROM story_line_links l JOIN story_lines s ON s.id=l.story_line_id AND s.project_id=l.project_id WHERE l.project_id=? AND l.story_line_id=? AND l.outline_node_id=?`, r.ProjectID, id, p.NodeID).Scan(&unlink.Position, &unlink.CreatedAt, &unlink.Name); err != nil {
+				return p, asset.ErrChangeConflict
+			}
+			if r.UnlinkStoryLineID != "" {
+				p.UnlinkedStoryLine = &unlink
+			} else {
+				p.UnlinkedStoryLines = append(p.UnlinkedStoryLines, unlink)
+			}
 		}
-		p.UnlinkedStoryLine = unlink
 	}
 	var pending int
 	if err = q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM assistant_authorizations a JOIN assistant_sessions s ON s.id=a.session_id WHERE s.project_id=? AND a.state IN ('pending_confirmation','active'))+(SELECT COUNT(*) FROM assistant_actions WHERE project_id=? AND state IN ('pending_confirmation','executing','outcome_unknown'))+(SELECT COUNT(*) FROM change_operations o JOIN change_sets c ON c.id=o.change_set_id WHERE c.project_id=? AND o.status='pending')+(SELECT COUNT(*) FROM agent_runs WHERE project_id=? AND status IN ('queued','running'))`, r.ProjectID, r.ProjectID, r.ProjectID, r.ProjectID).Scan(&pending); err != nil || pending != 0 {
@@ -152,12 +172,16 @@ func (s *Store) ConfirmFormalOutlineRetire(ctx context.Context, command asset.Fo
 	if err != nil || p.Digest != command.Digest {
 		return p, asset.ErrChangeConflict
 	}
+	links := p.UnlinkedStoryLines
 	if p.UnlinkedStoryLine != nil {
-		result, e := tx.ExecContext(ctx, `DELETE FROM story_line_links WHERE project_id=? AND story_line_id=? AND outline_node_id=? AND position=? AND created_at=?`, command.Request.ProjectID, p.UnlinkedStoryLine.StoryLineID, p.NodeID, p.UnlinkedStoryLine.Position, p.UnlinkedStoryLine.CreatedAt)
+		links = []asset.FormalStoryLineUnlink{*p.UnlinkedStoryLine}
+	}
+	for _, link := range links {
+		result, e := tx.ExecContext(ctx, `DELETE FROM story_line_links WHERE project_id=? AND story_line_id=? AND outline_node_id=? AND position=? AND created_at=?`, command.Request.ProjectID, link.StoryLineID, p.NodeID, link.Position, link.CreatedAt)
 		if e != nil {
 			return p, fmt.Errorf("unlink retired outline story line: %w", e)
 		}
-		if e = requireOneRow(result, "story line link", p.UnlinkedStoryLine.StoryLineID); e != nil {
+		if e = requireOneRow(result, "story line link", link.StoryLineID); e != nil {
 			return p, e
 		}
 	}
