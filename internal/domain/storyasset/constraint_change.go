@@ -67,6 +67,7 @@ type EffectiveConstraint struct {
 	Kind      string `json:"kind"`
 	TypedID   string `json:"typedId"`
 	Revision  int64  `json:"revision"`
+	Position  int    `json:"position,omitempty"`
 	ScopeKind string `json:"scopeKind"`
 	ScopeID   string `json:"scopeId"`
 	Text      string `json:"text"`

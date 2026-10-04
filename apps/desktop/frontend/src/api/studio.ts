@@ -10,6 +10,8 @@ export interface FormalOutlineAppendPreview {request:FormalOutlineAppendRequest;
 export interface FormalOutlineRetireRequest {projectId:string;branchId:string;assetId:string;chapterId:string;reason:string;unlinkStoryLineId?:string;unlinkStoryLineIds?:string[];rebindStoryLineId?:string;rebindStoryLineIds?:string[];rebindTargetAssetId?:string}
 export interface FormalOutlineRetirePreview {request:FormalOutlineRetireRequest;digest:string;nodeId:string;title:string;introducedAt:number;position:number;unlinkedStoryLine?:{storyLineId:string;name:string;position:number;createdAt:string};unlinkedStoryLines?:Array<{storyLineId:string;name:string;position:number;createdAt:string}>;reboundStoryLine?:{storyLineId:string;name:string;position:number;createdAt:string;targetAssetId:string;targetNodeId:string;targetTitle:string;targetRevision:number;targetParentId:string;targetIntroducedAt:number};reboundStoryLines?:Array<{storyLineId:string;name:string;position:number;createdAt:string;targetAssetId:string;targetNodeId:string;targetTitle:string;targetRevision:number;targetParentId:string;targetIntroducedAt:number}>}
 export interface FormalOutlineReferenceView {assetId:string;nodeId:string;title:string;references:Array<{kind:string;id:string;label:string}>}
+export interface FormalOutlineReorderRequest {projectId:string;branchId:string;firstAssetId:string;secondAssetId:string;chapterId:string;reason:string}
+export interface FormalOutlineReorderPreview {request:FormalOutlineReorderRequest;digest:string;firstNodeId:string;secondNodeId:string;firstTitle:string;secondTitle:string;parentNodeId:string;firstPosition:number;secondPosition:number;position:number;firstRevision:number;secondRevision:number}
 export interface ConstraintPreview {request:ConstraintRequest;digest:string;before:string;revision:number;position:number;protectedChapters:number;futureChapters:number;canApply:boolean;blockedReason:string}
 export interface ConstraintCommand {request:ConstraintRequest;digest:string;idempotencyKey:string}
 export type ProjectAccessMode = 'editable' | 'read_only';
@@ -609,6 +611,9 @@ export const studio = {
   previewFormalOutlineRetire: (assetId:string,chapterId:string,reason:string,unlinkStoryLineId:string,unlinkStoryLineIds:string[],rebindStoryLineId:string,rebindTargetAssetId:string,rebindStoryLineIds:string[]) => call<FormalOutlineRetirePreview>('PreviewFormalOutlineRetire',assetId,chapterId,reason,unlinkStoryLineId,unlinkStoryLineIds,rebindStoryLineId,rebindTargetAssetId,rebindStoryLineIds),
   formalOutlineReferences: (assetId:string) => call<FormalOutlineReferenceView>('FormalOutlineReferences',assetId),
   confirmFormalOutlineRetire: (command:{request:FormalOutlineRetireRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineRetirePreview>('ConfirmFormalOutlineRetire',command),
+  previewFormalOutlineReorder: (firstAssetId:string,secondAssetId:string,chapterId:string,reason:string) => call<FormalOutlineReorderPreview>('PreviewFormalOutlineReorder',firstAssetId,secondAssetId,chapterId,reason),
+  confirmFormalOutlineReorder: (command:{request:FormalOutlineReorderRequest;digest:string;idempotencyKey:string}) => call<FormalOutlineReorderPreview>('ConfirmFormalOutlineReorder',command),
+  formalOutlinePositionsAtChapter: (chapterId:string) => call<Record<string,number>>('FormalOutlinePositionsAtChapter',chapterId),
   createStoryLine: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateStoryLine', input),
   createSceneCard: (input: Record<string, unknown>) => call<Record<string, unknown>>('CreateSceneCard', input),
   storyWorld: () => call<StoryWorldView>('StoryWorld'),

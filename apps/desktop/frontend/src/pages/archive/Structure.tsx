@@ -4,6 +4,7 @@ import { studio, type StoryStructureView } from '../../api/studio';
 import { PlanningRevisions } from '../../components/PlanningRevisions';
 import { FormalOutlineAppend } from '../../components/FormalOutlineAppend';
 import { FormalOutlineRetire } from '../../components/FormalOutlineRetire';
+import { FormalOutlineReorder } from '../../components/FormalOutlineReorder';
 import { useApp } from '../../store/useApp';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -106,7 +107,8 @@ export default function Structure() {
       <PlanningRevisions key={revisionEpoch} api={studio} kind="outline_node" registerBeforeLeave={registerBeforeClose} readOnly={state.backendProject?.accessMode === "read_only"} onFormalTree={setFormalTree} />
       {formalTree && <FormalOutlineAppend api={studio} arcs={nodes.filter(node=>node.level==='arc').map(node=>({id:String(node.id),title:String(node.title)}))} readOnly={state.backendProject?.accessMode==='read_only'} registerBeforeLeave={registerBeforeClose} onApplied={async()=>{setRevisionEpoch(value=>value+1);await refresh();}} />}
       {formalTree && <FormalOutlineRetire api={studio} nodes={nodes.map(node=>({id:String(node.id),title:String(node.title),level:String(node.level),parentId:String(node.parentId||''),introducedAt:Number(node.effectiveFromPosition)||0,retiredAt:Number(node.effectiveUntilPosition)||0}))} readOnly={state.backendProject?.accessMode==='read_only'} registerBeforeLeave={registerBeforeClose} onApplied={async()=>{setRevisionEpoch(value=>value+1);await refresh();}} />}
-      <p className="text-xs text-text-muted">下方展示原始结构；按章节生效的最新目标请查看修订记录。尚无正文时，停用节点可同时解除或改绑全部故事线链接；其他引用与正式节点重排仍需先处理影响。</p>
+      {formalTree && <FormalOutlineReorder api={studio} nodes={nodes.map(node=>({id:String(node.id),title:String(node.title),level:String(node.level),parentId:String(node.parentId||''),introducedAt:Number(node.effectiveFromPosition)||0,retiredAt:Number(node.effectiveUntilPosition)||0}))} readOnly={state.backendProject?.accessMode==='read_only'} registerBeforeLeave={registerBeforeClose} onApplied={async()=>{setRevisionEpoch(value=>value+1);await refresh();}} />}
+      <p className="text-xs text-text-muted">下方展示原始结构；按章节生效的文字请查看修订记录，顺序可在未来重排面板按章核对。尚无正文时，停用节点可同时解除或改绑全部故事线链接；其他引用仍需先处理影响。</p>
       {error && <p className="text-sm text-danger">{error}</p>}
       {nodes.length ? <div className="space-y-3">{renderNodes()}</div> : <EmptyState icon={Sparkles} title="还没有故事架构" description="创建全书节点后，再逐层添加卷、故事弧与章节。" />}
       <Modal open={open} onClose={() => setOpen(false)} title="添加大纲节点">

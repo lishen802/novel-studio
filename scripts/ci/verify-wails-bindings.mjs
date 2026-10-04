@@ -26,6 +26,11 @@ const [apiDeclaration, apiRuntime, models] = await Promise.all([
 ]);
 
 const expected = [
+ ["Formal outline reorder preview",apiDeclaration,"PreviewFormalOutlineReorder(arg1:string,arg2:string,arg3:string,arg4:string):Promise<storyasset.FormalOutlineReorderPreview>"],
+ ["Formal outline reorder confirmation",apiDeclaration,"ConfirmFormalOutlineReorder(arg1:storyasset.FormalOutlineReorderCommand):Promise<storyasset.FormalOutlineReorderPreview>"],
+ ["Formal outline effective order",apiDeclaration,"FormalOutlinePositionsAtChapter(arg1:string):Promise<Record<string, number>>"],
+ ["Formal outline reorder runtime",apiRuntime,"export function ConfirmFormalOutlineReorder(arg1)"],
+ ["Formal outline reorder model",models,"export class FormalOutlineReorderPreview"],
  ["Formal outline reference inspection",apiDeclaration,"FormalOutlineReferences(arg1:string):Promise<storyasset.FormalOutlineReferenceView>"],
  ["Formal outline reference runtime",apiRuntime,"export function FormalOutlineReferences(arg1)"],
  ["Formal outline reference model",models,"export class FormalOutlineReferenceView"],

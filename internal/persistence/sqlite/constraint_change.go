@@ -201,6 +201,15 @@ func (s *Store) EffectiveConstraints(ctx context.Context, position int) ([]asset
 			return nil, err
 		}
 		v.Text = constraintText(v.Kind, payload)
+		if v.Kind == "outline_node" {
+			var order struct {
+				Position int `json:"position"`
+			}
+			if json.Unmarshal([]byte(payload), &order) != nil || order.Position < 1 {
+				return nil, asset.ErrChangeUnsupported
+			}
+			v.Position = order.Position
+		}
 		out = append(out, v)
 	}
 	return out, rows.Err()

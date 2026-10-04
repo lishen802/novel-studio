@@ -1642,16 +1642,34 @@ func requireSavedChapter(ctx context.Context, store ports.ProjectStore, chapter 
 
 // formalOutlinePlanning 仅将正式规划节点列为必要输入，规划目标不代表已经发生的事实。
 func formalOutlinePlanning(nodes []storydomain.OutlineNode, versions []storyassetdomain.EffectiveConstraint) []storydomain.OutlineNode {
-	ids := map[string]bool{}
+	positions := map[string]int{}
 	for _, version := range versions {
 		if version.Kind == "outline_node" {
-			ids[version.TypedID] = true
+			positions[version.TypedID] = version.Position
 		}
 	}
 	result := []storydomain.OutlineNode{}
 	for _, node := range nodes {
-		if ids[node.ID] {
+		if position, ok := positions[node.ID]; ok {
+			if position > 0 {
+				node.Position = position
+			}
 			result = append(result, node)
+		}
+	}
+	// 同父节点只改变各自在原投影中的槽位，跨故事弧的层级顺序保持不变。
+	groups := map[string][]int{}
+	for i, node := range result {
+		groups[node.ParentID] = append(groups[node.ParentID], i)
+	}
+	for _, indexes := range groups {
+		siblings := make([]storydomain.OutlineNode, len(indexes))
+		for i, index := range indexes {
+			siblings[i] = result[index]
+		}
+		sort.SliceStable(siblings, func(i, j int) bool { return siblings[i].Position < siblings[j].Position })
+		for i, index := range indexes {
+			result[index] = siblings[i]
 		}
 	}
 	return result
