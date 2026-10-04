@@ -140,6 +140,10 @@ func (s *Store) SwapOutlineNodePositions(ctx context.Context, firstID, secondID 
 	if first.projectID != second.projectID || first.parentID.Valid != second.parentID.Valid || first.parentID.String != second.parentID.String {
 		return storydomain.ErrInvalidReference
 	}
+	// 正式大纲顺序属于版本化规划，通用排序不得直接改写类型行。
+	if err := rejectFormalOutlineStructure(ctx, tx, first.projectID); err != nil {
+		return err
+	}
 	stamp := formatTime(updatedAt)
 	if _, err := tx.ExecContext(ctx, `UPDATE outline_nodes SET position = 2147483647, updated_at = ? WHERE id = ?`, stamp, firstID); err != nil {
 		return databaseOperationError("reserve outline position", err)

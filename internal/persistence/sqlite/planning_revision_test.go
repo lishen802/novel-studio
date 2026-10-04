@@ -189,6 +189,35 @@ func TestFormalPlanningCannotUseGlobalOutlineChangeSet(t *testing.T) {
 	}
 }
 
+// TestFormalPlanningRejectsUnversionedReorder 验证通用排序不会改写正式大纲的类型行。
+func TestFormalPlanningRejectsUnversionedReorder(t *testing.T) {
+	s, _ := seedPlanningRevision(t, "outline_node")
+	ctx := context.Background()
+	for _, sibling := range []struct {
+		id       string
+		position int
+	}{{"first", 1}, {"second", 2}} {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO outline_nodes (id, project_id, parent_id, level, title, summary, goal, conflict, outcome, position, planning_json, created_at, updated_at)
+			SELECT ?, project_id, id, 'volume', ?, '', '', '', '', ?, '{}', created_at, updated_at FROM outline_nodes WHERE id='arc'`, sibling.id, sibling.id, sibling.position); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SwapOutlineNodePositions(ctx, "first", "second", time.Unix(203, 0)); !errors.Is(err, asset.ErrChangeUnsupported) {
+		t.Fatalf("reorder: %v", err)
+	}
+	nodes, err := s.ListOutlineNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions := make(map[string]int, len(nodes))
+	for _, node := range nodes {
+		positions[node.ID] = node.Position
+	}
+	if positions["first"] != 1 || positions["second"] != 2 {
+		t.Fatalf("formal outline positions changed: %#v", positions)
+	}
+}
+
 // TestFormalPlanningRejectsUnversionedNodeCreation 验证正式入档后不能绕过规划审阅新增节点。
 func TestFormalPlanningRejectsUnversionedNodeCreation(t *testing.T) {
 	s, r := seedPlanningRevision(t, "outline_node")
