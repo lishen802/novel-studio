@@ -1215,6 +1215,12 @@ func (service *Service) persistCandidate(
 	if err != nil {
 		return creationdomain.Candidate{}, err
 	}
+	if binding.SchemaID != "author_material.schema" {
+		// 运行产物在落库前按候选的产品 Schema 再校验一次，防止修订节点丢字段后留下不可接受的版本。
+		if err := validateCandidateSchema(stage, candidate.PayloadJSON, candidate.PayloadSchemaVersion); err != nil {
+			return creationdomain.Candidate{}, err
+		}
+	}
 	candidate = candidate.WithUpstream(frozenDigest).WithQuality(candidateQuality(run.QualityStatus))
 	if hasPrevious {
 		superseded, markErr := previous.MarkSuperseded(service.clock.Now())

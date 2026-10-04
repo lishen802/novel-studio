@@ -103,3 +103,25 @@ func TestNormalizeBlueprintRevisionMarksMissingChangeUnresolved(t *testing.T) {
 		t.Fatalf("normalized revision invalid: %v", err)
 	}
 }
+
+func TestNormalizeBlueprintRevisionPreservesProductFields(t *testing.T) {
+	original := `{"title":"雾港","positioning":"悬疑成长","core_conflict":"追查失踪","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"],"sell_point":"灯塔藏有记忆","genre":"悬疑","growth_cost":"失去信任","pacing":"中速","ending":"揭开真相","subplots":["旧档案"],"forbidden":["超自然复活"],"anchors":[{"strength":"hard","statement":"月蚀会抹去记忆"}]}`
+	review := &agentdomain.ReviewBundleOutput{QualityStatus: agentdomain.QualityNeedsReview, Summary: "补强冲突", Findings: []agentdomain.ReviewFinding{{
+		ID: "f1", Category: agentdomain.FindingCausality, Severity: agentdomain.SeverityMajor,
+		Status: agentdomain.FindingOpen, Source: agentdomain.FindingModelReview, Message: "补强冲突", ConstraintRef: "blueprint:core_conflict",
+	}}}
+	revision := &agentdomain.ReviseBlueprintOutput{
+		Blueprint:   agentdomain.StoryBlueprintOutput{Title: "雾港", Positioning: "悬疑成长", CoreConflict: "追查失踪并付出代价", ProtagonistArc: "从逃避到承担", WorldRules: []string{"潮汐决定航路"}, MajorMilestones: []string{"失踪", "追查", "抉择"}},
+		Resolutions: []agentdomain.FindingResolution{{FindingID: "f1", Status: agentdomain.FindingResolved, Note: "已补强"}},
+		Changes:     []agentdomain.RevisionChange{{FindingID: "f1", OriginalText: "追查失踪", RevisedText: "追查失踪并付出代价"}},
+	}
+	if err := normalizeBlueprintRevision(review, original, revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := revision.Blueprint.ValidateProduct(); err != nil {
+		t.Fatalf("修订后丢失作品方案必需字段: %v", err)
+	}
+	if revision.Blueprint.SellPoint != "灯塔藏有记忆" || len(revision.Blueprint.Anchors) != 1 {
+		t.Fatalf("未保留修订范围外的产品字段: %#v", revision.Blueprint)
+	}
+}

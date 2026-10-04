@@ -829,6 +829,8 @@ func TestSafeDesktopErrorClassifiesCreationFailuresWithoutLeakingBody(t *testing
 		{name: "manuscript impact", err: creationdomain.ErrHistoryImpactRequired, code: errorCreationImpact, message: "作品已有保存正文或历史正文，当前整包入档尚不能声明变更生效范围，因此本次入档已阻止。候选和历史正文已保留，请继续编辑或审阅；高层变更需先完成历史影响处理。"},
 		{name: "impact", err: creationdomain.ErrImpactUnresolved, code: errorCreationImpact, message: "上游修改后的影响尚未处理，请先选择局部重算、保留例外、继续讨论或放弃上游修改。"},
 		{name: "acceptance", err: creationdomain.ErrCandidateAcceptanceRequired, code: errorCreationAcceptance, message: "请先接受当前候选版本，再继续推进或确认作品档案。"},
+		{name: "invalid candidate", err: agentdomain.ErrInvalidTaskOutput, code: errorValidationFailed, message: "候选内容缺少必填字段或结构无效，请重新生成候选或切换到完整版本。"},
+		{name: "quality blocked", err: creationdomain.ErrQualityBlocked, code: errorValidationFailed, message: "当前候选未通过质量检查，请核对审阅意见并修改或重新生成。"},
 		{name: "unavailable workspace", err: workspace.ErrCreationUnavailable, code: errorFeatureNotAvailable, message: "当前项目无法打开创作工作台。"},
 		{name: "run active", err: creation.ErrRunActive, code: errorAgentRunActive, message: "已有创作运行正在进行，请等待完成或取消后再试。"},
 		{name: "unavailable service", err: creation.ErrUnavailable, code: errorFeatureNotAvailable, message: "创作编排服务尚未就绪。"},

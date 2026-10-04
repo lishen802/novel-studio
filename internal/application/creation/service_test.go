@@ -236,6 +236,31 @@ func TestPersistCandidateConvergesDuplicateRunResult(t *testing.T) {
 	}
 }
 
+func TestPersistCandidateRejectsIncompleteProposalRevision(t *testing.T) {
+	service, store, _ := newTestService(t, newFakeKernel(), nil)
+	session := seedDirectionsSelection(t, service, store, "d1")
+	previous := seedStageCandidate(t, service, store, creationdomain.StageProposal, proposalPayload)
+	binding, err := bindingFor(creationdomain.StageProposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := liveUpstreamDigest(session, mustListCandidates(t, store, session.ID), creationdomain.StageProposal)
+	incomplete := `{"title":"雾港","positioning":"悬疑","core_conflict":"追查失踪","protagonist_arc":"从逃避到承担","world_rules":["潮汐决定航路"],"major_milestones":["失踪","追查","抉择"]}`
+	_, err = service.persistCandidate(context.Background(), session, creationdomain.StageProposal, "run-incomplete", "artifact-incomplete", incomplete,
+		agentdomain.Run{ID: "run-incomplete", QualityStatus: agentdomain.QualityNeedsReview}, digest, binding)
+	if !errors.Is(err, agentdomain.ErrInvalidTaskOutput) {
+		t.Fatalf("incomplete revision error = %v", err)
+	}
+	candidates := mustListCandidates(t, store, session.ID)
+	if len(candidates) != 2 {
+		t.Fatalf("invalid result changed candidate count: %d", len(candidates))
+	}
+	current, ok := currentCandidate(candidates, creationdomain.StageProposal)
+	if !ok || current.ID != previous.ID || current.Status == creationdomain.StatusSuperseded {
+		t.Fatalf("invalid result displaced working candidate: %#v", current)
+	}
+}
+
 // P1-5：最终产物指向修订稿而非初稿；质量 needs_review/blocked 暂停自动推进并阻断阶段推进。
 func TestQualityGateBlocksAdvanceAndRevisionResultWins(t *testing.T) {
 	kernel := newFakeKernel()

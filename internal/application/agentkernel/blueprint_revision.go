@@ -125,6 +125,15 @@ func normalizeBlueprintShape(target *agentdomain.StoryBlueprintOutput, fallback 
 	}
 	target.WorldRules = normalizeBlueprintList(target.WorldRules, fallback.WorldRules, 1)
 	target.MajorMilestones = normalizeBlueprintList(target.MajorMilestones, fallback.MajorMilestones, 3)
+	// 修订协议只覆盖六个基础字段，作品方案 v2 的其余字段必须沿用规划稿。
+	target.SellPoint = fallback.SellPoint
+	target.Genre = fallback.Genre
+	target.GrowthCost = fallback.GrowthCost
+	target.Pacing = fallback.Pacing
+	target.Ending = fallback.Ending
+	target.Subplots = append([]string(nil), fallback.Subplots...)
+	target.Forbidden = append([]string(nil), fallback.Forbidden...)
+	target.Anchors = append([]agentdomain.BlueprintAnchor(nil), fallback.Anchors...)
 }
 
 func normalizeBlueprintList(values, fallback []string, minimum int) []string {

@@ -174,6 +174,10 @@ func safeDesktopError(err error) error {
 		return errors.New("已有方案仍有未解决的缺口或冲突，请检查材料分析。")
 	case errors.Is(err, creationdomain.ErrCandidateAcceptanceRequired):
 		code, message = errorCreationAcceptance, "请先接受当前候选版本，再继续推进或确认作品档案。"
+	case errors.Is(err, agentdomain.ErrInvalidTaskOutput):
+		code, message = errorValidationFailed, "候选内容缺少必填字段或结构无效，请重新生成候选或切换到完整版本。"
+	case errors.Is(err, creationdomain.ErrQualityBlocked):
+		code, message = errorValidationFailed, "当前候选未通过质量检查，请核对审阅意见并修改或重新生成。"
 	case errors.Is(err, workspace.ErrCreationUnavailable):
 		code, message = errorFeatureNotAvailable, "当前项目无法打开创作工作台。"
 	case errors.Is(err, creation.ErrRunActive):
