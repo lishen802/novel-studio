@@ -29,7 +29,7 @@ const expected = [
  ["Formal outline reference inspection",apiDeclaration,"FormalOutlineReferences(arg1:string):Promise<storyasset.FormalOutlineReferenceView>"],
  ["Formal outline reference runtime",apiRuntime,"export function FormalOutlineReferences(arg1)"],
  ["Formal outline reference model",models,"export class FormalOutlineReferenceView"],
- ["Formal outline retirement preview",apiDeclaration,"PreviewFormalOutlineRetire(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>,arg6:string,arg7:string):Promise<storyasset.FormalOutlineRetirePreview>"],
+ ["Formal outline retirement preview",apiDeclaration,"PreviewFormalOutlineRetire(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>,arg6:string,arg7:string,arg8:Array<string>):Promise<storyasset.FormalOutlineRetirePreview>"],
  ["Formal outline retirement confirmation",apiDeclaration,"ConfirmFormalOutlineRetire(arg1:storyasset.FormalOutlineRetireCommand):Promise<storyasset.FormalOutlineRetirePreview>"],
  ["Formal outline retirement runtime",apiRuntime,"export function ConfirmFormalOutlineRetire(arg1)"],
  ["Formal outline retirement model",models,"export class FormalOutlineRetirePreview"],

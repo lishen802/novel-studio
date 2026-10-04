@@ -10,6 +10,7 @@ type FormalOutlineRetireRequest struct {
 	UnlinkStoryLineID   string   `json:"unlinkStoryLineId,omitempty"`
 	UnlinkStoryLineIDs  []string `json:"unlinkStoryLineIds,omitempty"`
 	RebindStoryLineID   string   `json:"rebindStoryLineId,omitempty"`
+	RebindStoryLineIDs  []string `json:"rebindStoryLineIds,omitempty"`
 	RebindTargetAssetID string   `json:"rebindTargetAssetId,omitempty"`
 }
 
@@ -43,6 +44,7 @@ type FormalOutlineRetirePreview struct {
 	UnlinkedStoryLine  *FormalStoryLineUnlink     `json:"unlinkedStoryLine,omitempty"`
 	UnlinkedStoryLines []FormalStoryLineUnlink    `json:"unlinkedStoryLines,omitempty"`
 	ReboundStoryLine   *FormalStoryLineRebind     `json:"reboundStoryLine,omitempty"`
+	ReboundStoryLines  []FormalStoryLineRebind    `json:"reboundStoryLines,omitempty"`
 }
 
 // FormalOutlineRetireCommand 由作者确认摘要和幂等键。

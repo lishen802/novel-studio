@@ -41,13 +41,12 @@ func (s *Store) PreviewFormalOutlineRetire(ctx context.Context, r asset.FormalOu
 
 func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset.FormalOutlineRetireRequest) (asset.FormalOutlineRetirePreview, error) {
 	p := asset.FormalOutlineRetirePreview{Request: r}
-	if r.ProjectID == "" || r.BranchID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Reason) > 2000 || len(r.UnlinkStoryLineID) > 200 || len(r.UnlinkStoryLineIDs) == 1 || len(r.UnlinkStoryLineIDs) > 100 || (r.UnlinkStoryLineID != "" && len(r.UnlinkStoryLineIDs) != 0) || len(r.RebindStoryLineID) > 200 || len(r.RebindTargetAssetID) > 200 || (r.RebindStoryLineID == "") != (r.RebindTargetAssetID == "") || (r.RebindStoryLineID != "" && (r.UnlinkStoryLineID != "" || len(r.UnlinkStoryLineIDs) != 0)) {
+	if r.ProjectID == "" || r.BranchID == "" || r.AssetID == "" || r.ChapterID == "" || strings.TrimSpace(r.Reason) == "" || utf8.RuneCountInString(r.Reason) > 2000 {
 		return p, asset.ErrChangeUnsupported
 	}
-	for i, id := range r.UnlinkStoryLineIDs {
-		if id == "" || len(id) > 200 || (i > 0 && id <= r.UnlinkStoryLineIDs[i-1]) {
-			return p, asset.ErrChangeUnsupported
-		}
+	mode, ids, err := formalRetireReferenceChoice(r)
+	if err != nil {
+		return p, err
 	}
 	var chapterProject, body string
 	if err := q.QueryRowContext(ctx, `SELECT project_id,position,body FROM chapters WHERE id=?`, r.ChapterID).Scan(&chapterProject, &p.Position, &body); err != nil || chapterProject != r.ProjectID || body != "" {
@@ -94,18 +93,11 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 	if err != nil {
 		return p, asset.ErrChangeConflict
 	}
-	if r.UnlinkStoryLineID == "" && len(r.UnlinkStoryLineIDs) == 0 && r.RebindStoryLineID == "" {
+	if mode == "none" {
 		if len(references.References) != 0 {
 			return p, asset.ErrChangeConflict
 		}
 	} else {
-		ids := r.UnlinkStoryLineIDs
-		if r.UnlinkStoryLineID != "" {
-			ids = []string{r.UnlinkStoryLineID}
-		}
-		if r.RebindStoryLineID != "" {
-			ids = []string{r.RebindStoryLineID}
-		}
 		if len(references.References) != len(ids) {
 			return p, asset.ErrChangeConflict
 		}
@@ -123,13 +115,17 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 			if err = q.QueryRowContext(ctx, `SELECT l.position,l.created_at,s.name FROM story_line_links l JOIN story_lines s ON s.id=l.story_line_id AND s.project_id=l.project_id WHERE l.project_id=? AND l.story_line_id=? AND l.outline_node_id=?`, r.ProjectID, id, p.NodeID).Scan(&unlink.Position, &unlink.CreatedAt, &unlink.Name); err != nil {
 				return p, asset.ErrChangeConflict
 			}
-			if r.RebindStoryLineID != "" {
+			if mode == "rebind_one" || mode == "rebind_many" {
 				rebind, e := previewFormalStoryLineRebind(ctx, q, r, p, unlink)
 				if e != nil {
 					return p, e
 				}
-				p.ReboundStoryLine = rebind
-			} else if r.UnlinkStoryLineID != "" {
+				if mode == "rebind_one" {
+					p.ReboundStoryLine = rebind
+				} else {
+					p.ReboundStoryLines = append(p.ReboundStoryLines, *rebind)
+				}
+			} else if mode == "unlink_one" {
 				p.UnlinkedStoryLine = &unlink
 			} else {
 				p.UnlinkedStoryLines = append(p.UnlinkedStoryLines, unlink)
@@ -154,6 +150,48 @@ func previewFormalOutlineRetire(ctx context.Context, q constraintReader, r asset
 	return p, nil
 }
 
+// formalRetireReferenceChoice 校验互斥的引用操作，并固定多条链接的稳定顺序。
+func formalRetireReferenceChoice(r asset.FormalOutlineRetireRequest) (string, []string, error) {
+	choices := 0
+	for _, selected := range []bool{r.UnlinkStoryLineID != "", len(r.UnlinkStoryLineIDs) != 0, r.RebindStoryLineID != "", len(r.RebindStoryLineIDs) != 0} {
+		if selected {
+			choices++
+		}
+	}
+	if choices > 1 || len(r.UnlinkStoryLineID) > 200 || len(r.RebindStoryLineID) > 200 || len(r.RebindTargetAssetID) > 200 || (r.RebindTargetAssetID != "") != (r.RebindStoryLineID != "" || len(r.RebindStoryLineIDs) != 0) {
+		return "", nil, asset.ErrChangeUnsupported
+	}
+	validateMany := func(ids []string) error {
+		if len(ids) < 2 || len(ids) > 100 {
+			return asset.ErrChangeUnsupported
+		}
+		for i, id := range ids {
+			if id == "" || len(id) > 200 || (i > 0 && id <= ids[i-1]) {
+				return asset.ErrChangeUnsupported
+			}
+		}
+		return nil
+	}
+	switch {
+	case r.UnlinkStoryLineID != "":
+		return "unlink_one", []string{r.UnlinkStoryLineID}, nil
+	case len(r.UnlinkStoryLineIDs) != 0:
+		if err := validateMany(r.UnlinkStoryLineIDs); err != nil {
+			return "", nil, err
+		}
+		return "unlink_many", r.UnlinkStoryLineIDs, nil
+	case r.RebindStoryLineID != "":
+		return "rebind_one", []string{r.RebindStoryLineID}, nil
+	case len(r.RebindStoryLineIDs) != 0:
+		if err := validateMany(r.RebindStoryLineIDs); err != nil {
+			return "", nil, err
+		}
+		return "rebind_many", r.RebindStoryLineIDs, nil
+	default:
+		return "none", nil, nil
+	}
+}
+
 // previewFormalStoryLineRebind 只接受同故事弧下仍有效且有正式来源的目标章节节点。
 func previewFormalStoryLineRebind(ctx context.Context, q constraintReader, r asset.FormalOutlineRetireRequest, p asset.FormalOutlineRetirePreview, original asset.FormalStoryLineUnlink) (*asset.FormalStoryLineRebind, error) {
 	var sourceParent, status string
@@ -173,7 +211,7 @@ func previewFormalStoryLineRebind(ctx context.Context, q constraintReader, r ass
 		}
 	}
 	var blocked int
-	if err := q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM formal_outline_retirements WHERE asset_id=?)+(SELECT COUNT(*) FROM formal_outline_origin_retirements WHERE asset_id=?)+(SELECT COUNT(*) FROM story_line_links WHERE project_id=? AND story_line_id=? AND outline_node_id=?)`, r.RebindTargetAssetID, r.RebindTargetAssetID, r.ProjectID, r.RebindStoryLineID, target.TargetNodeID).Scan(&blocked); err != nil || blocked != 0 {
+	if err := q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM formal_outline_retirements WHERE asset_id=?)+(SELECT COUNT(*) FROM formal_outline_origin_retirements WHERE asset_id=?)+(SELECT COUNT(*) FROM story_line_links WHERE project_id=? AND story_line_id=? AND outline_node_id=?)`, r.RebindTargetAssetID, r.RebindTargetAssetID, r.ProjectID, original.StoryLineID, target.TargetNodeID).Scan(&blocked); err != nil || blocked != 0 {
 		return nil, asset.ErrChangeConflict
 	}
 	return target, nil
@@ -219,8 +257,11 @@ func (s *Store) ConfirmFormalOutlineRetire(ctx context.Context, command asset.Fo
 			return p, e
 		}
 	}
+	rebounds := p.ReboundStoryLines
 	if p.ReboundStoryLine != nil {
-		link := p.ReboundStoryLine
+		rebounds = []asset.FormalStoryLineRebind{*p.ReboundStoryLine}
+	}
+	for _, link := range rebounds {
 		result, e := tx.ExecContext(ctx, `UPDATE story_line_links SET outline_node_id=?,created_at=? WHERE project_id=? AND story_line_id=? AND outline_node_id=? AND position=? AND created_at=?`, link.TargetNodeID, formatTime(now), command.Request.ProjectID, link.StoryLineID, p.NodeID, link.Position, link.CreatedAt)
 		if e != nil {
 			return p, fmt.Errorf("rebind retired outline story line: %w", e)

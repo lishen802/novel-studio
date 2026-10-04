@@ -12,11 +12,10 @@ import (
 	asset "github.com/lishen802/novel-studio/internal/domain/storyasset"
 )
 
-// 空正文项目改绑故事线时保留目标正式身份，并与源节点停用一起提交。
-func TestFormalOutlineRetirementRebindsSingleStoryLine(t *testing.T) {
+// formalRebindFixture 建立具有两个同弧正式章节目标的空正文项目。
+func formalRebindFixture(t *testing.T, lines []struct{ id, name string }) (context.Context, *Store, string, story.OutlineNode, story.OutlineNode) {
 	ctx := context.Background()
 	s, project := createTestStore(t)
-	defer s.Close()
 	now := time.Unix(100, 0)
 	for i, id := range []string{"old", "later"} {
 		if err := s.CreateChapter(ctx, mustChapter(t, id, project.ID, id, i+1)); err != nil {
@@ -61,13 +60,22 @@ func TestFormalOutlineRetirementRebindsSingleStoryLine(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO story_lines(id,project_id,name,status,created_at,updated_at) VALUES(?,?,'主线','planned',?,?)`, "rebind-line", project.ID, formatTime(now), formatTime(now)); err != nil {
-		t.Fatal(err)
+	for _, line := range lines {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO story_lines(id,project_id,name,status,created_at,updated_at) VALUES(?,?,?,'planned',?,?)`, line.id, project.ID, line.name, formatTime(now), formatTime(now)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO story_line_links(project_id,story_line_id,outline_node_id,position,created_at) VALUES(?,?,?,1,?)`, project.ID, line.id, source.ID, formatTime(now)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO story_line_links(project_id,story_line_id,outline_node_id,position,created_at) VALUES(?,?,?,1,?)`, project.ID, "rebind-line", source.ID, formatTime(now)); err != nil {
-		t.Fatal(err)
-	}
-	r := asset.FormalOutlineRetireRequest{ProjectID: project.ID, BranchID: "main", AssetID: "source-asset", ChapterID: "later", Reason: "保留主线目标", RebindStoryLineID: "rebind-line", RebindTargetAssetID: "target-asset"}
+	return ctx, s, project.ID, source, target
+}
+
+// 空正文项目改绑故事线时保留目标正式身份，并与源节点停用一起提交。
+func TestFormalOutlineRetirementRebindsSingleStoryLine(t *testing.T) {
+	ctx, s, projectID, source, target := formalRebindFixture(t, []struct{ id, name string }{{"rebind-line", "主线"}})
+	defer s.Close()
+	r := asset.FormalOutlineRetireRequest{ProjectID: projectID, BranchID: "main", AssetID: "source-asset", ChapterID: "later", Reason: "保留主线目标", RebindStoryLineID: "rebind-line", RebindTargetAssetID: "target-asset"}
 	r.RebindTargetAssetID = "source-asset"
 	if _, err := s.PreviewFormalOutlineRetire(ctx, r); !errors.Is(err, asset.ErrChangeConflict) {
 		t.Fatalf("source cannot be target: %v", err)
@@ -109,7 +117,7 @@ func TestFormalOutlineRetirementRebindsSingleStoryLine(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, `SELECT outline_node_id FROM story_line_links WHERE story_line_id='rebind-line'`).Scan(&linkedNode); err != nil || linkedNode != target.ID {
 		t.Fatalf("target link: %s %v", linkedNode, err)
 	}
-	boundaries, err := s.FormalOutlineRetirements(ctx, project.ID)
+	boundaries, err := s.FormalOutlineRetirements(ctx, projectID)
 	if err != nil || boundaries[source.ID] != 2 {
 		t.Fatalf("retired source boundary: %+v %v", boundaries, err)
 	}
@@ -126,6 +134,81 @@ func TestFormalOutlineRetirementRebindsSingleStoryLine(t *testing.T) {
 		t.Fatalf("effective goals after rebind: source=%v target=%v", sourceVisible, targetVisible)
 	}
 	if replay, err := s.ConfirmFormalOutlineRetire(ctx, cmd, time.Unix(220, 0)); err != nil || replay.Digest != result.Digest {
+		t.Fatalf("replay: %+v %v", replay, err)
+	}
+}
+
+// 多条链接必须全部选择并改绑到同一有效目标，任一冲突使整单失败。
+func TestFormalOutlineRetirementRebindsAllStoryLines(t *testing.T) {
+	ctx, s, projectID, source, target := formalRebindFixture(t, []struct{ id, name string }{{"line-a", "主线"}, {"line-b", "支线"}})
+	defer s.Close()
+	r := asset.FormalOutlineRetireRequest{ProjectID: projectID, BranchID: "main", AssetID: "source-asset", ChapterID: "later", Reason: "保留两条故事线", RebindTargetAssetID: "target-asset", RebindStoryLineIDs: []string{"line-a", "line-b"}}
+	r.RebindStoryLineIDs = []string{"line-b", "line-a"}
+	if _, err := s.PreviewFormalOutlineRetire(ctx, r); !errors.Is(err, asset.ErrChangeUnsupported) {
+		t.Fatalf("unstable order: %v", err)
+	}
+	r.RebindStoryLineIDs = nil
+	r.RebindStoryLineID = "line-a"
+	if _, err := s.PreviewFormalOutlineRetire(ctx, r); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("partial rebind: %v", err)
+	}
+	r.RebindStoryLineID = ""
+	r.RebindStoryLineIDs = []string{"line-a", "line-b"}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO story_line_links(project_id,story_line_id,outline_node_id,position,created_at) VALUES(?,?,?,2,?)`, projectID, "line-b", target.ID, formatTime(time.Unix(100, 0))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PreviewFormalOutlineRetire(ctx, r); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("target already linked: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM story_line_links WHERE story_line_id='line-b' AND outline_node_id=?`, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.PreviewFormalOutlineRetire(ctx, r)
+	if err != nil || len(p.ReboundStoryLines) != 2 || p.ReboundStoryLines[0].Name != "主线" || p.ReboundStoryLines[1].Name != "支线" {
+		t.Fatalf("preview: %+v %v", p, err)
+	}
+	cmd := asset.FormalOutlineRetireCommand{Request: r, Digest: p.Digest, IdempotencyKey: "rebind-all"}
+	if _, err := s.db.ExecContext(ctx, `UPDATE story_lines SET name='支线已变' WHERE id='line-b'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmFormalOutlineRetire(ctx, cmd, time.Unix(200, 0)); !errors.Is(err, asset.ErrChangeConflict) {
+		t.Fatalf("stale second link: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE story_lines SET name='支线' WHERE id='line-b'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER block_second_rebind BEFORE UPDATE ON story_line_links WHEN OLD.story_line_id='line-b' BEGIN SELECT RAISE(FAIL,'blocked'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmFormalOutlineRetire(ctx, cmd, time.Unix(205, 0)); err == nil {
+		t.Fatal("second link failure must roll back the whole retirement")
+	}
+	var unchanged int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM story_line_links WHERE outline_node_id=?`, source.ID).Scan(&unchanged); err != nil || unchanged != 2 {
+		t.Fatalf("partial rebind after failure: %d %v", unchanged, err)
+	}
+	boundaries, err := s.FormalOutlineRetirements(ctx, projectID)
+	if err != nil || len(boundaries) != 0 {
+		t.Fatalf("retirement after failed rebind: %+v %v", boundaries, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DROP TRIGGER block_second_rebind`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.ConfirmFormalOutlineRetire(ctx, cmd, time.Unix(210, 0))
+	if err != nil || len(result.ReboundStoryLines) != 2 {
+		t.Fatalf("confirm: %+v %v", result, err)
+	}
+	var targetLinks, sourceLinks int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM story_line_links WHERE outline_node_id=?`, target.ID).Scan(&targetLinks); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM story_line_links WHERE outline_node_id=?`, source.ID).Scan(&sourceLinks); err != nil {
+		t.Fatal(err)
+	}
+	if targetLinks != 2 || sourceLinks != 0 {
+		t.Fatalf("moved links: source=%d target=%d", sourceLinks, targetLinks)
+	}
+	if replay, err := s.ConfirmFormalOutlineRetire(ctx, cmd, time.Unix(220, 0)); err != nil || replay.Digest != result.Digest || len(replay.ReboundStoryLines) != 2 {
 		t.Fatalf("replay: %+v %v", replay, err)
 	}
 }
