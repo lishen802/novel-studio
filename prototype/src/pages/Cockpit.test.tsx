@@ -22,6 +22,15 @@ function renderCockpit() {
 }
 
 describe('创意构建工作台 R4 交互', () => {
+  it('分步与自动推进只在本地切换，并说明演示边界', async () => {
+    const user = userEvent.setup();
+    renderCockpit();
+    expect(screen.getByRole('button', { name: '分步审阅' }).getAttribute('aria-pressed')).toBe('true');
+    await user.click(screen.getByRole('button', { name: '自动推进' }));
+    expect(screen.getByRole('button', { name: '自动推进' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText(/原型演示：仅切换本地模式/)).toBeTruthy();
+  });
+
   it('接受单个审阅单位后状态标记与已接受计数一起更新', async () => {
     const user = userEvent.setup();
     renderCockpit();

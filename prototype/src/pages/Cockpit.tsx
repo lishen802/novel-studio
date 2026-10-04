@@ -207,6 +207,7 @@ export default function Cockpit() {
   const navigate = useNavigate();
   const { state } = useApp();
   const [mode, setMode] = useState<'brainstorm' | 'draft'>('brainstorm');
+  const [advanceMode, setAdvanceMode] = useState<'step_review' | 'auto_advance'>('step_review');
   const [input, setInput] = useState('');
   const [directions, setDirections] = useState<DirectionCard[]>(initialDirections);
   const [draftSections, setDraftSections] = useState<DraftSection[]>(initialDraftSections);
@@ -398,6 +399,15 @@ export default function Cockpit() {
           </div>
         </div>
       </header>
+
+      <div className="px-8 py-2 border-b border-border bg-surface flex items-center gap-3 flex-wrap" aria-label="创作推进模式">
+        <span className="text-xs text-text-sub">推进方式</span>
+        <div role="group" aria-label="创作推进方式" className="flex gap-2">
+          <Button size="sm" variant={advanceMode === 'step_review' ? 'primary' : 'ghost'} aria-pressed={advanceMode === 'step_review'} onClick={() => setAdvanceMode('step_review')}>分步审阅</Button>
+          <Button size="sm" variant={advanceMode === 'auto_advance' ? 'primary' : 'ghost'} aria-pressed={advanceMode === 'auto_advance'} onClick={() => setAdvanceMode('auto_advance')}>自动推进</Button>
+        </div>
+        <p className="text-xs text-text-muted">原型演示：仅切换本地模式，不调用模型。{advanceMode === 'auto_advance' ? '正式运行须先确认阶段范围与预算。' : '正式运行每阶段生成后暂停审阅。'}</p>
+      </div>
 
       {!getActiveModel(state.settings).apiKeyConfigured && (
         <div className="px-8 py-3 bg-warning/5 border-b border-warning/15 flex items-center gap-3 shrink-0">
