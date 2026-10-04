@@ -712,7 +712,7 @@ export const studio = {
   confirmPlanningRearchive: (command:{request:PlanningRearchivePreview['request'];digest:string;idempotencyKey:string}) => call<PlanningRearchivePreview>('ConfirmPlanningRearchive',command),
   confirmCreationArchive: (input: { confirmationDigest: string; idempotencyKey: string }) =>
     call<{ changeSetId: string }>('ConfirmCreationArchive', input),
-  resolveCreationImpact: (choice: string) => call<{ projection: CreationWorkbenchView['impact'] }>('ResolveCreationImpact', choice),
+  resolveCreationImpact: (choice: string) => call<{ projection: CreationWorkbenchView['impact']; regenerateStages: string[] }>('ResolveCreationImpact', choice),
   // 逐项审阅：命令只改审阅元数据，返回的工作台投影才是权威状态。
   setCreationReview: (request: { candidateId: string; scope: 'entity' | 'section'; refId: string; decision: 'accept' | 'reject' | 'unreviewed' }) =>
     call<CreationWorkbenchView>('SetCreationReview', request),

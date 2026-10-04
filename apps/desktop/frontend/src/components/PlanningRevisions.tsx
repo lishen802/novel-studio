@@ -74,7 +74,7 @@ export function PlanningRevisions({ api, kind, registerBeforeLeave, readOnly = f
   {notice && <p role="status" className="text-sm text-primary">{notice}</p>}
   {error && !open && <div><p role="alert" className="text-sm text-danger">{error}</p><Button disabled={loading} onClick={() => setReload((value) => value + 1)}>重新读取规划</Button></div>}
   <Modal open={open} onClose={close} title={`修订正式${title}`}><div className="space-y-4 max-h-[70vh] overflow-auto">
-   <p className="text-sm text-text-sub">仅从未来空章节起生效，旧章和原规划保留。节点增删、重排、引用、禁写及锚点变更和整组 AI 规划候选再次入档尚未就绪。</p>
+   <p className="text-sm text-text-sub">本入口只修订正式规划文字，从未来空章节起生效，旧章和原规划保留。候选结构编辑、正式节点追加或停用请使用各自的审阅入口；正式节点重排与其他引用处理尚未就绪。</p>
    {kind === 'proposal' && <p className="text-xs text-text-muted">未来方案标题、类型和卖点属于规划版本，不改变项目名称和项目设置。</p>}
    <label className="block text-sm">正式规划<select aria-label="正式规划" disabled={busy || dirty} value={assetId} onChange={(e) => choose(e.target.value)} className="w-full mt-1 p-2 bg-surface border border-border rounded-md">{items.map((item) => <option key={item.assetId} value={item.assetId}>{item.name} · 版本 {item.revision}</option>)}</select></label>
    {selected?.locked && <p role="alert" className="text-warning text-sm">该资产或来源候选已锁定，不能修订。解锁入口尚未就绪。</p>}

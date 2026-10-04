@@ -150,6 +150,45 @@ describe('创作驾驶舱', () => {
     expect(screen.getByRole('button', { name: '前往配置' })).toBeTruthy();
   });
 
+  it('下游过期时局部重算先读取权威范围并预览费用，不直接启动模型', async () => {
+    const user = userEvent.setup();
+    const impact = {
+      items: [{ candidateId: 'proposal-old', stage: 'proposal', severity: 'maybe_affected', reason: '方向已变化', locked: false, confirmed: false, excepted: false }],
+      touchesLocked: false, touchesConfirmed: false, canAdvance: false,
+      regenerateStages: ['proposal'], estimatedCalls: 2, evidence: '方向已变化',
+    };
+    const view = workbench({ stage: 'proposal', impact });
+    recoverCreation.mockResolvedValue(view);
+    const resolve = vi.fn().mockResolvedValue({ projection: impact, regenerateStages: ['proposal'] });
+    Object.assign(window.go!.main!.DesktopAPI!, { ResolveCreationImpact: resolve });
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+
+    await user.click(await screen.findByRole('button', { name: '局部重算' }));
+    expect(screen.getByLabelText('下游影响').textContent).toContain('预计 2 次模型调用');
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('regenerate_local'));
+    expect(previewCreationGenerate).toHaveBeenCalledWith('proposal');
+    expect(await screen.findByText('确认生成费用')).toBeTruthy();
+    expect(confirmCreationGenerate).not.toHaveBeenCalled();
+  });
+
+  it('局部重算范围在点击后消失时不请求模型费用预览', async () => {
+    const user = userEvent.setup();
+    const impact = {
+      items: [{ candidateId: 'proposal-old', stage: 'proposal', severity: 'maybe_affected', reason: '方向已变化', locked: false, confirmed: false, excepted: false }],
+      touchesLocked: false, touchesConfirmed: false, canAdvance: false,
+      regenerateStages: ['proposal'], estimatedCalls: 2, evidence: '方向已变化',
+    };
+    recoverCreation.mockResolvedValue(workbench({ stage: 'proposal', impact }));
+    const resolve = vi.fn().mockResolvedValue({ projection: { ...impact, regenerateStages: [] }, regenerateStages: [] });
+    Object.assign(window.go!.main!.DesktopAPI!, { ResolveCreationImpact: resolve });
+    render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
+
+    await user.click(await screen.findByRole('button', { name: '局部重算' }));
+    expect(await screen.findByText('受影响候选已变化，请刷新后重新核对。')).toBeTruthy();
+    expect(previewCreationGenerate).not.toHaveBeenCalled();
+    expect(confirmCreationGenerate).not.toHaveBeenCalled();
+  });
+
   it('选择第二张卡时把候选 ID 和卡 ID 一起传给后端', async () => {
     const user = userEvent.setup();
     const view = workbench({ stage: 'directions', directionSet: {

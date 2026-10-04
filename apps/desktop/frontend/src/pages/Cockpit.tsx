@@ -81,6 +81,10 @@ const sectionIcons = {
   forbidden: Ban,
 };
 
+const stageNames: Record<string, string> = {
+  directions: '故事方向', proposal: '作品方案', people_world: '人物与世界', roadmap: '全书路线图',
+};
+
 function generateStage(stage: string): string {
   if (stage === 'intent' || stage === 'directions') return 'directions';
   return stage;
@@ -275,6 +279,24 @@ export default function Cockpit() {
     } finally {
       setBusy(false);
     }
+  };
+
+  // 局部重算先重读后端影响范围，仍须单独确认费用才能创建运行。
+  const prepareLocalRegeneration = async () => {
+    if (busy || generating || fieldDirty || materialDirty || workbench.readOnly) return;
+    setBusy(true);
+    setError(null);
+    let stage = '';
+    try {
+      const result = await studio.resolveCreationImpact('regenerate_local');
+      stage = result.regenerateStages?.[0] ?? '';
+      if (!stage) throw new Error('受影响候选已变化，请刷新后重新核对。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '读取局部重算范围失败');
+    } finally {
+      setBusy(false);
+    }
+    if (stage) await startGenerate(stage);
   };
 
   const confirmGenerate = async () => {
@@ -523,11 +545,14 @@ export default function Cockpit() {
       )}
 
       {(workbench.impact.items ?? []).filter((item) => !item.excepted).length > 0 && (
-        <div className="px-8 py-3 border-b border-border flex items-center gap-2 flex-wrap">
-          <p className="text-sm text-text-sub flex-1">{workbench.impact.evidence || '下游候选已过期。'}</p>
+        <div className="px-8 py-3 border-b border-border flex items-center gap-2 flex-wrap" aria-label="下游影响">
+          <div className="flex-1 min-w-56 space-y-1">
+            <p className="text-sm text-text-sub">{workbench.impact.evidence || '下游候选已过期。'}</p>
+            <p className="text-xs text-text-muted">需重新核对：{workbench.impact.regenerateStages.map(stage => workbench.stageRail.find(item => item.id === stage)?.label || stageNames[stage] || '未知阶段').join('、')} · 预计 {workbench.impact.estimatedCalls} 次模型调用；局部重算先预览最早受影响阶段的费用。</p>
+          </div>
           <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('keep_exception').then(() => studio.creationWorkbench()))}>保留为例外</Button>
           <Button size="sm" onClick={() => void run(() => studio.resolveCreationImpact('abandon_upstream').then(() => studio.creationWorkbench()))}>放弃上游修改</Button>
-          <Button size="sm" variant="ghost" disabled>局部重算（尚未自动开跑）</Button>
+          <Button size="sm" variant="ghost" disabled={busy || generating || fieldDirty || materialDirty || workbench.readOnly || workbench.impact.regenerateStages.length === 0} onClick={() => void prepareLocalRegeneration()}>局部重算</Button>
         </div>
       )}
 
