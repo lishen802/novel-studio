@@ -341,7 +341,15 @@ func (service *Service) Workbench(ctx context.Context, projectID, branchID strin
 	}
 	runID := session.ActiveRunID
 	if runID == "" {
-		// 已物化候选仍保留运行入口，不能因槽位清空而丢失完成结果。
+		// 优先展示最近一次付费运行，失败时不能回退显示旧候选的成功进度。
+		operation, operationErr := service.store.LatestOperation(ctx, session.ProjectID, session.BranchID)
+		if operationErr != nil && !errors.Is(operationErr, ErrOperationNotFound) {
+			return WorkbenchView{}, operationErr
+		}
+		runID = operation.RunID
+	}
+	if runID == "" {
+		// 兼容旧数据：已物化候选仍保留运行入口。
 		var latest creationdomain.Candidate
 		for _, candidate := range candidates {
 			if candidate.RunID != "" && (latest.ID == "" || candidate.CreatedAt.After(latest.CreatedAt) ||
@@ -561,7 +569,7 @@ func projectProposal(candidate creationdomain.Candidate, review creationdomain.C
 		CandidateID: candidate.ID, Version: candidate.Version, Status: string(candidate.Status),
 		Sections: []ProposalSectionView{},
 	}
-	blueprint, err := decodeBlueprint(candidate.PayloadJSON)
+	blueprint, err := decodeCandidateBlueprint(candidate.PayloadJSON)
 	if err != nil {
 		return view
 	}

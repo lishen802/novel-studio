@@ -126,6 +126,12 @@ func (store creationStore) Operation(ctx context.Context, id string) (operation 
 	return
 }
 
+// LatestOperation 在项目代次保护下读取最近一次真实运行回执。
+func (store creationStore) LatestOperation(ctx context.Context, projectID, branchID string) (operation creationdomain.Operation, err error) {
+	err = store.guard.access(ctx, false, func() error { operation, err = store.inner.LatestOperation(ctx, projectID, branchID); return err })
+	return
+}
+
 // OperationByIdempotency 在访问创作存储前核对工作区和运行租约。
 func (store creationStore) OperationByIdempotency(ctx context.Context, projectID, branchID, command, key string) (operation creationdomain.Operation, err error) {
 	err = store.guard.access(ctx, false, func() error {

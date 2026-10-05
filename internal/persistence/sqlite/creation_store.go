@@ -478,6 +478,18 @@ func (s *Store) CreationOperation(ctx context.Context, id string) (creationdomai
 	return operation, nil
 }
 
+// LatestCreationOperation 返回项目分支最近更新的运行回执，供失败后展示真实运行结果。
+func (s *Store) LatestCreationOperation(ctx context.Context, projectID, branchID string) (creationdomain.Operation, error) {
+	operation, err := scanCreationOperation(s.db.QueryRowContext(ctx, creationOperationSelect+`
+		WHERE project_id = ? AND branch_id = ? AND run_id <> ''
+		ORDER BY updated_at DESC, id DESC LIMIT 1
+	`, strings.TrimSpace(projectID), strings.TrimSpace(branchID)))
+	if err != nil {
+		return creationdomain.Operation{}, fmt.Errorf("read latest creation operation: %w", err)
+	}
+	return operation, nil
+}
+
 func (s *Store) CreationOperationByIdempotency(
 	ctx context.Context, projectID, branchID, command, idempotencyKey string,
 ) (creationdomain.Operation, error) {

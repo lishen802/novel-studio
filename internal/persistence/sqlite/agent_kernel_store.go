@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
@@ -188,7 +189,7 @@ func insertAgentReviewFinding(ctx context.Context, exec txExecutor, finding agen
 			suggested_action, quoted_evidence, scope_start, scope_end, constraint_ref,
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, finding.ID, finding.RunID, finding.StepID, finding.Attempt, finding.Category,
+	`, storedFindingID(finding), finding.RunID, finding.StepID, finding.Attempt, finding.Category,
 		finding.Severity, finding.Status, finding.Source, finding.Message, finding.Suggestion,
 		finding.Quote, nullableInt(finding.ScopeStart), nullableInt(finding.ScopeEnd),
 		finding.ConstraintRef, formatTime(finding.CreatedAt), formatTime(finding.UpdatedAt))
@@ -311,6 +312,8 @@ func (s *Store) ListAgentReviewFindings(ctx context.Context, runID string) ([]ag
 			&finding.ConstraintRef, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
+		// 数据库主键跨运行唯一，读取时恢复模型在本次步骤内使用的局部引用。
+		finding.ID = strings.TrimPrefix(finding.ID, findingStoragePrefix(finding))
 		finding.ScopeStart = intPointer(start)
 		finding.ScopeEnd = intPointer(end)
 		finding.CreatedAt, err = parseTime(createdAt)
@@ -323,6 +326,15 @@ func (s *Store) ListAgentReviewFindings(ctx context.Context, runID string) ([]ag
 		result = append(result, finding)
 	}
 	return result, rows.Err()
+}
+
+// storedFindingID 为模型局部编号加上运行、步骤和重试范围，避免跨次调用撞主键。
+func storedFindingID(finding agentdomain.ReviewFindingRecord) string {
+	return findingStoragePrefix(finding) + finding.ID
+}
+
+func findingStoragePrefix(finding agentdomain.ReviewFindingRecord) string {
+	return finding.RunID + "/" + finding.StepID + "/" + strconv.Itoa(finding.Attempt) + "/"
 }
 
 func nullableInt(value *int) any {

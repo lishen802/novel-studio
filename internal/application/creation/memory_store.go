@@ -79,6 +79,25 @@ func (store *memoryStore) Operation(_ context.Context, id string) (creationdomai
 	return creationdomain.Operation{}, ErrOperationNotFound
 }
 
+func (store *memoryStore) LatestOperation(_ context.Context, projectID, branchID string) (creationdomain.Operation, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var latest creationdomain.Operation
+	for _, operation := range store.operations {
+		if operation.ProjectID != projectID || operation.BranchID != branchID || operation.RunID == "" {
+			continue
+		}
+		if latest.ID == "" || operation.UpdatedAt.After(latest.UpdatedAt) ||
+			(operation.UpdatedAt.Equal(latest.UpdatedAt) && operation.ID > latest.ID) {
+			latest = operation
+		}
+	}
+	if latest.ID == "" {
+		return creationdomain.Operation{}, ErrOperationNotFound
+	}
+	return latest, nil
+}
+
 func (store *memoryStore) UpdateOperation(_ context.Context, operation creationdomain.Operation) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()

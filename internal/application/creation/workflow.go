@@ -32,7 +32,7 @@ func bindingFor(stage creationdomain.Stage) (stageBinding, error) {
 		}, nil
 	case creationdomain.StageProposal:
 		return stageBinding{
-			WorkflowID: agentassets.StoryProposalWorkflowID, Version: agentassets.StoryProductWorkflowVersion,
+			WorkflowID: agentassets.StoryProposalWorkflowID, Version: agentassets.StoryProposalWorkflowVersion,
 			Kind: creationdomain.KindProposal, SchemaID: "story_blueprint.schema", SchemaVersion: 2,
 			Stage: stage,
 		}, nil

@@ -42,6 +42,7 @@ type SQLBackend interface {
 	ApplyCreationArchive(context.Context, revisiondomain.ChangeSet, creationdomain.Session, []creationdomain.Candidate, []creationdomain.Candidate, projectdomain.WorkbenchState) error
 	ReserveCreationOperation(context.Context, creationdomain.Operation) (creationdomain.Operation, bool, error)
 	CreationOperation(context.Context, string) (creationdomain.Operation, error)
+	LatestCreationOperation(context.Context, string, string) (creationdomain.Operation, error)
 	CreationOperationByIdempotency(context.Context, string, string, string, string) (creationdomain.Operation, error)
 	UpdateCreationOperation(context.Context, creationdomain.Operation) error
 	SaveAssistantSessionRecord(context.Context, assistantdomain.Session) error
@@ -150,6 +151,14 @@ func (store sqliteStore) ReserveOperation(ctx context.Context, operation creatio
 
 func (store sqliteStore) Operation(ctx context.Context, id string) (creationdomain.Operation, error) {
 	operation, err := store.inner.CreationOperation(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return creationdomain.Operation{}, ErrOperationNotFound
+	}
+	return operation, err
+}
+
+func (store sqliteStore) LatestOperation(ctx context.Context, projectID, branchID string) (creationdomain.Operation, error) {
+	operation, err := store.inner.LatestCreationOperation(ctx, projectID, branchID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return creationdomain.Operation{}, ErrOperationNotFound
 	}

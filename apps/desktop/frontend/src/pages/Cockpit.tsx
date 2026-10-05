@@ -33,6 +33,8 @@ import { CreationProgress } from '../components/creation/CreationProgress';
 import { RevisionPanel } from '../components/creation/RevisionPanel';
 import { CandidateFields } from '../components/creation/CandidateFields';
 import { StructureEditor } from '../components/creation/StructureEditor';
+import { ProposalAnchorScopes } from '../components/creation/ProposalAnchorScopes';
+import { WorldRuleScopes } from '../components/creation/WorldRuleScopes';
 import { CoCreationPanel } from '../components/creation/CoCreationPanel';
 import { EntryPanel } from '../components/creation/EntryPanel';
 import { useApp } from '../store/useApp';
@@ -184,7 +186,7 @@ export default function Cockpit() {
   const archiveConfirmed = state.backendProject?.workbench.archiveStatus === 'confirmed' || workbench.archiveConfirmed;
   const statusText = workbench.blockingReason ? `已暂停：${workbench.blockingReason}`
     : archiveConfirmed ? '作品档案已确认'
-    : state.backendProject?.workbench.stage === 'writing' ? '已有正文 · 策划待确认'
+    : state.backendProject?.workbench.stage === 'writing' ? '正文工作区已建立 · 策划待确认'
     : '创意构建中';
 
   const load = useCallback(async (recover = false) => {
@@ -483,13 +485,14 @@ export default function Cockpit() {
   };
 
   const hint = useMemo(() => {
+    if (archiveConfirmed) return '正式档案已保存，可查看设定或开始写正文。';
     if (generating) return '正在生成候选，完成后不会自动跳转正文。';
     if (workbench.recoverable) return '检测到未完成的付费运行，已暂停，不会自动续跑。';
     if (workbench.impact.items.length > 0) return workbench.impact.evidence || '上游修改影响了下游候选。';
     if (workbench.stage === 'intent') return '输入你的想法，确认费用后生成三套故事方向。';
     if (workbench.stage === 'directions') return '比较、保留或选择一套方向，再进入作品方案。';
     return '直接编辑、锁定后确认进入下一步；确认档案前不会写入正式资产。';
-  }, [generating, workbench]);
+  }, [archiveConfirmed, generating, workbench]);
 
   const cards = workbench.directionSet?.cards ?? [];
   const peopleEntities = workbench.peopleWorld?.entities ?? [];
@@ -803,6 +806,7 @@ export default function Cockpit() {
                   </Card>
                 );
               })}
+              <ProposalAnchorScopes candidateId={workbench.proposal.candidateId} disabled={reviewDisabled} onSaved={async () => { await load(); }} />
             </div>
           )}
 
@@ -829,6 +833,7 @@ export default function Cockpit() {
               )}
             </Card>
           )}
+          {workbench.stage === 'people_world' && <WorldRuleScopes candidateId={workbench.peopleWorld.candidateId} disabled={reviewDisabled} onSaved={async () => { await load(); }} />}
 
           {workbench.stage === 'roadmap' && selectedRoadmap && (
             <Card className="max-w-3xl">
@@ -858,9 +863,18 @@ export default function Cockpit() {
 
           {workbench.stage === 'archive_confirm' && (
             <Card className="max-w-xl mx-auto text-center space-y-3">
-              <h2 className="text-lg font-medium text-text">确认作品档案</h2>
-              <p className="text-sm text-text-sub">确认后才会写入人物、世界规则和大纲等正式资产，并进入可写状态。</p>
-              <Button variant="primary" onClick={() => void confirmNext()}>确认作品档案</Button>
+              {archiveConfirmed ? <>
+                <h2 className="text-lg font-medium text-text">作品档案已确认</h2>
+                <p className="text-sm text-text-sub">人物、世界规则和大纲已保存，可以继续写作。</p>
+                <div className="flex justify-center gap-2">
+                  <Button onClick={() => navigate('/archive/outline')}>查看作品档案</Button>
+                  <Button variant="primary" onClick={() => navigate('/chapters')}>开始写正文</Button>
+                </div>
+              </> : <>
+                <h2 className="text-lg font-medium text-text">确认作品档案</h2>
+                <p className="text-sm text-text-sub">确认后才会写入人物、世界规则和大纲等正式资产，并进入可写状态。</p>
+                <Button variant="primary" onClick={() => void confirmNext()}>确认作品档案</Button>
+              </>}
             </Card>
           )}
 
@@ -916,7 +930,7 @@ export default function Cockpit() {
         >
           上一步
         </Button>
-        <div className="flex gap-2">
+        {workbench.stage !== 'archive_confirm' && <div className="flex gap-2">
           <Button disabled={generating || busy} onClick={() => void startGenerate()} className="gap-1">
             <RefreshCw className="w-4 h-4" />{workbench.entry?.kind === 'author_plan' ? (workbench.stage === 'intent' ? '重新解析' : '补齐本阶段候选') : '重新生成'}
           </Button>
@@ -924,7 +938,7 @@ export default function Cockpit() {
           <Button variant="primary" disabled={generating || busy} onClick={() => void confirmNext()} className="gap-1">
             {['proposal', 'people_world', 'roadmap'].includes(workbench.stage) ? '接受并进入下一步' : '确认进入下一步'} <ChevronRight className="w-4 h-4" />
           </Button>
-        </div>
+        </div>}
       </footer>
 
       <Modal open={Boolean(preview)} onClose={() => setPreview(null)} title="确认生成费用">

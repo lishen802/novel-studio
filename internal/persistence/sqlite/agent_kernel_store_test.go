@@ -57,6 +57,29 @@ func TestAgentKernelBundlePersistsAndReconstructsAtomically(t *testing.T) {
 	}
 }
 
+func TestAgentReviewFindingIDsAreLocalToEachRun(t *testing.T) {
+	ctx := context.Background()
+	store, project, chapter := createStoreWithChapter(t)
+	defer store.Close()
+	now := time.Unix(1_100, 0).UTC()
+	for _, runID := range []string{"run-first", "run-second"} {
+		run := newR3PersistenceRun(t, project.ID, chapter.ID, chapter.Revision, now)
+		run.ID = runID
+		for index := range run.Steps {
+			run.Steps[index].RunID = runID
+			run.Steps[index].ID = runID + "-" + run.Steps[index].ID
+		}
+		finding := testAgentFinding(runID, run.Steps[0].ID, now)
+		if err := store.CreateAgentRunBundle(ctx, agentdomain.RunBundle{Run: run, Findings: []agentdomain.ReviewFindingRecord{finding}}); err != nil {
+			t.Fatalf("run %s 保存相同模型 finding ID: %v", runID, err)
+		}
+		loaded, err := store.ListAgentReviewFindings(ctx, runID)
+		if err != nil || len(loaded) != 1 || loaded[0].ID != finding.ID {
+			t.Fatalf("run %s 原始 finding ID 丢失: %+v, %v", runID, loaded, err)
+		}
+	}
+}
+
 func TestArtifactRelationsPreserveCandidateLineage(t *testing.T) {
 	ctx := context.Background()
 	store, project, chapter := createStoreWithChapter(t)

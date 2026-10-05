@@ -448,6 +448,24 @@ describe('创作驾驶舱', () => {
 describe('档案页确认入口', () => {
   afterEach(() => {
     cleanup();
+    delete window.go;
+  });
+
+  it('重启恢复已确认档案时展示写作入口，不再提示重复入档', async () => {
+    const view = workbench({ stage: 'archive_confirm', archiveConfirmed: true });
+    window.go = { main: { DesktopAPI: {
+      RecoverCreation: vi.fn().mockResolvedValue(view),
+      CreationWorkbench: vi.fn().mockResolvedValue(view),
+    } } };
+    render(<MemoryRouter initialEntries={['/cockpit']}><AppContext.Provider value={contextValue({ archiveStatus: 'confirmed' })}>
+      <Routes><Route path="/cockpit" element={<Cockpit />} /><Route path="/chapters" element={<p>正文工作区</p>} /></Routes>
+    </AppContext.Provider></MemoryRouter>);
+
+    expect(await screen.findByText('正式档案已保存，可查看设定或开始写正文。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '确认作品档案' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '确认进入下一步' })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: '开始写正文' }));
+    expect(screen.getByText('正文工作区')).toBeTruthy();
   });
 
   it('档案未确认时提示并提供返回驾驶舱入口', async () => {
@@ -729,6 +747,7 @@ describe('作品策划逐项审阅', () => {
       RecoverCreation: vi.fn().mockResolvedValue(base),
       CreationWorkbench: vi.fn().mockResolvedValue(base),
       SaveCreationReviewCursor: saveCursor,
+      GetCreationCandidate: vi.fn().mockResolvedValue({ id: 'people-1', stage: 'people_world', payloadJson: '{"world_rules":[]}' }),
     } } };
 
     render(<MemoryRouter><AppContext.Provider value={contextValue({ hasCredential: true })}><Cockpit /></AppContext.Provider></MemoryRouter>);
@@ -812,6 +831,7 @@ describe('候选结构增删', () => {
     window.go = { main: { DesktopAPI: {
       RecoverCreation: vi.fn().mockResolvedValue(view),
       CreationWorkbench: vi.fn().mockResolvedValue(view),
+      GetCreationCandidate: vi.fn().mockResolvedValue({ id: 'people-1', stage: 'people_world', payloadJson: '{"world_rules":[]}' }),
       // 桌面桥按任意参数转发命令，测试里只需要按命令形状断言。
       SaveCreationStructure: saveStructure as unknown as (...args: unknown[]) => Promise<unknown>,
     } } };

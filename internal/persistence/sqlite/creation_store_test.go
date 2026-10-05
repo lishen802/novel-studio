@@ -44,6 +44,28 @@ func TestCreationOperationPersistsFrozenInputDigest(t *testing.T) {
 	}
 }
 
+func TestLatestCreationOperationKeepsFailedRunVisible(t *testing.T) {
+	ctx := context.Background()
+	store, project := createTestStore(t)
+	defer store.Close()
+	now := time.Unix(510, 0).UTC()
+	for index, status := range []creationdomain.OperationStatus{creationdomain.OperationSucceeded, creationdomain.OperationFailed} {
+		operation := creationdomain.Operation{
+			ID: fmt.Sprintf("operation-%d", index), ProjectID: project.ID, BranchID: "main",
+			Command: "generate:proposal", IdempotencyKey: fmt.Sprintf("key-%d", index),
+			ArgumentsHash: "arguments", Status: status, RunID: fmt.Sprintf("run-%d", index),
+			CreatedAt: now.Add(time.Duration(index) * time.Minute), UpdatedAt: now.Add(time.Duration(index) * time.Minute),
+		}
+		if _, _, err := store.ReserveCreationOperation(ctx, operation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, err := store.LatestCreationOperation(ctx, project.ID, "main")
+	if err != nil || latest.RunID != "run-1" || latest.Status != creationdomain.OperationFailed {
+		t.Fatalf("最近运行应为失败的重试: %+v, %v", latest, err)
+	}
+}
+
 func TestCreationCandidateChangesRollbackAsOneTransaction(t *testing.T) {
 	ctx := context.Background()
 	store, project := createTestStore(t)

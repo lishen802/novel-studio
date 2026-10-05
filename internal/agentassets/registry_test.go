@@ -89,7 +89,7 @@ func TestBuiltinWorkflowsCompileWithoutModel(t *testing.T) {
 		{SplitReviewWorkflowID, VerifiedSplitReviewWorkflowVersion, []string{"director", "draft", "content", "continuity", "style", "revision", "verify"}},
 		{SlotParallelWorkflowID, SlotParallelWorkflowVersion, []string{"director", "skeleton", "slots_dialogue", "slots_action", "slots_interiority", "slots_description", "slots_transition", "integrate", "review", "revision"}},
 		{StoryDirectionsWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review"}},
-		{StoryProposalWorkflowID, StoryProductWorkflowVersion, []string{"blueprint", "review", "revision"}},
+		{StoryProposalWorkflowID, StoryProposalWorkflowVersion, []string{"blueprint", "review", "revision"}},
 		{StoryPeopleWorldWorkflowID, StoryPeopleWorldWorkflowVersion, []string{"blueprint", "review"}},
 		{StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersion, []string{"blueprint", "review"}},
 		{"story.author_roadmap", StoryAuthorRoadmapWorkflowVersion, []string{"blueprint", "review"}},
@@ -186,7 +186,7 @@ func TestBuiltinRegistersCurrentPlanningAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	blueprint := roadmap.Definition.Nodes[0]
-	if blueprint.Prompt.Version != 3 || blueprint.Schema.Version != 3 {
+	if blueprint.Prompt.Version != 4 || blueprint.Schema.Version != 3 {
 		t.Fatalf("roadmap current bindings = %+v", blueprint)
 	}
 	roadmapSchema, err := registry.Schema(context.Background(), "story_roadmap.schema", 3)
@@ -204,7 +204,7 @@ func TestBuiltinRegistersCurrentPlanningAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	peopleNode := peopleWorld.Definition.Nodes[0]
-	if peopleNode.Prompt.Version != 2 || peopleNode.Schema.Version != 2 {
+	if peopleNode.Prompt.Version != 3 || peopleNode.Schema.Version != 2 {
 		t.Fatalf("people/world current bindings = %+v", peopleNode)
 	}
 	castSchema, err := registry.Schema(context.Background(), "story_cast.schema", 2)
@@ -240,6 +240,7 @@ func TestBuiltinDoesNotRegisterSupersededPlanningAssets(t *testing.T) {
 		{StoryPeopleWorldWorkflowID, 1},
 		{StoryRoadmapWorkflowID, 1},
 		{StoryRoadmapWorkflowID, 2},
+		{StoryRoadmapWorkflowID, 3},
 		{"story.author_roadmap", 1},
 		{StoryCandidateRevisionWorkflowID, 1},
 		{StoryCandidateRevisionWorkflowID, 2},
@@ -252,9 +253,12 @@ func TestBuiltinDoesNotRegisterSupersededPlanningAssets(t *testing.T) {
 		}
 	}
 
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3} {
 		if _, promptErr := registry.Prompt(context.Background(), "story_roadmap.prompt", version); !errors.Is(promptErr, ports.ErrAgentAssetNotFound) {
 			t.Errorf("obsolete roadmap prompt @%d error = %v", version, promptErr)
+		}
+		if version == 3 {
+			continue
 		}
 		if _, schemaErr := registry.Schema(context.Background(), "story_roadmap.schema", version); !errors.Is(schemaErr, ports.ErrAgentAssetNotFound) {
 			t.Errorf("obsolete roadmap schema @%d error = %v", version, schemaErr)

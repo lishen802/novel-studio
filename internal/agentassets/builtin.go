@@ -27,6 +27,7 @@ const (
 	StoryRoadmapWorkflowID            = "story.roadmap"
 	StoryAuthorReviseWorkflowID       = "story.author_revise"
 	StoryProductWorkflowVersion       = 1
+	StoryProposalWorkflowVersion      = 2
 )
 
 // v2 在既有工作流末尾追加修订复核节点；v1 保留不变，供 Harness 判断复核节点是否值得这次调用。
@@ -39,13 +40,13 @@ const (
 )
 
 // StoryRoadmapWorkflowVersion 标识当前路线图工作流合同。
-const StoryRoadmapWorkflowVersion = 3
+const StoryRoadmapWorkflowVersion = 4
 
 // StoryAuthorRoadmapWorkflowVersion 标识当前已有方案路线图工作流合同。
 const StoryAuthorRoadmapWorkflowVersion = 2
 
 // StoryPeopleWorldWorkflowVersion 标识当前人物世界工作流合同。
-const StoryPeopleWorldWorkflowVersion = 2
+const StoryPeopleWorldWorkflowVersion = 3
 
 // StoryAuthorReviseWorkflowVersion 标识当前显式基线修订合同。
 const StoryAuthorReviseWorkflowVersion = 2
@@ -159,9 +160,9 @@ func Builtin() (*Registry, error) {
 	architectPromptBinding := BindingForText("story_architect.prompt", 1, []byte(storyArchitectPrompt))
 	directionsPromptBinding := BindingForText("story_directions.prompt", 1, []byte(storyDirectionsPrompt))
 	directionOperationPromptBinding := BindingForText("story_direction_operation.prompt", 1, []byte(storyDirectionOperationPrompt))
-	proposalPromptBinding := BindingForText("story_proposal.prompt", 2, []byte(storyProposalPrompt))
-	castPromptBinding := BindingForText("story_cast.prompt", 2, []byte(storyCastPrompt))
-	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 3, []byte(storyRoadmapPrompt))
+	proposalPromptBinding := BindingForText("story_proposal.prompt", 3, []byte(storyProposalPrompt))
+	castPromptBinding := BindingForText("story_cast.prompt", 3, []byte(storyCastPrompt))
+	roadmapPromptBinding := BindingForText("story_roadmap.prompt", 4, []byte(storyRoadmapPrompt))
 	planPromptBinding := BindingForText("chapter_plan.prompt", 1, []byte(chapterPlanPrompt))
 	directorPromptBinding := BindingForText("chapter_director.prompt", 1, []byte(chapterDirectorPrompt))
 	writerPromptBinding := BindingForText("prose_writer.prompt", 1, []byte(proseWriterPrompt))
@@ -362,7 +363,7 @@ func Builtin() (*Registry, error) {
 		}},
 	}
 	proposal := agentdomain.WorkflowDefinition{
-		ID: StoryProposalWorkflowID, Version: StoryProductWorkflowVersion, TaskKind: agentdomain.TaskStoryBlueprint,
+		ID: StoryProposalWorkflowID, Version: StoryProposalWorkflowVersion, TaskKind: agentdomain.TaskStoryBlueprint,
 		EntryNodeID: "blueprint", ResultNodeID: "revision", BudgetPolicyVersion: 1, QualityPolicyVersion: 1,
 		MaxRevisionAttempts: 1, MaxRunTokens: 11500, RepairReserve: 1000, RevisionReserve: 1000,
 		Nodes: []agentdomain.WorkflowNode{
@@ -384,7 +385,7 @@ func Builtin() (*Registry, error) {
 	)
 	roadmap := productGenerateAndReview(
 		StoryRoadmapWorkflowID, StoryRoadmapWorkflowVersion, agentdomain.TaskStoryRoadmap,
-		roadmapPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 9000,
+		roadmapPromptBinding, roadmapSchema, assembler, blueprintReviewPromptBinding, reviewSchema, 5000, 10000,
 	)
 	authorRevise := agentdomain.WorkflowDefinition{
 		ID: StoryAuthorReviseWorkflowID, Version: StoryAuthorReviseWorkflowVersion, TaskKind: agentdomain.TaskReviseBlueprint,

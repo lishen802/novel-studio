@@ -41,16 +41,16 @@ func (s *Store) ApplyCreationArchive(
 		appliedAt = time.Now().UTC()
 	}
 	prepared := make([]preparedOperation, 0, len(changeSet.Operations))
-	for _, operation := range pendingOperations(changeSet) {
+	for index, operation := range pendingOperations(changeSet) {
 		value, err := prepareOperation(ctx, tx, changeSet, operation, appliedAt)
 		if err != nil {
-			return err
+			return fmt.Errorf("prepare creation archive operation %d (%s): %w", index+1, operation.Kind, err)
 		}
 		prepared = append(prepared, value)
 	}
-	for _, operation := range prepared {
+	for index, operation := range prepared {
 		if _, err := operation.apply(); err != nil {
-			return err
+			return fmt.Errorf("apply creation archive operation %d: %w", index+1, err)
 		}
 	}
 	changeSet, err = changeSet.Apply(appliedAt)

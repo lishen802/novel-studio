@@ -705,6 +705,8 @@ export const studio = {
   saveCreationStructure: (request: StructureEditCommand) => call<CreationWorkbenchView>('SaveCreationStructure', request),
   saveCreationCandidateDraft: (candidateId: string, payloadJson: string) =>
     call<CreationWorkbenchView>('SaveCreationCandidateDraft', candidateId, payloadJson),
+  getCreationCandidate: (candidateId: string) =>
+    call<{ id: string; stage: string; version: number; status: string; payloadJson: string }>('GetCreationCandidate', candidateId),
   lockCreationField: (candidateId: string, path: string) => call<CreationWorkbenchView>('LockCreationField', candidateId, path),
   unlockCreationField: (candidateId: string, path: string) => call<CreationWorkbenchView>('UnlockCreationField', candidateId, path),
   previewCreationGenerate: (stage: string) => call<CreationCostPreview>('PreviewCreationGenerate', stage),

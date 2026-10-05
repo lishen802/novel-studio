@@ -2,7 +2,10 @@ package creation
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	agentdomain "github.com/lishen802/novel-studio/internal/domain/agent"
 	creationdomain "github.com/lishen802/novel-studio/internal/domain/creation"
@@ -53,6 +56,26 @@ func TestWorkbenchReadDoesNotRecoverInterruptedRun(t *testing.T) {
 	}
 }
 
+func TestWorkbenchShowsLatestFailedRunAfterEarlierCandidate(t *testing.T) {
+	kernel := newFakeKernel()
+	service, store, _ := newTestService(t, kernel, nil)
+	seedDirectionsSelection(t, service, store, "d1")
+	seedStageCandidate(t, service, store, creationdomain.StageProposal, proposalPayload)
+	kernel.runs["run-proposal"] = agentdomain.Run{ID: "run-proposal", Status: agentdomain.RunCompleted}
+	kernel.runs["run-failed"] = agentdomain.Run{ID: "run-failed", Status: agentdomain.RunFailed}
+	store.operations["failed"] = creationdomain.Operation{
+		ID: "failed", ProjectID: "project-1", BranchID: "branch-1", RunID: "run-failed",
+		Status: creationdomain.OperationFailed, UpdatedAt: testClock{}.Now().Add(time.Minute),
+	}
+	view, err := service.Workbench(context.Background(), "project-1", "branch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.CurrentRun.RunID != "run-failed" || view.CurrentRun.Status != string(agentdomain.RunFailed) {
+		t.Fatalf("不能把最近失败显示成旧候选的成功: %+v", view.CurrentRun)
+	}
+}
+
 func TestRoadmapProjectionKeepsArcPlanningGoals(t *testing.T) {
 	view := projectRoadmap(creationdomain.Candidate{ID: "roadmap-1", PayloadJSON: roadmapPayloadV3}, creationdomain.CandidateReview{})
 	if view.Book.Title != "潮汐关" || len(view.Arcs) != 1 || view.Arcs[0].ID != "arc:arc-1" {
@@ -79,6 +102,21 @@ func TestPeopleWorldProjectionUsesStableCharacterIDs(t *testing.T) {
 	view := projectPeopleWorld(creationdomain.Candidate{ID: "people-1", PayloadJSON: payload}, creationdomain.CandidateReview{})
 	if len(view.Entities) < 2 || view.Entities[0].ID != "character:char-a" || view.Entities[1].ID != "character:char-b" {
 		t.Fatalf("同名人物投影未使用稳定 ID: %+v", view.Entities)
+	}
+}
+
+func TestProposalProjectionKeepsUnresolvedAnchorsReviewable(t *testing.T) {
+	payload := strings.Replace(proposalPayload, `"scope_hint":"proposal"`, `"scope_hint":"结局"`, 1)
+	candidate := creationdomain.Candidate{ID: "proposal-1", Kind: creationdomain.KindProposal, PayloadJSON: payload}
+	view := projectProposal(candidate, creationdomain.CandidateReview{})
+	if view.Title != "潮汐关" || len(view.Sections) != 7 {
+		t.Fatalf("未解析锚点不应隐藏方案审阅: %+v", view)
+	}
+	if len(reviewRefs(candidate)[creationdomain.ReviewScopeSection]) != 7 {
+		t.Fatal("未解析锚点不应让方案审阅单位消失")
+	}
+	if _, err := decodeBlueprint(payload); !errors.Is(err, creationdomain.ErrStageIncomplete) {
+		t.Fatalf("未解析锚点仍须阻断入档: %v", err)
 	}
 }
 

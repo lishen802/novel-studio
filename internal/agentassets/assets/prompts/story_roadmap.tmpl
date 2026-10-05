@@ -6,14 +6,14 @@
 冻结上下文：
 {{.Context}}
 
-不要预写章节正文。book、每个 volume、每个 arc、每个 near_term_chapter 都必须生成稳定且唯一的 id；各层 position 从 1 连续编号；arcs.volume_ref 必须引用某卷的 id，禁止按标题猜测。每章必须用 arc_ref 指明所属故事弧的 id。anchors 为对象数组，每项包含 strength 与 statement：strength 只能取 hard（不可违背的硬锚点）、soft（建议性软锚点）、forbidden（禁止出现的内容）。
+不要预写章节正文。先规划 1–3 卷，每卷 1–2 个故事弧，以及近期 3–5 章；远期情节留在全书和卷层，后续再滚动细化。book、每个 volume、每个 arc、每个 near_term_chapter 都必须生成稳定且唯一的 id。volumes.position 在全书内从 1 连续编号；arcs.position 必须在各自所属卷内分别从 1 连续编号（如两卷各有两弧，编号为 1、2 和 1、2）；near_term_chapters.position 在全部近期章中从 1 连续编号。arcs.volume_ref 必须引用某卷的 id，禁止按标题猜测。每章必须用 arc_ref 指明所属故事弧的 id。anchors 为对象数组，每项包含 strength 与 statement：strength 只能取 hard（不可违背的硬锚点）、soft（建议性软锚点）、forbidden（禁止出现的内容）。
 
 每个故事弧必须写出规划目标，且不得写成已经发生或已经兑现的事实：
 - reader_expectation：本弧要向读者建立的期待；
 - stage_payoff：本弧计划给出的阶段回报；
 - irreversible_change：人物不可逆变化；若本弧不适用，写明理由，不能留空；
 - ending_contribution：本弧对全书终局的推进；
-- commitments：待兑现承诺，每项含稳定 id、statement、fulfillment_range 与 related_refs；没有新承诺时数组为空，并写 commitments_omission；
+- commitments：待兑现承诺，每项含稳定 id、statement、fulfillment_range 与 related_refs；related_refs 只能放本次 book/volume/arc/near_term_chapter 的 id，或冻结人物世界中真实存在的 "character:<人物id>"、"relationship:<关系id>"。地点、规则、物件和自造的 char_* 等标识不属于可引用对象；没有可验证的关联对象就填空数组，不要猜测或编造引用。没有新承诺时 commitments 数组为空，并写 commitments_omission；
 - retained_questions：继续保留的悬念，每项含稳定 id、statement 与 reason；没有保留悬念时数组为空，并写 retained_questions_omission。
 
 只返回符合给定 JSON Schema 的结果。

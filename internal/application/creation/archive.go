@@ -656,6 +656,20 @@ func (mapper *archiveMapper) addRoadmap(candidate creationdomain.Candidate, road
 }
 
 func decodeBlueprint(payload string) (agentdomain.StoryBlueprintOutput, error) {
+	output, err := decodeCandidateBlueprint(payload)
+	if err != nil {
+		return agentdomain.StoryBlueprintOutput{}, err
+	}
+	for _, anchor := range output.Anchors {
+		if strings.TrimSpace(anchor.ScopeHint) != "proposal" {
+			return agentdomain.StoryBlueprintOutput{}, creationdomain.ErrStageIncomplete
+		}
+	}
+	return output, nil
+}
+
+// decodeCandidateBlueprint 读取结构完整的方案候选，未解析锚点仍可供作者审阅。
+func decodeCandidateBlueprint(payload string) (agentdomain.StoryBlueprintOutput, error) {
 	decoded, err := agentdomain.DecodeTaskOutput(agentdomain.TaskStoryBlueprint, []byte(payload))
 	if err != nil {
 		return agentdomain.StoryBlueprintOutput{}, err
@@ -663,11 +677,6 @@ func decodeBlueprint(payload string) (agentdomain.StoryBlueprintOutput, error) {
 	output := *decoded.(*agentdomain.StoryBlueprintOutput)
 	if err := output.ValidateProduct(); err != nil {
 		return agentdomain.StoryBlueprintOutput{}, err
-	}
-	for _, anchor := range output.Anchors {
-		if strings.TrimSpace(anchor.ScopeHint) != "proposal" {
-			return agentdomain.StoryBlueprintOutput{}, creationdomain.ErrStageIncomplete
-		}
 	}
 	return output, nil
 }
@@ -682,6 +691,12 @@ func decodeArchivableCast(candidate creationdomain.Candidate) (agentdomain.Story
 	}
 	if err := output.ValidateStableReferences(); err != nil {
 		return agentdomain.StoryCastOutput{}, err
+	}
+	// v2 候选没有稳定的区域/地点作用目标，非作品级规则必须先由作者明确处理。
+	for _, rule := range output.WorldRules {
+		if strings.TrimSpace(rule.ScopeType) != "project" {
+			return agentdomain.StoryCastOutput{}, creationdomain.ErrStageIncomplete
+		}
 	}
 	return output, nil
 }

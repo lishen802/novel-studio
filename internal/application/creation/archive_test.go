@@ -972,6 +972,22 @@ func TestArchiveRejectsUnresolvedChapterScopeHint(t *testing.T) {
 	}
 }
 
+func TestArchivePreviewRejectsWorldRuleWithoutStableScopeTarget(t *testing.T) {
+	ctx := context.Background()
+	raw, project := sqliteCreateStore(t)
+	defer raw.Close()
+	bridge := NewSQLiteStore(raw)
+	unresolved := strings.Replace(peopleWorldPayload, `"scope_type":"project"`, `"scope_type":"region"`, 1)
+	seedArchiveSessionWithAllPayloads(t, bridge, project.ID, proposalPayload, unresolved, roadmapPayload)
+	service, err := New(Config{Store: bridge, Kernel: newFakeKernel(), Clock: testClock{}, IDs: &testIDs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PreviewConfirmArchive(ctx, project.ID); !errors.Is(err, creationdomain.ErrStageIncomplete) {
+		t.Fatalf("缺少稳定目标的区域规则应在预览前阻断: %v", err)
+	}
+}
+
 func TestApplyCreationArchiveRollsBackPartialFailure(t *testing.T) {
 	ctx := context.Background()
 	raw, project := sqliteCreateStore(t)
