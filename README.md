@@ -63,29 +63,51 @@ Rust 不是当前必需依赖。只有出现经测量的性能瓶颈、可靠库
 
 ### 分层与调用边界
 
-```text
-React 工作台
-    │ StudioClient / 类型化 DTO
-    ▼
-Wails 薄绑定
-    │ 应用命令、查询与事件通知
-    ▼
-Go 应用层
-    ├── creation        策划、候选、共创、影响与确认
-    ├── workspace       项目生命周期、编辑、资产与作业协调
-    ├── agentkernel     版本化任务、工作流、预算与恢复
-    └── creativeharness 创作质量评估
-    │
-    ├── 领域模型与规则
-    └── 消费方定义的端口
-            ├── SQLite 存储适配
-            ├── Provider 模型适配
-            └── 文件系统、凭据库等平台适配
+实线表示本地调用或读写，虚线表示外部模型请求；业务模块均运行在同一桌面应用内。
+
+```mermaid
+flowchart TB
+    subgraph desktopApp["本地桌面应用 · Windows / macOS"]
+        ui["React 工作台"]
+        bridge["Wails 薄绑定"]
+        app["应用用例 · creation / workspace"]
+        domain["领域规则 · 版本 / 锁 / 确认 / 依赖"]
+        kernel["Agent Kernel · 工作流 / 预算 / 恢复"]
+        repository["存储适配 · SQLite"]
+        platform["平台适配 · 文件系统 / 凭据库"]
+        provider["模型适配 · Provider"]
+
+        ui -->|"StudioClient / DTO"| bridge
+        bridge -->|"命令与查询"| app
+        app -->|"校验业务规则"| domain
+        app -->|"授权任务"| kernel
+        app -->|"事务与版本"| repository
+        app -->|"项目生命周期"| platform
+        kernel -->|"工件与运行记录"| repository
+        kernel -->|"模型请求"| provider
+    end
+
+    projectDb[("作品项目包 / 应用级数据库")]
+    osServices["本机文件与系统凭据库"]
+    modelService["外部模型服务 · 作者选择的供应商"]
+    repository --> projectDb
+    platform --> osServices
+    provider -.->|"仅发送授权上下文"| modelService
+
+    classDef interface fill:#eff6ff,stroke:#2563eb,color:#172554
+    classDef business fill:#f0fdf4,stroke:#16a34a,color:#14532d
+    classDef external fill:#fff7ed,stroke:#ea580c,color:#7c2d12
+    style desktopApp fill:#f8fafc,stroke:#94a3b8,color:#334155
+    class ui,bridge interface
+    class app,domain,kernel business
+    class modelService external
 ```
 
 领域层不依赖 Wails、React 或数据库。React 通过应用命令操作作品，不能直接访问 SQLite 或模型供应商；Wails 绑定负责转发和 DTO 转换，不承载核心业务规则。模型也不能绕过应用层写入正式数据。
 
 Go 返回工作台的**权威状态投影**，包括当前阶段、候选、阻断原因、运行状态和允许的动作。前端保留未保存输入及界面偏好，但不靠路由、示例数据或按钮点击自行推断作品是否已经入档。
+
+图表使用 Mermaid，图源与说明一起维护；支持 Mermaid 的 Markdown 阅读器可直接渲染。
 
 [`prototype/`](prototype/) 是已接受的视觉与交互基准。生产界面沿用其设计 Token、布局和组件结构；原型独立运行，不作为生产依赖。未接通能力明确显示未就绪，不能用原型数据伪装成功。
 
@@ -95,12 +117,27 @@ Go 返回工作台的**权威状态投影**，包括当前阶段、候选、阻�
 
 当前策划流程为：
 
-```text
-一句灵感 → 三方向 → 作者选择 ──┐
-                             ├→ 作品方案 → 人物与世界 → 四层路线图
-已有方案 → 保存来源与缺口检查 ─┘                             │
-                                                           ▼
-                          正式故事档案 ← 确认事务 ← 入档预览与逐项审阅
+```mermaid
+flowchart TB
+    idea["一句灵感"] --> directions["生成三套方向"]
+    directions --> choose["作者比较并选择"]
+    material["已有方案"] --> inspect["保存来源 / 检查缺口 / 复用内容"]
+    choose --> proposal["作品方案候选"]
+    inspect --> proposal
+    proposal --> cast["人物与世界候选"]
+    cast --> roadmap["四层路线图候选"]
+    roadmap --> review["逐项审阅与入档预览"]
+    review --> confirm{"确认入档？"}
+    confirm -->|"继续调整"| review
+    confirm -->|"确认"| validate{"校验通过？"}
+    validate -->|"否"| conflict["显示阻断原因 / 保留候选"]
+    conflict --> review
+    validate -->|"是"| archive[("事务提交正式故事档案")]
+
+    classDef author fill:#eff6ff,stroke:#2563eb,color:#172554
+    classDef canonical fill:#f0fdf4,stroke:#16a34a,color:#14532d
+    class choose,review,confirm author
+    class archive canonical
 ```
 
 已有方案可复用已提供内容并跳过不适用阶段。每次生成冻结实际选中的上游版本、作者指令和锁定项；上游修改后，只标记相关下游候选过期（`stale`），由作者选择局部重算、保留允许的例外、继续讨论或放弃调整。
@@ -125,11 +162,29 @@ Go 返回工作台的**权威状态投影**，包括当前阶段、候选、阻�
 
 共创消息绑定当前作品、阶段、对象、字段和候选版本。讨论可以解释设定或比较方向；涉及内容修改时，先形成结构化提案（`AssistantAction`），显示目标、基准版本、修改范围、保持项、影响和费用。
 
-```text
-讨论 → 修改提案 → 作者确认费用 → 后台执行与审阅
-                                      │
-                                      ▼
-                      正式入档 ← 新候选 ← 作者核对差异并采用
+下图展示策划候选修订的成功路径；费用授权、差异采用和正式入档是独立动作。
+
+```mermaid
+sequenceDiagram
+    actor author as 作者
+    participant app as 应用用例
+    participant kernel as Agent Kernel
+    participant model as 模型服务
+
+    author->>app: 请求修改提案
+    app-->>author: 展示目标、基线、范围与费用
+    author->>app: 确认本次调用费用
+    app->>kernel: 冻结输入并启动后台任务
+    kernel->>model: 按角色执行修改与独立审阅
+    model-->>kernel: 返回结果与用量
+    kernel-->>app: 提供已持久化的工件与质量结果
+    app-->>author: 展示可采用差异或阻断原因
+    author->>app: 选择差异并明确采用
+    app-->>author: 校验基线后保存新候选，等待审阅
+    author->>app: 审阅后请求入档预览
+    app-->>author: 展示正式资产变更摘要
+    author->>app: 再次明确确认入档
+    app-->>author: 事务校验通过后返回正式版本与回执
 ```
 
 修改提案冻结参数与幂等键。确认和采用时再次核对来源；旧版本、锁定冲突、失败或结果未知都有明确状态。采用文本差异时可选择子集，但部分采用形成的新候选需要复核；结构增删必须满足整组采用和引用完整性约束。
@@ -150,6 +205,24 @@ Go 返回工作台的**权威状态投影**，包括当前阶段、候选、阻�
 
 任务通过持久化事件（`JobEvent`）与快照投影恢复，前端按游标补拉事件，处理漏推、重复和重新挂载。已经完成的工件可以重新物化为业务候选，但结果未知的外部调用不能直接当作失败后自动重试。
 
+恢复时优先查询已有结果，区分“尚未显示”和“尚未执行”：
+
+```mermaid
+flowchart TB
+    reopen["重新打开项目 / 恢复工作台"] --> load["读取持久化运行、工件与操作回执"]
+    load --> state{"结果状态？"}
+    state -->|"业务结果已提交"| restore["恢复候选与审阅位置"]
+    state -->|"工件已完成，尚未物化"| materialize["核对来源与版本 / 幂等物化候选"]
+    materialize --> restore
+    state -->|"调用结果未知或运行中断"| pause["保留运行记录 / 等待核对与确认"]
+    pause --> reconcile["先对账原结果，不自动重发付费调用"]
+
+    classDef safe fill:#f0fdf4,stroke:#16a34a,color:#14532d
+    classDef pending fill:#fff7ed,stroke:#ea580c,color:#7c2d12
+    class restore safe
+    class pause,reconcile pending
+```
+
 编辑侧区分工作稿、保存版本和定稿。自动保存使用串行队列；切章、切项目或退出前先保存，失败保留输入。候选采用和历史恢复也检查当前工作稿，避免覆盖作者刚写入但尚未建立版本的内容。
 
 ### 6. 四层规划与按章节生效的修订
@@ -164,10 +237,33 @@ Go 返回工作台的**权威状态投影**，包括当前阶段、候选、阻�
 
 以下是后续实现方向，不能视为当前已交付能力：
 
-```text
-任务与预算预检 → 上下文装配 → 章节导演与按需补查 → 冻结写作输入
-    → 单一主写模型 → 独立审阅 → 问题合并与核验 → 有界修订与最终复检
-    → 作者审阅、编辑与定稿 → 后验记忆核验 → 下一章 / 批次检查点
+```mermaid
+flowchart TB
+    subgraph chapterLoop["R5 · 单章质量闭环（规划）"]
+        preflight["任务、记忆与预算预检"] --> context["上下文装配 / 章节导演 / 按需补查"]
+        context --> draft["冻结输入 / 单一主写模型"]
+        draft --> review["独立审阅 / 确定性问题合并 / 按需核验"]
+        review --> decision{"质量与证据通过？"}
+        decision -->|"需修改且仍在授权范围"| revise["有界修订 / 保留前稿"]
+        revise --> review
+        decision -->|"争议、证据不足或预算到限"| pause["暂停并交作者决定"]
+        decision -->|"通过"| candidate["按有效评估选择候选"]
+        candidate --> author["作者审阅、编辑与定稿"]
+        author --> posthoc["独立后验核验 / 保存记忆结果"]
+    end
+    subgraph continuation["R6–R7 · 持续创作与长期记忆（规划）"]
+        posthoc --> memory{"记忆就绪？"}
+        memory -->|"失败或来源过期"| rebuild["标记待恢复 / 保留已定稿正文"]
+        memory -->|"就绪"| checkpoint["批次与故事弧检查点 / 滚动规划候选"]
+        checkpoint --> nextChapter["作者处理本批并确认后进入下一批"]
+    end
+
+    classDef authorControl fill:#eff6ff,stroke:#2563eb,color:#172554
+    classDef pending fill:#fff7ed,stroke:#ea580c,color:#7c2d12
+    style chapterLoop fill:#f8fafc,stroke:#94a3b8,color:#334155
+    style continuation fill:#f8fafc,stroke:#94a3b8,color:#334155
+    class author,nextChapter authorControl
+    class pause,rebuild pending
 ```
 
 - **单章质量**：各审阅者读取同一正文和冻结证据，相互不读取结论；确定性 Finding Merger 只去重、归类和关联证据，不凭空增加问题。修订保留前稿并重新检查，不默认选择最后一版。
