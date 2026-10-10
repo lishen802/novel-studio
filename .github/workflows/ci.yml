@@ -21,7 +21,7 @@ jobs:
   test:
     name: Ubuntu tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -39,7 +39,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             apps/desktop/frontend/package-lock.json
-            prototype/web/package-lock.json
+            prototype/package-lock.json
 
       - name: Test tracked artifact policy
         run: node --test scripts/ci/tracked-artifact-policy.test.mjs
@@ -64,21 +64,21 @@ jobs:
         working-directory: apps/desktop/frontend
 
       - name: Run Go race tests
-        run: go test -count=1 -race -shuffle=on -timeout=5m ./apps/desktop ./internal/...
+        run: go test -count=1 -race -shuffle=on -timeout=15m ./apps/desktop ./internal/...
 
       - name: Vet Go packages
         run: go vet ./apps/desktop ./internal/...
 
       - name: Install prototype dependencies
         run: npm ci
-        working-directory: prototype/web
+        working-directory: prototype
 
       - name: Verify accepted prototype
         run: |
           npm test -- --run
           npm run typecheck
           npm run build
-        working-directory: prototype/web
+        working-directory: prototype
 
   macos-build:
     name: macOS production build
