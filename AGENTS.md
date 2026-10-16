@@ -44,3 +44,10 @@
 
 - When Python is required, use the pyenv-managed Python 3.12 runtime, currently 3.12.3.
 - Prefer `pyenv exec python` or `pyenv exec python3`; do not use the system Python directly.
+
+## Cursor Cloud specific instructions
+
+- Prefer `/usr/local/go/bin` and `/usr/local/bin` at the front of `PATH`. They provide Go 1.25.12, Node.js 22.23.3, and Wails v2.13.0. A login shell may also expose another Node earlier on `PATH`.
+- `apps/desktop/main.go` embeds `frontend/dist`. Before `go test` on `./apps/desktop`, run `npm --prefix apps/desktop/frontend run build` if that directory is missing.
+- On Ubuntu, build the desktop shell from `apps/desktop` with `wails build -m -tags webkit2_41`. This image provides WebKitGTK 4.1. macOS and Windows release builds stay on CI.
+- The accepted prototype listens on `http://127.0.0.1:5173/` after startup. Use it for browser interaction. The native window is `apps/desktop/build/bin/NovelStudio` after the Linux build above.
