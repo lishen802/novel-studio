@@ -290,6 +290,22 @@ export interface CreationSampleInput {
  pointOfView: string; tone: string; constraints: string[]; targetRunes: number;
 }
 
+export interface OpeningSampleCard {
+ id: string; body: string; status: string; feedback?: string;
+}
+
+export interface SelectionRewriteInput {
+ chapterId: string; revision: number; body: string; startRune: number; endRune: number; mode: string;
+}
+
+export interface SelectionProposal {
+ id: string; sourceText: string; replacement: string; sourceHash: string; revision: number;
+}
+
+export interface AcceptSelectionInput {
+ proposalId: string; chapterId: string; revision: number; body: string; partial: boolean; replacement?: string;
+}
+
 export interface RoadmapGoalItemView {
   id: string;
   statement: string;
@@ -672,6 +688,17 @@ export const studio = {
   exportCreativeHarnessReport: (id: string) => call<string>('ExportCreativeHarnessReport', id),
 
   saveCreationSample: (request: CreationSampleInput & { projectId: string; sessionId: string; expectedVersion: number; expectedRunSlotVersion: number; directionCandidateId: string; directionCardId: string }) => call<CreationWorkbenchView>('SaveCreationSample', request),
+  generateOpeningSample: () => call<OpeningSampleCard>('GenerateOpeningSample'),
+  recordOpeningSampleFeedback: (sampleId: string, kind: string) => call<OpeningSampleCard>('RecordOpeningSampleFeedback', sampleId, kind),
+  promoteOpeningSample: (sampleId: string) => call<OpeningSampleCard>('PromoteOpeningSample', sampleId),
+  currentOpeningSample: () => call<OpeningSampleCard>('CurrentOpeningSample'),
+  startChapterProduction: (roadmapNodeId: string, chapterId: string) => call<Record<string, unknown>>('StartChapterProduction', { roadmapNodeId, chapterId }),
+  finalizeChapterProduction: (chapterId: string) => call<ChapterView>('FinalizeChapterProduction', chapterId),
+  prepareSelectionRewrite: (input: SelectionRewriteInput) => call<SelectionProposal>('PrepareSelectionRewrite', input),
+  explainSelection: (input: SelectionRewriteInput) => call<string>('ExplainSelection', input),
+  acceptSelectionRewrite: (input: AcceptSelectionInput) => call<ChapterView>('AcceptSelectionRewrite', input),
+  commitChapterPosthoc: (chapterId: string, idempotencyKey: string) => call<Record<string, unknown>>('CommitChapterPosthoc', chapterId, idempotencyKey),
+  recoverChapterPosthoc: (chapterId: string) => call<Record<string, unknown>>('RecoverChapterPosthoc', chapterId),
   saveCreationEntry: (request: { projectId: string; sessionId: string; expectedVersion: number; expectedRunSlotVersion: number; kind: 'idea' | 'author_plan'; material: string }) => call<CreationWorkbenchView>('SaveCreationEntry', request),
   useCreationMaterial: (request: { projectId: string; sessionId: string; expectedVersion: number; analysisId: string; stage: string }) => call<CreationWorkbenchView>('UseCreationMaterial', request),
   creationWorkbench: () => call<CreationWorkbenchView>('CreationWorkbench'),

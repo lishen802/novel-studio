@@ -94,14 +94,16 @@ it('本章历史显示旧正文，恢复前保存当前输入为版本',async()=
  expect(commit).toHaveBeenCalledWith('c1','当前工作稿',1);expect(restore).toHaveBeenCalledWith('c1',0,2);
 });
 
-it('选区操作未就绪时明确提示，不借用整章生成',async()=>{
- setup();const create=vi.fn();Object.assign(window.go!.main!.DesktopAPI!,{CreateChapterAgentRun:create});
+it('选区解释不借用整章生成',async()=>{
+ setup();const create=vi.fn();const explain=vi.fn().mockResolvedValue('灯塔未亮是悬念。');
+ Object.assign(window.go!.main!.DesktopAPI!,{CreateChapterAgentRun:create,ExplainSelection:explain});
  const editor=await screen.findByPlaceholderText('从这里开始书写……');await waitFor(()=>expect((editor as HTMLTextAreaElement).value).toBe('原有正文'));
  (editor as HTMLTextAreaElement).setSelectionRange(0,2);fireEvent.mouseUp(editor);
- const explain=screen.queryByRole('button',{name:'解释'});
- if (!explain) { fireEvent.select(editor); }
+ const button=screen.queryByRole('button',{name:'解释'});
+ if (!button) { fireEvent.select(editor); }
  fireEvent.click(screen.getByRole('button',{name:'解释'}));
- expect(await screen.findByText(/解释这段尚未接入/)).toBeTruthy();expect(create).not.toHaveBeenCalled();
+ expect(await screen.findByText('灯塔未亮是悬念。')).toBeTruthy();
+ expect(explain).toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
 });
 
 it('章节目录可独立收起，专注后仍能主动展开目录',async()=>{

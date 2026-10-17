@@ -576,7 +576,13 @@ describe('试写准备工作台', () => {
   await user.click(await screen.findByRole('button',{name:'保存试写准备'}));
   await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({projectId:'project-1',sessionId:'session-1',expectedVersion:4,expectedRunSlotVersion:1,directionCandidateId:'c1',directionCardId:'d1',targetRunes:1200})));
   expect(generate).not.toHaveBeenCalled();expect(advance).not.toHaveBeenCalled();
-  expect((screen.getByRole('button',{name:'生成试写（尚未就绪）'}) as HTMLButtonElement).disabled).toBe(true);
+  const sampleGenerate=vi.fn().mockResolvedValue({id:'opening',body:'灯塔在雾里熄着。',status:'candidate'});
+  Object.assign(window.go!.main!.DesktopAPI!,{GenerateOpeningSample:sampleGenerate});
+  await waitFor(()=>expect((screen.getByRole('button',{name:'生成试写'}) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(screen.getByRole('button',{name:'生成试写'}));
+  await screen.findByLabelText('试写正文');
+  expect(sampleGenerate).toHaveBeenCalled();
+  expect(generate).not.toHaveBeenCalled();
  });
 });
 
