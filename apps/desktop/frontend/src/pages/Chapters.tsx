@@ -214,7 +214,9 @@ export default function Chapters() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number; start: number; end: number } | null>(null);
+  const [roadmapNodes, setRoadmapNodes] = useState<Array<{ id: string; title: string }>>([]);
+  const [roadmapNodeID, setRoadmapNodeID] = useState('');
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -422,6 +424,8 @@ export default function Chapters() {
     const rect = textarea.getBoundingClientRect();
     setSelection({
       text,
+      start,
+      end,
       x: rect.left + rect.width / 2,
       y: rect.top + 24,
     });
@@ -502,29 +506,30 @@ export default function Chapters() {
     setPendingRun({prompt: activeRun.prompt, label: '重新生成', retryId: activeRun.id});
   };
 
-  const runAiAction = (label: string) => {
-    setActionNotice(`${label}尚未接入独立的选区处理流程，当前不会发起整章生成。`);
-    setAiOpen(true); setSelection(null);
-  };
-
-  const handleFloatingAction = (action: string) => {
-    if (!selection) return;
-    switch (action) {
-      case 'explain':
-        runAiAction('解释这段');
-        break;
-      case 'polish':
-        runAiAction('润色');
-        break;
-      case 'rewrite':
-        runAiAction('改写');
-        break;
-      case 'mark':
-        runAiAction('标记问题');
-        break;
-      case 'review':
-        runAiAction('交给 AI 审阅');
-        break;
+  const handleFloatingAction = async (action: string) => {
+    const session = sessionRef.current;
+    if (!selection || !session) return;
+    const startRune = Array.from(content.slice(0, selection.start)).length;
+    const endRune = startRune + Array.from(selection.text).length;
+    const request = { chapterId: session.id, revision: session.revision, body: content, startRune, endRune, mode: action };
+    setAiOpen(true);
+    setSelection(null);
+    try {
+      if (action === 'rewrite' || action === 'polish') {
+        const proposal = await studio.prepareSelectionRewrite({ ...request, mode: action });
+        setCandidates((prev) => [{
+          id: proposal.id, type: action, label: action === 'polish' ? '润色' : '改写',
+          original: proposal.sourceText, result: proposal.replacement, applied: false, actionable: true,
+        }, ...prev]);
+        return;
+      }
+      const text = await studio.explainSelection(request);
+      setCandidates((prev) => [{
+        id: `explain-${Date.now()}`, type: 'explain', label: action === 'explain' ? '解释这段' : action,
+        original: '', result: text, applied: false, actionable: false,
+      }, ...prev]);
+    } catch (error) {
+      setActionNotice(error instanceof Error ? error.message : '选区处理失败，正文未改动。');
     }
   };
 
@@ -572,16 +577,23 @@ export default function Chapters() {
     }
   };
 
-  const applyCandidate = (id: string, partial?: string) => {
+  const applyCandidate = async (id: string, partial?: string) => {
     const candidate = candidates.find((c) => c.id === id);
-    if (!candidate) return;
-    const insert = partial ?? candidate.result;
-    if (candidate.original && content.includes(candidate.original)) {
-      setContent(content.replace(candidate.original, insert));
-    } else {
-      setContent(content ? `${content}\n\n${insert}` : insert);
+    const session = sessionRef.current;
+    if (!candidate?.actionable || !session) return;
+    try {
+      const updated = await studio.acceptSelectionRewrite({
+        proposalId: id, chapterId: session.id, revision: session.revision, body: content,
+        partial: partial != null, replacement: partial ?? candidate.result,
+      });
+      sessionRef.current = new EditorSession(updated.id, updated.body, updated.revision, studio.saveDraft);
+      setContentState(updated.body);
+      setRevision(updated.revision);
+      setCandidates((prev) => prev.map((c) => (c.id === id ? { ...c, applied: true } : c)));
+      setActionNotice('');
+    } catch (error) {
+      setActionNotice(error instanceof Error ? error.message : '正文已变化，没有覆盖。');
     }
-    setCandidates((prev) => prev.map((c) => (c.id === id ? { ...c, applied: true } : c)));
   };
 
   const discardCandidate = (id: string) => {
@@ -1037,7 +1049,44 @@ export default function Chapters() {
           <div className="flex-1 overflow-auto p-4 space-y-4">
             {actionNotice && <p role="status" className="text-sm text-warning">{actionNotice}</p>}
             <div className="p-3 bg-primary-subtle border border-primary/10 rounded-lg text-xs text-text-sub leading-relaxed">
-              根据指令和本章保存版本生成整章候选，需审阅后采用。选区解释、润色、改写暂未就绪。
+              根据指令和本章保存版本生成整章候选，需审阅后采用。选区改写绑定当前版本和原文，正文变化后不会错位覆盖。
+            </div>
+            <div className="space-y-2">
+              <Button size="sm" variant="ghost" onClick={() => void studio.storyStructure().then((view) => {
+                const nodes = (view.outlineNodes ?? []).flatMap((node) => {
+                  const id = String(node.id ?? '');
+                  const title = String(node.title ?? '');
+                  return id ? [{ id, title: title || id }] : [];
+                });
+                setRoadmapNodes(nodes);
+                if (!roadmapNodeID && nodes[0]) setRoadmapNodeID(nodes[0].id);
+              }).catch((error: unknown) => setActionNotice(error instanceof Error ? error.message : '无法读取路线图'))}>读取路线图节点</Button>
+              {roadmapNodes.length > 0 && <label className="block text-xs text-text-sub">已确认节点
+                <select aria-label="路线图节点" className="mt-1 w-full rounded-md border border-border bg-surface p-2 text-sm" value={roadmapNodeID} onChange={(event) => setRoadmapNodeID(event.target.value)}>
+                  {roadmapNodes.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}
+                </select>
+              </label>}
+              <Button size="sm" disabled={!selected || !roadmapNodeID} onClick={() => void (async () => {
+                if (!selected) return;
+                try {
+                  const production = await studio.startChapterProduction(roadmapNodeID, selected.id);
+                  const candidates = Array.isArray(production.candidates) ? production.candidates as Array<{ id?: string; body?: string }> : [];
+                  const selectedID = String(production.selectedId ?? '');
+                  const chosen = candidates.find((item) => item.id === selectedID);
+                  const findings = Array.isArray(production.findings) ? production.findings as Array<{ class?: string; finding?: { message?: string } }> : [];
+                  const issues = findings.map((item) => [item.class, item.finding?.message].filter(Boolean).join('：')).filter(Boolean).join('\n');
+                  setCandidates((prev) => [{ id: `production-${selectedID}`, type: 'review', label: '章节候选', original: '', result: [chosen?.body, production.selectionReason, issues].filter(Boolean).join('\n\n'), applied: false, actionable: false }, ...prev]);
+                  setActionNotice(`候选已生成。模型用量：输入 ${Number(production.inputTokens ?? 0)}，输出 ${Number(production.outputTokens ?? 0)}。定稿会写入新版本。`);
+                } catch (error) {
+                  setActionNotice(error instanceof Error ? error.message : '章节候选生成失败');
+                }
+              })()}>从路线图生成候选</Button>
+              <Button size="sm" variant="ghost" disabled={!selected} onClick={() => void studio.finalizeChapterProduction(selected!.id).then((chapter) => {
+                const session = sessionRef.current;
+                if (!session) return;
+                sessionRef.current = new EditorSession(chapter.id, chapter.body, chapter.revision, studio.saveDraft);
+                setContentState(chapter.body); setRevision(chapter.revision);
+              }).catch((error: unknown) => setActionNotice(error instanceof Error ? error.message : '定稿失败，正文未改动'))}>定稿选中候选</Button>
             </div>
 
             <div className="space-y-3">

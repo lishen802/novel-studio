@@ -15,22 +15,23 @@ import (
 )
 
 type Service struct {
-	packages        ports.ProjectPackageManager
-	stores          ports.ProjectStoreFactory
-	license         license.Service
-	clock           ports.Clock
-	ids             ports.IDGenerator
-	snapshots       ports.SnapshotArchive
-	branches        ports.BranchArchive
-	imports         ports.ImportSourceArchive
-	credentials     ports.CredentialStore
-	providers       ports.ModelProviderFactory
-	leaseManager    ports.ProjectLeaseManager
-	leaseMetadata   ports.ProjectLeaseMetadata
-	filesystem      ports.ProjectFilesystemGuard
-	projectDefaults ports.ProjectDefaults
-	legacyImporter  ports.LegacySettingsImporter
-	profileResolver ports.CreativeProfileResolver
+	packages         ports.ProjectPackageManager
+	stores           ports.ProjectStoreFactory
+	license          license.Service
+	clock            ports.Clock
+	ids              ports.IDGenerator
+	snapshots        ports.SnapshotArchive
+	branches         ports.BranchArchive
+	imports          ports.ImportSourceArchive
+	credentials      ports.CredentialStore
+	providers        ports.ModelProviderFactory
+	leaseManager     ports.ProjectLeaseManager
+	leaseMetadata    ports.ProjectLeaseMetadata
+	filesystem       ports.ProjectFilesystemGuard
+	projectDefaults  ports.ProjectDefaults
+	legacyImporter   ports.LegacySettingsImporter
+	profileResolver  ports.CreativeProfileResolver
+	chapterCompleter chapterLoopCompleter
 
 	lifecycleMu sync.Mutex
 	closed      bool
